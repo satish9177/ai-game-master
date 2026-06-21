@@ -2,6 +2,7 @@ import * as THREE from 'three'
 import type { LoadedRoom } from '../../roomspec/schema'
 import { Disposables, disposeObject } from './disposables'
 import { buildShell } from './builders/shell'
+import { buildLighting } from './builders/lighting'
 import { buildObjects } from './builders'
 import { MovementControls } from './controls/movement'
 import type { Bounds } from './controls/movement'
@@ -42,7 +43,7 @@ export class Engine {
     container.appendChild(this.renderer.domElement)
 
     this.scene = new THREE.Scene()
-    this.scene.add(new THREE.AmbientLight(0xffffff, 0.8))
+    // Lighting comes from the RoomSpec; added in setRoom() once we have a room.
 
     this.camera = new THREE.PerspectiveCamera(60, 1, 0.1, 1000)
     this.camera.position.set(0, 1.7, 8)
@@ -58,6 +59,7 @@ export class Engine {
   /** Receives the validated room, builds the shell, and places the camera. */
   setRoom(room: LoadedRoom): void {
     this.room = room
+    this.scene.add(buildLighting(room.lighting))
     this.scene.add(buildShell(room))
     this.scene.add(buildObjects(room))
     this.placeCamera(room.spawn)

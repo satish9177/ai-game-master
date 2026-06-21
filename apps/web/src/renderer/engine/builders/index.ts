@@ -41,6 +41,7 @@ const registry: { [K in RoomObject['type']]?: ObjectBuilder<K> } = {
   throne: buildThrone,
   pillar: buildPillar,
   rug: buildRug,
+  torch: buildTorch,
   arch: buildArch,
   prop: buildProp,
 }
@@ -76,6 +77,38 @@ function buildRug(obj: ObjectOf<'rug'>): THREE.Object3D {
   const geo = new THREE.BoxGeometry(w, 0.04, d)
   geo.translate(0, 0.02, 0) // sit the slab just above the floor
   return new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: obj.color }))
+}
+
+function buildTorch(obj: ObjectOf<'torch'>): THREE.Object3D {
+  // Unlike ground props, a torch's position is its mount point (e.g. y=3), so
+  // the geometry is built around the local origin: post centered, flame above.
+  const g = new THREE.Group()
+  const { color, intensity, distance } = obj.light
+
+  const post = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.05, 0.07, 0.6, 8),
+    new THREE.MeshStandardMaterial({ color: '#3a2a1a' }),
+  )
+  g.add(post) // centered on the mount point
+
+  // Emissive flame: glows on its own even before the point light lands on it.
+  const flame = new THREE.Mesh(
+    new THREE.ConeGeometry(0.12, 0.34, 8),
+    new THREE.MeshStandardMaterial({
+      color,
+      emissive: color,
+      emissiveIntensity: 1.4,
+    }),
+  )
+  flame.position.y = 0.45
+  g.add(flame)
+
+  // Real light, data-driven. No shadows (cheap), no flicker yet.
+  const light = new THREE.PointLight(color, intensity, distance)
+  light.position.y = 0.5
+  g.add(light)
+
+  return g
 }
 
 function buildArch(obj: ObjectOf<'arch'>): THREE.Object3D {
