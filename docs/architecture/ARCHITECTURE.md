@@ -205,6 +205,13 @@ today's seams in the right place.
 - Because `RoomSource.getRoom()` is async by contract, loading/error states and
   the React error boundary (see [FAILURE-MODES](./FAILURE-MODES.md)) are the
   same whether the room is static, generated, or fetched.
+- Generation is more than one model call: a prompt becomes a *validated,
+  playable* room through a multi-stage pipeline with bounded repair and a safe
+  fallback. See **[Generation pipeline](#generation-pipeline-planned)** below and
+  [ADR-0007](./decisions/ADR-0007-generated-room-validation-and-repair.md).
+- Rooms are pre-generated ahead of the player so transitions feel instant. See
+  **[Adjacent-room pre-generation](#adjacent-room-pre-generation-planned)** below
+  and [ADR-0009](./decisions/ADR-0009-adjacent-room-pre-generation.md).
 
 ### ❌ Backend / API
 
@@ -219,6 +226,120 @@ today's seams in the right place.
   UI and renderer **never** touch SQL or a DB driver.
 - SQLite is a *server-side* store, not an in-browser database. See
   [ADR-0004](./decisions/ADR-0004-persistence-sqlite-to-postgres.md).
+
+## Generation pipeline (planned)
+
+🔜 **Designed, not built.** Full rationale and the retry/repair policy live in
+[ADR-0007](./decisions/ADR-0007-generated-room-validation-and-repair.md);
+per-case failure handling is in [FAILURE-MODES](./FAILURE-MODES.md).
+
+A user prompt does not become a room in a single model call. It flows through a
+pipeline whose job is to produce a room that is **both safe and good**, with
+bounded cost and a guaranteed safe outcome:
+
+```
+  user prompt
+      │
+      ▼
+  fast LLM  ──►  RoomSpec JSON            cheap, quick first draft
+      │
+      ▼
+  schema validation     ── JSON shape/types (zod = the loadRoomSpec boundary)
+      │
+      ▼
+  code validator        ── DETERMINISTIC code (not an LLM): reachable exit?
+      │                    NPCs/objects not in walls? quest items placed?
+      │                    object/light budget? spawn inside room?
+      ▼
+  LLM reviewer (optional)── creative/story quality: coherent, on-prompt, fun
+      │
+      ▼
+  repair / regenerate   ── bounded loop (max 3 attempts, ~60s hard cap)
+      │
+      ▼
+  trusted renderer      ── only ever sees a validated, accepted spec
+      │
+      ▼
+  safe fallback room    ── if no acceptable room can be produced
+```
+
+**Four distinct checks — keep them separate:**
+
+- **Schema validation** checks **JSON/shape** (the existing trust boundary).
+- **Code validator** is **deterministic code, not an LLM** — it checks semantic
+  playability (reachability, collision, quest consistency, budgets).
+- **LLM reviewer** checks **creative/story quality** — taste, not shape; it
+  returns a verdict that feeds the repair loop, it does not edit the spec.
+- **Valid JSON does not mean the room is playable or good.** Schema validation is
+  necessary but not sufficient; the code validator and reviewer cover the gap.
+
+**Retry/repair policy (v1):** fast model first → one fast repair attempt →
+slow/better model fallback only if needed; **no infinite retries, max 3
+attempts**; target **10–30s** for the first room, **~60s** hard cap; after a hard
+failure, a **safe error with a retry button or a fallback demo room** — never an
+unvalidated or known-bad room. The renderer's contract is unchanged: generation
+adds checks *before* the `loadRoomSpec` boundary, it never weakens it.
+
+## Adjacent-room pre-generation (planned)
+
+🔜 **Designed, not built.** Full rationale in
+[ADR-0009](./decisions/ADR-0009-adjacent-room-pre-generation.md).
+
+The first room may cost up to ~60s once. To avoid that wait on every transition —
+and because the world is effectively infinite, so it can't be generated up
+front — the backend **pre-generates adjacent rooms in parallel while the player
+explores the current room**. After the first room, the player should rarely wait.
+
+**Generate the frontier, not the world.** Pre-generate only nearby reachable
+rooms, by priority:
+
+1. visible exits,
+2. player-facing / nearest exit,
+3. quest-critical path,
+4. optional / secret exits — only after discovery.
+
+**Limit parallel jobs** (e.g. **1–3 rooms** at a time) to bound cost and load.
+
+**Room status lifecycle** — each room carries an explicit status:
+`not_started → generating → validating → repairing → ready`, or `failed` if the
+pipeline exhausts its attempts.
+
+**At a door, behavior depends on status:**
+
+| Status | Behavior |
+| --- | --- |
+| `ready` | instant transition |
+| `generating` / `validating` / `repairing` | short "Opening the way…" wait |
+| `failed` | retry / fallback room |
+| `not_started` | generate on demand (the un-prefetched case) |
+
+## Renderer portability (engine strategy)
+
+🔜 **Direction.** Three.js is the v1 renderer and does not change. Full rationale
+in [ADR-0008](./decisions/ADR-0008-renderer-portability-strategy.md).
+
+The valuable core of this product is the **`RoomSpec`/`WorldSpec` contract,
+validation, the generation pipeline, memory, persistence, and the renderer
+adapter boundary — not the specific renderer.** To keep that core portable:
+
+- **Three.js remains the correct renderer for browser-first v1.**
+- **`RoomSpec`/domain stay renderer-agnostic.** Neutral data (positions, types,
+  parameters), never one engine's API.
+- **Never store Three.js objects in the domain or the DB** — no `Mesh`,
+  `Material`, `Vector3`, or scene-graph node in domain types or stored rows.
+  Persist the validated data spec only (see
+  [ADR-0004](./decisions/ADR-0004-persistence-sqlite-to-postgres.md)).
+- **Renderers are adapters over the same data contract.** A Three.js adapter
+  today; **Babylon.js** possible later for richer web-engine features;
+  **Unity/Godot** possible much later for native/desktop/mobile clients.
+- **A non-web engine fits only by consuming the spec through trusted engine
+  code.** A Unity client would have **trusted C#** load `RoomSpec` JSON and
+  instantiate prefabs; a Godot client would have **trusted GDScript/C#** load it
+  and instantiate nodes/resources — the same data-only → trusted-renderer rule as
+  the Three.js builder registry.
+- **The LLM must never generate** Three.js code, Unity C#, Godot GDScript, or any
+  executable scene script. It emits `RoomSpec`/`WorldSpec` **data** only — same
+  rule on every engine ([ADR-0001](./decisions/ADR-0001-data-only-room-spec-trusted-renderer.md)).
 
 ## Packaging decision
 

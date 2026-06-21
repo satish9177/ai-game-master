@@ -32,9 +32,15 @@ the architecture is built so they slot in without breaking boundaries.
 4. **The renderer must not import React** (`react`/`react-dom`). The engine is
    pure Three.js and framework-independent.
 5. **LLM/generation may only produce RoomSpec JSON data — never executable
-   JS/Three.js/React code.** Generated output is data, validated at the boundary,
-   never `eval`'d. This is the core trust boundary
+   JS/Three.js/React code** (nor Unity C#, Godot GDScript, or any scene script).
+   Generated output is data, validated at the boundary, never `eval`'d. This is
+   the core trust boundary
    ([ADR-0001](./docs/architecture/decisions/ADR-0001-data-only-room-spec-trusted-renderer.md)).
+   Keep `RoomSpec`/domain **renderer-agnostic**: no engine objects (`THREE.Mesh`,
+   materials, vectors, scene nodes) in the domain or the DB. A renderer is an
+   adapter over the data contract — Three.js today, possibly Babylon/Unity/Godot
+   later
+   ([ADR-0008](./docs/architecture/decisions/ADR-0008-renderer-portability-strategy.md)).
 6. **Persistence/database logic must never enter UI or renderer.** Data access is
    server-side, behind repository interfaces. No SQL or DB driver types in the
    browser ([ADR-0004](./docs/architecture/decisions/ADR-0004-persistence-sqlite-to-postgres.md)).

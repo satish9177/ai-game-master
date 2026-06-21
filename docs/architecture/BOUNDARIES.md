@@ -59,8 +59,9 @@ place allowed to depend on everything; it is where wiring happens.
 | **Domain must not import React, Three.js, the renderer, UI, the platform logger, the DOM, the network, or a DB.** | The contract must be sharable by every consumer (renderer today, backend/generation later) without dragging in a runtime; it returns problems as data instead of logging. |
 | **No layer may call `console.*`** except the browser logger adapter. | One logging seam; structured and swappable. ([ADR-0003](./decisions/ADR-0003-logging-abstraction.md)) |
 | **Persistence/DB code must never appear in UI or renderer.** | Data access is server-side and lives behind repository interfaces. SQL/driver types never leak outward. ([ADR-0004](./decisions/ADR-0004-persistence-sqlite-to-postgres.md)) |
-| **Generation must never emit executable code** — only RoomSpec data. | The trust boundary. Model output is data validated at the boundary, never `eval`'d, never turned into JS/Three/React. ([ADR-0001](./decisions/ADR-0001-data-only-room-spec-trusted-renderer.md)) |
+| **Generation must never emit executable code** — only RoomSpec data. | The trust boundary. Model output is data validated at the boundary, never `eval`'d, never turned into JS/Three/React — and never Unity C#, Godot GDScript, or any scene script. ([ADR-0001](./decisions/ADR-0001-data-only-room-spec-trusted-renderer.md), [ADR-0008](./decisions/ADR-0008-renderer-portability-strategy.md)) |
 | **No raw `RoomSpec` may reach the renderer unvalidated.** | All dynamic/external data is validated by `loadRoomSpec` at the boundary first. |
+| **No engine objects in the domain or DB; keep `RoomSpec`/domain renderer-agnostic.** | The renderer is an *adapter* over the data contract — a Three.js adapter today, possibly Babylon/Unity/Godot later. Engine handles (`THREE.Mesh`, `Material`, `Vector3`, scene nodes) live only inside a renderer adapter; the domain and persisted rows hold neutral data only, so a second renderer is a new adapter, not a rewrite. ([ADR-0008](./decisions/ADR-0008-renderer-portability-strategy.md)) |
 
 ## The approved host interface (React ↔ engine seam)
 
