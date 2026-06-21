@@ -27,12 +27,12 @@ layers, never the reverse. The domain depends on nothing in this repo.
 
 | Layer | Folder (today) | What lives here |
 | --- | --- | --- |
-| **Domain / Contracts** | `apps/web/src/domain/` | RoomSpec schema (`roomSpec.ts`), `loadRoomSpec.ts`, the interaction view-model (`ports/interaction.ts`), schema version; 🔜 more ports (`RoomSource`, …). Pure. |
+| **Domain / Contracts** | `apps/web/src/domain/` | RoomSpec schema (`roomSpec.ts`), `loadRoomSpec.ts`, ports (`ports/RoomSource.ts`, `ports/RoomGenerator.ts`, `ports/interaction.ts`), schema version; 🔜 more ports (repositories, …). Pure. |
 | **Renderer** | `apps/web/src/renderer/engine/` | Three.js engine, builders, controls, disposal. |
 | **UI** | `apps/web/src/renderer/ui/` | Presentational React components. |
-| **App / Composition root** | `apps/web/src/App.tsx`, `RoomViewer.tsx` (🔜 `app/`) | Wires concrete implementations together. |
+| **App / Composition root** | `apps/web/src/App.tsx`, `RoomViewer.tsx`, `app/`, `room/` | Wires concrete implementations together (room sources, prompt bar, error boundary). |
 | **Platform** | `apps/web/src/platform/` | Cross-cutting adapters: the logger (`logger/`); 🔜 config/env. |
-| **Generation** | ❌ not built | Prompt → RoomSpec data. |
+| **Generation** | ✅ v0 (fake): `apps/web/src/generation/` | Prompt → RoomSpec **data** via a deterministic fake generator; 🔜 real LLM. |
 | **Backend / Persistence** | ❌ not built (future `apps/api`) | HTTP, generation hosting, repositories. |
 
 ## Allowed dependency directions
@@ -95,8 +95,10 @@ These are enforced mechanically; a violation fails `npm run build` or
   - `renderer/engine/**` may not import `react` / `react-dom`.
   - `renderer/ui/**` may not import `three` or `renderer/engine/**` internals.
   - `domain/**` may not import `react`, `three`, `renderer/**`, or `platform/**`.
-- Boundaries lint cannot easily express — and future backend/DB/generation
-  rules, until those folders exist — stay enforced by review + these docs +
+  - `generation/**` may not import `react`, `three`, `renderer/**`, or
+    `platform/**` — it emits data and the caller logs ([ADR-0001](./decisions/ADR-0001-data-only-room-spec-trusted-renderer.md), [ADR-0003](./decisions/ADR-0003-logging-abstraction.md)).
+- Boundaries lint cannot easily express — and future backend/DB rules, until
+  those folders exist — stay enforced by review + these docs +
   [/AGENTS.md](../../AGENTS.md).
 
 **Treat this document as the contract**: a change that violates a rule above

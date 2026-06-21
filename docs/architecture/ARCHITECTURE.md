@@ -20,7 +20,8 @@ hand-written code* — is preserved as the system grows.
 
 Throughout these docs:
 
-- ✅ **Implemented** — exists today in `apps/web` (Renderer Foundation v0).
+- ✅ **Implemented** — exists today in `apps/web` (Renderer Foundation v0;
+  Generation Foundation v0).
 - 🔜 **Planned** — designed and approved, not yet built (next slices).
 - ❌ **Not built** — future shape only; documented so we don't paint into a corner.
 
@@ -37,6 +38,49 @@ It proves one thing: a hardcoded **RoomSpec** (pure data) can be turned into a
 walkable low-poly 3D room rendered entirely by **trusted Three.js code**, with
 no arbitrary code execution anywhere in the pipeline.
 
+## Generation Foundation v0
+
+✅ **Implemented.** The first generation seam now runs end-to-end **without a
+real LLM**: a user prompt becomes a validated room through a deterministic,
+*fake* generator.
+
+```
+User prompt
+  → PromptBar              (app composition chrome — not renderer UI)
+  → App composition root
+  → FakeRoomGenerator      (behind the RoomGenerator port; seeded by the prompt)
+  → raw, untrusted JSON text
+  → GeneratedRoomSource    (owns JSON.parse + loadRoomSpec)
+  → loadRoomSpec           ✅ the trust boundary, unchanged
+  → RoomLoadResult         (typed ok / invalid-room / unavailable)
+  → existing trusted Three.js renderer
+```
+
+What it proves — and what it deliberately is **not**:
+
+- **Deterministic fake only.** `FakeRoomGenerator` is pure: prompt → seeded PRNG
+  → RoomSpec data. The same prompt yields a byte-identical room. There is **no
+  real LLM, no API key, no backend, no database, no memory** yet.
+- **The generator returns raw, untrusted JSON *text*** — the exact shape a future
+  LLM completion would have. It emits **data, never code** ([ADR-0001](./decisions/ADR-0001-data-only-room-spec-trusted-renderer.md)).
+- **`GeneratedRoomSource` owns parse + validation.** It runs the text through
+  `JSON.parse` then the **same `loadRoomSpec`** every source uses, and maps the
+  outcome to a typed `RoomLoadResult` (`invalid-room` on bad JSON/envelope,
+  `unavailable` if the generator throws). The renderer still executes only
+  **trusted, hand-written builders**.
+- **Logging is length-only.** The prompt *text* is never logged — only its length
+  and safe result counts ([ADR-0003](./decisions/ADR-0003-logging-abstraction.md)).
+- **Tested.** Vitest covers the seeded PRNG, the fake generator (determinism,
+  known-vocabulary-only, passes `loadRoomSpec`, data-only round-trip), and the
+  `GeneratedRoomSource` failure paths (bad JSON, bad envelope, generator throws,
+  lenient object-skip).
+
+The full generation **pipeline** (real LLM, deterministic code validator, LLM
+reviewer, bounded repair/regenerate, adjacent-room pre-generation) and the
+**backend/persistence** that will host it remain **planned / not built** — see
+[Generation pipeline](#generation-pipeline-planned) and
+[ADR-0010](./decisions/ADR-0010-generation-foundation-v0.md).
+
 ## Layered architecture
 
 Dependencies point **inward**, toward the domain. Outer layers may depend on
@@ -46,14 +90,14 @@ inner layers; inner layers never depend on outer layers.
         ┌────────────────────────────────────────────────────────┐
         │  DOMAIN / CONTRACTS  (pure data + types, zero I/O)       │
         │  RoomSpec schema · loadRoomSpec (validation) · version   │
-        │  🔜 ports: RoomSource   ❌ ports: RoomGenerator, Repos    │
+        │  ✅ ports: RoomSource, RoomGenerator   ❌ ports: Repos    │
         └────────────────────────────────────────────────────────┘
               ▲              ▲                ▲              ▲
        imports│       imports│         impl   │       impl   │ (future)
      ┌────────┴─────┐ ┌──────┴───────┐ ┌──────┴──────┐ ┌─────┴──────────┐
-     │  RENDERER    │ │  UI (React)  │ │  APP /       │ │  GENERATION /  │
-     │  (Three.js)  │ │              │ │  COMPOSITION │ │  BACKEND / DB  │
-     │  no React    │ │  no Three    │ │  ROOT        │ │  ❌ NOT BUILT  │
+     │  RENDERER    │ │  UI (React)  │ │  APP /       │ │  GENERATION    │
+     │  (Three.js)  │ │              │ │  COMPOSITION │ │  v0: fake gen  │
+     │  no React    │ │  no Three    │ │  ROOT        │ │  BE/DB future  │
      └──────┬───────┘ └──────┬───────┘ └──────┬───────┘ └────────────────┘
             │                │                │
             └──── both may use ──► Logger (platform port) ◄──┘
@@ -65,7 +109,7 @@ inner layers; inner layers never depend on outer layers.
 | **Renderer** (`renderer/engine`) | Turn a validated room into a Three.js scene; own the render loop, controls, disposal. | Domain | React, network, DB |
 | **UI** (`renderer/ui`) | Presentational React overlay (HUD, dialogue panel). | Domain, approved host contract | Three.js internals, network, DB |
 | **App / Composition root** | Wire concrete implementations together (logger, room source, engine host). | All of the above | — |
-| 🔜 **Generation** | Prompt → **RoomSpec data** (never code). Validated by the same loader. | Domain | Renderer, React, DB |
+| ✅ **Generation (v0, fake)** | Prompt → **RoomSpec data** (never code) via a deterministic fake generator. Validated by the same loader. 🔜 real LLM. | Domain | Renderer, React, DB |
 | ❌ **Backend / Persistence** | Host generation; store rooms/sessions. | Domain | UI, Renderer |
 
 The current code already honors the top three rows: `Engine` is pure Three.js
@@ -130,6 +174,26 @@ The React ↔ engine seam is **callbacks + imperative methods**, not shared
 mutable state and not React reaching into Three.js objects. That seam is the
 "approved host interface" referenced in [BOUNDARIES](./BOUNDARIES.md).
 
+### Generated-room data flow (Generation Foundation v0)
+
+Submitting a prompt swaps the room source; the host path is otherwise identical:
+
+```
+PromptBar.onSubmit(prompt)              (app chrome — not renderer UI)
+  └─ App: setRoomSource(new GeneratedRoomSource(FakeRoomGenerator, prompt, logger))
+       └─ RoomViewer (unchanged — sees only a RoomSource; new identity → reload)
+            └─ GeneratedRoomSource.getRoom()
+                 ├─ FakeRoomGenerator.generate(prompt) → raw untrusted JSON text
+                 ├─ JSON.parse                          (never eval)
+                 ├─ loadRoomSpec(parsed)                ✅ same trust boundary
+                 └─ RoomLoadResult  (ok | invalid-room | unavailable)
+                      └─ engine.setRoom(room)           ✅ trusted builders only
+```
+
+`RoomViewer` and the engine are **unchanged**: they still consume a `RoomSource`
+and a validated `LoadedRoom`. Only the composition root knows a prompt or a fake
+generator exists, and the prompt *text* is never logged — only its length.
+
 ## Renderer Foundation v0 — module summary
 
 | Module | Role |
@@ -144,6 +208,22 @@ mutable state and not React reaching into Three.js objects. That seam is the
 | `renderer/engine/disposables.ts` | `Disposables` + `disposeObject` — explicit GPU teardown (Three.js does not GC geometries/materials/textures). |
 | `renderer/ui/` | `Hud` and `DialoguePanel` — presentational React only. |
 | `renderer/RoomViewer.tsx` | The composition seam: constructs/disposes the engine, bridges engine callbacks to React state. StrictMode-safe (mount → dispose → mount leaks nothing). |
+
+## Generation Foundation v0 — module summary
+
+| Module | Role |
+| --- | --- |
+| `domain/ports/RoomGenerator.ts` | The `RoomGenerator` port: `generate(prompt) → Promise<string>` of **raw, untrusted JSON text**. Domain-pure contract; the trust-boundary rules live in its doc comment. |
+| `generation/prng.ts` | Deterministic seeded PRNG (`xmur3` + `mulberry32`) and a small `Rng` helper. Pure — no I/O, no `Math.random`/`Date.now`. |
+| `generation/FakeRoomGenerator.ts` | A deterministic `RoomGenerator`: prompt → seeded PRNG → RoomSpec **data**, serialized with `JSON.stringify`. Emits only the published vocabulary; same prompt → byte-identical output. No real model. |
+| `room/GeneratedRoomSource.ts` | A `RoomSource` adapter (composition layer) that runs the generator's text through `JSON.parse` + `loadRoomSpec` and maps the outcome to a typed `RoomLoadResult`. Owns parse + validation; logs length/counts only. |
+| `app/PromptBar.tsx` | Presentational prompt input + Generate button — app composition chrome, **not** renderer UI. Trims/validates; emits `onSubmit(prompt)`. |
+| `App.tsx` | Composition root: holds the active `RoomSource` in state; on submit, swaps to `GeneratedRoomSource(FakeRoomGenerator, prompt, logger)`. The only place a generator is named. |
+
+Tested with **Vitest**: the PRNG (determinism/divergence/ranges), the fake
+generator (determinism, known-vocabulary-only, passes `loadRoomSpec`, data-only
+round-trip), and the `GeneratedRoomSource` failure paths (bad JSON, bad envelope,
+generator throws, lenient object-skip) — with prompt text never logged.
 
 ## Object & entity system (compositional builders)
 
@@ -194,22 +274,29 @@ types today (see [FAILURE-MODES](./FAILURE-MODES.md)).
 These are **designed, not built**. The point of documenting them now is to keep
 today's seams in the right place.
 
-### 🔜 Generation (AI-authored rooms)
+### ✅ Generation Foundation v0  ·  🔜 real LLM
 
-- A `RoomSource` **port** (interface) in the domain answers "give me a room".
-  Its first implementation will be a `StaticRoomSource` returning `throneRoom`.
-- A future `GeneratedRoomSource` calls an LLM that returns **RoomSpec JSON only**
-  and runs it through the *same* `loadRoomSpec`. The model never emits renderer
-  code. See the trust boundary above and
-  [ADR-0001](./decisions/ADR-0001-data-only-room-spec-trusted-renderer.md).
-- Because `RoomSource.getRoom()` is async by contract, loading/error states and
-  the React error boundary (see [FAILURE-MODES](./FAILURE-MODES.md)) are the
-  same whether the room is static, generated, or fetched.
-- Generation is more than one model call: a prompt becomes a *validated,
+- ✅ A `RoomSource` **port** in the domain answers "give me a room". Two
+  implementations exist: `StaticRoomSource` (the hardcoded `throneRoom`) and
+  `GeneratedRoomSource` (prompt-driven).
+- ✅ A `RoomGenerator` **port** in the domain turns a prompt into **raw, untrusted
+  JSON text**. Its v0 implementation is the deterministic `FakeRoomGenerator`;
+  `GeneratedRoomSource` runs that text through the *same* `loadRoomSpec`. The
+  generator emits **data, never code**
+  ([ADR-0001](./decisions/ADR-0001-data-only-room-spec-trusted-renderer.md),
+  [ADR-0010](./decisions/ADR-0010-generation-foundation-v0.md)).
+- 🔜 Swapping the fake for a **real LLM client** is a one-line change at the
+  composition root — the port, the parse/validate boundary, and the renderer do
+  not move. The model will return **RoomSpec JSON only**, never renderer code.
+- ✅ Because `RoomSource.getRoom()` is async by contract, loading/error states and
+  the React error boundary (see [FAILURE-MODES](./FAILURE-MODES.md)) are the same
+  whether the room is static, generated, or fetched.
+- 🔜 Generation is more than one model call: a prompt becomes a *validated,
   playable* room through a multi-stage pipeline with bounded repair and a safe
-  fallback. See **[Generation pipeline](#generation-pipeline-planned)** below and
+  fallback. v0 implements only stage 1 (generate) + schema validation. See
+  **[Generation pipeline](#generation-pipeline-planned)** below and
   [ADR-0007](./decisions/ADR-0007-generated-room-validation-and-repair.md).
-- Rooms are pre-generated ahead of the player so transitions feel instant. See
+- 🔜 Rooms are pre-generated ahead of the player so transitions feel instant. See
   **[Adjacent-room pre-generation](#adjacent-room-pre-generation-planned)** below
   and [ADR-0009](./decisions/ADR-0009-adjacent-room-pre-generation.md).
 
