@@ -10,6 +10,20 @@ pillars, a rug, an arch, wall torches (real point lights), an NPC (Malik), and a
 readable scroll. You can walk around, look with the mouse, and interact with the
 NPC and the scroll.
 
+## Architecture & engineering standards
+
+This repo follows documented architecture boundaries and engineering standards.
+Start with **[AGENTS.md](./AGENTS.md)** (rules for contributors and AI coding
+agents), then the architecture docs in
+**[`docs/architecture/`](./docs/architecture/ARCHITECTURE.md)**:
+
+- [ARCHITECTURE.md](./docs/architecture/ARCHITECTURE.md) — layers, the data-only
+  RoomSpec → trusted-renderer trust boundary, and future plug-in points.
+- [BOUNDARIES.md](./docs/architecture/BOUNDARIES.md) — allowed/forbidden imports.
+- [CONVENTIONS.md](./docs/architecture/CONVENTIONS.md) — coordinates & RoomSpec authoring.
+- [FAILURE-MODES.md](./docs/architecture/FAILURE-MODES.md) — failure detection & handling.
+- [decisions/](./docs/architecture/decisions/) — architecture decision records (ADRs).
+
 ## Goal of v0
 
 Establish the **data → trusted renderer** boundary and the lifecycle discipline
