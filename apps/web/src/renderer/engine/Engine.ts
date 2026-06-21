@@ -8,6 +8,15 @@ import { MovementControls } from './controls/movement'
 import type { Bounds } from './controls/movement'
 import { LookControls } from './controls/lookControls'
 
+/** A nearby thing the player can interact with (sourced from RoomSpec). */
+export type Interactable = {
+  type: string
+  label: string
+  key: 'E' | 'F'
+  prompt: string
+  position: THREE.Vector3
+}
+
 /**
  * Owns the Three.js renderer, scene, camera, and render loop. Pure Three.js
  * with no React dependency so the React layer stays a thin host.
@@ -32,6 +41,9 @@ export class Engine {
   private movement: MovementControls | null = null
   private look: LookControls | null = null
   private bounds: Bounds | null = null
+  private readonly interactables: Interactable[] = []
+  private activeInteractable: Interactable | null = null
+  private readonly interactRange = 2.5 // meters (XZ) to register as "in range"
 
   constructor(container: HTMLElement) {
     this.container = container
@@ -78,6 +90,19 @@ export class Engine {
       THREE.MathUtils.degToRad(room.spawn.yaw),
     )
 
+    // Collect interactables (objects carrying an `interaction`) for proximity.
+    for (const o of room.objects) {
+      if (!('interaction' in o)) continue
+      this.interactables.push({
+        type: o.type,
+        label: 'name' in o ? o.name : o.type,
+        key: o.interaction.key,
+        prompt: o.interaction.prompt,
+        position: new THREE.Vector3(o.position[0], o.position[1], o.position[2]),
+      })
+    }
+    window.addEventListener('keydown', this.onInteractKey)
+
     console.info(
       `[Engine] room received: "${room.name}" (${room.objects.length} objects, ${room.warnings.length} warnings)`,
     )
@@ -115,18 +140,63 @@ export class Engine {
       this.movement.update(this.camera, this.look.yawAngle, dt, this.bounds)
       this.look.applyTo(this.camera)
     }
+    this.updateProximity()
     this.renderer.render(this.scene, this.camera)
+  }
+
+  /** Nearest interactable in range right now, or null. Consumed by the UI later. */
+  get activeInteraction(): Interactable | null {
+    return this.activeInteractable
+  }
+
+  /**
+   * Each frame, pick the nearest interactable within range on the XZ plane.
+   * Strict `<` so ties resolve to the first-listed object deterministically.
+   * Logs only on change (groundwork; Commit 9 surfaces this in the HUD).
+   */
+  private updateProximity(): void {
+    const { x, z } = this.camera.position
+    let nearest: Interactable | null = null
+    let best = this.interactRange
+    for (const it of this.interactables) {
+      const d = Math.hypot(x - it.position.x, z - it.position.z)
+      if (d < best) {
+        best = d
+        nearest = it
+      }
+    }
+    if (nearest !== this.activeInteractable) {
+      this.activeInteractable = nearest
+      console.info(
+        nearest
+          ? `[interaction] in range: ${nearest.label} — "${nearest.prompt}" (press ${nearest.key})`
+          : '[interaction] in range: none',
+      )
+    }
+  }
+
+  private readonly onInteractKey = (e: KeyboardEvent): void => {
+    if (e.code !== 'KeyE' && e.code !== 'KeyF') return
+    const active = this.activeInteractable
+    if (!active) return
+    const key = e.code === 'KeyE' ? 'E' : 'F'
+    if (active.key !== key) return // wrong key for this interactable
+    // Groundwork only — Commit 9 opens the dialogue panel from here.
+    console.info(`[interaction] ${key} pressed → ${active.label}: "${active.prompt}"`)
   }
 
   dispose(): void {
     cancelAnimationFrame(this.rafId)
     this.rafId = 0
     this.resizeObserver.disconnect()
+    window.removeEventListener('keydown', this.onInteractKey)
     this.movement?.dispose()
     this.look?.dispose()
     this.movement = null
     this.look = null
     this.bounds = null
+    this.interactables.length = 0
+    this.activeInteractable = null
 
     disposeObject(this.scene)
     this.scene.clear()

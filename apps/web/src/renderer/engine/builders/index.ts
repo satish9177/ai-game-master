@@ -43,6 +43,8 @@ const registry: { [K in RoomObject['type']]?: ObjectBuilder<K> } = {
   rug: buildRug,
   torch: buildTorch,
   arch: buildArch,
+  scroll: buildScroll,
+  npc: buildNpc,
   prop: buildProp,
 }
 
@@ -132,6 +134,47 @@ function buildArch(obj: ObjectOf<'arch'>): THREE.Object3D {
   g.add(box(post, height, post, -width / 2, height / 2, 0, color)) // left post
   g.add(box(post, height, post, width / 2, height / 2, 0, color)) // right post
   g.add(box(width + post, 0.5, post, 0, height + 0.25, 0, color)) // lintel
+  return g
+}
+
+function buildScroll(obj: ObjectOf<'scroll'>): THREE.Object3D {
+  // Small rolled parchment lying along X; the object's position carries its
+  // height (e.g. y=0.5), so the roll is built centered on the local origin.
+  const g = new THREE.Group()
+  const roll = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.09, 0.09, 0.5, 10),
+    new THREE.MeshStandardMaterial({ color: obj.color }),
+  )
+  roll.rotation.z = Math.PI / 2
+  g.add(roll)
+  // Slightly larger, paler end caps so it reads as a scroll, not a stick.
+  for (const x of [-0.25, 0.25]) {
+    const cap = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.11, 0.11, 0.06, 10),
+      new THREE.MeshStandardMaterial({ color: '#cbbf94' }),
+    )
+    cap.rotation.z = Math.PI / 2
+    cap.position.x = x
+    g.add(cap)
+  }
+  return g
+}
+
+function buildNpc(obj: ObjectOf<'npc'>): THREE.Object3D {
+  // Low-poly standing figure resting on the floor (position is the base).
+  const g = new THREE.Group()
+  const body = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.28, 0.34, 1.2, 8),
+    new THREE.MeshStandardMaterial({ color: obj.color }),
+  )
+  body.position.y = 0.6 // base at y=0
+  g.add(body)
+  const head = new THREE.Mesh(
+    new THREE.SphereGeometry(0.22, 12, 10),
+    new THREE.MeshStandardMaterial({ color: obj.color }),
+  )
+  head.position.y = 1.45
+  g.add(head)
   return g
 }
 
