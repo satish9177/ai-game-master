@@ -161,20 +161,39 @@ function buildScroll(obj: ObjectOf<'scroll'>): THREE.Object3D {
 }
 
 function buildNpc(obj: ObjectOf<'npc'>): THREE.Object3D {
-  // Low-poly standing figure resting on the floor (position is the base).
+  // Low-poly robed figure resting on the floor (position is the base). Built
+  // from primitives so it reads clearly as a humanoid: feet, robe (covering the
+  // legs), belt, arms/hands, shoulders, neck, head and a simple turban. A small
+  // nose marks the facing direction (local +Z), so at rotationY=0 it looks south
+  // toward an approaching player. ~1.76m tall; one material per mesh.
   const g = new THREE.Group()
-  const body = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.28, 0.34, 1.2, 8),
-    new THREE.MeshStandardMaterial({ color: obj.color }),
-  )
-  body.position.y = 0.6 // base at y=0
-  g.add(body)
-  const head = new THREE.Mesh(
-    new THREE.SphereGeometry(0.22, 12, 10),
-    new THREE.MeshStandardMaterial({ color: obj.color }),
-  )
-  head.position.y = 1.45
-  g.add(head)
+  const robe = obj.color
+  const skin = '#c8a27a'
+  const cloth = '#e8e2d0'
+  const dark = '#3a2f25'
+
+  // Fresh geometry + material per call so disposeObject frees each exactly once.
+  const part = (geo: THREE.BufferGeometry, color: string, x = 0, y = 0, z = 0): THREE.Mesh => {
+    const m = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color }))
+    m.position.set(x, y, z)
+    g.add(m)
+    return m
+  }
+
+  part(new THREE.BoxGeometry(0.18, 0.1, 0.3), dark, -0.13, 0.05, 0.06) // left foot
+  part(new THREE.BoxGeometry(0.18, 0.1, 0.3), dark, 0.13, 0.05, 0.06) // right foot
+  part(new THREE.CylinderGeometry(0.24, 0.46, 1.15, 12), robe, 0, 0.575, 0) // robe + legs
+  part(new THREE.CylinderGeometry(0.3, 0.3, 0.1, 12), dark, 0, 0.9, 0) // belt
+  part(new THREE.BoxGeometry(0.56, 0.2, 0.3), robe, 0, 1.2, 0) // shoulders
+  part(new THREE.CylinderGeometry(0.08, 0.07, 0.72, 8), robe, -0.32, 0.84, 0) // left arm
+  part(new THREE.CylinderGeometry(0.08, 0.07, 0.72, 8), robe, 0.32, 0.84, 0) // right arm
+  part(new THREE.SphereGeometry(0.09, 8, 8), skin, -0.32, 0.46, 0) // left hand
+  part(new THREE.SphereGeometry(0.09, 8, 8), skin, 0.32, 0.46, 0) // right hand
+  part(new THREE.CylinderGeometry(0.1, 0.1, 0.12, 8), skin, 0, 1.32, 0) // neck
+  part(new THREE.SphereGeometry(0.18, 16, 12), skin, 0, 1.52, 0) // head
+  part(new THREE.BoxGeometry(0.05, 0.05, 0.07), dark, 0, 1.5, 0.17) // nose (faces +Z)
+  part(new THREE.SphereGeometry(0.2, 16, 12), cloth, 0, 1.62, 0).scale.set(1, 0.72, 1) // turban
+
   return g
 }
 
