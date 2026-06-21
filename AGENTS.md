@@ -59,6 +59,15 @@ the architecture is built so they slot in without breaking boundaries.
 13. **Do not over-engineer with heavy frameworks** (DI containers, Redux, Nest,
     heavy ORMs, etc.) unless the maintainer explicitly approves. DI = constructor
     parameters. Prefer the smallest seam that satisfies the boundary.
+14. **Build entities compositionally — don't add a builder per type.** For future
+    object/character rendering, don't write a bespoke builder per entity
+    (`soldier`, `zombie`, `giant`, `merchant`, …). Compose from a trusted part
+    library: base body + appearance + outfit + equipment + scale + palette +
+    role/preset + interaction/behavior metadata. RoomSpec selects safe
+    presets/parts/params (data only); the renderer owns and assembles the parts;
+    the LLM never emits geometry. v0 primitive builders are fine — this governs
+    how the object system grows. See
+    [ADR-0006](./docs/architecture/decisions/ADR-0006-compositional-entity-builders.md).
 
 ## Module boundaries (quick reference)
 

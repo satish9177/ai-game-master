@@ -143,6 +143,50 @@ mutable state and not React reaching into Three.js objects. That seam is the
 | `renderer/ui/` | `Hud` and `DialoguePanel` — presentational React only. |
 | `renderer/RoomViewer.tsx` | The composition seam: constructs/disposes the engine, bridges engine callbacks to React state. StrictMode-safe (mount → dispose → mount leaks nothing). |
 
+## Object & entity system (compositional builders)
+
+🔜 **Direction for future object/character work.** v0's per-type primitive
+builders are fine as-is; this section governs how the object system *grows*. Full
+rationale in
+[ADR-0006](./decisions/ADR-0006-compositional-entity-builders.md).
+
+**Anti-pattern (avoid):** a separate one-off builder per entity type —
+`buildSoldier`, `buildWoman`, `buildMan`, `buildZombie`, `buildGiant`,
+`buildKing`, `buildMerchant`, … This explodes combinatorially, duplicates limb
+and posture logic, and is unmaintainable. It violates SRP / OCP / DRY.
+
+**Preferred: compositional builders.** The renderer assembles an entity from a
+trusted **part library** along fixed dimensions:
+
+```
+entity = base body type (e.g. humanoid)
+       + appearance parts
+       + clothing / outfit
+       + equipment
+       + size / scale modifiers
+       + material / color palette
+       + role / preset      (a named bundle of the above)
+       + interaction / behavior metadata
+```
+
+| Entity | Composition |
+| --- | --- |
+| soldier | humanoid + armor + helmet + weapon |
+| zombie | humanoid + damaged posture + pale skin + torn clothes |
+| giant | humanoid + large scale + heavy limbs + monster traits |
+| merchant | humanoid + robe + bag/wares |
+
+**The trust boundary still holds.** RoomSpec stays **data-only**: it selects a
+preset and/or lists parts + parameters. The LLM may choose *safe presets and
+parts* from the published vocabulary, but **never generates geometry or builder
+code**. The renderer owns the trusted part library and assembles the final
+object safely — the data-only → trusted-renderer rule of
+[ADR-0001](./decisions/ADR-0001-data-only-room-spec-trusted-renderer.md) applied
+at part granularity. A new entity is usually a new *data combination*;
+occasionally a new *part* is added (and reviewed); almost never a new bespoke
+builder. Unknown parts/presets degrade to a placeholder, like unknown object
+types today (see [FAILURE-MODES](./FAILURE-MODES.md)).
+
 ## Future plug-in points
 
 These are **designed, not built**. The point of documenting them now is to keep
