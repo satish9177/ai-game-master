@@ -1,6 +1,7 @@
 import * as THREE from 'three'
 import type { LoadedRoom } from '../../roomspec/schema'
 import { Disposables, disposeObject } from './disposables'
+import { buildShell } from './builders/shell'
 
 /**
  * Owns the Three.js renderer, scene, camera, and render loop. Pure Three.js
@@ -46,12 +47,26 @@ export class Engine {
     this.rafId = requestAnimationFrame(this.renderLoop)
   }
 
-  /** Receives the validated room. Geometry is built in a later commit. */
+  /** Receives the validated room, builds the shell, and places the camera. */
   setRoom(room: LoadedRoom): void {
     this.room = room
+    this.scene.add(buildShell(room))
+    this.placeCamera(room.spawn)
     console.info(
       `[Engine] room received: "${room.name}" (${room.objects.length} objects, ${room.warnings.length} warnings)`,
     )
+  }
+
+  /**
+   * Positions the camera at the spawn point. yaw is in degrees: the forward
+   * direction is (sin yaw, 0, cos yaw), so yaw=0 faces south (+Z) and yaw=180
+   * faces north (-Z).
+   */
+  private placeCamera(spawn: LoadedRoom['spawn']): void {
+    const [x, y, z] = spawn.position
+    const yawRad = THREE.MathUtils.degToRad(spawn.yaw)
+    this.camera.position.set(x, y, z)
+    this.camera.lookAt(x + Math.sin(yawRad), y, z + Math.cos(yawRad))
   }
 
   /** The room currently held by the engine, consumed by later commits. */
