@@ -7,6 +7,7 @@ import { buildObjects } from './builders'
 import { MovementControls } from './controls/movement'
 import type { Bounds } from './controls/movement'
 import { LookControls } from './controls/lookControls'
+import type { Logger } from '../../platform/logger/Logger'
 
 /** A nearby thing the player can interact with (sourced from RoomSpec). */
 export type Interactable = {
@@ -32,6 +33,7 @@ export type Interactable = {
  */
 export class Engine {
   private readonly container: HTMLElement
+  private readonly logger: Logger
   private readonly renderer: THREE.WebGLRenderer
   private readonly scene: THREE.Scene
   private readonly camera: THREE.PerspectiveCamera
@@ -53,8 +55,9 @@ export class Engine {
   /** Fired when the player presses the matching key to open an interaction. */
   onRequestOpenInteraction: ((target: Interactable) => void) | null = null
 
-  constructor(container: HTMLElement) {
+  constructor(container: HTMLElement, logger: Logger) {
     this.container = container
+    this.logger = logger
 
     this.renderer = new THREE.WebGLRenderer({ antialias: true })
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
@@ -81,7 +84,7 @@ export class Engine {
     this.room = room
     this.scene.add(buildLighting(room.lighting))
     this.scene.add(buildShell(room))
-    this.scene.add(buildObjects(room))
+    this.scene.add(buildObjects(room, this.logger))
     this.placeCamera(room.spawn)
 
     const { width, depth } = room.shell.dimensions
@@ -113,10 +116,11 @@ export class Engine {
     }
     window.addEventListener('keydown', this.onInteractKey)
 
-    // eslint-disable-next-line no-console -- TODO(logger): route via Logger adapter (ADR-0003)
-    console.info(
-      `[Engine] room received: "${room.name}" (${room.objects.length} objects, ${room.warnings.length} warnings)`,
-    )
+    this.logger.info('room received', {
+      room: room.name,
+      objects: room.objects.length,
+      warnings: room.warnings.length,
+    })
   }
 
   /**

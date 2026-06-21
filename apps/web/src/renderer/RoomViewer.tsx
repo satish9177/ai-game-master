@@ -5,6 +5,7 @@ import { loadRoomSpec } from '../roomspec/schema'
 import { throneRoom } from '../roomspec/examples/throneRoom'
 import { Hud } from './ui/Hud'
 import { DialoguePanel } from './ui/DialoguePanel'
+import { createConsoleLogger } from '../platform/logger/consoleLogger'
 
 /**
  * Hosts the Three.js engine and the React UI overlay. The engine owns the
@@ -22,7 +23,8 @@ export function RoomViewer() {
     const container = containerRef.current
     if (!container) return
 
-    const engine = new Engine(container)
+    const logger = createConsoleLogger()
+    const engine = new Engine(container, logger)
     engineRef.current = engine
     engine.onActiveInteractionChange = setActive
     engine.onRequestOpenInteraction = (target) => {

@@ -24,10 +24,17 @@ export default defineConfig([
     },
     rules: {
       // All logging must go through the Logger abstraction (ADR-0003). console.*
-      // will be allowed only in the future browser logger adapter; add that path
-      // as an override when it lands. The two legacy call sites carry temporary
-      // eslint-disable markers until then.
+      // is allowed only in the browser logger adapter (override below).
       'no-console': 'error',
+    },
+  },
+
+  // The browser console adapter is the single approved place to call console.*
+  // (ADR-0003). Everywhere else logs through the Logger interface.
+  {
+    files: ['src/platform/logger/consoleLogger.ts'],
+    rules: {
+      'no-console': 'off',
     },
   },
 
