@@ -1,22 +1,30 @@
 import { useEffect, useRef } from 'react'
+import { Engine } from './engine/Engine'
 import { loadRoomSpec } from '../roomspec/schema'
 import { throneRoom } from '../roomspec/examples/throneRoom'
 
 /**
- * Bare canvas host for the 3D room. The Three.js engine (scene, camera,
- * render loop, RoomSpec rendering) is wired up in later commits; for now this
- * only mounts the canvas element the renderer will eventually own.
+ * Hosts the Three.js engine. The engine creates and owns the canvas inside
+ * this container; the effect initializes once and disposes fully on cleanup,
+ * which keeps it safe under React StrictMode's dev double-mount.
  */
 export function RoomViewer() {
-  const canvasRef = useRef<HTMLCanvasElement>(null)
+  const containerRef = useRef<HTMLDivElement>(null)
+  const engineRef = useRef<Engine | null>(null)
 
-  // TEMP (commit 2): verify the RoomSpec loads and validates. Removed once the
-  // engine consumes the loaded room directly.
   useEffect(() => {
-    const room = loadRoomSpec(throneRoom)
-    console.log('[RoomViewer] loaded room:', room)
-    console.log(`[RoomViewer] warnings: ${room.warnings.length}`, room.warnings)
+    const container = containerRef.current
+    if (!container) return
+
+    const engine = new Engine(container)
+    engineRef.current = engine
+    engine.setRoom(loadRoomSpec(throneRoom))
+
+    return () => {
+      engine.dispose()
+      engineRef.current = null
+    }
   }, [])
 
-  return <canvas ref={canvasRef} className="room-viewer" />
+  return <div ref={containerRef} className="room-viewer" />
 }
