@@ -80,32 +80,46 @@ function buildRug(obj: ObjectOf<'rug'>): THREE.Object3D {
 }
 
 function buildTorch(obj: ObjectOf<'torch'>): THREE.Object3D {
-  // Unlike ground props, a torch's position is its mount point (e.g. y=3), so
-  // the geometry is built around the local origin: post centered, flame above.
+  // v0 pillar-mounted torch: the object's position is the mount point on a
+  // pillar/wall (e.g. y=3), which in the example coincides with a 0.4m-radius
+  // pillar. So the sconce brackets outward along local +Z and the flame sits
+  // ~0.55m in front of the mount, clearing the pillar and facing the room.
+  // rotationY aims this offset for other mounts. (No real attachment logic.)
   const g = new THREE.Group()
   const { color, intensity, distance } = obj.light
+  const reach = 0.55 // how far the flame sits out from the mount surface
 
-  const post = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.05, 0.07, 0.6, 8),
-    new THREE.MeshStandardMaterial({ color: '#3a2a1a' }),
+  // Horizontal arm from the mount out to the flame.
+  const arm = new THREE.Mesh(
+    new THREE.BoxGeometry(0.1, 0.1, reach),
+    new THREE.MeshStandardMaterial({ color: '#2a1d12' }),
   )
-  g.add(post) // centered on the mount point
+  arm.position.set(0, 0, reach / 2)
+  g.add(arm)
 
-  // Emissive flame: glows on its own even before the point light lands on it.
+  // Cup/holder at the end of the arm.
+  const cup = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.12, 0.08, 0.22, 8),
+    new THREE.MeshStandardMaterial({ color: '#2a1d12' }),
+  )
+  cup.position.set(0, 0.15, reach)
+  g.add(cup)
+
+  // Emissive flame: glows on its own, large enough to read from across the room.
   const flame = new THREE.Mesh(
-    new THREE.ConeGeometry(0.12, 0.34, 8),
+    new THREE.ConeGeometry(0.2, 0.6, 8),
     new THREE.MeshStandardMaterial({
       color,
       emissive: color,
-      emissiveIntensity: 1.4,
+      emissiveIntensity: 2.5,
     }),
   )
-  flame.position.y = 0.45
+  flame.position.set(0, 0.55, reach)
   g.add(flame)
 
   // Real light, data-driven. No shadows (cheap), no flicker yet.
   const light = new THREE.PointLight(color, intensity, distance)
-  light.position.y = 0.5
+  light.position.set(0, 0.6, reach)
   g.add(light)
 
   return g

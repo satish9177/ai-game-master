@@ -15,7 +15,7 @@ export const throneRoom = {
   },
   spawn: { position: [0, 1.7, 8], yaw: 180 }, // near south wall, facing north
   lighting: {
-    ambient: { intensity: 0.6 },
+    ambient: { intensity: 0.85 }, // dark but readable
     hemisphere: { intensity: 0.5 },
   },
   objects: [
@@ -25,8 +25,8 @@ export const throneRoom = {
     { type: 'pillar', position: [4, 0, -4] },
     { type: 'pillar', position: [-4, 0, 2] },
     { type: 'pillar', position: [4, 0, 2] },
-    { type: 'torch', position: [-4, 3, -4] },
-    { type: 'torch', position: [4, 3, -4] },
+    { type: 'torch', position: [-4, 3, -4], light: { intensity: 12, distance: 9 } },
+    { type: 'torch', position: [4, 3, -4], light: { intensity: 12, distance: 9 } },
     {
       type: 'scroll',
       position: [2, 0.5, 2],
