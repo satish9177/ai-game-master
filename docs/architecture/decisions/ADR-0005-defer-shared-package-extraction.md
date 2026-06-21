@@ -20,8 +20,8 @@ and ceremony for a boundary that can be enforced more cheaply.
 - **Keep the current `apps/web` structure.** Do **not** introduce npm workspaces
   or a `packages/contracts` package yet.
 - **Enforce the boundaries by other means now:** folder structure, these
-  architecture docs, code review, and (in a later commit) TypeScript `strict` +
-  ESLint `no-restricted-imports`. The *dependency direction* is correct today;
+  architecture docs, code review, and TypeScript `strict` + ESLint
+  `no-restricted-imports`. The *dependency direction* is correct today;
   the physical packaging is the only thing deferred.
 - **Extract a real shared package only when both are true:** (a) the backend
   exists, and (b) there is a genuine second consumer of the RoomSpec contract.

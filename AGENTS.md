@@ -43,8 +43,8 @@ the architecture is built so they slot in without breaking boundaries.
 8. **The browser logger adapter may be the only place that calls `console.*`.**
    Everywhere else, inject and use the logger
    ([ADR-0003](./docs/architecture/decisions/ADR-0003-logging-abstraction.md)).
-   *(The interface is being introduced in a later commit; until then, do not add
-   new `console.*` calls — there are only two legacy ones, slated for removal.)*
+   *(Implemented in `src/platform/logger/`: the console adapter is the only place
+   `console.*` is allowed, enforced by the `no-console` lint rule.)*
 9. **Validate all external/dynamic data at boundaries.** Anything entering a
    layer from outside (a RoomSpec, an HTTP payload, a stored row, model output)
    is validated with the shared schema first. Raw data never reaches the renderer.

@@ -49,10 +49,10 @@ One entry in `objects[]` has an unknown `type` or fails its schema.
   of the room loads normally.
 - **User-facing** ✅ — a clearly-wrong magenta box at the object's position;
   everything else works.
-- **Logging** — Today ✅ a `console.warn` for a missing builder and a
-  `console.info` summarizing object/warning counts. 🔜 these move behind the
-  logger; `warnings[]` is surfaced as structured data (and optionally a dev
-  overlay) rather than ad-hoc console calls.
+- **Logging** ✅ — the missing-builder case logs `logger.warn(…, { objectType,
+  objectId })` and room load logs `logger.info('room received', …)` through the
+  Logger adapter (no direct `console.*`). 🔜 surfacing `warnings[]` to the UI as
+  structured data (e.g. a dev overlay) remains future.
 
 ## 3. WebGL unavailable or context lost
 

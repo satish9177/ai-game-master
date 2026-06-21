@@ -56,7 +56,7 @@ inner layers; inner layers never depend on outer layers.
      │  no React    │ │  no Three    │ │  ROOT        │ │  ❌ NOT BUILT  │
      └──────┬───────┘ └──────┬───────┘ └──────┬───────┘ └────────────────┘
             │                │                │
-            └──── 🔜 both depend on ──► Logger (platform port) ◄──┘
+            └──── both may use ──► Logger (platform port) ◄──┘
 ```
 
 | Layer | Responsibility | May depend on | Must NOT depend on |
@@ -197,7 +197,7 @@ today's seams in the right place.
 ### 🔜 Generation (AI-authored rooms)
 
 - A `RoomSource` **port** (interface) in the domain answers "give me a room".
-  Today the only implementation is a `StaticRoomSource` returning `throneRoom`.
+  Its first implementation will be a `StaticRoomSource` returning `throneRoom`.
 - A future `GeneratedRoomSource` calls an LLM that returns **RoomSpec JSON only**
   and runs it through the *same* `loadRoomSpec`. The model never emits renderer
   code. See the trust boundary above and
@@ -223,7 +223,6 @@ today's seams in the right place.
 ## Packaging decision
 
 The domain/renderer/UI boundaries are real **today**, enforced by folder
-structure, these docs, and (in a later commit) lint rules — not by separate npm
-packages. A shared `packages/contracts` package is extracted only when a second
+structure, these docs, and lint rules — not by separate npm packages. A shared `packages/contracts` package is extracted only when a second
 consumer of the RoomSpec contract exists (i.e. when the backend lands). See
 [ADR-0005](./decisions/ADR-0005-defer-shared-package-extraction.md).

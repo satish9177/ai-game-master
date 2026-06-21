@@ -1,6 +1,6 @@
 # ADR-0003: Logging abstraction
 
-- **Status:** Accepted — **not yet implemented** (planned commit)
+- **Status:** Accepted — **implemented** (Logger port + browser console adapter, Commit 3)
 - **Date:** 2026-06-21
 - **Deciders:** Project owner
 
@@ -18,7 +18,7 @@ editing call sites. A long-term product needs one logging seam from the start.
    each taking a message plus an optional **structured context object**
    (`{ roomId, objectIndex, … }`). Structured from day one — never string-built.
 2. **`console.*` is allowed in exactly one place:** the browser logger adapter.
-   Everywhere else (`no-console` lint, planned) logs through the interface.
+   Everywhere else (enforced by the `no-console` lint rule) logs through the interface.
 3. **Loggers are injected** (constructor parameters), not imported as a global —
    e.g. `new Engine(container, logger)`. No service locator, no DI framework.
 4. **Pure code returns problems as data; the caller logs.** `loadRoomSpec`
@@ -33,9 +33,10 @@ editing call sites. A long-term product needs one logging seam from the start.
 
 - Call sites are stable; routing/format changes happen in one adapter.
 - Levels and structure make logs queryable and safe to ship.
-- Small up-front cost: define the interface, write the console adapter, inject
-  it, and remove the two `console.*` calls. This is a later, isolated commit;
-  this ADR records the decision so nobody adds new `console.*` in the meantime.
+- Implemented in Commit 3: the `Logger` interface, the browser console adapter,
+  injection into the engine, and removal of the two `console.*` calls (new ones
+  outside the adapter now fail lint). Environment-based level filtering (point 5)
+  is deferred to the composition root / a future server adapter.
 
 ## Alternatives considered
 
