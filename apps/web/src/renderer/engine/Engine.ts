@@ -1,5 +1,5 @@
 import * as THREE from 'three'
-import type { LoadedRoom } from '../../roomspec/schema'
+import type { LoadedRoom } from '../../domain/loadRoomSpec'
 import { Disposables, disposeObject } from './disposables'
 import { buildShell } from './builders/shell'
 import { buildLighting } from './builders/lighting'
@@ -8,17 +8,7 @@ import { MovementControls } from './controls/movement'
 import type { Bounds } from './controls/movement'
 import { LookControls } from './controls/lookControls'
 import type { Logger } from '../../platform/logger/Logger'
-
-/** A nearby thing the player can interact with (sourced from RoomSpec). */
-export type Interactable = {
-  type: string
-  label: string
-  key: 'E' | 'F'
-  prompt: string
-  title?: string
-  body?: string
-  position: THREE.Vector3
-}
+import type { Interactable } from '../../domain/ports/interaction'
 
 /**
  * Owns the Three.js renderer, scene, camera, and render loop. Pure Three.js
@@ -111,7 +101,7 @@ export class Engine {
         prompt: o.interaction.prompt,
         title: o.interaction.title,
         body: o.interaction.body,
-        position: new THREE.Vector3(o.position[0], o.position[1], o.position[2]),
+        position: { x: o.position[0], y: o.position[1], z: o.position[2] },
       })
     }
     window.addEventListener('keydown', this.onInteractKey)

@@ -25,8 +25,8 @@ not react-three-fiber, to keep the engine independent of React's render cycle.)
    constructs the engine, bridges callbacks to React state, and disposes on
    unmount. This is the **only** approved coupling point.
 4. **UI components are presentational** and never import Three.js or engine
-   internals. Shared view-model types are part of the host contract (planned to
-   live in a neutral module, not inside the engine).
+   internals. Shared view-model types are part of the host contract and live in
+   a neutral module (`domain/ports/interaction.ts`), not inside the engine.
 
 ## Consequences
 
@@ -34,10 +34,10 @@ not react-three-fiber, to keep the engine independent of React's render cycle.)
   double-mount (mount → dispose → mount) is safe because lifecycle is explicit.
 - A clear, narrow surface to reason about: anything outside methods + callbacks
   is a boundary violation (see [BOUNDARIES](../BOUNDARIES.md)).
-- One small debt: the interaction view-model type currently lives in
-  `engine/Engine.ts` and is imported by UI. A planned refactor moves it to a
-  neutral module so neither side imports the other's internals. This will also
-  be backed by lint (`no-restricted-imports`).
+- The interaction view-model type lives in the neutral
+  `domain/ports/interaction.ts`, imported by both the engine and the UI, so
+  neither imports the other's internals. This is backed by lint:
+  `renderer/ui/**` may not import `renderer/engine/**` (`no-restricted-imports`).
 
 ## Alternatives considered
 

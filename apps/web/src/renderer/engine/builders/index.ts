@@ -1,5 +1,6 @@
 import * as THREE from 'three'
-import type { LoadedRoom, RoomObject } from '../../../roomspec/schema'
+import type { LoadedRoom } from '../../../domain/loadRoomSpec'
+import type { RoomObject } from '../../../domain/roomSpec'
 import type { Logger } from '../../../platform/logger/Logger'
 
 /**

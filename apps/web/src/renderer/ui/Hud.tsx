@@ -1,4 +1,4 @@
-import type { Interactable } from '../engine/Engine'
+import type { Interactable } from '../../domain/ports/interaction'
 
 /**
  * Bottom-centered prompt for the nearest interactable, e.g. "Press E to read

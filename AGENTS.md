@@ -76,7 +76,7 @@ Dependencies point **inward**, toward the domain. Full rules in
 
 | Layer | Location (today) | May import | Must NOT import |
 | --- | --- | --- | --- |
-| **Domain / Contracts** | `apps/web/src/roomspec/` | zod only | React, Three.js, DOM, network, DB |
+| **Domain / Contracts** | `apps/web/src/domain/` | zod only | React, Three.js, renderer, UI, platform, DOM, network, DB |
 | **Renderer** | `apps/web/src/renderer/engine/` | domain, logger port | React, network, DB |
 | **UI** (React) | `apps/web/src/renderer/ui/` | domain, host contract, logger port | Three.js, engine internals |
 | **Composition root** | `apps/web/src/App.tsx`, `RoomViewer.tsx` | everything (this is where wiring lives) | — |

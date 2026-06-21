@@ -134,8 +134,10 @@ mutable state and not React reaching into Three.js objects. That seam is the
 
 | Module | Role |
 | --- | --- |
-| `roomspec/schema.ts` | `RoomSpecSchema` (envelope), `RoomObjectSchema` (discriminated union on `type`), `loadRoomSpec` (strict envelope, lenient objects), `LoadedRoom`. |
-| `roomspec/examples/throneRoom.ts` | The single hardcoded demo room — pure data literal. |
+| `domain/roomSpec.ts` | `RoomSpecSchema` (envelope) + `RoomObjectSchema` (discriminated union on `type`); inferred `RoomSpec` / `RoomObject` types. Schema/types only, no behavior. |
+| `domain/loadRoomSpec.ts` | `loadRoomSpec` (strict envelope, lenient objects) + the `LoadedRoom` result type. |
+| `domain/ports/interaction.ts` | The neutral interaction view-model shared by the engine and the UI. |
+| `domain/examples/throneRoom.ts` | The single hardcoded demo room — pure data literal. |
 | `renderer/engine/Engine.ts` | Owns renderer/scene/camera, render loop, proximity detection, interaction keys, and **total `dispose()`**. No React. |
 | `renderer/engine/builders/` | `buildShell`, `buildLighting`, and the object `registry` + `buildObjects` with magenta-placeholder fallback. |
 | `renderer/engine/controls/` | `MovementControls` (WASD, room-clamped), `LookControls` (drag-look). |

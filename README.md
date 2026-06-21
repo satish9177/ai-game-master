@@ -83,7 +83,7 @@ All rooms use one coordinate convention:
 
 ## Data-only RoomSpec / trusted-renderer boundary
 
-`RoomSpec` is **pure data** (see `apps/web/src/roomspec/`). It is validated with
+`RoomSpec` is **pure data** (see `apps/web/src/domain/`). It is validated with
 zod and mapped to trusted builders by its `type` string. Nothing in a RoomSpec
 is ever evaluated as code — no functions, no scripts, no raw JS.
 

@@ -26,7 +26,7 @@ layers, never the reverse. The domain depends on nothing in this repo.
 
 | Layer | Folder (today) | What lives here |
 | --- | --- | --- |
-| **Domain / Contracts** | `apps/web/src/roomspec/` (🔜 `domain/`) | RoomSpec schema, `loadRoomSpec`, types, schema version; 🔜 ports (`RoomSource`, …). Pure. |
+| **Domain / Contracts** | `apps/web/src/domain/` | RoomSpec schema (`roomSpec.ts`), `loadRoomSpec.ts`, the interaction view-model (`ports/interaction.ts`), schema version; 🔜 more ports (`RoomSource`, …). Pure. |
 | **Renderer** | `apps/web/src/renderer/engine/` | Three.js engine, builders, controls, disposal. |
 | **UI** | `apps/web/src/renderer/ui/` | Presentational React components. |
 | **App / Composition root** | `apps/web/src/App.tsx`, `RoomViewer.tsx` (🔜 `app/`) | Wires concrete implementations together. |
@@ -55,7 +55,7 @@ place allowed to depend on everything; it is where wiring happens.
 | --- | --- |
 | **Renderer must not import React** (`react`, `react-dom`). | The engine must be usable and testable independently of the UI framework. The React host adapts to it, not the other way around. ([ADR-0002](./decisions/ADR-0002-react-three-boundary.md)) |
 | **UI must not import Three.js** (`three`) or engine internals. | UI is presentational. Mixing Three.js objects into React render logic couples the view to engine guts and breaks the lifecycle/disposal contract. |
-| **Domain must not import React, Three.js, the DOM, the network, or a DB.** | The contract must be sharable by every consumer (renderer today, backend/generation later) without dragging in a runtime. |
+| **Domain must not import React, Three.js, the renderer, UI, the platform logger, the DOM, the network, or a DB.** | The contract must be sharable by every consumer (renderer today, backend/generation later) without dragging in a runtime; it returns problems as data instead of logging. |
 | **No layer may call `console.*`** except the browser logger adapter. | One logging seam; structured, level-controlled, swappable. ([ADR-0003](./decisions/ADR-0003-logging-abstraction.md)) 🔜 |
 | **Persistence/DB code must never appear in UI or renderer.** | Data access is server-side and lives behind repository interfaces. SQL/driver types never leak outward. ([ADR-0004](./decisions/ADR-0004-persistence-sqlite-to-postgres.md)) |
 | **Generation must never emit executable code** — only RoomSpec data. | The trust boundary. Model output is data validated at the boundary, never `eval`'d, never turned into JS/Three/React. ([ADR-0001](./decisions/ADR-0001-data-only-room-spec-trusted-renderer.md)) |
@@ -73,8 +73,9 @@ The UI and the engine are wired together **only** at the composition root
   `engine.onRequestOpenInteraction`. The engine pushes plain, serializable view
   data out; React turns it into UI.
 - **Shared view-model types** (e.g. the interaction descriptor) are part of this
-  contract. They currently live in `engine/Engine.ts`; a planned refactor moves
-  them to a neutral module so neither side imports the other's internals.
+  contract. They live in the neutral `domain/ports/` module (e.g.
+  `domain/ports/interaction.ts`), imported by both the engine and the UI, so
+  neither side imports the other's internals.
 
 Anything beyond this surface (React touching `THREE.*`, the engine importing a
 component) is a boundary violation.
@@ -90,7 +91,7 @@ so the intent is unambiguous:
 - **`no-restricted-imports`** to encode the forbidden-import table:
   - `renderer/**` may not import `react` / `react-dom`.
   - `renderer/ui/**` may not import `three` or `renderer/engine/**` internals.
-  - `roomspec/**` (domain) may not import `react`, `three`, or `renderer/**`.
+  - `domain/**` may not import `react`, `three`, `renderer/**`, or `platform/**`.
 - Boundaries that lint cannot easily express stay enforced by review + these
   docs + [/AGENTS.md](../../AGENTS.md).
 
