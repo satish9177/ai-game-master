@@ -1,5 +1,7 @@
 import * as THREE from 'three'
-import type { LoadedRoom, RoomObject } from '../../../roomspec/schema'
+import type { LoadedRoom } from '../../../domain/loadRoomSpec'
+import type { RoomObject } from '../../../domain/roomSpec'
+import type { Logger } from '../../../platform/logger/Logger'
 
 /**
  * Builds the room's props from RoomSpec objects via a type-to-builder registry.
@@ -13,12 +15,12 @@ import type { LoadedRoom, RoomObject } from '../../../roomspec/schema'
  * constructs its prop resting on the local floor plane (y=0); one material per
  * mesh so disposeObject frees every geometry/material exactly once.
  */
-export function buildObjects(room: LoadedRoom): THREE.Group {
+export function buildObjects(room: LoadedRoom, logger: Logger): THREE.Group {
   const group = new THREE.Group()
   group.name = 'objects'
 
   for (const obj of room.objects) {
-    const node = buildKnownObject(obj)
+    const node = buildKnownObject(obj, logger)
     applyTransform(node, obj.position, obj.rotationY, obj.scale)
     group.add(node)
   }
@@ -48,10 +50,13 @@ const registry: { [K in RoomObject['type']]?: ObjectBuilder<K> } = {
   prop: buildProp,
 }
 
-function buildKnownObject(obj: RoomObject): THREE.Object3D {
+function buildKnownObject(obj: RoomObject, logger: Logger): THREE.Object3D {
   const builder = registry[obj.type] as ((o: RoomObject) => THREE.Object3D) | undefined
   if (!builder) {
-    console.warn(`[builders] no builder for "${obj.type}" yet — rendering placeholder`)
+    logger.warn('no builder for object type — rendering placeholder', {
+      objectType: obj.type,
+      objectId: obj.id,
+    })
     return buildPlaceholder(obj.type)
   }
   return builder(obj)
@@ -265,7 +270,10 @@ function readPosition(raw: unknown): Vec3 {
   if (raw && typeof raw === 'object' && 'position' in raw) {
     const p = (raw as { position: unknown }).position
     if (Array.isArray(p) && p.length === 3 && p.every((n) => typeof n === 'number')) {
-      return [p[0], p[1], p[2]]
+      // Validated above as a length-3 number array; assert the tuple shape so
+      // noUncheckedIndexedAccess is satisfied, then copy into a fresh Vec3.
+      const [x, y, z] = p as Vec3
+      return [x, y, z]
     }
   }
   return [0, 0, 0]

@@ -1,5 +1,5 @@
 import * as THREE from 'three'
-import type { LoadedRoom } from '../../../roomspec/schema'
+import type { LoadedRoom } from '../../../domain/loadRoomSpec'
 
 /**
  * Builds the room's scene-wide lighting — ambient fill plus an optional

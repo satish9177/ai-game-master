@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import type { Interactable } from '../engine/Engine'
+import type { Interactable } from '../../domain/ports/interaction'
 
 /**
  * Static interact panel for v0 — no dialogue tree, no choices. Shows the

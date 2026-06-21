@@ -1,5 +1,5 @@
 import * as THREE from 'three'
-import type { LoadedRoom } from '../../../roomspec/schema'
+import type { LoadedRoom } from '../../../domain/loadRoomSpec'
 
 /**
  * Builds the static room shell — floor + four walls — from the RoomSpec.

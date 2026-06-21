@@ -1,5 +1,5 @@
 import * as THREE from 'three'
-import type { LoadedRoom } from '../../roomspec/schema'
+import type { LoadedRoom } from '../../domain/loadRoomSpec'
 import { Disposables, disposeObject } from './disposables'
 import { buildShell } from './builders/shell'
 import { buildLighting } from './builders/lighting'
@@ -7,17 +7,8 @@ import { buildObjects } from './builders'
 import { MovementControls } from './controls/movement'
 import type { Bounds } from './controls/movement'
 import { LookControls } from './controls/lookControls'
-
-/** A nearby thing the player can interact with (sourced from RoomSpec). */
-export type Interactable = {
-  type: string
-  label: string
-  key: 'E' | 'F'
-  prompt: string
-  title?: string
-  body?: string
-  position: THREE.Vector3
-}
+import type { Logger } from '../../platform/logger/Logger'
+import type { Interactable } from '../../domain/ports/interaction'
 
 /**
  * Owns the Three.js renderer, scene, camera, and render loop. Pure Three.js
@@ -32,6 +23,7 @@ export type Interactable = {
  */
 export class Engine {
   private readonly container: HTMLElement
+  private readonly logger: Logger
   private readonly renderer: THREE.WebGLRenderer
   private readonly scene: THREE.Scene
   private readonly camera: THREE.PerspectiveCamera
@@ -53,8 +45,9 @@ export class Engine {
   /** Fired when the player presses the matching key to open an interaction. */
   onRequestOpenInteraction: ((target: Interactable) => void) | null = null
 
-  constructor(container: HTMLElement) {
+  constructor(container: HTMLElement, logger: Logger) {
     this.container = container
+    this.logger = logger
 
     this.renderer = new THREE.WebGLRenderer({ antialias: true })
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
@@ -81,7 +74,7 @@ export class Engine {
     this.room = room
     this.scene.add(buildLighting(room.lighting))
     this.scene.add(buildShell(room))
-    this.scene.add(buildObjects(room))
+    this.scene.add(buildObjects(room, this.logger))
     this.placeCamera(room.spawn)
 
     const { width, depth } = room.shell.dimensions
@@ -108,14 +101,16 @@ export class Engine {
         prompt: o.interaction.prompt,
         title: o.interaction.title,
         body: o.interaction.body,
-        position: new THREE.Vector3(o.position[0], o.position[1], o.position[2]),
+        position: { x: o.position[0], y: o.position[1], z: o.position[2] },
       })
     }
     window.addEventListener('keydown', this.onInteractKey)
 
-    console.info(
-      `[Engine] room received: "${room.name}" (${room.objects.length} objects, ${room.warnings.length} warnings)`,
-    )
+    this.logger.info('room received', {
+      room: room.name,
+      objects: room.objects.length,
+      warnings: room.warnings.length,
+    })
   }
 
   /**
