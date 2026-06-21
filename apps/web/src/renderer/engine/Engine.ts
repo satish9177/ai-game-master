@@ -2,6 +2,9 @@ import * as THREE from 'three'
 import type { LoadedRoom } from '../../roomspec/schema'
 import { Disposables, disposeObject } from './disposables'
 import { buildShell } from './builders/shell'
+import { MovementControls } from './controls/movement'
+import type { Bounds } from './controls/movement'
+import { LookControls } from './controls/lookControls'
 
 /**
  * Owns the Three.js renderer, scene, camera, and render loop. Pure Three.js
@@ -21,8 +24,12 @@ export class Engine {
   private readonly camera: THREE.PerspectiveCamera
   private readonly disposables = new Disposables()
   private readonly resizeObserver: ResizeObserver
+  private readonly clock = new THREE.Clock()
   private rafId = 0
   private room: LoadedRoom | null = null
+  private movement: MovementControls | null = null
+  private look: LookControls | null = null
+  private bounds: Bounds | null = null
 
   constructor(container: HTMLElement) {
     this.container = container
@@ -52,6 +59,21 @@ export class Engine {
     this.room = room
     this.scene.add(buildShell(room))
     this.placeCamera(room.spawn)
+
+    const { width, depth } = room.shell.dimensions
+    const margin = room.shell.wallThickness / 2 + 0.3 // keep off the walls
+    this.bounds = {
+      minX: -(width / 2 - margin),
+      maxX: width / 2 - margin,
+      minZ: -(depth / 2 - margin),
+      maxZ: depth / 2 - margin,
+    }
+    this.movement = new MovementControls()
+    this.look = new LookControls(
+      this.renderer.domElement,
+      THREE.MathUtils.degToRad(room.spawn.yaw),
+    )
+
     console.info(
       `[Engine] room received: "${room.name}" (${room.objects.length} objects, ${room.warnings.length} warnings)`,
     )
@@ -84,6 +106,11 @@ export class Engine {
 
   private readonly renderLoop = (): void => {
     this.rafId = requestAnimationFrame(this.renderLoop)
+    const dt = Math.min(this.clock.getDelta(), 0.1) // cap to avoid post-idle jumps
+    if (this.movement && this.look && this.bounds) {
+      this.movement.update(this.camera, this.look.yawAngle, dt, this.bounds)
+      this.look.applyTo(this.camera)
+    }
     this.renderer.render(this.scene, this.camera)
   }
 
@@ -91,6 +118,11 @@ export class Engine {
     cancelAnimationFrame(this.rafId)
     this.rafId = 0
     this.resizeObserver.disconnect()
+    this.movement?.dispose()
+    this.look?.dispose()
+    this.movement = null
+    this.look = null
+    this.bounds = null
 
     disposeObject(this.scene)
     this.scene.clear()
