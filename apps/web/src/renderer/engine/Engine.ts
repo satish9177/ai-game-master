@@ -2,6 +2,7 @@ import * as THREE from 'three'
 import type { LoadedRoom } from '../../roomspec/schema'
 import { Disposables, disposeObject } from './disposables'
 import { buildShell } from './builders/shell'
+import { buildObjects } from './builders'
 import { MovementControls } from './controls/movement'
 import type { Bounds } from './controls/movement'
 import { LookControls } from './controls/lookControls'
@@ -58,6 +59,7 @@ export class Engine {
   setRoom(room: LoadedRoom): void {
     this.room = room
     this.scene.add(buildShell(room))
+    this.scene.add(buildObjects(room))
     this.placeCamera(room.spawn)
 
     const { width, depth } = room.shell.dimensions
