@@ -67,17 +67,15 @@ function buildThrone(obj: ObjectOf<'throne'>): THREE.Object3D {
 
 function buildPillar(obj: ObjectOf<'pillar'>): THREE.Object3D {
   const geo = new THREE.CylinderGeometry(obj.radius, obj.radius, obj.height, 12)
-  const m = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: obj.color }))
-  m.position.y = obj.height / 2
-  return m
+  geo.translate(0, obj.height / 2, 0) // anchor base at y=0 so it stands on the floor
+  return new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: obj.color }))
 }
 
 function buildRug(obj: ObjectOf<'rug'>): THREE.Object3D {
   const [w, d] = obj.size
   const geo = new THREE.BoxGeometry(w, 0.04, d)
-  const m = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: obj.color }))
-  m.position.y = 0.02
-  return m
+  geo.translate(0, 0.02, 0) // sit the slab just above the floor
+  return new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: obj.color }))
 }
 
 function buildArch(obj: ObjectOf<'arch'>): THREE.Object3D {
@@ -94,7 +92,7 @@ function buildProp(obj: ObjectOf<'prop'>): THREE.Object3D {
   const [sx, sy, sz] = obj.size
   const radius = Math.min(sx, sz) / 2
   let geo: THREE.BufferGeometry
-  let centerY = sy / 2
+  let baseOffset = sy / 2
   switch (obj.shape) {
     case 'cylinder':
       geo = new THREE.CylinderGeometry(radius, radius, sy, 12)
@@ -104,14 +102,13 @@ function buildProp(obj: ObjectOf<'prop'>): THREE.Object3D {
       break
     case 'sphere':
       geo = new THREE.SphereGeometry(radius, 16, 12)
-      centerY = radius
+      baseOffset = radius
       break
     default:
       geo = new THREE.BoxGeometry(sx, sy, sz)
   }
-  const m = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: obj.color }))
-  m.position.y = centerY
-  return m
+  geo.translate(0, baseOffset, 0) // anchor base at y=0 so it rests on the floor
+  return new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: obj.color }))
 }
 
 function buildPlaceholder(type: string): THREE.Object3D {
