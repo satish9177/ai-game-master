@@ -6,9 +6,10 @@ import tseslint from 'typescript-eslint'
 import { defineConfig, globalIgnores } from 'eslint/config'
 
 // Architecture boundaries are documented in docs/architecture/BOUNDARIES.md and
-// the ADRs. The rules below make the most important ones mechanical. Persistence/
-// backend/generation boundaries are intentionally NOT encoded yet — those folders
-// don't exist, so enforcing them now would be speculative (see BOUNDARIES.md).
+// the ADRs. The rules below make the most important ones mechanical. The
+// generation boundary is encoded now that src/generation/ exists; persistence and
+// backend boundaries are intentionally NOT encoded yet — those folders don't
+// exist, so enforcing them now would be speculative (see BOUNDARIES.md).
 export default defineConfig([
   globalIgnores(['dist']),
   {
@@ -94,6 +95,32 @@ export default defineConfig([
             { group: ['three/*'], message: 'domain must not import Three.js (BOUNDARIES.md).' },
             { group: ['**/renderer/**'], message: 'domain must not import renderer or UI (BOUNDARIES.md).' },
             { group: ['**/platform/**'], message: 'domain must not import the platform logger or other adapters; it returns problems as data (ADR-0003, BOUNDARIES.md).' },
+          ],
+        },
+      ],
+    },
+  },
+
+  // Boundary: generation turns a prompt into RoomSpec *data* (ADR-0001, ADR-0007).
+  // It may depend on the domain (schema, ports, loadRoomSpec) but must stay free
+  // of React, Three.js, the renderer/UI, and platform adapters — it never renders
+  // and never logs directly (the caller logs; ADR-0003). no-console stays enforced
+  // by the global rule above: generation is deliberately NOT exempted.
+  {
+    files: ['src/generation/**/*.{ts,tsx}'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: [
+            { name: 'react', message: 'generation must not import React — it emits RoomSpec data, not UI (BOUNDARIES.md).' },
+            { name: 'react-dom', message: 'generation must not import React — it emits RoomSpec data, not UI (BOUNDARIES.md).' },
+            { name: 'three', message: 'generation must not import Three.js — it emits data, never renders (ADR-0001, BOUNDARIES.md).' },
+          ],
+          patterns: [
+            { group: ['three/*'], message: 'generation must not import Three.js (ADR-0001, BOUNDARIES.md).' },
+            { group: ['**/renderer/**'], message: 'generation must not import the renderer or UI; its output is validated at the loadRoomSpec boundary (BOUNDARIES.md).' },
+            { group: ['**/platform/**'], message: 'generation must not import platform adapters such as the logger; it returns data and the caller logs (ADR-0003, BOUNDARIES.md).' },
           ],
         },
       ],

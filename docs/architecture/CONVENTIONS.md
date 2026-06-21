@@ -68,7 +68,8 @@ comment** and keep it consistent with one of these two patterns.
 
 RoomSpec is **data only** — see
 [ADR-0001](./decisions/ADR-0001-data-only-room-spec-trusted-renderer.md). When
-authoring (by hand today, or via an LLM later):
+authoring (by hand, via the deterministic fake generator of Generation
+Foundation v0 today, or via an LLM later):
 
 1. **No code, ever.** No functions, no expressions, no `eval`-able strings, no
    references to JS/Three/React. Numbers, strings, booleans, enums, arrays,

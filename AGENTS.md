@@ -15,9 +15,12 @@ Deep context lives in [`docs/architecture/`](./docs/architecture/ARCHITECTURE.md
 
 An AI Game Master that renders walkable low-poly 3D rooms. A room is described by
 a **RoomSpec** (pure data) and rendered by **trusted, hand-written Three.js**.
-Today: a single Vite app at `apps/web` (React 19 + TypeScript + Three.js + zod),
-with one hardcoded room. No AI, backend, or database yet — those are coming and
-the architecture is built so they slot in without breaking boundaries.
+Today: a single Vite app at `apps/web` (React 19 + TypeScript + Three.js + zod).
+**Renderer Foundation v0** renders one hardcoded room; **Generation Foundation
+v0** adds a deterministic *fake* room generator behind a prompt bar, validated
+through the same `loadRoomSpec` boundary. No real LLM/API, backend, or database
+yet — those are coming and the architecture is built so they slot in without
+breaking boundaries.
 
 ## Engineering standards (non-negotiable)
 
@@ -85,8 +88,9 @@ Dependencies point **inward**, toward the domain. Full rules in
 | **Domain / Contracts** | `apps/web/src/domain/` | zod only | React, Three.js, renderer, UI, platform, DOM, network, DB |
 | **Renderer** | `apps/web/src/renderer/engine/` | domain, logger port | React, network, DB |
 | **UI** (React) | `apps/web/src/renderer/ui/` | domain, host contract, logger port | Three.js, engine internals |
-| **Composition root** | `apps/web/src/App.tsx`, `RoomViewer.tsx` | everything (this is where wiring lives) | — |
-| **Generation / Backend / Persistence** | not built yet | domain | UI, renderer |
+| **Composition root** | `apps/web/src/App.tsx`, `RoomViewer.tsx`, `app/`, `room/` | everything (this is where wiring lives) | — |
+| **Generation** | `apps/web/src/generation/` (v0, fake) | domain, logger port | UI, renderer, React, Three.js |
+| **Backend / Persistence** | not built yet | domain | UI, renderer |
 
 ## Logging rules
 
@@ -106,7 +110,11 @@ ground objects. Full details in [CONVENTIONS](./docs/architecture/CONVENTIONS.md
 
 Unless the maintainer explicitly asks, do **not**:
 
-- add AI/LLM/generation code, a backend, or a database;
+- add **real** LLM/API generation, a backend, or a database — the deterministic
+  *fake* generator (Generation Foundation v0) is the only generation code; do not
+  extend it into a real model, a multi-stage pipeline, a code validator, a
+  reviewer, a repair loop, memory, or adjacent-room pre-generation without
+  explicit approval;
 - add npm workspaces or extract `packages/contracts`
   ([ADR-0005](./docs/architecture/decisions/ADR-0005-defer-shared-package-extraction.md));
 - introduce a state-management library, a DI framework, or a heavy ORM;
@@ -125,6 +133,7 @@ npm install        # first time
 npm run dev        # Vite dev server
 npm run build      # tsc -b + vite build  (use this to prove a change type-checks)
 npm run lint       # eslint
+npm run test       # vitest (PRNG, fake generator, GeneratedRoomSource failure paths)
 ```
 
 For a docs-only or non-`src` change, `npm run build --prefix apps/web` from the

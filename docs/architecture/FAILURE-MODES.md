@@ -70,23 +70,29 @@ The browser can't create a WebGL context, or the GPU drops the context at runtim
   with guidance, instead of a blank canvas or an uncaught error.
 - **Logging** 🔜 — `logger.error('webgl unavailable' | 'webgl context lost', …)`.
 
-## 4. Invalid LLM JSON / generated RoomSpec ❌ (future)
+## 4. Invalid generated JSON / RoomSpec ✅ v0 handling · 🔜 real LLM + repair
 
-A future generator returns malformed JSON, a schema-invalid spec, a partial
-spec, or hostile content.
+A generator returns malformed JSON, a schema-invalid spec, a partial spec, or
+(from a future model) hostile content.
 
-- **Detection** — the generated spec flows through the **same** `loadRoomSpec`
-  boundary. Bad JSON fails to parse; a bad envelope throws (case 1); bad objects
-  are skipped (case 2). Hostile content is *still just data* — there is no code
-  path to execution (see
-  [ADR-0001](./decisions/ADR-0001-data-only-room-spec-trusted-renderer.md)).
-- **Handling** — retry with a corrective prompt (bounded attempts); if it still
-  fails, surface a generation error and fall back to a known-good room. Never
-  ship unvalidated model output to the renderer.
-- **User-facing** — "Couldn't generate a room, try again" (or a fallback room),
-  never raw model output or errors.
-- **Logging** — model, latency, token counts, validation outcome, attempt count;
-  **never** log full prompts/keys/PII.
+- **Detection** ✅ — implemented in `GeneratedRoomSource`: the generator's raw
+  text flows through the **same** `loadRoomSpec` boundary. `JSON.parse` failure
+  and a bad envelope both map to a typed `invalid-room` result (case 1); bad
+  objects are skipped (case 2); a generator throw maps to `unavailable`. Hostile
+  content is *still just data* — there is no code path to execution (see
+  [ADR-0001](./decisions/ADR-0001-data-only-room-spec-trusted-renderer.md),
+  [ADR-0010](./decisions/ADR-0010-generation-foundation-v0.md)). The deterministic
+  fake can't actually emit bad output, but the failure mapping is real and
+  **unit-tested**.
+- **Handling** — ✅ v0 surfaces the typed failure to the host, which shows the safe
+  room-load screen. 🔜 the bounded retry/repair loop and a fallback known-good room
+  (with a real model) remain future
+  ([ADR-0007](./decisions/ADR-0007-generated-room-validation-and-repair.md)).
+- **User-facing** ✅ — a calm "This room could not be loaded." / "Could not
+  generate a room. Please try again." screen; never raw model output or errors.
+- **Logging** ✅ — the caller logs **prompt length** and safe result counts/codes
+  only; **never** full prompts/keys/PII. 🔜 model/latency/token/attempt metadata
+  arrives with the real client.
 
 ## 4b. Valid RoomSpec but a bad room ❌ (future)
 
@@ -173,7 +179,7 @@ pre-generation failed. Design in
 | 1 | Bad envelope | `parse` throws | safe "couldn't load" screen | 🔜 |
 | 2 | Bad/unknown object | per-object `safeParse` | magenta placeholder | ✅ |
 | 3 | WebGL unavailable/lost | capability check + event | fallback message | 🔜 |
-| 4 | Invalid LLM JSON | same `loadRoomSpec` boundary | retry / fallback room | ❌ |
+| 4 | Invalid generated JSON | same `loadRoomSpec` boundary → typed result | safe load screen; retry/fallback 🔜 | ✅ v0 |
 | 4b | Valid spec, bad room | code validator + LLM reviewer | repair → fallback room | ❌ |
 | 5 | Backend/network | typed HTTP results | retry state | ❌ |
 | 6 | DB failure | adapter → typed error | read-only / safe error | ❌ |

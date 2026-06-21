@@ -144,3 +144,58 @@ body {
 .panel-btn:hover {
   background: #2e2b3a;
 }
+
+/* ---------- prompt bar (generate a room) ---------- */
+.prompt-bar {
+  position: fixed;
+  top: 1.1rem;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10; /* above the canvas and the safe-fallback screen */
+  display: flex;
+  gap: 0.5rem;
+  width: min(560px, 92vw);
+  padding: 0.5rem;
+  border-radius: 0.6rem;
+  background: rgba(12, 12, 16, 0.78);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
+}
+
+.prompt-bar-input {
+  flex: 1;
+  min-width: 0;
+  padding: 0.5rem 0.7rem;
+  border: 1px solid #3a3747;
+  border-radius: 0.4rem;
+  background: #16151c;
+  color: #ece6d6;
+  font-size: 1rem;
+}
+
+.prompt-bar-input::placeholder {
+  color: #8b8576;
+}
+
+.prompt-bar-input:focus {
+  outline: none;
+  border-color: #6a6480;
+}
+
+.prompt-bar-btn {
+  padding: 0.5rem 1rem;
+  border: 1px solid #3a3747;
+  border-radius: 0.4rem;
+  background: #24222e;
+  color: #ece6d6;
+  font-size: 1rem;
+  cursor: pointer;
+}
+
+.prompt-bar-btn:hover:not(:disabled) {
+  background: #2e2b3a;
+}
+
+.prompt-bar-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
