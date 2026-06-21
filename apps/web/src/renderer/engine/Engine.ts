@@ -14,6 +14,8 @@ export type Interactable = {
   label: string
   key: 'E' | 'F'
   prompt: string
+  title?: string
+  body?: string
   position: THREE.Vector3
 }
 
@@ -44,6 +46,12 @@ export class Engine {
   private readonly interactables: Interactable[] = []
   private activeInteractable: Interactable | null = null
   private readonly interactRange = 2.5 // meters (XZ) to register as "in range"
+  private locked = false // true while a dialogue panel owns input
+
+  /** Fired when the nearest in-range interactable changes (drives the HUD). */
+  onActiveInteractionChange: ((active: Interactable | null) => void) | null = null
+  /** Fired when the player presses the matching key to open an interaction. */
+  onRequestOpenInteraction: ((target: Interactable) => void) | null = null
 
   constructor(container: HTMLElement) {
     this.container = container
@@ -98,6 +106,8 @@ export class Engine {
         label: 'name' in o ? o.name : o.type,
         key: o.interaction.key,
         prompt: o.interaction.prompt,
+        title: o.interaction.title,
+        body: o.interaction.body,
         position: new THREE.Vector3(o.position[0], o.position[1], o.position[2]),
       })
     }
@@ -144,15 +154,25 @@ export class Engine {
     this.renderer.render(this.scene, this.camera)
   }
 
-  /** Nearest interactable in range right now, or null. Consumed by the UI later. */
+  /** Nearest interactable in range right now, or null. */
   get activeInteraction(): Interactable | null {
     return this.activeInteractable
   }
 
   /**
+   * Locks/unlocks player input while a dialogue panel owns the screen. Movement
+   * and drag-look are disabled, and the matching key can't re-open a panel.
+   */
+  setInteractionLock(locked: boolean): void {
+    this.locked = locked
+    this.movement?.setEnabled(!locked)
+    this.look?.setEnabled(!locked)
+  }
+
+  /**
    * Each frame, pick the nearest interactable within range on the XZ plane.
    * Strict `<` so ties resolve to the first-listed object deterministically.
-   * Logs only on change (groundwork; Commit 9 surfaces this in the HUD).
+   * Notifies the UI only when the active interactable changes.
    */
   private updateProximity(): void {
     const { x, z } = this.camera.position
@@ -167,22 +187,18 @@ export class Engine {
     }
     if (nearest !== this.activeInteractable) {
       this.activeInteractable = nearest
-      console.info(
-        nearest
-          ? `[interaction] in range: ${nearest.label} — "${nearest.prompt}" (press ${nearest.key})`
-          : '[interaction] in range: none',
-      )
+      this.onActiveInteractionChange?.(nearest)
     }
   }
 
   private readonly onInteractKey = (e: KeyboardEvent): void => {
+    if (this.locked) return // a panel is open; ignore until it closes
     if (e.code !== 'KeyE' && e.code !== 'KeyF') return
     const active = this.activeInteractable
     if (!active) return
     const key = e.code === 'KeyE' ? 'E' : 'F'
     if (active.key !== key) return // wrong key for this interactable
-    // Groundwork only — Commit 9 opens the dialogue panel from here.
-    console.info(`[interaction] ${key} pressed → ${active.label}: "${active.prompt}"`)
+    this.onRequestOpenInteraction?.(active)
   }
 
   dispose(): void {
@@ -197,6 +213,9 @@ export class Engine {
     this.bounds = null
     this.interactables.length = 0
     this.activeInteractable = null
+    this.locked = false
+    this.onActiveInteractionChange = null
+    this.onRequestOpenInteraction = null
 
     disposeObject(this.scene)
     this.scene.clear()

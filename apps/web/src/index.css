@@ -14,11 +14,119 @@ body {
   overflow: hidden;
 }
 
-.room-viewer {
+.room-viewer-root {
+  position: relative;
   width: 100vw;
   height: 100vh;
+  overflow: hidden;
+  font-family: system-ui, sans-serif;
+}
+
+.room-viewer {
+  position: absolute;
+  inset: 0;
 }
 
 .room-viewer canvas {
   display: block;
+}
+
+/* ---------- HUD prompt ---------- */
+.hud {
+  position: absolute;
+  bottom: 6%;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.55rem 1rem;
+  border-radius: 0.5rem;
+  background: rgba(12, 12, 16, 0.72);
+  color: #f3ead2;
+  font-size: 1rem;
+  pointer-events: none; /* let drag-look pass through to the canvas */
+  user-select: none;
+}
+
+.hud-key {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.6rem;
+  height: 1.6rem;
+  padding: 0 0.35rem;
+  border-radius: 0.35rem;
+  background: #f3ead2;
+  color: #12121a;
+  font-weight: 700;
+}
+
+/* ---------- dialogue / interact panel ---------- */
+.panel-backdrop {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.45);
+}
+
+.panel {
+  width: min(480px, 88vw);
+  background: #16151c;
+  border: 1px solid #2c2a36;
+  border-radius: 0.75rem;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+  color: #ece6d6;
+  padding: 1.25rem 1.4rem;
+}
+
+.panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.panel-title {
+  margin: 0;
+  font-size: 1.25rem;
+}
+
+.panel-close {
+  background: none;
+  border: none;
+  color: #b9b2a3;
+  font-size: 1.5rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.panel-close:hover {
+  color: #fff;
+}
+
+.panel-body {
+  margin: 0.9rem 0 1.2rem;
+  line-height: 1.5;
+  color: #cfc7b6;
+}
+
+.panel-foot {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.panel-btn {
+  padding: 0.45rem 1rem;
+  border: 1px solid #3a3747;
+  border-radius: 0.4rem;
+  background: #24222e;
+  color: #ece6d6;
+  cursor: pointer;
+}
+
+.panel-btn:hover {
+  background: #2e2b3a;
 }

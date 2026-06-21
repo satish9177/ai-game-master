@@ -14,13 +14,21 @@ export type Bounds = { minX: number; maxX: number; minZ: number; maxZ: number }
 export class MovementControls {
   private readonly keys = new Set<string>()
   private readonly speed = 4 // meters per second
+  private enabled = true
 
   constructor() {
     window.addEventListener('keydown', this.onKeyDown)
     window.addEventListener('keyup', this.onKeyUp)
   }
 
+  /** Gates movement (e.g. while a dialogue panel is open); clears held keys. */
+  setEnabled(enabled: boolean): void {
+    this.enabled = enabled
+    if (!enabled) this.keys.clear()
+  }
+
   update(camera: THREE.PerspectiveCamera, yaw: number, dt: number, bounds: Bounds): void {
+    if (!this.enabled) return
     let forward = 0
     let strafe = 0
     if (this.keys.has('KeyW')) forward += 1
@@ -51,6 +59,7 @@ export class MovementControls {
   }
 
   private readonly onKeyDown = (e: KeyboardEvent): void => {
+    if (!this.enabled) return
     this.keys.add(e.code)
   }
 

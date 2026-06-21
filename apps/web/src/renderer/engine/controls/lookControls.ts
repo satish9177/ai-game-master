@@ -10,6 +10,7 @@ import * as THREE from 'three'
 export class LookControls {
   private yaw: number
   private pitch = 0
+  private enabled = true
   private dragging = false
   private lastX = 0
   private lastY = 0
@@ -30,6 +31,12 @@ export class LookControls {
     return this.yaw
   }
 
+  /** Gates drag-look (e.g. while a dialogue panel is open); ends any drag. */
+  setEnabled(enabled: boolean): void {
+    this.enabled = enabled
+    if (!enabled) this.dragging = false
+  }
+
   /** Orients the camera from the current yaw/pitch about its position. */
   applyTo(camera: THREE.PerspectiveCamera): void {
     const cp = Math.cos(this.pitch)
@@ -46,6 +53,7 @@ export class LookControls {
   }
 
   private readonly onPointerDown = (e: PointerEvent): void => {
+    if (!this.enabled) return
     this.dragging = true
     this.lastX = e.clientX
     this.lastY = e.clientY
