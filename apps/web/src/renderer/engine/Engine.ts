@@ -113,6 +113,7 @@ export class Engine {
     }
     window.addEventListener('keydown', this.onInteractKey)
 
+    // eslint-disable-next-line no-console -- TODO(logger): route via Logger adapter (ADR-0003)
     console.info(
       `[Engine] room received: "${room.name}" (${room.objects.length} objects, ${room.warnings.length} warnings)`,
     )

@@ -51,6 +51,7 @@ const registry: { [K in RoomObject['type']]?: ObjectBuilder<K> } = {
 function buildKnownObject(obj: RoomObject): THREE.Object3D {
   const builder = registry[obj.type] as ((o: RoomObject) => THREE.Object3D) | undefined
   if (!builder) {
+    // eslint-disable-next-line no-console -- TODO(logger): route via Logger adapter (ADR-0003)
     console.warn(`[builders] no builder for "${obj.type}" yet — rendering placeholder`)
     return buildPlaceholder(obj.type)
   }
@@ -265,7 +266,10 @@ function readPosition(raw: unknown): Vec3 {
   if (raw && typeof raw === 'object' && 'position' in raw) {
     const p = (raw as { position: unknown }).position
     if (Array.isArray(p) && p.length === 3 && p.every((n) => typeof n === 'number')) {
-      return [p[0], p[1], p[2]]
+      // Validated above as a length-3 number array; assert the tuple shape so
+      // noUncheckedIndexedAccess is satisfied, then copy into a fresh Vec3.
+      const [x, y, z] = p as Vec3
+      return [x, y, z]
     }
   }
   return [0, 0, 0]
