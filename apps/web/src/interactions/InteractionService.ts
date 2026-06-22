@@ -6,10 +6,8 @@ import type {
 } from '../domain/interactions/planInteraction'
 import type { WorldState } from '../domain/world/worldState'
 import type { Logger } from '../platform/logger/Logger'
-import type {
-  AppendEventResult,
-  WorldSession,
-} from '../world-session/WorldSession'
+import { applyCommands } from '../world-session/applyCommands'
+import type { WorldSession } from '../world-session/WorldSession'
 
 export type InteractionSession = Pick<WorldSession, 'getWorldState' | 'appendEvent'>
 
@@ -60,22 +58,13 @@ export class InteractionService {
       return plan
     }
 
-    let latestState = current.state
-    for (const [index, command] of plan.commands.entries()) {
-      const appended = await this.session.appendEvent(
-        sessionId,
-        command,
-        latestState.revision,
-      )
-      if (!appended.ok) {
-        const reason = index === 0 ? mapFirstAppendFailure(appended) : 'partial'
-        this.logResult(sessionId, 'failed', plan.commands.length, reason, effect.kind)
-        return { status: 'failed', reason }
-      }
-      latestState = appended.state
+    const applied = await applyCommands(this.session, sessionId, plan.commands, current.state)
+    if (!applied.ok) {
+      this.logResult(sessionId, 'failed', plan.commands.length, applied.reason, effect.kind)
+      return { status: 'failed', reason: applied.reason }
     }
 
-    const result = { status: 'applied', outcome: plan.outcome, state: latestState } as const
+    const result = { status: 'applied', outcome: plan.outcome, state: applied.state } as const
     this.logResult(sessionId, result.status, plan.commands.length, undefined, effect.kind)
     return result
   }
@@ -97,11 +86,4 @@ export class InteractionService {
     if (status === 'failed') this.log.warn('interaction resolution failed', context)
     else this.log.info('interaction resolved', context)
   }
-}
-
-function mapFirstAppendFailure(result: Extract<AppendEventResult, { ok: false }>):
-  'conflict' | 'not-found' | 'partial' {
-  if (result.error.code === 'conflict') return 'conflict'
-  if (result.error.code === 'not-found') return 'not-found'
-  return 'partial'
 }

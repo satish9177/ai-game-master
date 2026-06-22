@@ -52,6 +52,7 @@ export default defineConfig([
           patterns: [
             { group: ['**/world-session/**'], message: 'renderer/engine emits intent and must not import world-session (ADR-0014).' },
             { group: ['**/interactions/**'], message: 'renderer/engine emits intent and must not import interaction application/domain internals (ADR-0014).' },
+            { group: ['**/encounters/**'], message: 'renderer/engine emits intent and must not import encounter application/domain internals (ADR-0015).' },
           ],
         },
       ],
@@ -169,6 +170,30 @@ export default defineConfig([
           patterns: [
             { group: ['three/*'], message: 'interactions must not import Three.js (ADR-0014).' },
             { group: ['**/renderer/**'], message: 'interactions must not import renderer or UI internals (ADR-0014, BOUNDARIES.md).' },
+          ],
+        },
+      ],
+    },
+  },
+
+  // Boundary: encounters resolves pure encounter plans through WorldSession
+  // (ADR-0015), mirroring the interactions block. Headless application code: it
+  // may use domain contracts, world-session, and the Logger interface, but must
+  // not reach into React or the renderer.
+  {
+    files: ['src/encounters/**/*.{ts,tsx}'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: [
+            { name: 'react', message: 'encounters is headless and must not import React (ADR-0015).' },
+            { name: 'react-dom', message: 'encounters is headless and must not import React (ADR-0015).' },
+            { name: 'three', message: 'encounters holds neutral data and must not import Three.js (ADR-0015).' },
+          ],
+          patterns: [
+            { group: ['three/*'], message: 'encounters must not import Three.js (ADR-0015).' },
+            { group: ['**/renderer/**'], message: 'encounters must not import renderer or UI internals (ADR-0015, BOUNDARIES.md).' },
           ],
         },
       ],
