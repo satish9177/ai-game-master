@@ -5,9 +5,10 @@ import type { WallSide } from './shell'
 import type { LoadedRoom } from '../../../domain/loadRoomSpec'
 
 /**
- * Geometry-only test (no WebGL): builds the shell and inspects wall heights. The
- * cutaway lowers exactly the requested near walls to a curb and leaves the rest
- * full height, so the isometric camera can see over the open sides.
+ * Geometry-only test (no WebGL): builds the shell and inspects it. Covers the
+ * cutaway curb heights, the readability touches (floor seams + curb trim), and
+ * the shadow flags. Meshes are identified by `name` so seams/trim never get
+ * mistaken for walls.
  */
 
 const WIDTH = 10
@@ -20,17 +21,16 @@ function room(): LoadedRoom {
     shell: {
       dimensions: { width: WIDTH, depth: DEPTH, height: HEIGHT },
       wallThickness: 0.2,
-      floorColor: '#444',
-      wallColor: '#888',
+      floorColor: '#444444',
+      wallColor: '#888888',
       exits: [],
     },
   } as unknown as LoadedRoom
 }
 
-/** The walls are every mesh sitting above the floor (the floor centers below y=0). */
-function wallMeshes(group: THREE.Group): THREE.Mesh[] {
+function meshesNamed(group: THREE.Group, name: string): THREE.Mesh[] {
   return group.children.filter(
-    (c): c is THREE.Mesh => c instanceof THREE.Mesh && c.position.y > 0,
+    (c): c is THREE.Mesh => c instanceof THREE.Mesh && c.name === name,
   )
 }
 
@@ -41,7 +41,7 @@ function wallHeight(mesh: THREE.Mesh): number {
 
 /** Height of the single wall on the given side, by its position. */
 function heightOnSide(group: THREE.Group, side: WallSide): number {
-  const walls = wallMeshes(group)
+  const walls = meshesNamed(group, 'wall')
   const pick: Record<WallSide, (m: THREE.Mesh) => boolean> = {
     south: (m) => m.position.z > 0.5,
     north: (m) => m.position.z < -0.5,
@@ -76,11 +76,45 @@ describe('buildShell cutaway', () => {
       shell: {
         dimensions: { width: WIDTH, depth: DEPTH, height: 0.25 },
         wallThickness: 0.2,
-        floorColor: '#444',
-        wallColor: '#888',
+        floorColor: '#444444',
+        wallColor: '#888888',
         exits: [],
       },
     } as unknown as LoadedRoom
     expect(heightOnSide(buildShell(low, { cutawaySides: ['south'] }), 'south')).toBeCloseTo(0.25)
+  })
+})
+
+describe('buildShell readability', () => {
+  it('lays subtle floor seams that sit flush on the floor (not a tall grid)', () => {
+    const seams = meshesNamed(buildShell(room()), 'floor-seam')
+    expect(seams.length).toBeGreaterThan(0)
+    for (const seam of seams) {
+      expect(seam.position.y).toBeLessThan(0.05) // just above the floor (y = 0)
+      expect(wallHeight(seam)).toBeLessThan(0.05) // thin — a joint line, not a wall
+    }
+  })
+
+  it('caps every cutaway curb with trim and leaves a closed box untrimmed', () => {
+    const open = buildShell(room(), { cutawaySides: ['south', 'east'] })
+    const trims = meshesNamed(open, 'curb-trim')
+    expect(trims).toHaveLength(2) // one per cutaway side
+    for (const trim of trims) {
+      // The trim sits on top of the 0.4 m curb, well below the full wall height.
+      expect(trim.position.y).toBeGreaterThan(0.4)
+      expect(trim.position.y).toBeLessThan(1)
+    }
+    expect(meshesNamed(buildShell(room()), 'curb-trim')).toHaveLength(0)
+  })
+})
+
+describe('buildShell shadows', () => {
+  it('makes the floor receive shadows and the walls cast them', () => {
+    const g = buildShell(room(), { cutawaySides: ['south'] })
+    const [floor] = meshesNamed(g, 'floor')
+    expect(floor?.receiveShadow).toBe(true)
+    for (const wall of meshesNamed(g, 'wall')) {
+      expect(wall.castShadow).toBe(true)
+    }
   })
 })

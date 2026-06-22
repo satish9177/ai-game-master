@@ -1,4 +1,5 @@
 import * as THREE from 'three'
+import { buildGroundRing } from './builders/indicators'
 
 /**
  * The minimal visible player marker: a capsule "body" with a small nose marking
@@ -7,8 +8,10 @@ import * as THREE from 'three'
  * moves it with WASD/arrows and the camera frames it from the isometric angle.
  *
  * Low-poly, one material per mesh, with a touch of emissive so it reads clearly
- * from the isometric angle in any room lighting. Its geometry/materials are freed
- * by the engine's scene-graph disposal (`disposeObject`) like every other mesh.
+ * from the isometric angle in any room lighting. The body casts a shadow and a
+ * faint ground ring sits under it so the marker reads as planted on the floor
+ * rather than floating. Its geometry/materials are freed by the engine's
+ * scene-graph disposal (`disposeObject`) like every other mesh.
  */
 export function buildPlayerMarker(): THREE.Group {
   const g = new THREE.Group()
@@ -24,7 +27,19 @@ export function buildPlayerMarker(): THREE.Group {
     new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.35 }),
   )
   body.position.y = center
+  body.castShadow = true
   g.add(body)
+
+  // Faint ring on the floor so the marker reads as planted, not floating.
+  g.add(
+    buildGroundRing({
+      innerRadius: radius + 0.05,
+      outerRadius: radius + 0.2,
+      color,
+      emissiveIntensity: 0.5,
+      opacity: 0.85,
+    }),
+  )
 
   // Small cone nose pointing local +Z, so the marker's facing is legible from above.
   const nose = new THREE.Mesh(
