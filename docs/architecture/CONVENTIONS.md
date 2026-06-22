@@ -58,6 +58,32 @@ origin) refers to depends on how the object is placed:
 When adding a new object type, **state its anchoring rule in the builder's doc
 comment** and keep it consistent with one of these two patterns.
 
+## Camera & movement (renderer-internal presentation)
+
+The camera and the player marker are **renderer-internal presentation**, not
+RoomSpec data — a spec never describes the camera. V1's default view is a
+**controlled 3D / isometric 2.5D-style** presentation; full first-person /
+free-camera 3D is future/optional ([ADR-0012](./decisions/ADR-0012-isometric-camera-foundation.md)).
+
+- **Isometric camera.** An `OrthographicCamera` at the fixed true-isometric angle:
+  azimuth **45°**, elevation **`atan(1/√2) ≈ 35.264°`**. It **follows the player**
+  from a constant offset; it never rotates with input. Sitting toward +X/+Z, the
+  camera looks toward −X/−Z (the north-west).
+- **The player drives; the camera follows.** The engine owns a `player` object on
+  the floor; movement and interaction proximity act on the **player**, and the
+  camera derives its transform from the player each frame. `spawn.yaw` orients the
+  **player marker** (which faces local +Z at yaw 0, the NPC facing convention).
+- **Screen-relative movement** (relative to the fixed camera, not world axes):
+  **W / ↑ = up-screen (into the scene)**, **S / ↓ = toward the camera**,
+  **A / ← = screen-left**, **D / → = screen-right**; diagonals are normalized and
+  movement stays clamped to the room AABB. (At the 45° azimuth, screen diagonals
+  collapse onto the world axes — W+D walks straight north.)
+- **Isometric cutaway shell.** The camera-facing **south (+Z) and east (+X)** near
+  walls render as a low **curb** so they can't hide the player; the **north (−Z)
+  and west (−X)** far walls stay full height to preserve room shape. This is a
+  renderer choice derived from the camera angle — `exits`, dimensions, and the rest
+  of the RoomSpec are unchanged.
+
 ## Colors
 
 - Colors are **`#rrggbb` hex strings** (validated by zod: `^#[0-9a-fA-F]{6}$`).
@@ -105,4 +131,6 @@ Y-up · meters · -Z north · +X east · degrees for yaw
 forward = (sin yaw, cos yaw)      yaw 0 → +Z (south)   yaw 180 → -Z (north)
 floor top at y=0                  ground objects: position = base on floor
 colors = #rrggbb                  schemaVersion = 1     data only, never code
+camera = renderer-internal        isometric (orthographic), follows the player
+movement = screen-relative        W/↑ into scene · S/↓ toward camera · A/D strafe
 ```

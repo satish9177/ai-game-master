@@ -28,7 +28,7 @@ layers, never the reverse. The domain depends on nothing in this repo.
 | Layer | Folder (today) | What lives here |
 | --- | --- | --- |
 | **Domain / Contracts** | `apps/web/src/domain/` | RoomSpec schema (`roomSpec.ts`), `loadRoomSpec.ts`, `validateRoom.ts` (semantic validator), ports (`ports/RoomSource.ts`, `ports/RoomGenerator.ts`, `ports/interaction.ts`), schema version; 🔜 more ports (repositories, …). Pure. |
-| **Renderer** | `apps/web/src/renderer/engine/` | Three.js engine, builders, controls, disposal. |
+| **Renderer** | `apps/web/src/renderer/engine/` | Three.js engine, builders, controls, **camera controllers** (`camera/`: `CameraController` / `IsometricCameraController`), the **player object/marker**, disposal. |
 | **UI** | `apps/web/src/renderer/ui/` | Presentational React components. |
 | **App / Composition root** | `apps/web/src/App.tsx`, `RoomViewer.tsx`, `app/`, `room/` | Wires concrete implementations together (room sources, prompt bar, error boundary). |
 | **Platform** | `apps/web/src/platform/` | Cross-cutting adapters: the logger (`logger/`); 🔜 config/env. |
@@ -62,6 +62,7 @@ place allowed to depend on everything; it is where wiring happens.
 | **Generation must never emit executable code** — only RoomSpec data. | The trust boundary. Model output is data validated at the boundary, never `eval`'d, never turned into JS/Three/React — and never Unity C#, Godot GDScript, or any scene script. ([ADR-0001](./decisions/ADR-0001-data-only-room-spec-trusted-renderer.md), [ADR-0008](./decisions/ADR-0008-renderer-portability-strategy.md)) |
 | **No raw `RoomSpec` may reach the renderer unvalidated.** | All dynamic/external data is validated by `loadRoomSpec` at the boundary first. |
 | **No engine objects in the domain or DB; keep `RoomSpec`/domain renderer-agnostic.** | The renderer is an *adapter* over the data contract — a Three.js adapter today, possibly Babylon/Unity/Godot later. Engine handles (`THREE.Mesh`, `Material`, `Vector3`, scene nodes) live only inside a renderer adapter; the domain and persisted rows hold neutral data only, so a second renderer is a new adapter, not a rewrite. ([ADR-0008](./decisions/ADR-0008-renderer-portability-strategy.md)) |
+| **The camera and the player marker are renderer-internal presentation — never `RoomSpec`/domain data.** | Camera mode (isometric today, free-camera later), the `CameraController`/`OrthographicCamera`, and the player marker live only inside the renderer engine. A `RoomSpec` describes *what is in the room*, not *how it is filmed*; no camera/player fields exist in the schema, and the model never directs the camera. ([ADR-0012](./decisions/ADR-0012-isometric-camera-foundation.md)) |
 
 ## The approved host interface (React ↔ engine seam)
 
