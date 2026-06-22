@@ -106,7 +106,8 @@ Foundation v0 today, or via an LLM later):
    an optional `id`. Prefer stable, meaningful ids.
 4. **Use known object `type`s.** The renderer maps `type` to a builder via a
    fixed registry: `throne`, `pillar`, `rug`, `torch`, `arch`, `scroll`, `npc`,
-   `prop`. Unknown types are not an error — they render as a visible magenta
+   `prop`, `crate`, `barrel`, `debris`, `barricade`, `zombie`. Unknown types are
+   not an error — they render as a visible magenta
    placeholder (see [FAILURE-MODES](./FAILURE-MODES.md)) — but they do nothing
    useful, so prefer known types or add a new builder + schema variant.
 5. **Rely on defaults.** Most fields (colors, sizes, light intensity, wall
