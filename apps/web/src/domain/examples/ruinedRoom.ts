@@ -154,6 +154,15 @@ export const ruinedRoom = {
     { type: 'torch', position: [7.5, 3, -6], light: { color: '#9fd0ff', intensity: 9, distance: 9 } },
 
     // A buckled doorway framing the north exit.
-    { type: 'arch', position: [0, 0, -7] },
+    {
+      type: 'arch',
+      id: 'north-door',
+      position: [0, 0, -7],
+      interaction: {
+        key: 'E',
+        prompt: 'Press E to leave through the north arch',
+        exit: { toRoomId: 'throne-room' },
+      },
+    },
   ],
 }
