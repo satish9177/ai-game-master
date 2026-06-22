@@ -18,6 +18,8 @@ import type { WorldStateResult } from './world-session/WorldSession'
 import { InteractionService } from './interactions/InteractionService'
 import { EncounterService } from './encounters/EncounterService'
 import type { LoadedRoom } from './domain/loadRoomSpec'
+import { FakeNPCDialogueProvider } from './dialogue/FakeNPCDialogueProvider'
+import { NPCDialogueService } from './dialogue/NPCDialogueService'
 
 // Composition root: concrete adapters are constructed once and injected.
 const logger = createConsoleLogger()
@@ -27,6 +29,8 @@ const worldStore = new InMemoryWorldStore()
 const worldSession = new WorldSession(worldStore, new SystemClock(), idGenerator, logger)
 const interactionService = new InteractionService(worldSession, logger)
 const encounterService = new EncounterService(worldSession, logger)
+const dialogueProvider = new FakeNPCDialogueProvider()
+const npcDialogueService = new NPCDialogueService(worldSession, dialogueProvider, logger)
 const roomRegistry = new RoomRegistry()
 const exampleRoomCache = new SessionRoomCache()
 const exampleNavigation = new NavigationService(
@@ -167,6 +171,7 @@ function App() {
           sessionId={activePlay.sessionId}
           interactionService={interactionService}
           encounterService={encounterService}
+          npcDialogueService={npcDialogueService}
           onNavigate={handleNavigate}
         />
       ) : (

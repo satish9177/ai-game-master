@@ -19,6 +19,7 @@ layers, never the reverse. The domain depends on nothing in this repo.
   World session ┤
   Interactions ─┤
   Encounters ───┤
+  Dialogue ─────┤
   Backend ──────┤
   Persistence ──┤──► (App / Composition root) ──► UI ─┐
                 │                                       ├──► DOMAIN / CONTRACTS
@@ -39,21 +40,23 @@ layers, never the reverse. The domain depends on nothing in this repo.
 | **World session** | ✅ v0 (headless): `apps/web/src/world-session/` | Application use-cases, in-memory `WorldStore`, and the SaveGame JSON boundary. No React/renderer wiring. |
 | **Interactions** | ✅ v0 (headless): `apps/web/src/interactions/` | Plans validated interaction effects and executes their commands through `WorldSession`; composition wiring stays outside this folder. |
 | **Encounters** | ✅ v0 (headless): `apps/web/src/encounters/` | Plans validated encounter outcomes and executes their commands through `WorldSession` (shared `world-session/applyCommands`); composition wiring stays outside this folder. |
+| **Dialogue** | ✅ v0 (headless): `apps/web/src/dialogue/` | Builds pure dialogue context and coordinates read-only provider replies through `WorldSession.getWorldState`; composition/UI wiring stays outside this folder. |
 | **Backend / Persistence** | ❌ not built (future `apps/api`) | HTTP, generation hosting, repositories. |
 
 ## Allowed dependency directions
 
-| From ↓ → To → | Domain | Renderer | UI | Platform (Logger) | Generation | World session | Interactions | Encounters | Backend/DB |
-| --- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| **Domain** | — | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
-| **Renderer** | ✓ | — | ✗ | ✓ (port) | ✗ | ✗ | ✗ | ✗ | ✗ |
-| **UI** | ✓ | ✗* | — | ✓ (port) | ✗ | ✗ | ✗ | ✗ | ✗ |
-| **App / Composition root** | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| **Generation** | ✓ | ✗ | ✗ | ✓ (port) | — | ✗ | ✗ | ✗ | ✗ |
-| **World session** | ✓ | ✗ | ✗ | ✓ (port) | ✗ | — | ✗ | ✗ | ✗ |
-| **Interactions** | ✓ | ✗ | ✗ | ✓ (port) | ✗ | ✓ | — | ✗ | ✗ |
-| **Encounters** | ✓ | ✗ | ✗ | ✓ (port) | ✗ | ✓ | ✗ | — | ✗ |
-| **Backend / Persistence** | ✓ | ✗ | ✗ | ✓ (port) | ✓ | ✓ | ✓ | ✓ | — |
+| From ↓ → To → | Domain | Renderer | UI | Platform (Logger) | Generation | World session | Interactions | Encounters | Dialogue | Backend/DB |
+| --- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| **Domain** | — | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
+| **Renderer** | ✓ | — | ✗ | ✓ (port) | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
+| **UI** | ✓ | ✗* | — | ✓ (port) | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
+| **App / Composition root** | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| **Generation** | ✓ | ✗ | ✗ | ✓ (port) | — | ✗ | ✗ | ✗ | ✗ | ✗ |
+| **World session** | ✓ | ✗ | ✗ | ✓ (port) | ✗ | — | ✗ | ✗ | ✗ | ✗ |
+| **Interactions** | ✓ | ✗ | ✗ | ✓ (port) | ✗ | ✓ | — | ✗ | ✗ | ✗ |
+| **Encounters** | ✓ | ✗ | ✗ | ✓ (port) | ✗ | ✓ | ✗ | — | ✗ | ✗ |
+| **Dialogue** | ✓ | ✗ | ✗ | ✓ (port) | ✗ | ✓ | ✗ | ✗ | — | ✗ |
+| **Backend / Persistence** | ✓ | ✗ | ✗ | ✓ (port) | ✓ | ✓ | ✓ | ✓ | ✓ | — |
 
 `✗*` UI may not import renderer **internals**. It interacts with the engine only
 through the *approved host interface* (below). The composition root is the only
@@ -70,9 +73,10 @@ place allowed to depend on everything; it is where wiring happens.
 | **Persistence/DB code must never appear in UI or renderer.** | Data access is server-side and lives behind repository interfaces. SQL/driver types never leak outward. ([ADR-0004](./decisions/ADR-0004-persistence-sqlite-to-postgres.md)) |
 | **World session must not import React, Three.js, or renderer/UI internals.** | Authoritative gameplay truth is a headless application layer over neutral domain data and ports; renderer wiring is a separate future slice. ([ADR-0013](./decisions/ADR-0013-world-state-event-log-v0.md)) |
 | **World state changes only by appending a validated event and projecting it.** | The event log is authoritative. Direct snapshot setters would create a second source of truth and break reconstruction/integrity. ([ADR-0013](./decisions/ADR-0013-world-state-event-log-v0.md)) |
-| **Renderer interaction callbacks carry intent only.** | The engine may pass a neutral object id but must not import `world-session`/`interactions`/`encounters` or navigation/cache modules, plan effects, resolve exits, or mutate `WorldState`; the composition root owns that wiring. ([ADR-0014](./decisions/ADR-0014-object-interactions-v0.md), [ADR-0015](./decisions/ADR-0015-encounter-system-v0.md), [ADR-0016](./decisions/ADR-0016-multi-room-navigation-cache-v0.md)) |
+| **Renderer interaction callbacks carry intent only.** | The engine may pass a neutral object id but must not import `world-session`/`interactions`/`encounters`/`dialogue` or navigation/cache modules, plan effects, resolve exits/dialogue, or mutate `WorldState`; the composition root owns that wiring. ([ADR-0014](./decisions/ADR-0014-object-interactions-v0.md), [ADR-0015](./decisions/ADR-0015-encounter-system-v0.md), [ADR-0016](./decisions/ADR-0016-multi-room-navigation-cache-v0.md), [ADR-0017](./decisions/ADR-0017-npc-dialogue-foundation-v0.md)) |
 | **Interaction effects are fixed-vocabulary data, never behavior/code.** | The pure domain planner maps validated descriptors to existing commands, and the application service can write only through `WorldSession.appendEvent`. ([ADR-0014](./decisions/ADR-0014-object-interactions-v0.md)) |
 | **Encounters are fixed-vocabulary data, never behavior/code.** | An `EncounterSpec` rides the shared `Interaction`; the pure `planEncounter` maps the chosen choice to existing commands (no new event type, encounter wins over `effect`), and `EncounterService` writes only through `WorldSession.appendEvent` via the shared `applyCommands` helper. ([ADR-0015](./decisions/ADR-0015-encounter-system-v0.md)) |
+| **NPC dialogue is read-only display data.** | `NPCDialogueSpec` and provider replies are neutral data; `NPCDialogueService` may only read `WorldState`, never append events, and dialogue/history/text remain outside authoritative state and logs. ([ADR-0017](./decisions/ADR-0017-npc-dialogue-foundation-v0.md)) |
 | **Generation must never emit executable code** — only RoomSpec data. | The trust boundary. Model output is data validated at the boundary, never `eval`'d, never turned into JS/Three/React — and never Unity C#, Godot GDScript, or any scene script. ([ADR-0001](./decisions/ADR-0001-data-only-room-spec-trusted-renderer.md), [ADR-0008](./decisions/ADR-0008-renderer-portability-strategy.md)) |
 | **No raw `RoomSpec` may reach the renderer unvalidated.** | All dynamic/external data is validated by `loadRoomSpec` at the boundary first. |
 | **No engine objects in the domain or DB; keep `RoomSpec`/domain renderer-agnostic.** | The renderer is an *adapter* over the data contract — a Three.js adapter today, possibly Babylon/Unity/Godot later. Engine handles (`THREE.Mesh`, `Material`, `Vector3`, scene nodes) live only inside a renderer adapter; the domain and persisted rows hold neutral data only, so a second renderer is a new adapter, not a rewrite. ([ADR-0008](./decisions/ADR-0008-renderer-portability-strategy.md)) |
@@ -104,6 +108,11 @@ live in `app/`, and `App` owns the persistent session/cache. `RoomViewer` maps a
 neutral object id to an exit and routes intent upward. The engine imports none of
 these modules, and this slice adds no ESLint platform rule.
 
+NPC dialogue follows the same intent boundary: `RoomViewer` maps a neutral id to
+validated dialogue data and calls the headless read-only service;
+`NPCDialoguePanel` receives only neutral turns/prompts/callbacks. The engine does
+not import dialogue, and conversation history stays in component state.
+
 ## Lint-enforced boundaries
 
 These are enforced mechanically; a violation fails `npm run build` or
@@ -128,10 +137,14 @@ These are enforced mechanically; a violation fails `npm run build` or
   - `encounters/**` may import domain, `world-session`, and the Logger
     interface, but may not import `react`, `react-dom`, `three`, or
     `renderer/**` ([ADR-0015](./decisions/ADR-0015-encounter-system-v0.md)).
+  - `dialogue/**` may import domain, the `world-session` read path, and the
+    Logger interface, but may not import `react`, `react-dom`, `three`, or
+    `renderer/**` ([ADR-0017](./decisions/ADR-0017-npc-dialogue-foundation-v0.md)).
   - `renderer/engine/**` may not import `world-session/**`, `interactions/**`,
-    or `encounters/**`; it emits interaction intent only
+    `encounters/**`, or `dialogue/**`; it emits interaction intent only
     ([ADR-0014](./decisions/ADR-0014-object-interactions-v0.md),
-    [ADR-0015](./decisions/ADR-0015-encounter-system-v0.md)).
+    [ADR-0015](./decisions/ADR-0015-encounter-system-v0.md),
+    [ADR-0017](./decisions/ADR-0017-npc-dialogue-foundation-v0.md)).
 - Boundaries lint cannot easily express — and future backend/DB rules, until
   those folders exist — stay enforced by review + these docs +
   [/AGENTS.md](../../AGENTS.md).

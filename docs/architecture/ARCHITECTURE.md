@@ -23,7 +23,7 @@ Throughout these docs:
 - ✅ **Implemented** — exists today in `apps/web` (Renderer Foundation v0;
   Generation Foundation v0; Semantic Room Validator v0; Isometric Camera
   Foundation; World State & Event Log v0; Object Interactions v0; Encounter
-  System v0; Multi-Room Navigation & Cache v0).
+  System v0; Multi-Room Navigation & Cache v0; NPC Dialogue Foundation v0).
 - 🔜 **Planned** — designed and approved, not yet built (next slices).
 - ❌ **Not built** — future shape only; documented so we don't paint into a corner.
 
@@ -197,7 +197,7 @@ death/game-over state**. Authored text (`description`, `title`, choice `label`,
 ✅ **Implemented.** Authored objects may carry the data-only
 `interaction.exit: { toRoomId }`; the two example rooms connect through stable
 interactable north arches. `RoomViewer` maps the renderer's neutral object id to
-exit metadata and applies composition precedence **exit → encounter → effect**.
+exit metadata and applies composition precedence **exit → encounter → dialogue → effect**.
 The engine still emits intent only and was not changed.
 
 `RoomRegistry` validates registered example rooms through `loadRoomSpec`,
@@ -212,6 +212,23 @@ session's visited and interaction/encounter flags survive and returning reuses
 the cached room. Prompt-generated rooms remain fresh single-room sessions with
 fresh caches. See
 [ADR-0016](./decisions/ADR-0016-multi-room-navigation-cache-v0.md).
+
+## NPC Dialogue Foundation v0
+
+✅ **Implemented.** A validated `interaction.dialogue` marker opts an NPC into a
+read-only conversation path. The pure `buildDialogueContext` projection selects
+current room/player facts without inventory names; `NPCDialogueService` reads
+through `WorldSession.getWorldState` and delegates to the domain
+`NPCDialogueProvider` port. Its deterministic fake provider performs no network
+I/O and returns display text data only.
+
+The composition root resolves the renderer's neutral object id with precedence
+**exit → encounter → dialogue → effect**. Dialogue-bearing NPCs open the
+presentational `NPCDialoguePanel`, which offers authored canned prompts or
+Continue—never free text. Conversation history stays in component state and
+resets on close or room change. Dialogue appends no event, sets no room flag,
+and changes no world state. See
+[ADR-0017](./decisions/ADR-0017-npc-dialogue-foundation-v0.md).
 
 ## Layered architecture
 
@@ -245,6 +262,7 @@ inner layers; inner layers never depend on outer layers.
 | ✅ **World session (v0, headless)** | Commands → validated append-only events → pure `WorldState` projection; in-memory store and SaveGame boundary. | Domain, Logger port | React, Three.js, Renderer, DB |
 | ✅ **Interactions (v0, headless)** | Pure effect plans executed through `WorldSession.appendEvent`; typed outcomes for composition. | Domain, World session, Logger port | React, Three.js, Renderer, DB |
 | ✅ **Encounters (v0, headless)** | Pure encounter plans executed through `WorldSession.appendEvent` (shared `applyCommands`); typed two-phase outcomes for composition. | Domain, World session, Logger port | React, Three.js, Renderer, DB |
+| ✅ **Dialogue (v0, headless)** | Pure dialogue context plus a read-only service over `WorldSession.getWorldState` and an injected provider port. | Domain, World session, Logger port | React, Three.js, Renderer, DB |
 | ❌ **Backend / Persistence** | Host generation; store rooms/sessions. | Domain | UI, Renderer |
 
 The current code already honors the top three rows: `Engine` is pure Three.js
@@ -305,7 +323,10 @@ App.tsx
        │       (LookControls retained but NOT instantiated — future free-camera mode)
        ├─ engine.onActiveInteractionChange → React state → <Hud/>
        └─ engine.onRequestOpenInteraction  → RoomViewer id lookup
+            ├─ exit? → NavigationService → existing moved-to-room
             ├─ encounter? → present choices → EncounterService (on choose)
+            ├─ dialogue? → NPCDialogueService.getWorldState → fake provider
+            │    → component-only history → <NPCDialoguePanel/>
             └─ else effect? → InteractionService
                  → WorldSession.appendEvent (shared applyCommands)
                  → typed result message → <DialoguePanel/>
@@ -512,9 +533,22 @@ is to keep each replacement local to its port.
   `moved-to-room`; unknown/invalid targets and self-navigation append nothing.
 - ✅ `App` keeps the session/cache alive while `RoomViewer` rebuilds the unchanged
   engine for each active room. Return visits preserve visited and resolution
-  flags, with exit → encounter → effect precedence at composition.
+  flags, with exit → encounter → dialogue → effect precedence at composition.
 - 🔜 Durable room storage, more than two rooms, adjacent-room pre-generation,
   entry-aligned spawn, transition animation, and a minimap remain future work.
+
+### ✅ NPC Dialogue Foundation v0  ·  🔜 real provider
+
+- ✅ `NPCDialogueSpec` is validated display/seed data on the shared Interaction;
+  `buildDialogueContext` is a pure projection of current authoritative facts.
+- ✅ `NPCDialogueProvider` is the external-provider seam. The v0 fake is
+  deterministic, static, and performs no network I/O.
+- ✅ `NPCDialogueService` injects only the `getWorldState` read path and returns
+  typed replies/failures. Repeated turns leave the event log unchanged.
+- ✅ `NPCDialoguePanel` is presentational; canned prompts/Continue and conversation
+  history live only in component state. The renderer still emits intent only.
+- 🔜 A real validated LLM adapter, free-text input, persistent memory, relationship
+  state, summaries/vector recall, speech, and quests remain future work.
 
 ### ❌ Backend / API
 

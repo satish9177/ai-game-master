@@ -89,7 +89,7 @@ describe('post-apoc object schema', () => {
     })
   })
 
-  it('keeps exit optional and accepts exit, encounter, and effect together', () => {
+  it('accepts dialogue, exit, encounter, and effect together', () => {
     const parsed = RoomObjectSchema.parse({
       type: 'arch',
       id: 'compound-door',
@@ -99,6 +99,10 @@ describe('post-apoc object schema', () => {
         prompt: 'Press E',
         exit: { toRoomId: 'next-room' },
         effect: { kind: 'inspect' },
+        dialogue: {
+          persona: 'gatekeeper',
+          prompts: [{ id: 'ask-entry', label: 'May I enter?' }],
+        },
         encounter: {
           description: 'A guardian blocks the arch.',
           choices: [{
@@ -114,6 +118,10 @@ describe('post-apoc object schema', () => {
     expect(parsed.interaction.exit?.toRoomId).toBe('next-room')
     expect(parsed.interaction.encounter?.choices[0]?.action).toBe('run')
     expect(parsed.interaction.effect?.kind).toBe('inspect')
+    expect(parsed.interaction.dialogue).toEqual({
+      persona: 'gatekeeper',
+      prompts: [{ id: 'ask-entry', label: 'May I enter?' }],
+    })
 
     const presentationOnly = RoomObjectSchema.parse({
       type: 'scroll',
@@ -122,6 +130,26 @@ describe('post-apoc object schema', () => {
     })
     expect(presentationOnly.type === 'scroll' && presentationOnly.interaction.exit)
       .toBeUndefined()
+    expect(presentationOnly.type === 'scroll' && presentationOnly.interaction.dialogue)
+      .toBeUndefined()
+  })
+
+  it('lets an NPC opt into pure dialogue without requiring another behavior', () => {
+    const npc = RoomObjectSchema.parse({
+      type: 'npc',
+      id: 'friendly-aide',
+      name: 'Asha',
+      position: [0, 0, 0],
+      interaction: {
+        key: 'F',
+        prompt: 'Press F to talk',
+        dialogue: { greeting: 'Welcome.', prompts: [] },
+      },
+    })
+    expect(npc.type === 'npc' && npc.interaction.dialogue).toEqual({
+      greeting: 'Welcome.',
+      prompts: [],
+    })
   })
 
   it('rejects empty and malformed exit targets', () => {

@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import { InteractionEffectSchema } from './interactions/effects'
 import { EncounterSpecSchema } from './encounters/encounterSpec'
+import { NPCDialogueSpecSchema } from './dialogue/contracts'
 
 /**
  * RoomSpec is DATA ONLY. It describes a room declaratively; the trusted
@@ -34,6 +35,7 @@ const Interaction = z.object({
   // Optional genre-neutral encounter (ADR-0015). Rides alongside `effect`; when
   // both are present the encounter takes precedence at the composition root.
   encounter: EncounterSpecSchema.optional(),
+  dialogue: NPCDialogueSpecSchema.optional(),
   exit: z.object({ toRoomId: z.string().min(1) }).strict().optional(),
 })
 
