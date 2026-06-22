@@ -2,6 +2,7 @@ import * as THREE from 'three'
 import type { LoadedRoom } from '../../../domain/loadRoomSpec'
 import type { RoomObject } from '../../../domain/roomSpec'
 import type { Logger } from '../../../platform/logger/Logger'
+import { buildGroundRing } from './indicators'
 
 /**
  * Builds the room's props from RoomSpec objects via a type-to-builder registry.
@@ -22,13 +23,21 @@ export function buildObjects(room: LoadedRoom, logger: Logger): THREE.Group {
   for (const obj of room.objects) {
     const node = buildKnownObject(obj, logger)
     applyTransform(node, obj.position, obj.rotationY, obj.scale)
+    enableShadows(node)
     group.add(node)
+    // Objects carrying an interaction get a static floor indicator so they're
+    // discoverable from the isometric view. Driven purely by existing RoomSpec
+    // interaction data; the engine's proximity/open logic is unchanged.
+    if ('interaction' in obj) {
+      group.add(buildInteractableIndicator(obj.position))
+    }
   }
 
   // Unknown/malformed objects the loader skipped — placeholder, never crash.
   for (const item of room.skipped) {
     const node = buildPlaceholder(item.type)
     applyTransform(node, readPosition(item.raw), 0, 1)
+    enableShadows(node)
     group.add(node)
   }
 
@@ -277,4 +286,36 @@ function readPosition(raw: unknown): Vec3 {
     }
   }
   return [0, 0, 0]
+}
+
+/** Warm accent that reads as "you can interact here" from the isometric angle. */
+const INTERACTABLE_COLOR = '#ffcf6b'
+
+/**
+ * A static floor ring placed under an interactable object at its XZ (on the
+ * floor, not at the object's own height). Renderer-internal discoverability cue;
+ * disposed with the scene like every other mesh.
+ */
+function buildInteractableIndicator(position: Vec3): THREE.Object3D {
+  const ring = buildGroundRing({
+    innerRadius: 0.55,
+    outerRadius: 0.78,
+    color: INTERACTABLE_COLOR,
+    emissiveIntensity: 0.75,
+    opacity: 0.9,
+  })
+  ring.name = 'interactable-indicator'
+  ring.position.set(position[0], ring.position.y, position[2])
+  return ring
+}
+
+/** Enables shadow casting/receiving on every mesh under a built object node. */
+function enableShadows(node: THREE.Object3D): void {
+  node.traverse((child) => {
+    const mesh = child as THREE.Mesh
+    if (mesh.isMesh) {
+      mesh.castShadow = true
+      mesh.receiveShadow = true
+    }
+  })
 }

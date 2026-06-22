@@ -63,6 +63,10 @@ export class Engine {
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
     this.renderer.outputColorSpace = THREE.SRGBColorSpace
     this.renderer.setClearColor(0x14121a, 1)
+    // Soft shadows from the renderer-internal key light give the isometric scene
+    // depth/form. The shadow map dies with this engine's WebGL context on dispose.
+    this.renderer.shadowMap.enabled = true
+    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap
     container.appendChild(this.renderer.domElement)
 
     this.scene = new THREE.Scene()
@@ -84,7 +88,7 @@ export class Engine {
   /** Receives the validated room, builds the shell, and places the player. */
   setRoom(room: LoadedRoom): void {
     this.room = room
-    this.scene.add(buildLighting(room.lighting))
+    this.scene.add(buildLighting(room.lighting, room.shell.dimensions))
     this.scene.add(buildShell(room, { cutawaySides: this.cutawaySides() }))
     this.scene.add(buildObjects(room, this.logger))
     this.placePlayer(room.spawn)
