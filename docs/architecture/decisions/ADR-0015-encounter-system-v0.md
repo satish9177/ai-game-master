@@ -1,14 +1,14 @@
 # ADR-0015: Encounter System v0 — threat encounters produce world-state/event-log effects
 
-- **Status:** Accepted — **design approved; not yet implemented** (Encounter System v0)
+- **Status:** Accepted — **implemented** (Encounter System v0)
 - **Date:** 2026-06-22
 - **Deciders:** Project owner
 
-> This ADR is an **approved design / implementation brief**. It records the agreed
-> shape so the implementing agent (Codex) can build it without re-deciding. It is
-> **not implemented yet**; flip the status to *implemented* in the docs commit once
-> the slice lands. The implementer must **not** commit — the maintainer commits
-> manually.
+> This ADR began as an **approved design / implementation brief** and is now
+> **implemented**: a separate pure `planEncounter` + `EncounterService` over the
+> shared `world-session/applyCommands` helper, wired through the existing E/F
+> interaction flow with the renderer still emitting intent only. The example
+> rooms each gained one genre-distinct encounter.
 
 ## Context
 

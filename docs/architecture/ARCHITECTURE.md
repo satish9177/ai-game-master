@@ -22,7 +22,8 @@ Throughout these docs:
 
 - ✅ **Implemented** — exists today in `apps/web` (Renderer Foundation v0;
   Generation Foundation v0; Semantic Room Validator v0; Isometric Camera
-  Foundation; World State & Event Log v0; Object Interactions v0).
+  Foundation; World State & Event Log v0; Object Interactions v0; Encounter
+  System v0).
 - 🔜 **Planned** — designed and approved, not yet built (next slices).
 - ❌ **Not built** — future shape only; documented so we don't paint into a corner.
 
@@ -167,6 +168,30 @@ failure are typed outcomes. The renderer imports neither `world-session` nor
 `interactions` and never mutates `WorldState`. See
 [ADR-0014](./decisions/ADR-0014-object-interactions-v0.md).
 
+## Encounter System v0
+
+✅ **Implemented.** A genre-neutral **encounter** layer sits parallel to Object
+Interactions v0: a *threat* with a *description*, a set of *choices* (`fight`,
+`hide`, `run`, `distract`, `negotiate`), and a deterministic *authored outcome*
+per choice. It differs from an interaction in exactly one way — it is
+**two-phase**: present the threat and its choices, then resolve the one the
+player picks. Everything else reuses the ADR-0014 blueprint.
+
+Encounters **ride the existing `Interaction`** (`interaction.encounter?`), so no
+engine or `Interactable` change was needed; pressing E/F on an object whose
+interaction carries an encounter triggers it, and an encounter **takes
+precedence over an `effect`** when both are present. The pure `planEncounter`
+maps the chosen choice to existing `WorldCommand`s (six effect atoms — `damage`,
+`heal`, `add-status`, `clear-status`, `remove-item`, `add-item` — each 1:1 with
+an existing command, no new event type), gated by an optional `requires`
+possession check and a stable one-shot resolution flag in
+`room-state-changed.flags`. `EncounterService` executes the plan through a shared
+`world-session/applyCommands` helper (extracted from `InteractionService`, which
+now reuses it) and returns a typed result; health may clamp to `0` with **no
+death/game-over state**. Authored text (`description`, `title`, choice `label`,
+`resultText`, status strings, item names) is display-only and never logged. See
+[ADR-0015](./decisions/ADR-0015-encounter-system-v0.md).
+
 ## Layered architecture
 
 Dependencies point **inward**, toward the domain. Outer layers may depend on
@@ -198,6 +223,7 @@ inner layers; inner layers never depend on outer layers.
 | ✅ **Generation (v0, fake)** | Prompt → **RoomSpec data** (never code) via a deterministic fake generator. Validated by the same loader. 🔜 real LLM. | Domain | Renderer, React, DB |
 | ✅ **World session (v0, headless)** | Commands → validated append-only events → pure `WorldState` projection; in-memory store and SaveGame boundary. | Domain, Logger port | React, Three.js, Renderer, DB |
 | ✅ **Interactions (v0, headless)** | Pure effect plans executed through `WorldSession.appendEvent`; typed outcomes for composition. | Domain, World session, Logger port | React, Three.js, Renderer, DB |
+| ✅ **Encounters (v0, headless)** | Pure encounter plans executed through `WorldSession.appendEvent` (shared `applyCommands`); typed two-phase outcomes for composition. | Domain, World session, Logger port | React, Three.js, Renderer, DB |
 | ❌ **Backend / Persistence** | Host generation; store rooms/sessions. | Domain | UI, Renderer |
 
 The current code already honors the top three rows: `Engine` is pure Three.js
@@ -257,9 +283,11 @@ App.tsx
        │    └─ MovementControls           screen-relative WASD/arrows → player (AABB clamp)
        │       (LookControls retained but NOT instantiated — future free-camera mode)
        ├─ engine.onActiveInteractionChange → React state → <Hud/>
-       └─ engine.onRequestOpenInteraction  → RoomViewer effect lookup
-            → InteractionService → WorldSession.appendEvent
-            → typed result message → <DialoguePanel/>
+       └─ engine.onRequestOpenInteraction  → RoomViewer id lookup
+            ├─ encounter? → present choices → EncounterService (on choose)
+            └─ else effect? → InteractionService
+                 → WorldSession.appendEvent (shared applyCommands)
+                 → typed result message → <DialoguePanel/>
 ```
 
 The React ↔ engine seam is **callbacks + imperative methods**, not shared
@@ -434,6 +462,24 @@ is to keep each replacement local to its port.
   neutral host callback and never imports the interaction service or world state.
 - 🔜 Cooldowns, random loot, quest gates, combat, dialogue trees, persistence,
   and cross-event transactional commits remain future work.
+
+### ✅ Encounter System v0  ·  🔜 richer threat outcomes
+
+- ✅ `EncounterSpec` is a closed, data-only domain descriptor (genre-neutral
+  `action` enum + six generic effect atoms). RoomSpec may attach an optional
+  `encounter` to the shared `Interaction`; an encounter takes precedence over an
+  `effect` when both are present.
+- ✅ `planEncounter` deterministically maps the chosen choice to existing
+  `WorldCommand`s (no new event type) behind an optional `requires` gate and a
+  stable one-shot resolution flag; `EncounterService` executes them through the
+  shared `world-session/applyCommands` helper, which `InteractionService` also
+  uses.
+- ✅ The composition root routes an E/F open to a two-phase encounter panel
+  (description + choice buttons) when the object has an encounter; the renderer
+  still only emits intent.
+- 🔜 Randomness/dice via a seeded `Rng` port, death/downed state, multi-room
+  consequences, cooldowns/escalation, and LLM-authored encounter data remain
+  future work.
 
 ### ❌ Backend / API
 

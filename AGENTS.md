@@ -30,6 +30,11 @@ isometric camera following a player object — still Three.js, still real 3D, wi
 planner and an application service into the authoritative world-session event
 log, without letting the renderer import or mutate world state
 ([ADR-0014](./docs/architecture/decisions/ADR-0014-object-interactions-v0.md)).
+**Encounter System v0** adds a genre-neutral two-phase threat layer over the same
+E/F flow — a pure `planEncounter` and an `EncounterService` (sharing
+`world-session/applyCommands` with interactions) compose existing world commands;
+an encounter rides the shared `Interaction` and takes precedence over its
+`effect` ([ADR-0015](./docs/architecture/decisions/ADR-0015-encounter-system-v0.md)).
 "2.5D" means camera/presentation, **not** a new engine; full first-person /
 free-camera 3D remains future/optional. No real LLM/API, backend, or database yet
 — those are coming and the architecture is built so they slot in without breaking
@@ -105,6 +110,7 @@ Dependencies point **inward**, toward the domain. Full rules in
 | **Generation** | `apps/web/src/generation/` (v0, fake) | domain, logger port | UI, renderer, React, Three.js |
 | **World session** | `apps/web/src/world-session/` (v0, headless) | domain, logger port | UI, renderer, React, Three.js, DB |
 | **Interactions** | `apps/web/src/interactions/` (v0, headless) | domain, world-session, logger port | UI, renderer, React, Three.js, DB |
+| **Encounters** | `apps/web/src/encounters/` (v0, headless) | domain, world-session, logger port | UI, renderer, React, Three.js, DB |
 | **Backend / Persistence** | not built yet | domain | UI, renderer |
 
 ## Logging rules

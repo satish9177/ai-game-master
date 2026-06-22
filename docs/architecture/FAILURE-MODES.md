@@ -287,6 +287,36 @@ if an unexpected later append fails, the typed `partial` result exposes that
 fact without inventing a retry or alternate write path. Logs never include item
 names, panel prompt/body/title, health deltas, or other narrative/user content.
 
+## 13. Encounter resolution ✅
+
+A two-phase encounter (present the threat + choices, then resolve the picked
+one) may be re-triggered after resolution, lack a stable id, name an unknown
+choice, fail an inventory gate, or be interrupted while applying multiple
+commands. The renderer only reports intent; detection and state changes happen
+in the pure `planEncounter` and the headless `EncounterService`
+([ADR-0015](./decisions/ADR-0015-encounter-system-v0.md)).
+
+| Situation | Detection | Handling / result | Logging |
+| --- | --- | --- | --- |
+| Re-trigger a resolved encounter | current-room flag already set | `already-resolved`; append nothing; panel still shows `description` | status code/count only |
+| Object has no `encounter` | service step 1 | `rejected: missing-encounter`; effect path or plain panel | reason code only |
+| Encounter has no stable id/ref | pure planner | `rejected: missing-id`; never generate a random key (decision 7) | reason code only |
+| Choice id not in encounter | pure planner | `rejected: unknown-choice`; append nothing | reason code only |
+| Choice gate not met (too few items) | planner `requires` held-check, then `appendEvent` defense | `rejected: insufficient-item`; append nothing | reason code only |
+| First append sees stale revision | `WorldSession.appendEvent` → `conflict` | `failed: conflict`; no retry | ids/reason/count only |
+| Later append fails | `applyCommands` command index | `failed: partial`; keep committed prefix, do not retry | ids/reason/count only |
+| Lethal damage | `applyEvent` health clamp | health clamps to `0`; **no death/game-over state** (decision 4) | code only |
+
+`EncounterService` shares the `world-session/applyCommands` revision-threading
+helper with `InteractionService`, so the same single-writer atomicity reasoning
+as case 12 applies: outcome effects are ordered first and the resolution flag
+last, threaded from each returned revision, making a mid-sequence conflict
+practically unreachable; an unexpected later failure surfaces as `partial`
+without a new write path. Authored encounter text (`description`, `title`,
+choice `label`, `resultText`, status strings, item names) is display-only and
+never reaches the logger; the chosen genre-neutral `action` is the only
+choice-derived value logged.
+
 ---
 
 ## Summary
@@ -306,6 +336,7 @@ names, panel prompt/body/title, health deltas, or other narrative/user content.
 | 10 | Save integrity mismatch | validate log + seed + projected snapshot | reject whole save | ✅ headless |
 | 11 | Unsupported save version | envelope version check | typed rejection; no silent migration | ✅ headless |
 | 12 | Object interaction resolution | pure effect plan + sequential typed appends | no-op/rejection/conflict/partial result; safe panel message | ✅ |
+| 13 | Encounter resolution | pure encounter plan + shared `applyCommands` typed appends | already-resolved/rejection/conflict/partial result; safe panel message; health clamps, no death state | ✅ |
 
 The through-line: **validate at the boundary, degrade visibly and safely, log
 the detail, show the user calm.**
