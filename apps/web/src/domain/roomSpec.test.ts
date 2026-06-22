@@ -44,6 +44,32 @@ describe('post-apoc object schema', () => {
     expect('interaction' in parsed).toBe(false)
   })
 
+  it('keeps presentation-only interactions valid without an effect', () => {
+    const parsed = RoomObjectSchema.parse({
+      type: 'scroll',
+      position: [0, 0, 0],
+      interaction: { key: 'E', prompt: 'Press E to read' },
+    })
+    expect(parsed.type === 'scroll' && parsed.interaction.effect).toBeUndefined()
+  })
+
+  it.each(['crate', 'barrel', 'debris', 'barricade'] as const)(
+    'lets %s carry an optional interaction effect without making it required',
+    (type) => {
+      const parsed = RoomObjectSchema.parse({
+        type,
+        position: [0, 0, 0],
+        interaction: {
+          key: 'E',
+          prompt: 'Press E to inspect',
+          effect: { kind: 'inspect' },
+        },
+      })
+      expect('interaction' in parsed && parsed.interaction?.effect?.kind).toBe('inspect')
+      expect('interaction' in RoomObjectSchema.parse({ type, position: [0, 0, 0] })).toBe(false)
+    },
+  )
+
   it('loads the new types without skipping while still skipping unknown ones', () => {
     const loaded = loadRoomSpec(
       minimalRoom([

@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { InteractionEffectSchema } from './interactions/effects'
 
 /**
  * RoomSpec is DATA ONLY. It describes a room declaratively; the trusted
@@ -28,6 +29,7 @@ const Interaction = z.object({
   prompt: z.string().min(1),
   title: z.string().optional(),
   body: z.string().optional(), // static dialogue text for v0
+  effect: InteractionEffectSchema.optional(),
 })
 
 /* ---------- known object types ---------- */
@@ -107,6 +109,7 @@ const Crate = z.object({
   type: z.literal('crate'),
   size: Vec3.default([1, 1, 1]),
   color: Hex.default('#7a5a32'),
+  interaction: Interaction.optional(),
   ...transform,
 })
 
@@ -116,6 +119,7 @@ const Barrel = z.object({
   radius: z.number().positive().default(0.35),
   height: z.number().positive().default(0.95),
   color: Hex.default('#46603a'),
+  interaction: Interaction.optional(),
   ...transform,
 })
 
@@ -125,6 +129,7 @@ const Debris = z.object({
   type: z.literal('debris'),
   size: Vec3.default([2, 0.8, 2]),
   color: Hex.default('#6b6358'),
+  interaction: Interaction.optional(),
   ...transform,
 })
 
@@ -135,6 +140,7 @@ const Barricade = z.object({
   height: z.number().positive().default(1.2),
   style: z.enum(['planks', 'sandbags']).default('planks'),
   color: Hex.default('#5a4a32'),
+  interaction: Interaction.optional(),
   ...transform,
 })
 
