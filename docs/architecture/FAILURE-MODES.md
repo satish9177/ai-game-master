@@ -263,6 +263,30 @@ A parsed SaveGame declares a top-level `schemaVersion` other than `1`.
   produced by an unsupported game version.
 - **Logging** ✅ — stable error code only; never the document or embedded content.
 
+## 12. Object interaction resolution ✅
+
+An interaction may be presentation-only, already consumed, missing a stable
+one-shot id, inventory-gated, or interrupted while applying multiple commands.
+The renderer only reports intent; detection and state changes happen in the pure
+planner and headless application service ([ADR-0014](./decisions/ADR-0014-object-interactions-v0.md)).
+
+| Situation | Detection | Handling / result | Logging |
+| --- | --- | --- | --- |
+| Re-open one-shot inspect | current-room flag already true | `already-resolved`; append nothing; panel body remains visible | status code/count only |
+| Repeat item pickup | `take-item` idempotency flag already true | `already-resolved`; no second `item-added` | status code/count only |
+| Interaction has no effect | service before state read | `rejected: missing-effect`; presentation-only panel still opens | reason code only |
+| One-shot has no stable id/key | pure planner | `rejected: missing-id`; never generate a random ref | reason code only |
+| Too few items for `use-item` | planner held check, then `appendEvent` defense | `rejected: insufficient-item`; append nothing | reason code only |
+| First append sees stale revision | `WorldSession.appendEvent` | `failed: conflict`; no retry | ids/reason/count only |
+| Later append fails | service command index | `failed: partial`; keep committed prefix, do not retry | ids/reason/count only |
+
+For v0, the app is a single in-process writer and `InteractionService` threads
+each returned revision into the next append, making a mid-sequence conflict
+practically unreachable. Multi-event effects are not transactionally atomic:
+if an unexpected later append fails, the typed `partial` result exposes that
+fact without inventing a retry or alternate write path. Logs never include item
+names, panel prompt/body/title, health deltas, or other narrative/user content.
+
 ---
 
 ## Summary
@@ -281,6 +305,7 @@ A parsed SaveGame declares a top-level `schemaVersion` other than `1`.
 | 9 | Concurrent world append | optimistic revision check | typed conflict; neither event nor snapshot committed | ✅ headless |
 | 10 | Save integrity mismatch | validate log + seed + projected snapshot | reject whole save | ✅ headless |
 | 11 | Unsupported save version | envelope version check | typed rejection; no silent migration | ✅ headless |
+| 12 | Object interaction resolution | pure effect plan + sequential typed appends | no-op/rejection/conflict/partial result; safe panel message | ✅ |
 
 The through-line: **validate at the boundary, degrade visibly and safely, log
 the detail, show the user calm.**

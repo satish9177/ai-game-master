@@ -1,7 +1,6 @@
 # ADR-0014: Object Interactions v0 — interactions produce world-state/event-log effects
 
-- **Status:** Accepted — **approved design, NOT yet implemented** (this is the
-  implementation brief; Codex implements from it next; the maintainer commits).
+- **Status:** Accepted — **implemented** (Object Interactions v0)
 - **Date:** 2026-06-22
 - **Deciders:** Project owner
 
@@ -327,15 +326,14 @@ future concern, consistent with `WorldStore.commit` being single-event today
 
 - `domain/interactions/**` is covered by the existing `src/domain/**` lint block
   (zod only; no React/Three/renderer/UI/platform). No lint change needed there.
-- Add a `src/interactions/**` `no-restricted-imports` block in
+- A `src/interactions/**` `no-restricted-imports` block in
   [`eslint.config.js`](../../../apps/web/eslint.config.js) mirroring the
   `world-session/**` block: it may import domain contracts/ports and the `Logger`
   interface, but must **not** import `react`, `react-dom`, `three`, `three/*`, or
   `**/renderer/**`. `no-console` stays enforced (the service logs via `Logger`).
-- The engine keeps its existing block forbidding `react`/`react-dom`; it must not
-  gain a `world-session`/`interactions` import (enforced by review; add a
-  `**/world-session/**` + `**/interactions/**` pattern to the
-  `renderer/engine/**` block if convenient).
+- The engine keeps its existing block forbidding `react`/`react-dom` and now also
+  forbids `**/world-session/**` + `**/interactions/**`; it cannot gain the state
+  mutation/application dependencies that the callback boundary excludes.
 - No engine objects ever enter `InteractionEffect`, the plan, or the result
   ([ADR-0008](./ADR-0008-renderer-portability-strategy.md)).
 

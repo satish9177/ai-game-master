@@ -22,7 +22,7 @@ Throughout these docs:
 
 - ✅ **Implemented** — exists today in `apps/web` (Renderer Foundation v0;
   Generation Foundation v0; Semantic Room Validator v0; Isometric Camera
-  Foundation; World State & Event Log v0).
+  Foundation; World State & Event Log v0; Object Interactions v0).
 - 🔜 **Planned** — designed and approved, not yet built (next slices).
 - ❌ **Not built** — future shape only; documented so we don't paint into a corner.
 
@@ -150,6 +150,23 @@ document whose seed or projected snapshot fails integrity. There is no renderer,
 React, `App.tsx`, HTTP, database, LLM, dialogue, or memory wiring in this slice.
 See [ADR-0013](./decisions/ADR-0013-world-state-event-log-v0.md).
 
+## Object Interactions v0
+
+✅ **Implemented.** E/F interactions can now produce authoritative world-state
+effects without moving gameplay logic into the renderer. The engine still emits
+only a neutral `Interactable` intent with an optional stable object id. At the
+composition root, that id selects a validated, data-only `InteractionEffect`;
+the pure `planInteraction` domain function maps it to existing `WorldCommand`s,
+and `InteractionService` executes them only through `WorldSession.appendEvent`.
+
+The v0 vocabulary is `inspect`, one-shot `take-item`, and inventory-gated
+`use-item` with an optional health change. One-shot idempotency reuses
+`room-state-changed.flags`; ADR-0013's seven-event union is unchanged. Missing
+effects/ids, insufficient inventory, conflicts, and partial multi-command
+failure are typed outcomes. The renderer imports neither `world-session` nor
+`interactions` and never mutates `WorldState`. See
+[ADR-0014](./decisions/ADR-0014-object-interactions-v0.md).
+
 ## Layered architecture
 
 Dependencies point **inward**, toward the domain. Outer layers may depend on
@@ -180,6 +197,7 @@ inner layers; inner layers never depend on outer layers.
 | **App / Composition root** | Wire concrete implementations together (logger, room source, engine host). | All of the above | — |
 | ✅ **Generation (v0, fake)** | Prompt → **RoomSpec data** (never code) via a deterministic fake generator. Validated by the same loader. 🔜 real LLM. | Domain | Renderer, React, DB |
 | ✅ **World session (v0, headless)** | Commands → validated append-only events → pure `WorldState` projection; in-memory store and SaveGame boundary. | Domain, Logger port | React, Three.js, Renderer, DB |
+| ✅ **Interactions (v0, headless)** | Pure effect plans executed through `WorldSession.appendEvent`; typed outcomes for composition. | Domain, World session, Logger port | React, Three.js, Renderer, DB |
 | ❌ **Backend / Persistence** | Host generation; store rooms/sessions. | Domain | UI, Renderer |
 
 The current code already honors the top three rows: `Engine` is pure Three.js
@@ -239,7 +257,9 @@ App.tsx
        │    └─ MovementControls           screen-relative WASD/arrows → player (AABB clamp)
        │       (LookControls retained but NOT instantiated — future free-camera mode)
        ├─ engine.onActiveInteractionChange → React state → <Hud/>
-       └─ engine.onRequestOpenInteraction  → React state → <DialoguePanel/>
+       └─ engine.onRequestOpenInteraction  → RoomViewer effect lookup
+            → InteractionService → WorldSession.appendEvent
+            → typed result message → <DialoguePanel/>
 ```
 
 The React ↔ engine seam is **callbacks + imperative methods**, not shared
@@ -273,7 +293,7 @@ generator exists, and the prompt *text* is never logged — only its length.
 | --- | --- |
 | `domain/roomSpec.ts` | `RoomSpecSchema` (envelope) + `RoomObjectSchema` (discriminated union on `type`); inferred `RoomSpec` / `RoomObject` types. Schema/types only, no behavior. |
 | `domain/loadRoomSpec.ts` | `loadRoomSpec` (strict envelope, lenient objects) + the `LoadedRoom` result type. |
-| `domain/ports/interaction.ts` | The neutral interaction view-model shared by the engine and the UI. |
+| `domain/ports/interaction.ts` | The neutral interaction view-model shared by the engine and UI, including an optional passive object id for composition lookup. |
 | `domain/examples/throneRoom.ts` | The single hardcoded demo room — pure data literal. |
 | `renderer/engine/Engine.ts` | Owns renderer/scene, the **player object** + a `CameraController` (isometric), render loop, **player-position** proximity, interaction keys, and **total `dispose()`**. No React. |
 | `renderer/engine/camera/` | `CameraController` interface + `IsometricCameraController` (orthographic true-isometric, follows the player) over a pure, WebGL-free `isometric.ts` math module (offset / pose / screen-relative move / clamp / frustum). |
@@ -281,7 +301,7 @@ generator exists, and the prompt *text* is never logged — only its length.
 | `renderer/engine/builders/` | `buildShell` (floor + walls, with isometric **cutaway curbs** on the camera-facing walls), `buildLighting`, and the object `registry` + `buildObjects` with magenta-placeholder fallback. |
 | `renderer/engine/controls/` | `MovementControls` (screen-relative WASD/arrows driving the **player**, room-clamped); `LookControls` (drag-look) **retained but not instantiated** in isometric mode. |
 | `renderer/engine/disposables.ts` | `Disposables` + `disposeObject` — explicit GPU teardown (Three.js does not GC geometries/materials/textures). |
-| `renderer/ui/` | `Hud` and `DialoguePanel` — presentational React only. |
+| `renderer/ui/` | `Hud` and `DialoguePanel` — presentational React only; the panel accepts a plain optional interaction-result message. |
 | `renderer/RoomViewer.tsx` | The composition seam: constructs/disposes the engine, bridges engine callbacks to React state. StrictMode-safe (mount → dispose → mount leaks nothing). |
 
 ## Generation Foundation v0 — module summary
@@ -396,7 +416,24 @@ is to keep each replacement local to its port.
 - ✅ Save/load revalidates schemas, log shape, seed identity, and snapshot
   integrity. Unknown versions and tampering are rejected, never silently fixed.
 - 🔜 A server-side SQLite/PostgreSQL adapter may implement the same `WorldStore`
-  port. No real DB, API, renderer/UI wiring, or memory system exists yet.
+  port. No real DB, API, or memory system exists yet; current renderer/UI access
+  is composition-only through Object Interactions v0.
+
+### ✅ Object Interactions v0  ·  🔜 richer gameplay effects
+
+- ✅ `InteractionEffect` is a closed, data-only domain union. RoomSpec may attach
+  an optional effect to an interaction; presentation-only interactions remain
+  valid.
+- ✅ `planInteraction` deterministically produces existing `WorldCommand`s or a
+  typed no-op/rejection. One-shot effects require a stable idempotency key and
+  record it in the current room's flags.
+- ✅ `InteractionService` threads revisions through `WorldSession.appendEvent`.
+  The composition root starts an ephemeral in-memory session per room load and
+  sends a plain result message to the existing dialogue panel.
+- ✅ The renderer remains intent-only: it passes a passive object id through the
+  neutral host callback and never imports the interaction service or world state.
+- 🔜 Cooldowns, random loot, quest gates, combat, dialogue trees, persistence,
+  and cross-event transactional commits remain future work.
 
 ### ❌ Backend / API
 
