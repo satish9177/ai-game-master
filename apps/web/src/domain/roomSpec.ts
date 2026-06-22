@@ -97,6 +97,57 @@ const Prop = z.object({
   ...transform,
 })
 
+/* ---------- zombie / post-apocalyptic asset pack v0 ---------- */
+// A small, reusable vocabulary for ruined cities, raider camps, safe houses,
+// abandoned interiors, and survival rooms. All fields are data only (numbers,
+// enums, #rrggbb); the trusted renderer owns the geometry.
+
+// Wooden supply/loot crate (storage, stashes).
+const Crate = z.object({
+  type: z.literal('crate'),
+  size: Vec3.default([1, 1, 1]),
+  color: Hex.default('#7a5a32'),
+  ...transform,
+})
+
+// Steel drum — fuel/water/toxic; the color carries the meaning.
+const Barrel = z.object({
+  type: z.literal('barrel'),
+  radius: z.number().positive().default(0.35),
+  height: z.number().positive().default(0.95),
+  color: Hex.default('#46603a'),
+  ...transform,
+})
+
+// Rubble/wreckage pile. The builder scatters a fixed, deterministic cluster
+// scaled to `size`; no randomness, so it round-trips and tests cleanly.
+const Debris = z.object({
+  type: z.literal('debris'),
+  size: Vec3.default([2, 0.8, 2]),
+  color: Hex.default('#6b6358'),
+  ...transform,
+})
+
+// Improvised barrier — planks or stacked sandbags. Blocks streets/doorways.
+const Barricade = z.object({
+  type: z.literal('barricade'),
+  length: z.number().positive().default(3),
+  height: z.number().positive().default(1.2),
+  style: z.enum(['planks', 'sandbags']).default('planks'),
+  color: Hex.default('#5a4a32'),
+  ...transform,
+})
+
+// Shambling figure. Static decoration (no combat/AI). May carry the shared
+// optional interaction (e.g. "examine"); the existing indicator handles it.
+const Zombie = z.object({
+  type: z.literal('zombie'),
+  name: z.string().optional(),
+  interaction: Interaction.optional(),
+  color: Hex.default('#5c6b46'), // torn, sickly clothing
+  ...transform,
+})
+
 export const RoomObjectSchema = z.discriminatedUnion('type', [
   Throne,
   Pillar,
@@ -106,6 +157,11 @@ export const RoomObjectSchema = z.discriminatedUnion('type', [
   Scroll,
   Npc,
   Prop,
+  Crate,
+  Barrel,
+  Debris,
+  Barricade,
+  Zombie,
 ])
 export type RoomObject = z.infer<typeof RoomObjectSchema>
 

@@ -165,6 +165,33 @@ describe('validateRoom', () => {
     )
   })
 
+  it.each(['crate', 'barrel', 'barricade', 'debris', 'zombie'] as const)(
+    'treats a %s at the spawn as a solid obstruction',
+    (type) => {
+      const room = validRoom()
+      const at = room.spawn.position
+      // Append a freshly loaded object of the new type sitting on the spawn.
+      room.objects = [
+        ...room.objects,
+        ...loadRoomSpec({
+          ...structuredClone(throneRoom),
+          objects: [{ type, position: [at[0], 0, at[2]] }],
+        }).objects,
+      ]
+      const index = room.objects.length - 1
+
+      expect(validateRoom(room).issues).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            code: 'object-crowds-spawn',
+            objectIndex: index,
+            objectType: type,
+          }),
+        ]),
+      )
+    },
+  )
+
   it('accepts spawn exactly on the walkable boundary', () => {
     const room = validRoom()
     const margin = room.shell.wallThickness / 2 + LIMITS.WALL_CLEARANCE

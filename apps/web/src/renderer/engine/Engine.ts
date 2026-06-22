@@ -104,15 +104,18 @@ export class Engine {
     this.movement = new MovementControls()
 
     // Collect interactables (objects carrying an `interaction`) for proximity.
+    // `interaction` is required on scroll/npc and optional on others (zombie),
+    // so read it as a value rather than trusting the key's presence.
     for (const o of room.objects) {
-      if (!('interaction' in o)) continue
+      const interaction = 'interaction' in o ? o.interaction : undefined
+      if (!interaction) continue
       this.interactables.push({
         type: o.type,
-        label: 'name' in o ? o.name : o.type,
-        key: o.interaction.key,
-        prompt: o.interaction.prompt,
-        title: o.interaction.title,
-        body: o.interaction.body,
+        label: 'name' in o && o.name ? o.name : o.type,
+        key: interaction.key,
+        prompt: interaction.prompt,
+        title: interaction.title,
+        body: interaction.body,
         position: { x: o.position[0], y: o.position[1], z: o.position[2] },
       })
     }

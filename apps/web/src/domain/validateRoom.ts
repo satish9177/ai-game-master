@@ -54,6 +54,11 @@ const SPAWN_BLOCKING_TYPES = new Set<RoomObject['type']>([
   'pillar',
   'npc',
   'prop',
+  'crate',
+  'barrel',
+  'barricade',
+  'debris',
+  'zombie',
 ])
 
 export function validateRoom(room: LoadedRoom): RoomValidationResult {
