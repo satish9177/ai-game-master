@@ -9,9 +9,11 @@ import type { Interactable } from '../../domain/ports/interaction'
  */
 export function DialoguePanel({
   target,
+  resultMessage,
   onClose,
 }: {
   target: Interactable
+  resultMessage?: string
   onClose: () => void
 }) {
   useEffect(() => {
@@ -41,6 +43,7 @@ export function DialoguePanel({
           </button>
         </div>
         <p className="panel-body">{body}</p>
+        {resultMessage && <p className="panel-result">{resultMessage}</p>}
         <div className="panel-foot">
           <button className="panel-btn" onClick={onClose}>
             Close (Esc)

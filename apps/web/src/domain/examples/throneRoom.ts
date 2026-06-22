@@ -29,14 +29,26 @@ export const throneRoom = {
     { type: 'torch', position: [4, 3, -4], light: { intensity: 12, distance: 9 } },
     {
       type: 'scroll',
+      id: 'royal-decree',
       position: [2, 0.5, 2],
-      interaction: { key: 'E', prompt: 'Press E to read the scroll', body: 'A faded decree bearing the royal seal.' },
+      interaction: {
+        key: 'E',
+        prompt: 'Press E to read the scroll',
+        body: 'A faded decree bearing the royal seal.',
+        effect: { kind: 'inspect' },
+      },
     },
     {
       type: 'npc',
+      id: 'steward-malik',
       name: 'Malik',
       position: [-2, 0, 0],
-      interaction: { key: 'F', prompt: 'Press F to speak with Malik', body: 'The steward Malik regards you warily.' },
+      interaction: {
+        key: 'F',
+        prompt: 'Press F to speak with Malik',
+        body: 'The steward Malik regards you warily.',
+        effect: { kind: 'inspect' },
+      },
     },
     { type: 'arch', position: [0, 0, -10] }, // at the north exit
   ],

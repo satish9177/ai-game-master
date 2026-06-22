@@ -31,12 +31,41 @@ export const ruinedRoom = {
     { type: 'barricade', position: [5, 0, 2], length: 3, rotationY: 90, style: 'planks' },
 
     // Looted supplies stacked along the east wall.
-    { type: 'crate', position: [6, 0, -2], size: [1.2, 1.2, 1.2] },
+    {
+      type: 'crate',
+      id: 'medical-crate',
+      position: [6, 0, -2],
+      size: [1.2, 1.2, 1.2],
+      interaction: {
+        key: 'E',
+        prompt: 'Press E to search the medical crate',
+        body: 'A sealed field medkit remains under the torn packing cloth.',
+        effect: {
+          kind: 'take-item',
+          item: { itemId: 'medkit', name: 'Field Medkit', quantity: 1 },
+        },
+      },
+    },
     { type: 'crate', position: [6.9, 0, -1.1], size: [1, 1, 1] },
     { type: 'crate', position: [7, 0, 3], size: [1, 1.4, 1] },
 
     // Fuel and water drums clustered in the west corner.
-    { type: 'barrel', position: [-6, 0, -3] },
+    {
+      type: 'barrel',
+      id: 'medkit-use-point',
+      position: [-6, 0, -3],
+      interaction: {
+        key: 'E',
+        prompt: 'Press E to use a medkit',
+        body: 'The drum offers a flat surface and a little cover to dress your wounds.',
+        effect: {
+          kind: 'use-item',
+          itemId: 'medkit',
+          quantity: 1,
+          health: { delta: 25 },
+        },
+      },
+    },
     { type: 'barrel', position: [-6.8, 0, -3.4] },
     { type: 'barrel', position: [-6, 0, -2.1], color: '#7a5230' }, // rusted
 
@@ -47,20 +76,27 @@ export const ruinedRoom = {
     // The dead. One examinable; one just shambling scenery.
     {
       type: 'zombie',
+      id: 'slumped-corpse',
       position: [-2, 0, -3],
       rotationY: 20,
-      interaction: { key: 'F', prompt: 'Press F to examine the slumped corpse' },
+      interaction: {
+        key: 'F',
+        prompt: 'Press F to examine the slumped corpse',
+        effect: { kind: 'inspect' },
+      },
     },
     { type: 'zombie', position: [2.5, 0, -4], rotationY: -30 },
 
     // A scavenged note and a toppled shelf.
     {
       type: 'scroll',
+      id: 'east-wall-note',
       position: [6, 0.5, 4],
       interaction: {
         key: 'E',
         prompt: 'Press E to read the note',
         body: 'Scrawled in haste: "They got through the east wall. Don\'t open it."',
+        effect: { kind: 'inspect' },
       },
     },
     { type: 'prop', shape: 'box', position: [7, 0, 0], size: [0.6, 1.8, 2], color: '#6f675a' },
