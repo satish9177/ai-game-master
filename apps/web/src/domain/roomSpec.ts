@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { InteractionEffectSchema } from './interactions/effects'
+import { EncounterSpecSchema } from './encounters/encounterSpec'
 
 /**
  * RoomSpec is DATA ONLY. It describes a room declaratively; the trusted
@@ -30,6 +31,9 @@ const Interaction = z.object({
   title: z.string().optional(),
   body: z.string().optional(), // static dialogue text for v0
   effect: InteractionEffectSchema.optional(),
+  // Optional genre-neutral encounter (ADR-0015). Rides alongside `effect`; when
+  // both are present the encounter takes precedence at the composition root.
+  encounter: EncounterSpecSchema.optional(),
 })
 
 /* ---------- known object types ---------- */
