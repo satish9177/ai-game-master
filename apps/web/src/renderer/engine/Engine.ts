@@ -104,12 +104,13 @@ export class Engine {
     this.movement = new MovementControls()
 
     // Collect interactables (objects carrying an `interaction`) for proximity.
-    // `interaction` is required on scroll/npc and optional on others (zombie),
-    // so read it as a value rather than trusting the key's presence.
+    // `interaction` is required on scroll/npc and optional on other supported
+    // objects, so read it as a value rather than trusting the key's presence.
     for (const o of room.objects) {
       const interaction = 'interaction' in o ? o.interaction : undefined
       if (!interaction) continue
       this.interactables.push({
+        id: 'id' in o ? o.id : undefined,
         type: o.type,
         label: 'name' in o && o.name ? o.name : o.type,
         key: interaction.key,
@@ -122,9 +123,9 @@ export class Engine {
     window.addEventListener('keydown', this.onInteractKey)
 
     this.logger.info('room received', {
-      room: room.name,
-      objects: room.objects.length,
-      warnings: room.warnings.length,
+      roomId: room.id,
+      objectCount: room.objects.length,
+      warningCount: room.warnings.length,
     })
   }
 

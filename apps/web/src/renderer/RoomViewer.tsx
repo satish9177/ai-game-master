@@ -6,6 +6,14 @@ import { Hud } from './ui/Hud'
 import { DialoguePanel } from './ui/DialoguePanel'
 import { createConsoleLogger } from '../platform/logger/consoleLogger'
 import { isWebGL2Available } from '../platform/browser/webglSupport'
+import type { LoadedRoom } from '../domain/loadRoomSpec'
+import type { WorldStateResult } from '../world-session/WorldSession'
+import type { InteractionService } from '../interactions/InteractionService'
+import {
+  buildInteractionEffectLookup,
+  interactionResultMessage,
+} from '../app/interactionEffects'
+import type { InteractionEffectLookup } from '../app/interactionEffects'
 
 /** Safe, user-facing copy for a host failure — detail goes to the log, not here. */
 const ROOM_UNAVAILABLE = 'This room could not be loaded.'
@@ -28,11 +36,24 @@ function describeError(err: unknown): string {
  * fetched. The engine is built synchronously (one canvas, no async gap there);
  * only the room contents arrive when the source resolves.
  */
-export function RoomViewer({ roomSource }: { roomSource: RoomSource }) {
+type RoomViewerProps = {
+  roomSource: RoomSource
+  interactionService: InteractionService
+  startRoomSession: (room: LoadedRoom) => Promise<WorldStateResult>
+}
+
+export function RoomViewer({
+  roomSource,
+  interactionService,
+  startRoomSession,
+}: RoomViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const engineRef = useRef<Engine | null>(null)
+  const sessionIdRef = useRef<string | null>(null)
+  const effectLookupRef = useRef<InteractionEffectLookup>(new Map())
   const [active, setActive] = useState<Interactable | null>(null)
   const [dialogue, setDialogue] = useState<Interactable | null>(null)
+  const [resultMessage, setResultMessage] = useState<string | undefined>()
   // FAILURE-MODES case 3: probe WebGL2 once as render-derived state (the check is
   // pure) so we never construct an engine that can't get a context, and never
   // call setState synchronously in the effect for it.
@@ -71,18 +92,38 @@ export function RoomViewer({ roomSource }: { roomSource: RoomSource }) {
     }
 
     engineRef.current = engine
+    let cancelled = false
     engine.onActiveInteractionChange = setActive
     engine.onRequestOpenInteraction = (target) => {
       engine.setInteractionLock(true) // freeze movement/look while open
       setDialogue(target)
+      setResultMessage(undefined)
+
+      const sessionId = sessionIdRef.current
+      if (!sessionId) {
+        setResultMessage('This interaction is unavailable.')
+        return
+      }
+      const effectTarget = effectLookupRef.current.get(target.id)
+      void interactionService.resolve({
+        sessionId,
+        effect: effectTarget?.effect,
+        ref: effectTarget?.ref ?? target.id,
+      }).then((result) => {
+        if (cancelled) return
+        setResultMessage(interactionResultMessage(result))
+      }).catch(() => {
+        if (cancelled) return
+        logger.error('interaction resolution threw', { code: 'interaction-failed' })
+        setResultMessage('This interaction is unavailable.')
+      })
     }
 
     // Async seam: the source resolves to a typed result. Guard against a resolve
     // landing after StrictMode's dev unmount (or any remount) disposed engine.
-    let cancelled = false
     void roomSource
       .getRoom()
-      .then((result) => {
+      .then(async (result) => {
         if (cancelled) return
         if (!result.ok) {
           logger.error('room load failed', { code: result.error.code })
@@ -94,6 +135,15 @@ export function RoomViewer({ roomSource }: { roomSource: RoomSource }) {
             count: result.room.warnings.length,
           })
         }
+        const session = await startRoomSession(result.room)
+        if (cancelled) return
+        if (!session.ok) {
+          logger.error('world session start failed', { code: session.error.code })
+          setFatalMessage(ROOM_UNAVAILABLE)
+          return
+        }
+        sessionIdRef.current = session.state.sessionId
+        effectLookupRef.current = buildInteractionEffectLookup(result.room)
         // Building the scene can throw unexpectedly; fail safe and dispose.
         try {
           engine.setRoom(result.room)
@@ -116,15 +166,19 @@ export function RoomViewer({ roomSource }: { roomSource: RoomSource }) {
       cancelled = true
       engine.dispose()
       engineRef.current = null
+      sessionIdRef.current = null
+      effectLookupRef.current = new Map()
       setActive(null)
       setDialogue(null)
+      setResultMessage(undefined)
       setFatalMessage(null)
     }
-  }, [roomSource, webgl2Available])
+  }, [interactionService, roomSource, startRoomSession, webgl2Available])
 
   const closeDialogue = useCallback(() => {
     engineRef.current?.setInteractionLock(false) // resume movement/look
     setDialogue(null)
+    setResultMessage(undefined)
   }, [])
 
   // A single safe-fallback string from any host failure (FAILURE-MODES). Null on
@@ -143,7 +197,11 @@ export function RoomViewer({ roomSource }: { roomSource: RoomSource }) {
       {/* Hide the prompt while the panel is open. */}
       {!fallback && !dialogue && <Hud active={active} />}
       {!fallback && dialogue && (
-        <DialoguePanel target={dialogue} onClose={closeDialogue} />
+        <DialoguePanel
+          target={dialogue}
+          resultMessage={resultMessage}
+          onClose={closeDialogue}
+        />
       )}
     </div>
   )

@@ -10,6 +10,7 @@
  * THREE.Vector3.
  */
 export type Interactable = {
+  id?: string
   type: string
   label: string
   key: 'E' | 'F'

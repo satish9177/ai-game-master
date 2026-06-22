@@ -17,6 +17,7 @@ layers, never the reverse. The domain depends on nothing in this repo.
 ```
   Generation ───┐
   World session ┤
+  Interactions ─┤
   Backend ──────┤
   Persistence ──┤──► (App / Composition root) ──► UI ─┐
                 │                                       ├──► DOMAIN / CONTRACTS
@@ -35,19 +36,21 @@ layers, never the reverse. The domain depends on nothing in this repo.
 | **Platform** | `apps/web/src/platform/` | Cross-cutting adapters: logger (`logger/`) and real clock/UUID implementations (`system/`); 🔜 config/env. |
 | **Generation** | ✅ v0 (fake): `apps/web/src/generation/` | Prompt → RoomSpec **data** via a deterministic fake generator; 🔜 real LLM. |
 | **World session** | ✅ v0 (headless): `apps/web/src/world-session/` | Application use-cases, in-memory `WorldStore`, and the SaveGame JSON boundary. No React/renderer wiring. |
+| **Interactions** | ✅ v0 (headless): `apps/web/src/interactions/` | Plans validated interaction effects and executes their commands through `WorldSession`; composition wiring stays outside this folder. |
 | **Backend / Persistence** | ❌ not built (future `apps/api`) | HTTP, generation hosting, repositories. |
 
 ## Allowed dependency directions
 
-| From ↓ → To → | Domain | Renderer | UI | Platform (Logger) | Generation | World session | Backend/DB |
-| --- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| **Domain** | — | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
-| **Renderer** | ✓ | — | ✗ | ✓ (port) | ✗ | ✗ | ✗ |
-| **UI** | ✓ | ✗* | — | ✓ (port) | ✗ | ✗ | ✗ |
-| **App / Composition root** | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| **Generation** | ✓ | ✗ | ✗ | ✓ (port) | — | ✗ | ✗ |
-| **World session** | ✓ | ✗ | ✗ | ✓ (port) | ✗ | — | ✗ |
-| **Backend / Persistence** | ✓ | ✗ | ✗ | ✓ (port) | ✓ | ✓ | — |
+| From ↓ → To → | Domain | Renderer | UI | Platform (Logger) | Generation | World session | Interactions | Backend/DB |
+| --- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| **Domain** | — | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
+| **Renderer** | ✓ | — | ✗ | ✓ (port) | ✗ | ✗ | ✗ | ✗ |
+| **UI** | ✓ | ✗* | — | ✓ (port) | ✗ | ✗ | ✗ | ✗ |
+| **App / Composition root** | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| **Generation** | ✓ | ✗ | ✗ | ✓ (port) | — | ✗ | ✗ | ✗ |
+| **World session** | ✓ | ✗ | ✗ | ✓ (port) | ✗ | — | ✗ | ✗ |
+| **Interactions** | ✓ | ✗ | ✗ | ✓ (port) | ✗ | ✓ | — | ✗ |
+| **Backend / Persistence** | ✓ | ✗ | ✗ | ✓ (port) | ✓ | ✓ | ✓ | — |
 
 `✗*` UI may not import renderer **internals**. It interacts with the engine only
 through the *approved host interface* (below). The composition root is the only
@@ -64,6 +67,8 @@ place allowed to depend on everything; it is where wiring happens.
 | **Persistence/DB code must never appear in UI or renderer.** | Data access is server-side and lives behind repository interfaces. SQL/driver types never leak outward. ([ADR-0004](./decisions/ADR-0004-persistence-sqlite-to-postgres.md)) |
 | **World session must not import React, Three.js, or renderer/UI internals.** | Authoritative gameplay truth is a headless application layer over neutral domain data and ports; renderer wiring is a separate future slice. ([ADR-0013](./decisions/ADR-0013-world-state-event-log-v0.md)) |
 | **World state changes only by appending a validated event and projecting it.** | The event log is authoritative. Direct snapshot setters would create a second source of truth and break reconstruction/integrity. ([ADR-0013](./decisions/ADR-0013-world-state-event-log-v0.md)) |
+| **Renderer interaction callbacks carry intent only.** | The engine may pass a neutral object id but must not import `world-session`/`interactions`, plan effects, or mutate `WorldState`; the composition root owns that wiring. ([ADR-0014](./decisions/ADR-0014-object-interactions-v0.md)) |
+| **Interaction effects are fixed-vocabulary data, never behavior/code.** | The pure domain planner maps validated descriptors to existing commands, and the application service can write only through `WorldSession.appendEvent`. ([ADR-0014](./decisions/ADR-0014-object-interactions-v0.md)) |
 | **Generation must never emit executable code** — only RoomSpec data. | The trust boundary. Model output is data validated at the boundary, never `eval`'d, never turned into JS/Three/React — and never Unity C#, Godot GDScript, or any scene script. ([ADR-0001](./decisions/ADR-0001-data-only-room-spec-trusted-renderer.md), [ADR-0008](./decisions/ADR-0008-renderer-portability-strategy.md)) |
 | **No raw `RoomSpec` may reach the renderer unvalidated.** | All dynamic/external data is validated by `loadRoomSpec` at the boundary first. |
 | **No engine objects in the domain or DB; keep `RoomSpec`/domain renderer-agnostic.** | The renderer is an *adapter* over the data contract — a Three.js adapter today, possibly Babylon/Unity/Godot later. Engine handles (`THREE.Mesh`, `Material`, `Vector3`, scene nodes) live only inside a renderer adapter; the domain and persisted rows hold neutral data only, so a second renderer is a new adapter, not a rewrite. ([ADR-0008](./decisions/ADR-0008-renderer-portability-strategy.md)) |
@@ -79,7 +84,8 @@ The UI and the engine are wired together **only** at the composition root
   scene graph, camera, or meshes.
 - **engine → React: callbacks.** e.g. `engine.onActiveInteractionChange`,
   `engine.onRequestOpenInteraction`. The engine pushes plain, serializable view
-  data out; React turns it into UI.
+  data out (including an optional passive object id); React/composition turns it
+  into UI and may resolve the id through application services.
 - **Shared view-model types** (e.g. the interaction descriptor) are part of this
   contract. They live in the neutral `domain/ports/` module (e.g.
   `domain/ports/interaction.ts`), imported by both the engine and the UI, so
@@ -106,6 +112,11 @@ These are enforced mechanically; a violation fails `npm run build` or
   - `world-session/**` may import domain contracts/ports and the Logger
     interface, but may not import `react`, `react-dom`, `three`, or
     `renderer/**` ([ADR-0013](./decisions/ADR-0013-world-state-event-log-v0.md)).
+  - `interactions/**` may import domain, `world-session`, and the Logger
+    interface, but may not import `react`, `react-dom`, `three`, or
+    `renderer/**` ([ADR-0014](./decisions/ADR-0014-object-interactions-v0.md)).
+  - `renderer/engine/**` may not import `world-session/**` or `interactions/**`;
+    it emits interaction intent only ([ADR-0014](./decisions/ADR-0014-object-interactions-v0.md)).
 - Boundaries lint cannot easily express — and future backend/DB rules, until
   those folders exist — stay enforced by review + these docs +
   [/AGENTS.md](../../AGENTS.md).

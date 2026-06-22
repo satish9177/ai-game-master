@@ -7,6 +7,13 @@ import { FakeRoomGenerator } from './generation/FakeRoomGenerator'
 import { ErrorBoundary } from './app/ErrorBoundary'
 import { PromptBar } from './app/PromptBar'
 import { createConsoleLogger } from './platform/logger/consoleLogger'
+import { SystemClock } from './platform/system/clock'
+import { UuidGenerator } from './platform/system/idGenerator'
+import { InMemoryWorldStore } from './world-session/InMemoryWorldStore'
+import { WorldSession } from './world-session/WorldSession'
+import type { WorldStateResult } from './world-session/WorldSession'
+import { InteractionService } from './interactions/InteractionService'
+import type { LoadedRoom } from './domain/loadRoomSpec'
 
 // Composition root: the one place concrete implementations are chosen and wired.
 // Constructed once at module scope so their identity is stable across renders.
@@ -15,10 +22,28 @@ import { createConsoleLogger } from './platform/logger/consoleLogger'
 // it is a one-line change here, and nothing downstream moves.
 const logger = createConsoleLogger()
 const generator = new FakeRoomGenerator()
+const idGenerator = new UuidGenerator()
+const worldStore = new InMemoryWorldStore()
+const worldSession = new WorldSession(worldStore, new SystemClock(), idGenerator, logger)
+const interactionService = new InteractionService(worldSession, logger)
 
 // First paint shows the existing static throne room. Its identity is stable so
 // the host doesn't reload it on re-render; a prompt submission swaps it out.
 const initialRoomSource = new StaticRoomSource()
+
+function startRoomSession(room: LoadedRoom): Promise<WorldStateResult> {
+  return worldSession.startSession({
+    schemaVersion: 1,
+    worldId: idGenerator.newId(),
+    name: room.name,
+    startingRoomId: room.id,
+    initialPlayer: {
+      health: { current: 75, max: 100 },
+      status: [],
+      inventory: [],
+    },
+  })
+}
 
 function App() {
   // The active room source is state. Submitting a prompt swaps in a new
@@ -39,7 +64,11 @@ function App() {
     // The boundary is the backstop for unexpected render errors; the host handles
     // expected failures (WebGL/room-load) inline with a matching safe fallback.
     <ErrorBoundary logger={logger}>
-      <RoomViewer roomSource={roomSource} />
+      <RoomViewer
+        roomSource={roomSource}
+        interactionService={interactionService}
+        startRoomSession={startRoomSession}
+      />
       <PromptBar onSubmit={handlePrompt} />
     </ErrorBoundary>
   )

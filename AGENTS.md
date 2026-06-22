@@ -26,6 +26,10 @@ The **Isometric Camera Foundation** makes the default view a fixed orthographic
 isometric camera following a player object — still Three.js, still real 3D, with
 **RoomSpec unchanged** and the camera renderer-internal
 ([ADR-0012](./docs/architecture/decisions/ADR-0012-isometric-camera-foundation.md)).
+**Object Interactions v0** now routes renderer E/F intent through a pure effect
+planner and an application service into the authoritative world-session event
+log, without letting the renderer import or mutate world state
+([ADR-0014](./docs/architecture/decisions/ADR-0014-object-interactions-v0.md)).
 "2.5D" means camera/presentation, **not** a new engine; full first-person /
 free-camera 3D remains future/optional. No real LLM/API, backend, or database yet
 — those are coming and the architecture is built so they slot in without breaking
@@ -100,6 +104,7 @@ Dependencies point **inward**, toward the domain. Full rules in
 | **Composition root** | `apps/web/src/App.tsx`, `RoomViewer.tsx`, `app/`, `room/` | everything (this is where wiring lives) | — |
 | **Generation** | `apps/web/src/generation/` (v0, fake) | domain, logger port | UI, renderer, React, Three.js |
 | **World session** | `apps/web/src/world-session/` (v0, headless) | domain, logger port | UI, renderer, React, Three.js, DB |
+| **Interactions** | `apps/web/src/interactions/` (v0, headless) | domain, world-session, logger port | UI, renderer, React, Three.js, DB |
 | **Backend / Persistence** | not built yet | domain | UI, renderer |
 
 ## Logging rules
