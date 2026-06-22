@@ -1,8 +1,21 @@
 # ADR-0004: Persistence — SQLite now, PostgreSQL later
 
-- **Status:** Accepted — **future shape only, nothing built**
-- **Date:** 2026-06-21
+- **Status:** Accepted — **partially implemented**: a headless, Node-only SQLite
+  layer now exists ([ADR-0018](./ADR-0018-backend-sqlite-persistence-v0.md));
+  the dual-dialect query tool and the PostgreSQL migration remain future shape only
+- **Date:** 2026-06-21 (updated 2026-06-22)
 - **Deciders:** Project owner
+
+> **Update (ADR-0018):** principles 1, 2, 4, 5, 6, and 7 below are now realized
+> by the `apps/web/src/persistence/**` build unit — repository interfaces in the
+> domain (`WorldStore`, the new `RoomStore`), server-side-only data access
+> (browser-excluded, lint-walled), migrations from day one, app-generated string
+> ids, UTC timestamps, validated RoomSpec stored as a JSON document with a
+> `schema_version` column, transactions owning atomicity, and re-validation at the
+> persistence boundary. Principle 3 (a dual-dialect Drizzle/Kysely layer) is
+> deliberately **not** adopted yet: `node:sqlite` with parameterized SQL confined
+> to the adapter/migration files is sufficient for a SQLite-only v0, and the
+> dual-dialect tool is revisited when the PostgreSQL migration actually approaches.
 
 ## Context
 
