@@ -127,6 +127,12 @@ body {
   color: #cfc7b6;
 }
 
+.panel-result {
+  margin: -0.45rem 0 1.2rem;
+  color: #f3d58a;
+  font-weight: 600;
+}
+
 .panel-foot {
   display: flex;
   justify-content: flex-end;
