@@ -2,17 +2,27 @@ import * as THREE from 'three'
 import type { LoadedRoom } from '../../domain/loadRoomSpec'
 import { Disposables, disposeObject } from './disposables'
 import { buildShell } from './builders/shell'
+import type { WallSide } from './builders/shell'
 import { buildLighting } from './builders/lighting'
 import { buildObjects } from './builders'
 import { MovementControls } from './controls/movement'
 import type { Bounds } from './controls/movement'
-import { LookControls } from './controls/lookControls'
+import { IsometricCameraController } from './camera/IsometricCameraController'
+import type { CameraController } from './camera/CameraController'
+import { isometricOffsetDirection } from './camera/isometric'
+import { buildPlayerMarker } from './playerMarker'
 import type { Logger } from '../../platform/logger/Logger'
 import type { Interactable } from '../../domain/ports/interaction'
 
 /**
  * Owns the Three.js renderer, scene, camera, and render loop. Pure Three.js
  * with no React dependency so the React layer stays a thin host.
+ *
+ * View model: a `player` object on the floor is what movement drives and
+ * proximity reads; the camera is a separate `CameraController` that follows the
+ * player from a fixed isometric angle. The two are decoupled — input never moves
+ * the camera directly. (`lookControls.ts` stays for a future free-camera mode but
+ * is not wired here.)
  *
  * Lifecycle contract: construct once with a container element, then call
  * dispose() exactly once. dispose() is total (RAF, listeners, GPU resources,
@@ -26,14 +36,14 @@ export class Engine {
   private readonly logger: Logger
   private readonly renderer: THREE.WebGLRenderer
   private readonly scene: THREE.Scene
-  private readonly camera: THREE.PerspectiveCamera
+  private readonly cameraController: CameraController
+  private readonly player: THREE.Object3D
   private readonly disposables = new Disposables()
   private readonly resizeObserver: ResizeObserver
   private readonly clock = new THREE.Clock()
   private rafId = 0
   private room: LoadedRoom | null = null
   private movement: MovementControls | null = null
-  private look: LookControls | null = null
   private bounds: Bounds | null = null
   private readonly interactables: Interactable[] = []
   private activeInteractable: Interactable | null = null
@@ -58,9 +68,11 @@ export class Engine {
     this.scene = new THREE.Scene()
     // Lighting comes from the RoomSpec; added in setRoom() once we have a room.
 
-    this.camera = new THREE.PerspectiveCamera(60, 1, 0.1, 1000)
-    this.camera.position.set(0, 1.7, 8)
-    this.camera.lookAt(0, 1.7, 0)
+    // The camera follows the player from a fixed isometric angle; both exist
+    // before any room loads so the first frame is already well-framed.
+    this.cameraController = new IsometricCameraController()
+    this.player = buildPlayerMarker()
+    this.scene.add(this.player)
 
     this.resizeObserver = new ResizeObserver(this.handleResize)
     this.resizeObserver.observe(container)
@@ -69,13 +81,13 @@ export class Engine {
     this.rafId = requestAnimationFrame(this.renderLoop)
   }
 
-  /** Receives the validated room, builds the shell, and places the camera. */
+  /** Receives the validated room, builds the shell, and places the player. */
   setRoom(room: LoadedRoom): void {
     this.room = room
     this.scene.add(buildLighting(room.lighting))
-    this.scene.add(buildShell(room))
+    this.scene.add(buildShell(room, { cutawaySides: this.cutawaySides() }))
     this.scene.add(buildObjects(room, this.logger))
-    this.placeCamera(room.spawn)
+    this.placePlayer(room.spawn)
 
     const { width, depth } = room.shell.dimensions
     const margin = room.shell.wallThickness / 2 + 0.3 // keep off the walls
@@ -86,10 +98,6 @@ export class Engine {
       maxZ: depth / 2 - margin,
     }
     this.movement = new MovementControls()
-    this.look = new LookControls(
-      this.renderer.domElement,
-      THREE.MathUtils.degToRad(room.spawn.yaw),
-    )
 
     // Collect interactables (objects carrying an `interaction`) for proximity.
     for (const o of room.objects) {
@@ -114,15 +122,32 @@ export class Engine {
   }
 
   /**
-   * Positions the camera at the spawn point. yaw is in degrees: the forward
-   * direction is (sin yaw, 0, cos yaw), so yaw=0 faces south (+Z) and yaw=180
-   * faces north (-Z).
+   * Places the player marker at the spawn point on the floor and snaps the
+   * camera to frame it. yaw is in degrees: the marker faces (sin yaw, 0, cos yaw),
+   * so yaw=0 faces south (+Z) and yaw=180 faces north (-Z). The marker's height is
+   * its own (base on the floor); the spawn Y (an eye height) is not used here.
    */
-  private placeCamera(spawn: LoadedRoom['spawn']): void {
-    const [x, y, z] = spawn.position
-    const yawRad = THREE.MathUtils.degToRad(spawn.yaw)
-    this.camera.position.set(x, y, z)
-    this.camera.lookAt(x + Math.sin(yawRad), y, z + Math.cos(yawRad))
+  private placePlayer(spawn: LoadedRoom['spawn']): void {
+    const [x, , z] = spawn.position
+    this.player.position.set(x, 0, z)
+    this.player.rotation.y = THREE.MathUtils.degToRad(spawn.yaw)
+    this.cameraController.follow(this.player.position)
+  }
+
+  /**
+   * The walls between the camera and the room interior, derived from the camera's
+   * own target→camera offset: the camera sits toward +X/+Z, so the east and south
+   * walls are nearest and get cut to a curb (the dollhouse open side). Derived
+   * rather than hardcoded so it stays correct if the isometric angle changes.
+   */
+  private cutawaySides(): WallSide[] {
+    const dir = isometricOffsetDirection() // unit vector from target toward camera
+    const sides: WallSide[] = []
+    if (dir.z > 0) sides.push('south')
+    else if (dir.z < 0) sides.push('north')
+    if (dir.x > 0) sides.push('east')
+    else if (dir.x < 0) sides.push('west')
+    return sides
   }
 
   /** The room currently held by the engine, consumed by later commits. */
@@ -133,20 +158,19 @@ export class Engine {
   private readonly handleResize = (): void => {
     const w = this.container.clientWidth || 1
     const h = this.container.clientHeight || 1
-    this.camera.aspect = w / h
-    this.camera.updateProjectionMatrix()
+    this.cameraController.resize(w / h)
     this.renderer.setSize(w, h)
   }
 
   private readonly renderLoop = (): void => {
     this.rafId = requestAnimationFrame(this.renderLoop)
     const dt = Math.min(this.clock.getDelta(), 0.1) // cap to avoid post-idle jumps
-    if (this.movement && this.look && this.bounds) {
-      this.movement.update(this.camera, this.look.yawAngle, dt, this.bounds)
-      this.look.applyTo(this.camera)
+    if (this.movement && this.bounds) {
+      this.movement.update(this.player, dt, this.bounds)
     }
+    this.cameraController.follow(this.player.position)
     this.updateProximity()
-    this.renderer.render(this.scene, this.camera)
+    this.renderer.render(this.scene, this.cameraController.camera)
   }
 
   /** Nearest interactable in range right now, or null. */
@@ -156,12 +180,11 @@ export class Engine {
 
   /**
    * Locks/unlocks player input while a dialogue panel owns the screen. Movement
-   * and drag-look are disabled, and the matching key can't re-open a panel.
+   * is disabled, and the matching key can't re-open a panel.
    */
   setInteractionLock(locked: boolean): void {
     this.locked = locked
     this.movement?.setEnabled(!locked)
-    this.look?.setEnabled(!locked)
   }
 
   /**
@@ -170,7 +193,7 @@ export class Engine {
    * Notifies the UI only when the active interactable changes.
    */
   private updateProximity(): void {
-    const { x, z } = this.camera.position
+    const { x, z } = this.player.position
     let nearest: Interactable | null = null
     let best = this.interactRange
     for (const it of this.interactables) {
@@ -202,9 +225,7 @@ export class Engine {
     this.resizeObserver.disconnect()
     window.removeEventListener('keydown', this.onInteractKey)
     this.movement?.dispose()
-    this.look?.dispose()
     this.movement = null
-    this.look = null
     this.bounds = null
     this.interactables.length = 0
     this.activeInteractable = null
@@ -212,9 +233,10 @@ export class Engine {
     this.onActiveInteractionChange = null
     this.onRequestOpenInteraction = null
 
-    disposeObject(this.scene)
+    disposeObject(this.scene) // frees the player marker's geometry/materials too
     this.scene.clear()
     this.disposables.dispose()
+    this.cameraController.dispose()
 
     this.renderer.dispose()
     this.renderer.forceContextLoss()

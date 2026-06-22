@@ -21,7 +21,8 @@ hand-written code* — is preserved as the system grows.
 Throughout these docs:
 
 - ✅ **Implemented** — exists today in `apps/web` (Renderer Foundation v0;
-  Generation Foundation v0).
+  Generation Foundation v0; Semantic Room Validator v0; Isometric Camera
+  Foundation).
 - 🔜 **Planned** — designed and approved, not yet built (next slices).
 - ❌ **Not built** — future shape only; documented so we don't paint into a corner.
 
@@ -93,6 +94,45 @@ remain **planned / not built** — see
 [Generation pipeline](#generation-pipeline-planned),
 [ADR-0010](./decisions/ADR-0010-generation-foundation-v0.md), and
 [ADR-0011](./decisions/ADR-0011-semantic-room-validator-v0.md).
+
+## Isometric Camera Foundation
+
+✅ **Implemented.** The default view is now a **controlled 3D / isometric
+2.5D-style** presentation: a fixed orthographic true-isometric camera that
+**follows a player object**, replacing Renderer Foundation v0's first-person
+camera. This is a **presentation** change — still vanilla Three.js, still real 3D
+objects and rooms, **RoomSpec JSON unchanged**, generation still **data only**,
+and the trusted renderer still owns the camera, movement, and builders. Full
+rationale in [ADR-0012](./decisions/ADR-0012-isometric-camera-foundation.md).
+
+- **Player ↔ camera decoupling (the key change).** The engine owns a `player`
+  (`THREE.Object3D`) that input drives; a `CameraController` derives the camera
+  transform **from** the player each frame. Input never moves the camera directly.
+  On room load the player is placed at the spawn point and the camera snaps to it.
+- **`IsometricCameraController`** owns an `OrthographicCamera` at the fixed
+  true-isometric angle (azimuth 45°, elevation `atan(1/√2) ≈ 35.264°`); a pure,
+  WebGL-free `camera/isometric.ts` module holds the offset/pose/movement/frustum
+  math (unit-tested), and the controller and movement are thin adapters over it.
+- **Screen-relative movement.** `MovementControls` moves the player on the ground
+  plane: **W/↑ up-screen (into the scene), S/↓ toward the camera, A/← and D/→
+  strafe**; diagonals normalized, delta-time scaled, clamped to the room AABB.
+- **Proximity reads the player**, not the camera, so HUD prompts and E/F dialogue
+  behave as before but anchor to where the player actually stands.
+- **A minimal player marker** (a renderer-internal `buildPlayerMarker()` capsule
+  with a facing nose) is **not RoomSpec data**; it lives in the scene graph and is
+  freed by the engine's normal disposal.
+- **Isometric cutaway shell.** `buildShell` lowers the camera-facing **south/east**
+  near walls to a low **curb** so they can't hide the player; the **north/west far
+  walls stay full height** to preserve room shape (a dollhouse, not a closed box).
+  The near sides are derived from the camera's offset direction; RoomSpec is
+  untouched.
+- **`LookControls` is retained but not instantiated** — kept for a future
+  free-camera / first-person mode behind the same `CameraController` seam.
+
+**V1's default visual direction is controlled 3D / isometric; full first-person /
+free-camera 3D remains future and optional.** Camera mode is **renderer-internal
+presentation**, never room data — a RoomSpec describes *what is in the room*, not
+*how it is filmed*.
 
 ## Layered architecture
 
@@ -175,10 +215,12 @@ App.tsx
        ├─ loadRoomSpec(throneRoom)       ✅ validation boundary (today: static data)
        ├─ new Engine(container)          ✅ pure Three.js
        │    ├─ buildLighting(room)        ambient + optional hemisphere
-       │    ├─ buildShell(room)           floor + walls (north exit split)
+       │    ├─ buildShell(room)           floor + walls (north exit split; iso cutaway curbs)
        │    ├─ buildObjects(room)         type→builder registry, placeholder fallback
-       │    ├─ MovementControls           WASD, delta-time, AABB room clamp
-       │    └─ LookControls               drag-look (no pointer lock)
+       │    ├─ buildPlayerMarker()        renderer-internal player object (not RoomSpec data)
+       │    ├─ IsometricCameraController  orthographic iso camera; follows the player
+       │    └─ MovementControls           screen-relative WASD/arrows → player (AABB clamp)
+       │       (LookControls retained but NOT instantiated — future free-camera mode)
        ├─ engine.onActiveInteractionChange → React state → <Hud/>
        └─ engine.onRequestOpenInteraction  → React state → <DialoguePanel/>
 ```
@@ -216,9 +258,11 @@ generator exists, and the prompt *text* is never logged — only its length.
 | `domain/loadRoomSpec.ts` | `loadRoomSpec` (strict envelope, lenient objects) + the `LoadedRoom` result type. |
 | `domain/ports/interaction.ts` | The neutral interaction view-model shared by the engine and the UI. |
 | `domain/examples/throneRoom.ts` | The single hardcoded demo room — pure data literal. |
-| `renderer/engine/Engine.ts` | Owns renderer/scene/camera, render loop, proximity detection, interaction keys, and **total `dispose()`**. No React. |
-| `renderer/engine/builders/` | `buildShell`, `buildLighting`, and the object `registry` + `buildObjects` with magenta-placeholder fallback. |
-| `renderer/engine/controls/` | `MovementControls` (WASD, room-clamped), `LookControls` (drag-look). |
+| `renderer/engine/Engine.ts` | Owns renderer/scene, the **player object** + a `CameraController` (isometric), render loop, **player-position** proximity, interaction keys, and **total `dispose()`**. No React. |
+| `renderer/engine/camera/` | `CameraController` interface + `IsometricCameraController` (orthographic true-isometric, follows the player) over a pure, WebGL-free `isometric.ts` math module (offset / pose / screen-relative move / clamp / frustum). |
+| `renderer/engine/playerMarker.ts` | `buildPlayerMarker` — the minimal **renderer-internal** player marker (capsule + facing nose). Presentation, **not** RoomSpec data. |
+| `renderer/engine/builders/` | `buildShell` (floor + walls, with isometric **cutaway curbs** on the camera-facing walls), `buildLighting`, and the object `registry` + `buildObjects` with magenta-placeholder fallback. |
+| `renderer/engine/controls/` | `MovementControls` (screen-relative WASD/arrows driving the **player**, room-clamped); `LookControls` (drag-look) **retained but not instantiated** in isometric mode. |
 | `renderer/engine/disposables.ts` | `Disposables` + `disposeObject` — explicit GPU teardown (Three.js does not GC geometries/materials/textures). |
 | `renderer/ui/` | `Hud` and `DialoguePanel` — presentational React only. |
 | `renderer/RoomViewer.tsx` | The composition seam: constructs/disposes the engine, bridges engine callbacks to React state. StrictMode-safe (mount → dispose → mount leaks nothing). |

@@ -13,16 +13,23 @@ Deep context lives in [`docs/architecture/`](./docs/architecture/ARCHITECTURE.md
 
 ## What this project is
 
-An AI Game Master that renders walkable low-poly 3D rooms. A room is described by
-a **RoomSpec** (pure data) and rendered by **trusted, hand-written Three.js**.
+An AI Game Master that renders a **walkable isometric 3D story scene** — a
+browser-based controlled 3D / isometric solo RPG scene. A room is described by a
+**RoomSpec** (pure data) and rendered by **trusted, hand-written Three.js**.
 Today: a single Vite app at `apps/web` (React 19 + TypeScript + Three.js + zod).
 **Renderer Foundation v0** renders one hardcoded room; **Generation Foundation
 v0** adds a deterministic *fake* room generator behind a prompt bar, validated
 through the same `loadRoomSpec` schema boundary and a pure semantic `validateRoom`
 playability check (**Semantic Room Validator v0**,
 [ADR-0011](./docs/architecture/decisions/ADR-0011-semantic-room-validator-v0.md)).
-No real LLM/API, backend, or database yet — those are coming and the architecture
-is built so they slot in without breaking boundaries.
+The **Isometric Camera Foundation** makes the default view a fixed orthographic
+isometric camera following a player object — still Three.js, still real 3D, with
+**RoomSpec unchanged** and the camera renderer-internal
+([ADR-0012](./docs/architecture/decisions/ADR-0012-isometric-camera-foundation.md)).
+"2.5D" means camera/presentation, **not** a new engine; full first-person /
+free-camera 3D remains future/optional. No real LLM/API, backend, or database yet
+— those are coming and the architecture is built so they slot in without breaking
+boundaries.
 
 ## Engineering standards (non-negotiable)
 
@@ -124,7 +131,13 @@ Unless the maintainer explicitly asks, do **not**:
 - introduce a state-management library, a DI framework, or a heavy ORM;
 - rewrite the working renderer beyond what a boundary fix requires;
 - add new gameplay/renderer features (collision, pointer lock, dialogue trees,
-  multi-room, GLTF) as part of an architecture change.
+  multi-room, GLTF) as part of an architecture change;
+- extend the camera beyond the wired isometric mode — no **zoom**, **camera-mode
+  toggle UI**, **free-camera / first-person mode**, mobile/touch controls, or
+  minimap. `LookControls` is **retained but not instantiated**; a free-camera mode
+  goes behind the existing `CameraController` seam, not by re-wiring first-person
+  ([ADR-0012](./docs/architecture/decisions/ADR-0012-isometric-camera-foundation.md)).
+  Camera/player are renderer-internal — never add camera fields to RoomSpec.
 
 When unsure whether something fits a boundary, **check the docs and ask** rather
 than guessing.

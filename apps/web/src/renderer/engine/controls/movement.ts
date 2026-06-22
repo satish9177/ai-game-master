@@ -1,15 +1,21 @@
 import type * as THREE from 'three'
+import { clampToBounds, screenRelativeMove } from '../camera/isometric'
+import type { Bounds } from '../camera/isometric'
 
-/** Axis-aligned clamp region for the player on the XZ plane (meters). */
-export type Bounds = { minX: number; maxX: number; minZ: number; maxZ: number }
+export type { Bounds }
 
 /**
- * WASD movement on the XZ plane. Delta-time scaled so speed is frame-rate
- * independent, and clamped to an axis-aligned room box (no per-object
- * collision). Camera height (Y) is never changed.
+ * Screen-relative ground movement for the isometric view. WASD / arrow keys move
+ * the player on the XZ plane relative to the fixed camera azimuth: W / ArrowUp
+ * goes up-screen (into the scene, away from the camera), S / ArrowDown toward the
+ * camera, and A / D strafe screen-left / screen-right. Delta-time scaled so speed
+ * is frame-rate independent, diagonals are normalized, and the result is clamped
+ * to the room's axis-aligned box. The player's height (Y) is never changed; the
+ * camera follows separately.
  *
- * Convention: forward = (sin yaw, cos yaw); right = (-cos yaw, sin yaw), so at
- * yaw=180 (facing north / -Z) W walks north and D strafes east.
+ * The direction and clamp math is the pure, unit-tested `camera/isometric`
+ * module — this class only owns keyboard state and applies the result to the
+ * player object.
  */
 export class MovementControls {
   private readonly keys = new Set<string>()
@@ -27,35 +33,25 @@ export class MovementControls {
     if (!enabled) this.keys.clear()
   }
 
-  update(camera: THREE.PerspectiveCamera, yaw: number, dt: number, bounds: Bounds): void {
+  /** Advances `player` one frame from the held keys; mutates only its X/Z. */
+  update(player: THREE.Object3D, dt: number, bounds: Bounds): void {
     if (!this.enabled) return
     let forward = 0
     let strafe = 0
-    if (this.keys.has('KeyW')) forward += 1
-    if (this.keys.has('KeyS')) forward -= 1
-    if (this.keys.has('KeyD')) strafe += 1
-    if (this.keys.has('KeyA')) strafe -= 1
+    if (this.keys.has('KeyW') || this.keys.has('ArrowUp')) forward += 1
+    if (this.keys.has('KeyS') || this.keys.has('ArrowDown')) forward -= 1
+    if (this.keys.has('KeyD') || this.keys.has('ArrowRight')) strafe += 1
+    if (this.keys.has('KeyA') || this.keys.has('ArrowLeft')) strafe -= 1
     if (forward === 0 && strafe === 0) return
 
-    const fx = Math.sin(yaw)
-    const fz = Math.cos(yaw)
-    const rx = -Math.cos(yaw)
-    const rz = Math.sin(yaw)
-
-    let dx = fx * forward + rx * strafe
-    let dz = fz * forward + rz * strafe
-    const len = Math.hypot(dx, dz)
-    if (len > 0) {
-      dx /= len // normalize so diagonals aren't faster
-      dz /= len
-    }
-
+    const dir = screenRelativeMove({ forward, strafe })
     const dist = this.speed * dt
-    camera.position.x += dx * dist
-    camera.position.z += dz * dist
-
-    camera.position.x = Math.max(bounds.minX, Math.min(bounds.maxX, camera.position.x))
-    camera.position.z = Math.max(bounds.minZ, Math.min(bounds.maxZ, camera.position.z))
+    const next = clampToBounds(
+      { x: player.position.x + dir.x * dist, z: player.position.z + dir.z * dist },
+      bounds,
+    )
+    player.position.x = next.x
+    player.position.z = next.z
   }
 
   private readonly onKeyDown = (e: KeyboardEvent): void => {

@@ -186,6 +186,39 @@ pre-generation failed. Design in
 - **Logging** — room id, status at the door, wait time, pre-gen hit/miss; reuse
   the generation logging from case 4/4b.
 
+## 8. Isometric camera / player presentation ✅
+
+The renderer's default view is a fixed orthographic isometric camera following a
+player object ([ADR-0012](./decisions/ADR-0012-isometric-camera-foundation.md)).
+A handful of invariants keep it robust; all are ✅ today.
+
+- **Orthographic frustum must track viewport resize.** ✅ The `ResizeObserver`
+  calls `CameraController.resize(aspect)`, which recomputes the orthographic
+  frustum (`orthographicFrustum`) and `updateProjectionMatrix()`, so world units
+  never stretch on a non-square or resized window.
+- **Player and camera must initialize safely before *and* after room load.** ✅
+  Both are constructed up front — the player marker is added to the scene and the
+  camera frames it at the origin — so the first frame before any room is valid; on
+  `setRoom` the player is placed at spawn and the camera snaps to it. No frame
+  reads a null camera/player.
+- **Interaction proximity must use the player, not the camera.** ✅ `updateProximity`
+  and the E/F open-key read `player.position`. A regression here (reading the
+  camera, which now sits tens of meters away at the isometric offset) would
+  silently break every HUD prompt — so it is called out explicitly.
+- **The player marker must dispose with the scene/engine.** ✅ The marker is part
+  of the scene graph, so the engine's total `dispose()` (`disposeObject(scene)` +
+  `scene.clear()`) frees its geometry/material like any other mesh — no separate
+  teardown path and no leak under StrictMode's mount → dispose → mount.
+- **Cutaway walls must prevent occlusion without destroying readability.** ✅ The
+  camera-facing south/east walls drop to a 0.4 m curb (well below the ~1.4 m marker
+  and ~1.76 m NPCs at the ~35° camera angle), while the far north/west walls stay
+  full height to show the room's shape. Too tall a near wall hides the player; too
+  much removed loses the footprint — the curb is the middle.
+- **No camera/player data may leak into the domain or RoomSpec.** ✅ Camera mode
+  and the marker are renderer-internal presentation; the schema has no
+  camera/player fields and the model never directs the camera (see
+  [BOUNDARIES](./BOUNDARIES.md)).
+
 ---
 
 ## Summary
@@ -200,6 +233,7 @@ pre-generation failed. Design in
 | 5 | Backend/network | typed HTTP results | retry state | ❌ |
 | 6 | DB failure | adapter → typed error | read-only / safe error | ❌ |
 | 7 | Pre-gen not ready | room status at door | "Opening the way…" / fallback | ❌ |
+| 8 | Iso camera/player presentation | resize→frustum; player-position proximity; scene-graph disposal; cutaway curbs | stable framing, no occlusion or leak | ✅ |
 
 The through-line: **validate at the boundary, degrade visibly and safely, log
 the detail, show the user calm.**
