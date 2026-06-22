@@ -1,6 +1,8 @@
 import type { RoomSource, RoomLoadResult } from '../domain/ports/RoomSource'
 import type { RoomGenerator } from '../domain/ports/RoomGenerator'
 import { loadRoomSpec, type LoadedRoom } from '../domain/loadRoomSpec'
+import { validateRoom } from '../domain/validateRoom'
+import type { RoomIssueCode, RoomValidationResult } from '../domain/validateRoom'
 import type { Logger } from '../platform/logger/Logger'
 
 /**
@@ -69,13 +71,34 @@ export class GeneratedRoomSource implements RoomSource {
       return fail('invalid-room', INVALID_ROOM_MESSAGE)
     }
 
-    // 4. Success — including the lenient case where some objects were skipped. One
-    //    info line with safe counts; the host separately surfaces the skipped
-    //    objects, so we don't warn here too (avoid double-logging).
+    // 3.5 Semantic validation (ADR-0007 stage 2). loadRoomSpec proves the room is
+    //     well-formed; this proves it is *playable*. Fatal issues (e.g. an
+    //     unwalkable room, a spawn outside the walls) fold into the SAME
+    //     `invalid-room` outcome — no new error code, no new user copy. The
+    //     validator is pure and never logs, so we log codes/counts here: codes are
+    //     a fixed enum (always safe), and we never log issue messages (which are
+    //     templated from coords, not prompt text). Warnings don't block the room.
+    const validation = validateRoom(room)
+    if (!validation.ok) {
+      this.log.warn('generated room failed semantic validation', {
+        code: 'invalid-room',
+        fatalCount: validation.issues.filter((issue) => issue.severity === 'fatal').length,
+        warningCount: validation.issues.filter((issue) => issue.severity === 'warning').length,
+        fatalCodes: distinctFatalCodes(validation),
+      })
+      return fail('invalid-room', INVALID_ROOM_MESSAGE)
+    }
+
+    // 4. Success — including the lenient case where some objects were skipped, and
+    //    the case where semantic warnings were raised on an otherwise playable
+    //    room. One info line with safe counts; the host separately surfaces the
+    //    skipped objects, so we don't warn here too (avoid double-logging). On this
+    //    path every semantic issue is a warning, so the count is issues.length.
     this.log.info('room generated', {
       objectCount: room.objects.length,
       skippedCount: room.skipped.length,
       warningCount: room.warnings.length,
+      semanticWarningCount: validation.issues.length,
     })
     return { ok: true, room }
   }
@@ -93,4 +116,16 @@ function fail(code: 'invalid-room' | 'unavailable', message: string): RoomLoadRe
 /** Log-safe summary of an unknown thrown value (mirrors the host). */
 function describeError(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
+}
+
+/**
+ * Distinct fatal issue codes for the failure log. Codes are a fixed enum
+ * (validateRoom), so they are always safe to log — unlike issue messages, which
+ * we never log (FAILURE-MODES case 4: prompt text never escapes as data).
+ */
+function distinctFatalCodes(validation: RoomValidationResult): RoomIssueCode[] {
+  const fatal = validation.issues
+    .filter((issue) => issue.severity === 'fatal')
+    .map((issue) => issue.code)
+  return [...new Set(fatal)]
 }

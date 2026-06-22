@@ -27,7 +27,7 @@ layers, never the reverse. The domain depends on nothing in this repo.
 
 | Layer | Folder (today) | What lives here |
 | --- | --- | --- |
-| **Domain / Contracts** | `apps/web/src/domain/` | RoomSpec schema (`roomSpec.ts`), `loadRoomSpec.ts`, ports (`ports/RoomSource.ts`, `ports/RoomGenerator.ts`, `ports/interaction.ts`), schema version; 🔜 more ports (repositories, …). Pure. |
+| **Domain / Contracts** | `apps/web/src/domain/` | RoomSpec schema (`roomSpec.ts`), `loadRoomSpec.ts`, `validateRoom.ts` (semantic validator), ports (`ports/RoomSource.ts`, `ports/RoomGenerator.ts`, `ports/interaction.ts`), schema version; 🔜 more ports (repositories, …). Pure. |
 | **Renderer** | `apps/web/src/renderer/engine/` | Three.js engine, builders, controls, disposal. |
 | **UI** | `apps/web/src/renderer/ui/` | Presentational React components. |
 | **App / Composition root** | `apps/web/src/App.tsx`, `RoomViewer.tsx`, `app/`, `room/` | Wires concrete implementations together (room sources, prompt bar, error boundary). |

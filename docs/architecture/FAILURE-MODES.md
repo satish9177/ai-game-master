@@ -94,36 +94,52 @@ A generator returns malformed JSON, a schema-invalid spec, a partial spec, or
   only; **never** full prompts/keys/PII. 🔜 model/latency/token/attempt metadata
   arrives with the real client.
 
-## 4b. Valid RoomSpec but a bad room ❌ (future)
+## 4b. Valid RoomSpec but a bad room ✅ v0 (code validator) · 🔜 reviewer + repair
 
 The spec is valid JSON and passes the schema, yet the room is **unplayable or
 poor**. **Valid JSON does not mean a room is playable or good.** This is the gap
 the generation pipeline closes; full design in
-[ADR-0007](./decisions/ADR-0007-generated-room-validation-and-repair.md).
+[ADR-0007](./decisions/ADR-0007-generated-room-validation-and-repair.md). A first
+slice of the deterministic code validator now closes part of it
+([ADR-0011](./decisions/ADR-0011-semantic-room-validator-v0.md)).
 
 - **Detection** — two checks *beyond* schema validation, kept distinct:
-  - a **deterministic code validator** (**not** an LLM) for semantic
-    playability — reachable exit, no NPC/object inside a wall, quest items
-    actually placed, object/light counts within budget, spawn inside the room;
-  - an **optional LLM reviewer** for creative/story quality — coherent,
+  - ✅ a **deterministic code validator** (**not** an LLM) for semantic
+    playability — implemented in v0 as `validateRoom` (a pure domain function):
+    sane dimensions, spawn inside the walkable bounds, anchors within the
+    footprint and under the ceiling, object/light budgets, usable interactions
+    (non-empty prompt, a dialogue body, a named NPC). 🔜 deeper reachability,
+    object↔object collision, and quest-item consistency;
+  - 🔜 an **optional LLM reviewer** for creative/story quality — coherent,
     on-prompt, interesting; it returns a verdict, it does not edit the spec.
 - **Handling** — by the severity of the problem:
 
   | Class | Examples | Handling |
   | --- | --- | --- |
-  | **Object-level** (room still playable) | one NPC clipping a wall, an overlapping prop, a light over budget | skip / placeholder / log a warning, keep the room |
-  | **Room-level** (not playable) | no reachable exit, spawn outside the room, quest item missing, impossible danger/encounter | repair or regenerate within the attempt budget |
-  | **Prompt mismatch / too empty/boring** | output doesn't match the prompt; room is dull | reviewer rejects → repair/regenerate |
-  | **Repeated failure** | still unacceptable after max attempts | safe fallback room / retry |
+  | **Object-level** (room still playable) | one NPC clipping a wall, an overlapping prop, a light over the soft budget | ✅ log a `warning` (counts/codes), keep the room |
+  | **Room-level** (not playable) | unwalkable size, spawn outside the room, object/light over the hard budget | ✅ v0 fatal → `invalid-room` (no render); 🔜 repair or regenerate within the attempt budget |
+  | **Prompt mismatch / too empty/boring** | output doesn't match the prompt; room is dull | 🔜 reviewer rejects → repair/regenerate |
+  | **Repeated failure** | still unacceptable after max attempts | 🔜 safe fallback room / retry |
 
-- **Retry/repair policy (v1)** — fast model first → one fast repair attempt →
+- **v0 handling** ✅ — `GeneratedRoomSource` runs `validateRoom` right after
+  `loadRoomSpec`: a **fatal** (room-level) issue folds into the existing
+  `invalid-room` result so the room never renders; **warnings** (object-level) are
+  logged as counts/codes and the room still loads. The room is never mutated and
+  warnings are not surfaced in the UI yet.
+- **Retry/repair policy (v1)** 🔜 — fast model first → one fast repair attempt →
   slow/better model fallback only if needed; **no infinite retries, max 3
   attempts**; target **10–30s** for the first room, **~60s** hard cap. After a
   hard failure: a **safe error with a retry button or a fallback demo room**.
-- **User-facing** — a brief wait, then the room; on hard failure, a retryable
-  error or a fallback room — never a broken or unplayable room.
-- **Logging** — per-attempt validator/reviewer outcomes, which class failed,
-  attempt count, model, latency; **never** full prompts/keys/PII.
+- **User-facing** — ✅ on a fatal semantic issue, the same safe "This room could
+  not be loaded." screen as case 4; warnings are not shown in the UI yet (a dev
+  overlay stays future). 🔜 a brief wait, then the room, with repair behind the
+  scenes; on hard failure, a retryable error or a fallback room — never a broken or
+  unplayable room.
+- **Logging** — ✅ v0 logs one safe line: `code: 'invalid-room'`, fatal/warning
+  counts, and the distinct fatal issue **codes** (a fixed enum) — never issue
+  message text, full prompts, raw generated JSON, keys, or PII; the success line
+  carries `semanticWarningCount`. 🔜 per-attempt validator/reviewer outcomes,
+  which class failed, attempt count, model, latency arrive with the real pipeline.
 
 ## 5. Backend / network failure ❌ (future)
 
@@ -180,7 +196,7 @@ pre-generation failed. Design in
 | 2 | Bad/unknown object | per-object `safeParse` | magenta placeholder | ✅ |
 | 3 | WebGL unavailable/lost | capability check + event | fallback message | 🔜 |
 | 4 | Invalid generated JSON | same `loadRoomSpec` boundary → typed result | safe load screen; retry/fallback 🔜 | ✅ v0 |
-| 4b | Valid spec, bad room | code validator + LLM reviewer | repair → fallback room | ❌ |
+| 4b | Valid spec, bad room | `validateRoom` (semantic) + 🔜 LLM reviewer | fatal → `invalid-room`; 🔜 repair/fallback | ✅ v0 |
 | 5 | Backend/network | typed HTTP results | retry state | ❌ |
 | 6 | DB failure | adapter → typed error | read-only / safe error | ❌ |
 | 7 | Pre-gen not ready | room status at door | "Opening the way…" / fallback | ❌ |
