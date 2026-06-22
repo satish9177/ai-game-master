@@ -7,8 +7,8 @@ import { defineConfig, globalIgnores } from 'eslint/config'
 
 // Architecture boundaries are documented in docs/architecture/BOUNDARIES.md and
 // the ADRs. The rules below make the most important ones mechanical. The
-// generation and world-session boundaries are encoded now that those folders
-// exist. Real persistence/backend boundaries remain deferred with those layers.
+// generation, world-session, and interactions boundaries are encoded now that
+// those folders exist. Real persistence/backend boundaries remain deferred.
 export default defineConfig([
   globalIgnores(['dist']),
   {
@@ -48,6 +48,10 @@ export default defineConfig([
           paths: [
             { name: 'react', message: 'renderer/engine must not import React — the engine is framework-independent (ADR-0002).' },
             { name: 'react-dom', message: 'renderer/engine must not import React — the engine is framework-independent (ADR-0002).' },
+          ],
+          patterns: [
+            { group: ['**/world-session/**'], message: 'renderer/engine emits intent and must not import world-session (ADR-0014).' },
+            { group: ['**/interactions/**'], message: 'renderer/engine emits intent and must not import interaction application/domain internals (ADR-0014).' },
           ],
         },
       ],
@@ -143,6 +147,28 @@ export default defineConfig([
           patterns: [
             { group: ['three/*'], message: 'world-session must not import Three.js (ADR-0013).' },
             { group: ['**/renderer/**'], message: 'world-session must not import renderer or UI internals (ADR-0013, BOUNDARIES.md).' },
+          ],
+        },
+      ],
+    },
+  },
+
+  // Boundary: interactions resolves pure effect plans through WorldSession. It
+  // is headless application code and must not reach into React or the renderer.
+  {
+    files: ['src/interactions/**/*.{ts,tsx}'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: [
+            { name: 'react', message: 'interactions is headless and must not import React (ADR-0014).' },
+            { name: 'react-dom', message: 'interactions is headless and must not import React (ADR-0014).' },
+            { name: 'three', message: 'interactions holds neutral data and must not import Three.js (ADR-0014).' },
+          ],
+          patterns: [
+            { group: ['three/*'], message: 'interactions must not import Three.js (ADR-0014).' },
+            { group: ['**/renderer/**'], message: 'interactions must not import renderer or UI internals (ADR-0014, BOUNDARIES.md).' },
           ],
         },
       ],
