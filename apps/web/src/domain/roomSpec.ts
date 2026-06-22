@@ -34,6 +34,7 @@ const Interaction = z.object({
   // Optional genre-neutral encounter (ADR-0015). Rides alongside `effect`; when
   // both are present the encounter takes precedence at the composition root.
   encounter: EncounterSpecSchema.optional(),
+  exit: z.object({ toRoomId: z.string().min(1) }).strict().optional(),
 })
 
 /* ---------- known object types ---------- */
@@ -76,6 +77,7 @@ const Arch = z.object({
   width: z.number().positive().default(2.5),
   height: z.number().positive().default(3.5),
   color: Hex.default('#9a9488'),
+  interaction: Interaction.optional(),
   ...transform,
 })
 

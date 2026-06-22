@@ -33,7 +33,7 @@ layers, never the reverse. The domain depends on nothing in this repo.
 | **Domain / Contracts** | `apps/web/src/domain/` | RoomSpec plus versioned world/event/save schemas, pure loaders/validators/projection, and ports (`RoomSource`, `RoomGenerator`, `WorldStore`, `Clock`, `IdGenerator`, interaction). Pure. |
 | **Renderer** | `apps/web/src/renderer/engine/` | Three.js engine, builders, controls, **camera controllers** (`camera/`: `CameraController` / `IsometricCameraController`), the **player object/marker**, disposal. |
 | **UI** | `apps/web/src/renderer/ui/` | Presentational React components. |
-| **App / Composition root** | `apps/web/src/App.tsx`, `RoomViewer.tsx`, `app/`, `room/` | Wires concrete implementations together (room sources, prompt bar, error boundary). |
+| **App / Composition root** | `apps/web/src/App.tsx`, `RoomViewer.tsx`, `app/`, `room/` | Wires concrete implementations together, including room sources, persistent play-session/cache ownership, navigation, prompt bar, and error boundary. |
 | **Platform** | `apps/web/src/platform/` | Cross-cutting adapters: logger (`logger/`) and real clock/UUID implementations (`system/`); 🔜 config/env. |
 | **Generation** | ✅ v0 (fake): `apps/web/src/generation/` | Prompt → RoomSpec **data** via a deterministic fake generator; 🔜 real LLM. |
 | **World session** | ✅ v0 (headless): `apps/web/src/world-session/` | Application use-cases, in-memory `WorldStore`, and the SaveGame JSON boundary. No React/renderer wiring. |
@@ -70,7 +70,7 @@ place allowed to depend on everything; it is where wiring happens.
 | **Persistence/DB code must never appear in UI or renderer.** | Data access is server-side and lives behind repository interfaces. SQL/driver types never leak outward. ([ADR-0004](./decisions/ADR-0004-persistence-sqlite-to-postgres.md)) |
 | **World session must not import React, Three.js, or renderer/UI internals.** | Authoritative gameplay truth is a headless application layer over neutral domain data and ports; renderer wiring is a separate future slice. ([ADR-0013](./decisions/ADR-0013-world-state-event-log-v0.md)) |
 | **World state changes only by appending a validated event and projecting it.** | The event log is authoritative. Direct snapshot setters would create a second source of truth and break reconstruction/integrity. ([ADR-0013](./decisions/ADR-0013-world-state-event-log-v0.md)) |
-| **Renderer interaction callbacks carry intent only.** | The engine may pass a neutral object id but must not import `world-session`/`interactions`/`encounters`, plan effects, or mutate `WorldState`; the composition root owns that wiring. ([ADR-0014](./decisions/ADR-0014-object-interactions-v0.md), [ADR-0015](./decisions/ADR-0015-encounter-system-v0.md)) |
+| **Renderer interaction callbacks carry intent only.** | The engine may pass a neutral object id but must not import `world-session`/`interactions`/`encounters` or navigation/cache modules, plan effects, resolve exits, or mutate `WorldState`; the composition root owns that wiring. ([ADR-0014](./decisions/ADR-0014-object-interactions-v0.md), [ADR-0015](./decisions/ADR-0015-encounter-system-v0.md), [ADR-0016](./decisions/ADR-0016-multi-room-navigation-cache-v0.md)) |
 | **Interaction effects are fixed-vocabulary data, never behavior/code.** | The pure domain planner maps validated descriptors to existing commands, and the application service can write only through `WorldSession.appendEvent`. ([ADR-0014](./decisions/ADR-0014-object-interactions-v0.md)) |
 | **Encounters are fixed-vocabulary data, never behavior/code.** | An `EncounterSpec` rides the shared `Interaction`; the pure `planEncounter` maps the chosen choice to existing commands (no new event type, encounter wins over `effect`), and `EncounterService` writes only through `WorldSession.appendEvent` via the shared `applyCommands` helper. ([ADR-0015](./decisions/ADR-0015-encounter-system-v0.md)) |
 | **Generation must never emit executable code** — only RoomSpec data. | The trust boundary. Model output is data validated at the boundary, never `eval`'d, never turned into JS/Three/React — and never Unity C#, Godot GDScript, or any scene script. ([ADR-0001](./decisions/ADR-0001-data-only-room-spec-trusted-renderer.md), [ADR-0008](./decisions/ADR-0008-renderer-portability-strategy.md)) |
@@ -97,6 +97,12 @@ The UI and the engine are wired together **only** at the composition root
 
 Anything beyond this surface (React touching `THREE.*`, the engine importing a
 component) is a boundary violation.
+
+Multi-room navigation remains composition-layer code: `RoomRegistry` and
+`SessionRoomCache` live in `room/`, `NavigationService` and exit lookup helpers
+live in `app/`, and `App` owns the persistent session/cache. `RoomViewer` maps a
+neutral object id to an exit and routes intent upward. The engine imports none of
+these modules, and this slice adds no ESLint platform rule.
 
 ## Lint-enforced boundaries
 

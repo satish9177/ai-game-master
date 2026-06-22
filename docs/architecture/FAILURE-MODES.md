@@ -317,6 +317,28 @@ choice `label`, `resultText`, status strings, item names) is display-only and
 never reaches the logger; the chosen genre-neutral `action` is the only
 choice-derived value logged.
 
+## 14. Multi-room navigation ✅
+
+An authored interaction exit is resolved through the session cache and room
+registry before the existing `moved-to-room` event is appended
+([ADR-0016](./decisions/ADR-0016-multi-room-navigation-cache-v0.md)).
+
+| Situation | Detection | Handling / result | Logging |
+| --- | --- | --- | --- |
+| Object has no exit | composition lookup miss | `rejected: missing-exit`; fall through to encounter/effect/plain panel | reason code only |
+| Target is unknown | registry/cache miss | `rejected: unknown-room`; append nothing; calm blocked message | code, `toRoomId` |
+| Target spec is invalid/unavailable | room-load boundary | typed `failed`; append nothing; safe message | ids/codes only |
+| Target is current room | self-navigation guard | `rejected: already-here`; append nothing | ids/code only |
+| Move revision is stale | `WorldSession.move` | `failed: conflict`; no retry | ids/code/revision only |
+| Session is missing | state read or move | `failed: not-found` | ids/code only |
+| Return to visited room | cache hit + persistent session | reuse cached room; visited and resolution flags remain intact | ids/code/`cacheHit` only |
+
+Target resolution always happens before append, so the authoritative log never
+claims the player entered an unrenderable room. Successful navigation appends
+only the existing `moved-to-room`; visited marking is the reducer's existing
+behavior. The active cached room rebuilds the engine for presentation, while the
+session/cache persist and the renderer remains intent-only.
+
 ---
 
 ## Summary
@@ -337,6 +359,7 @@ choice-derived value logged.
 | 11 | Unsupported save version | envelope version check | typed rejection; no silent migration | ✅ headless |
 | 12 | Object interaction resolution | pure effect plan + sequential typed appends | no-op/rejection/conflict/partial result; safe panel message | ✅ |
 | 13 | Encounter resolution | pure encounter plan + shared `applyCommands` typed appends | already-resolved/rejection/conflict/partial result; safe panel message; health clamps, no death state | ✅ |
+| 14 | Multi-room navigation | cache/registry resolve before `WorldSession.move` | rejection/failure with no move, or cached room + persistent flags | ✅ |
 
 The through-line: **validate at the boundary, degrade visibly and safely, log
 the detail, show the user calm.**

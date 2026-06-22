@@ -23,7 +23,7 @@ Throughout these docs:
 - ✅ **Implemented** — exists today in `apps/web` (Renderer Foundation v0;
   Generation Foundation v0; Semantic Room Validator v0; Isometric Camera
   Foundation; World State & Event Log v0; Object Interactions v0; Encounter
-  System v0).
+  System v0; Multi-Room Navigation & Cache v0).
 - 🔜 **Planned** — designed and approved, not yet built (next slices).
 - ❌ **Not built** — future shape only; documented so we don't paint into a corner.
 
@@ -191,6 +191,27 @@ now reuses it) and returns a typed result; health may clamp to `0` with **no
 death/game-over state**. Authored text (`description`, `title`, choice `label`,
 `resultText`, status strings, item names) is display-only and never logged. See
 [ADR-0015](./decisions/ADR-0015-encounter-system-v0.md).
+
+## Multi-Room Navigation & Cache v0
+
+✅ **Implemented.** Authored objects may carry the data-only
+`interaction.exit: { toRoomId }`; the two example rooms connect through stable
+interactable north arches. `RoomViewer` maps the renderer's neutral object id to
+exit metadata and applies composition precedence **exit → encounter → effect**.
+The engine still emits intent only and was not changed.
+
+`RoomRegistry` validates registered example rooms through `loadRoomSpec`,
+`SessionRoomCache` reuses each loaded room verbatim for one play session, and
+`NavigationService` resolves the target before calling the existing
+`WorldSession.move`. A failed resolve appends nothing. A successful move appends
+only `moved-to-room`; the existing reducer marks the destination visited.
+
+`App` owns the persistent example-world session and cache across transitions.
+Changing the active preloaded room disposes and rebuilds the engine, while the
+session's visited and interaction/encounter flags survive and returning reuses
+the cached room. Prompt-generated rooms remain fresh single-room sessions with
+fresh caches. See
+[ADR-0016](./decisions/ADR-0016-multi-room-navigation-cache-v0.md).
 
 ## Layered architecture
 
@@ -445,7 +466,8 @@ is to keep each replacement local to its port.
   integrity. Unknown versions and tampering are rejected, never silently fixed.
 - 🔜 A server-side SQLite/PostgreSQL adapter may implement the same `WorldStore`
   port. No real DB, API, or memory system exists yet; current renderer/UI access
-  is composition-only through Object Interactions v0.
+  is composition-only through Object Interactions, Encounters, and Multi-Room
+  Navigation v0.
 
 ### ✅ Object Interactions v0  ·  🔜 richer gameplay effects
 
@@ -456,8 +478,9 @@ is to keep each replacement local to its port.
   typed no-op/rejection. One-shot effects require a stable idempotency key and
   record it in the current room's flags.
 - ✅ `InteractionService` threads revisions through `WorldSession.appendEvent`.
-  The composition root starts an ephemeral in-memory session per room load and
-  sends a plain result message to the existing dialogue panel.
+  The composition root uses the persistent example-world session across room
+  navigation and sends a plain result message to the existing dialogue panel;
+  prompt-generated rooms still start fresh single-room sessions.
 - ✅ The renderer remains intent-only: it passes a passive object id through the
   neutral host callback and never imports the interaction service or world state.
 - 🔜 Cooldowns, random loot, quest gates, combat, dialogue trees, persistence,
@@ -477,9 +500,21 @@ is to keep each replacement local to its port.
 - ✅ The composition root routes an E/F open to a two-phase encounter panel
   (description + choice buttons) when the object has an encounter; the renderer
   still only emits intent.
-- 🔜 Randomness/dice via a seeded `Rng` port, death/downed state, multi-room
+- 🔜 Randomness/dice via a seeded `Rng` port, death/downed state, richer cross-room
   consequences, cooldowns/escalation, and LLM-authored encounter data remain
   future work.
+
+### ✅ Multi-Room Navigation & Cache v0  ·  🔜 durable room storage
+
+- ✅ `RoomRegistry` resolves the two authored rooms through `loadRoomSpec`, while
+  `SessionRoomCache` holds identical `LoadedRoom` references for one session.
+- ✅ `NavigationService` is cache-first and resolves before appending the existing
+  `moved-to-room`; unknown/invalid targets and self-navigation append nothing.
+- ✅ `App` keeps the session/cache alive while `RoomViewer` rebuilds the unchanged
+  engine for each active room. Return visits preserve visited and resolution
+  flags, with exit → encounter → effect precedence at composition.
+- 🔜 Durable room storage, more than two rooms, adjacent-room pre-generation,
+  entry-aligned spawn, transition animation, and a minimap remain future work.
 
 ### ❌ Backend / API
 

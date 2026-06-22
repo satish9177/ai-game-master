@@ -108,6 +108,15 @@ export const throneRoom = {
         },
       },
     },
-    { type: 'arch', position: [0, 0, -10] }, // at the north exit
+    {
+      type: 'arch',
+      id: 'north-door',
+      position: [0, 0, -10],
+      interaction: {
+        key: 'E',
+        prompt: 'Press E to leave through the north arch',
+        exit: { toRoomId: 'ruined-safehouse' },
+      },
+    }, // at the north exit
   ],
 }

@@ -70,6 +70,77 @@ describe('post-apoc object schema', () => {
     },
   )
 
+  it('keeps decorative arches valid and lets an arch carry a room exit', () => {
+    const decorative = RoomObjectSchema.parse({ type: 'arch', position: [0, 0, 0] })
+    expect('interaction' in decorative).toBe(false)
+
+    const door = RoomObjectSchema.parse({
+      type: 'arch',
+      id: 'north-door',
+      position: [0, 0, -5],
+      interaction: {
+        key: 'E',
+        prompt: 'Press E to enter',
+        exit: { toRoomId: 'next-room' },
+      },
+    })
+    expect(door.type === 'arch' && door.interaction?.exit).toEqual({
+      toRoomId: 'next-room',
+    })
+  })
+
+  it('keeps exit optional and accepts exit, encounter, and effect together', () => {
+    const parsed = RoomObjectSchema.parse({
+      type: 'arch',
+      id: 'compound-door',
+      position: [0, 0, 0],
+      interaction: {
+        key: 'E',
+        prompt: 'Press E',
+        exit: { toRoomId: 'next-room' },
+        effect: { kind: 'inspect' },
+        encounter: {
+          description: 'A guardian blocks the arch.',
+          choices: [{
+            id: 'run',
+            action: 'run',
+            label: 'Run through',
+            outcome: { effects: [] },
+          }],
+        },
+      },
+    })
+    if (parsed.type !== 'arch' || !parsed.interaction) throw new Error('arch did not parse')
+    expect(parsed.interaction.exit?.toRoomId).toBe('next-room')
+    expect(parsed.interaction.encounter?.choices[0]?.action).toBe('run')
+    expect(parsed.interaction.effect?.kind).toBe('inspect')
+
+    const presentationOnly = RoomObjectSchema.parse({
+      type: 'scroll',
+      position: [0, 0, 0],
+      interaction: { key: 'E', prompt: 'Read' },
+    })
+    expect(presentationOnly.type === 'scroll' && presentationOnly.interaction.exit)
+      .toBeUndefined()
+  })
+
+  it('rejects empty and malformed exit targets', () => {
+    expect(RoomObjectSchema.safeParse({
+      type: 'arch',
+      position: [0, 0, 0],
+      interaction: { key: 'E', prompt: 'Enter', exit: { toRoomId: '' } },
+    }).success).toBe(false)
+    expect(RoomObjectSchema.safeParse({
+      type: 'arch',
+      position: [0, 0, 0],
+      interaction: {
+        key: 'E',
+        prompt: 'Enter',
+        exit: { toRoomId: 'next-room', executable: true },
+      },
+    }).success).toBe(false)
+  })
+
   it('loads the new types without skipping while still skipping unknown ones', () => {
     const loaded = loadRoomSpec(
       minimalRoom([
