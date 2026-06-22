@@ -99,6 +99,7 @@ Dependencies point **inward**, toward the domain. Full rules in
 | **UI** (React) | `apps/web/src/renderer/ui/` | domain, host contract, logger port | Three.js, engine internals |
 | **Composition root** | `apps/web/src/App.tsx`, `RoomViewer.tsx`, `app/`, `room/` | everything (this is where wiring lives) | — |
 | **Generation** | `apps/web/src/generation/` (v0, fake) | domain, logger port | UI, renderer, React, Three.js |
+| **World session** | `apps/web/src/world-session/` (v0, headless) | domain, logger port | UI, renderer, React, Three.js, DB |
 | **Backend / Persistence** | not built yet | domain | UI, renderer |
 
 ## Logging rules

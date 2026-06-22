@@ -22,7 +22,7 @@ Throughout these docs:
 
 - ✅ **Implemented** — exists today in `apps/web` (Renderer Foundation v0;
   Generation Foundation v0; Semantic Room Validator v0; Isometric Camera
-  Foundation).
+  Foundation; World State & Event Log v0).
 - 🔜 **Planned** — designed and approved, not yet built (next slices).
 - ❌ **Not built** — future shape only; documented so we don't paint into a corner.
 
@@ -33,7 +33,8 @@ A single Vite application at `apps/web`:
 - **React 19 + TypeScript + Vite** — application shell and UI overlay.
 - **Vanilla Three.js 0.184** (not react-three-fiber) — the rendering engine.
 - **zod 4** — RoomSpec validation at the data boundary.
-- No AI, no backend, no database, no persistence. ✅ by design for v0.
+- No real AI, backend, or database. The only persistence-shaped adapter is the
+  headless in-memory world store and explicit SaveGame JSON boundary. ✅ by design.
 
 It proves one thing: a hardcoded **RoomSpec** (pure data) can be turned into a
 walkable low-poly 3D room rendered entirely by **trusted Three.js code**, with
@@ -134,6 +135,21 @@ free-camera 3D remains future and optional.** Camera mode is **renderer-internal
 presentation**, never room data — a RoomSpec describes *what is in the room*, not
 *how it is filmed*.
 
+## World State & Event Log v0
+
+✅ **Implemented, headless.** Authoritative gameplay truth now lives in an
+append-only `WorldEvent[]`; `WorldState` is a pure, reconstructable projection
+and its stored snapshot is only a cache. `CanonSeed` initializes the first
+`session-started` event and never overrides subsequent play.
+
+`WorldSession` exposes typed use-cases over `WorldStore`, `Clock`, and
+`IdGenerator` ports. `InMemoryWorldStore` proves atomic append + snapshot commit
+and optimistic concurrency without adding a database. The SaveGame boundary
+serializes seed + log + snapshot, rejects unsupported versions, and rejects any
+document whose seed or projected snapshot fails integrity. There is no renderer,
+React, `App.tsx`, HTTP, database, LLM, dialogue, or memory wiring in this slice.
+See [ADR-0013](./decisions/ADR-0013-world-state-event-log-v0.md).
+
 ## Layered architecture
 
 Dependencies point **inward**, toward the domain. Outer layers may depend on
@@ -142,8 +158,8 @@ inner layers; inner layers never depend on outer layers.
 ```
         ┌────────────────────────────────────────────────────────┐
         │  DOMAIN / CONTRACTS  (pure data + types, zero I/O)       │
-        │  RoomSpec schema · loadRoomSpec (validation) · version   │
-        │  ✅ ports: RoomSource, RoomGenerator   ❌ ports: Repos    │
+        │  RoomSpec + World schemas · pure validators/projections  │
+        │  ✅ ports: RoomSource, RoomGenerator, WorldStore, time/id │
         └────────────────────────────────────────────────────────┘
               ▲              ▲                ▲              ▲
        imports│       imports│         impl   │       impl   │ (future)
@@ -158,11 +174,12 @@ inner layers; inner layers never depend on outer layers.
 
 | Layer | Responsibility | May depend on | Must NOT depend on |
 | --- | --- | --- | --- |
-| **Domain / Contracts** | The RoomSpec data contract, validation, types, ports (interfaces). Pure; no I/O. | Nothing (only zod) | React, Three.js, DOM, network, DB |
+| **Domain / Contracts** | Room and world data contracts, validation/projection, types, and ports. Pure; no I/O. | Nothing (only zod) | React, Three.js, DOM, network, DB |
 | **Renderer** (`renderer/engine`) | Turn a validated room into a Three.js scene; own the render loop, controls, disposal. | Domain | React, network, DB |
 | **UI** (`renderer/ui`) | Presentational React overlay (HUD, dialogue panel). | Domain, approved host contract | Three.js internals, network, DB |
 | **App / Composition root** | Wire concrete implementations together (logger, room source, engine host). | All of the above | — |
 | ✅ **Generation (v0, fake)** | Prompt → **RoomSpec data** (never code) via a deterministic fake generator. Validated by the same loader. 🔜 real LLM. | Domain | Renderer, React, DB |
+| ✅ **World session (v0, headless)** | Commands → validated append-only events → pure `WorldState` projection; in-memory store and SaveGame boundary. | Domain, Logger port | React, Three.js, Renderer, DB |
 | ❌ **Backend / Persistence** | Host generation; store rooms/sessions. | Domain | UI, Renderer |
 
 The current code already honors the top three rows: `Engine` is pure Three.js
@@ -334,8 +351,8 @@ types today (see [FAILURE-MODES](./FAILURE-MODES.md)).
 
 ## Future plug-in points
 
-These are **designed, not built**. The point of documenting them now is to keep
-today's seams in the right place.
+These seams include both implemented foundations and future adapters. The point
+is to keep each replacement local to its port.
 
 ### ✅ Generation Foundation v0  ·  🔜 real LLM
 
@@ -365,6 +382,21 @@ today's seams in the right place.
 - 🔜 Rooms are pre-generated ahead of the player so transitions feel instant. See
   **[Adjacent-room pre-generation](#adjacent-room-pre-generation-planned)** below
   and [ADR-0009](./decisions/ADR-0009-adjacent-room-pre-generation.md).
+
+### ✅ World State & Event Log v0  ·  🔜 database adapter
+
+- ✅ `CanonSeed`, `WorldEvent`, `WorldCommand`, `WorldState`, and `SaveGame` are
+  versioned neutral-JSON domain schemas. The event log is authoritative; the
+  snapshot must equal `projectWorldState(log)`.
+- ✅ `WorldStore`, `Clock`, and `IdGenerator` are domain ports. `WorldSession`
+  depends on them by constructor injection and returns typed expected failures.
+- ✅ `InMemoryWorldStore` atomically appends an event and replaces its projected
+  snapshot under an optimistic revision check. It exposes no event mutation or
+  deletion path.
+- ✅ Save/load revalidates schemas, log shape, seed identity, and snapshot
+  integrity. Unknown versions and tampering are rejected, never silently fixed.
+- 🔜 A server-side SQLite/PostgreSQL adapter may implement the same `WorldStore`
+  port. No real DB, API, renderer/UI wiring, or memory system exists yet.
 
 ### ❌ Backend / API
 

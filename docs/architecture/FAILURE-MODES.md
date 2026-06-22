@@ -219,6 +219,50 @@ A handful of invariants keep it robust; all are ✅ today.
   camera/player fields and the model never directs the camera (see
   [BOUNDARIES](./BOUNDARIES.md)).
 
+## 9. Concurrent world-session append ✅ (headless)
+
+Two callers attempt to append from the same cached revision.
+
+- **Detection** ✅ — `WorldStore.commit` compares `expectedRevision` with the
+  current snapshot revision. A mismatch returns the typed `conflict` code; the
+  event and snapshot are both left unchanged.
+- **Handling** ✅ — the in-memory adapter commits append + projected snapshot as
+  one atomic unit, both or neither. The caller may re-read and deliberately retry;
+  no automatic replay exists in v0.
+- **User-facing** — no UI is wired in this headless slice. A future host maps the
+  typed conflict to retry/reload behavior rather than exposing internals.
+- **Logging** ✅ — session id, expected revision, and `conflict` code only; never
+  command payload, item names, reasons, or narrative content.
+
+## 10. SaveGame integrity mismatch ✅ (headless)
+
+The top-level seed differs from the first event, the log shape is malformed, or
+the cached snapshot differs from `projectWorldState(log)`.
+
+- **Detection** ✅ — after strict v1 schema validation, `loadSaveGame` runs
+  `validateEventLog`, structurally compares both seed copies, reconstructs the
+  snapshot from the authoritative log, and compares it with key-order-independent
+  JSON equality.
+- **Handling** ✅ — reject the entire document with typed `integrity-mismatch`;
+  nothing is restored and no partial state is accepted or repaired.
+- **User-facing** — no UI exists yet. The typed error is safe for a future host to
+  map to “save could not be loaded” without echoing save content.
+- **Logging** ✅ — error code and, when known, session id/revision/event count
+  only. The save JSON, seed name, event payloads, and narrative text are never
+  logged.
+
+## 11. Unsupported SaveGame version ✅ (headless)
+
+A parsed SaveGame declares a top-level `schemaVersion` other than `1`.
+
+- **Detection** ✅ — the load boundary validates the minimal envelope first, then
+  checks its version before attempting the strict current-version schema.
+- **Handling** ✅ — reject with typed `unsupported-version`; never silently
+  migrate, coerce, or mutate the document.
+- **User-facing** — no UI exists yet. A future host can explain that the save was
+  produced by an unsupported game version.
+- **Logging** ✅ — stable error code only; never the document or embedded content.
+
 ---
 
 ## Summary
@@ -234,6 +278,9 @@ A handful of invariants keep it robust; all are ✅ today.
 | 6 | DB failure | adapter → typed error | read-only / safe error | ❌ |
 | 7 | Pre-gen not ready | room status at door | "Opening the way…" / fallback | ❌ |
 | 8 | Iso camera/player presentation | resize→frustum; player-position proximity; scene-graph disposal; cutaway curbs | stable framing, no occlusion or leak | ✅ |
+| 9 | Concurrent world append | optimistic revision check | typed conflict; neither event nor snapshot committed | ✅ headless |
+| 10 | Save integrity mismatch | validate log + seed + projected snapshot | reject whole save | ✅ headless |
+| 11 | Unsupported save version | envelope version check | typed rejection; no silent migration | ✅ headless |
 
 The through-line: **validate at the boundary, degrade visibly and safely, log
 the detail, show the user calm.**
