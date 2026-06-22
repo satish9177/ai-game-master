@@ -85,7 +85,55 @@ export const ruinedRoom = {
         effect: { kind: 'inspect' },
       },
     },
-    { type: 'zombie', position: [2.5, 0, -4], rotationY: -30 },
+    // A walker that rises when approached — a survival encounter (ADR-0015):
+    // fight (damage + infection), hide (nothing happens), or run (slip away).
+    {
+      type: 'zombie',
+      id: 'lurching-walker',
+      position: [2.5, 0, -4],
+      rotationY: -30,
+      interaction: {
+        key: 'F',
+        prompt: 'Press F to face the walker',
+        encounter: {
+          id: 'walker-encounter',
+          title: 'A Reanimated Walker',
+          description: 'A corpse lurches upright between you and the back wall, jaws working.',
+          choices: [
+            {
+              id: 'fight',
+              action: 'fight',
+              label: 'Put it down',
+              outcome: {
+                effects: [
+                  { kind: 'damage', amount: 20 },
+                  { kind: 'add-status', status: 'infected' },
+                ],
+                resultText: 'You crush its skull — but not before its teeth find your arm.',
+              },
+            },
+            {
+              id: 'hide',
+              action: 'hide',
+              label: 'Hold still and hide',
+              outcome: {
+                effects: [],
+                resultText: 'You press into the shadows until it shambles past.',
+              },
+            },
+            {
+              id: 'run',
+              action: 'run',
+              label: 'Run for the door',
+              outcome: {
+                effects: [],
+                resultText: 'You bolt for the north arch and do not look back.',
+              },
+            },
+          ],
+        },
+      },
+    },
 
     // A scavenged note and a toppled shelf.
     {

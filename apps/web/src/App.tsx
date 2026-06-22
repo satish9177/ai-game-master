@@ -13,6 +13,7 @@ import { InMemoryWorldStore } from './world-session/InMemoryWorldStore'
 import { WorldSession } from './world-session/WorldSession'
 import type { WorldStateResult } from './world-session/WorldSession'
 import { InteractionService } from './interactions/InteractionService'
+import { EncounterService } from './encounters/EncounterService'
 import type { LoadedRoom } from './domain/loadRoomSpec'
 
 // Composition root: the one place concrete implementations are chosen and wired.
@@ -26,6 +27,7 @@ const idGenerator = new UuidGenerator()
 const worldStore = new InMemoryWorldStore()
 const worldSession = new WorldSession(worldStore, new SystemClock(), idGenerator, logger)
 const interactionService = new InteractionService(worldSession, logger)
+const encounterService = new EncounterService(worldSession, logger)
 
 // First paint shows the existing static throne room. Its identity is stable so
 // the host doesn't reload it on re-render; a prompt submission swaps it out.
@@ -67,6 +69,7 @@ function App() {
       <RoomViewer
         roomSource={roomSource}
         interactionService={interactionService}
+        encounterService={encounterService}
         startRoomSession={startRoomSession}
       />
       <PromptBar onSubmit={handlePrompt} />

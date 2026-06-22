@@ -7,13 +7,17 @@ import { DialoguePanel } from './ui/DialoguePanel'
 import { createConsoleLogger } from '../platform/logger/consoleLogger'
 import { isWebGL2Available } from '../platform/browser/webglSupport'
 import type { LoadedRoom } from '../domain/loadRoomSpec'
+import type { EncounterSpec } from '../domain/encounters/encounterSpec'
 import type { WorldStateResult } from '../world-session/WorldSession'
 import type { InteractionService } from '../interactions/InteractionService'
+import type { EncounterService } from '../encounters/EncounterService'
 import {
   buildInteractionEffectLookup,
   interactionResultMessage,
 } from '../app/interactionEffects'
 import type { InteractionEffectLookup } from '../app/interactionEffects'
+import { buildEncounterLookup, encounterResultMessage } from '../app/encounters'
+import type { EncounterLookup } from '../app/encounters'
 
 /** Safe, user-facing copy for a host failure — detail goes to the log, not here. */
 const ROOM_UNAVAILABLE = 'This room could not be loaded.'
@@ -39,21 +43,31 @@ function describeError(err: unknown): string {
 type RoomViewerProps = {
   roomSource: RoomSource
   interactionService: InteractionService
+  encounterService: EncounterService
   startRoomSession: (room: LoadedRoom) => Promise<WorldStateResult>
 }
 
 export function RoomViewer({
   roomSource,
   interactionService,
+  encounterService,
   startRoomSession,
 }: RoomViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const engineRef = useRef<Engine | null>(null)
   const sessionIdRef = useRef<string | null>(null)
   const effectLookupRef = useRef<InteractionEffectLookup>(new Map())
+  const encounterLookupRef = useRef<EncounterLookup>(new Map())
+  // The encounter currently presented in the panel (if any), so a chosen choice
+  // resolves against the right threat. Cleared on close/dispose; its identity
+  // also guards against a resolution landing after a remount.
+  const activeEncounterRef = useRef<{ encounter: EncounterSpec; ref: string | undefined } | null>(
+    null,
+  )
   const [active, setActive] = useState<Interactable | null>(null)
   const [dialogue, setDialogue] = useState<Interactable | null>(null)
   const [resultMessage, setResultMessage] = useState<string | undefined>()
+  const [choices, setChoices] = useState<{ id: string; label: string }[] | undefined>()
   // FAILURE-MODES case 3: probe WebGL2 once as render-derived state (the check is
   // pure) so we never construct an engine that can't get a context, and never
   // call setState synchronously in the effect for it.
@@ -96,10 +110,31 @@ export function RoomViewer({
     engine.onActiveInteractionChange = setActive
     engine.onRequestOpenInteraction = (target) => {
       engine.setInteractionLock(true) // freeze movement/look while open
-      setDialogue(target)
       setResultMessage(undefined)
-
       const sessionId = sessionIdRef.current
+
+      // Encounter wins over any effect (ADR-0015 decision 3): present the threat
+      // and its choices. Nothing is applied until the player picks one.
+      const encounterTarget = encounterLookupRef.current.get(target.id)
+      if (encounterTarget) {
+        const enc = encounterTarget.encounter
+        activeEncounterRef.current = { encounter: enc, ref: encounterTarget.ref ?? target.id }
+        // The threat description rides through the neutral `body` view-model
+        // field; the engine never learns about encounters.
+        setDialogue({ ...target, title: enc.title ?? target.title, body: enc.description })
+        if (!sessionId) {
+          setChoices(undefined)
+          setResultMessage('This interaction is unavailable.')
+          return
+        }
+        setChoices(enc.choices.map((choice) => ({ id: choice.id, label: choice.label })))
+        return
+      }
+
+      // No encounter: today's single-press effect path.
+      activeEncounterRef.current = null
+      setChoices(undefined)
+      setDialogue(target)
       if (!sessionId) {
         setResultMessage('This interaction is unavailable.')
         return
@@ -144,6 +179,7 @@ export function RoomViewer({
         }
         sessionIdRef.current = session.state.sessionId
         effectLookupRef.current = buildInteractionEffectLookup(result.room)
+        encounterLookupRef.current = buildEncounterLookup(result.room)
         // Building the scene can throw unexpectedly; fail safe and dispose.
         try {
           engine.setRoom(result.room)
@@ -168,17 +204,50 @@ export function RoomViewer({
       engineRef.current = null
       sessionIdRef.current = null
       effectLookupRef.current = new Map()
+      encounterLookupRef.current = new Map()
+      activeEncounterRef.current = null
       setActive(null)
       setDialogue(null)
       setResultMessage(undefined)
+      setChoices(undefined)
       setFatalMessage(null)
     }
-  }, [interactionService, roomSource, startRoomSession, webgl2Available])
+  }, [encounterService, interactionService, roomSource, startRoomSession, webgl2Available])
+
+  // Resolve a picked encounter choice. Defined at component scope so the panel
+  // can call it; guarded by the active-encounter identity so a resolution that
+  // lands after a remount is ignored (mirrors the effect path's `cancelled`).
+  const handleChoose = useCallback(
+    (choiceId: string) => {
+      const active = activeEncounterRef.current
+      const sessionId = sessionIdRef.current
+      if (!active || !sessionId) return
+      setChoices(undefined) // one resolution per open: hide the buttons
+      const chosen = active.encounter.choices.find((choice) => choice.id === choiceId)
+      void encounterService
+        .resolve({ sessionId, encounter: active.encounter, choiceId, ref: active.ref })
+        .then((result) => {
+          if (activeEncounterRef.current !== active) return
+          // Prefer the choice's authored result text (display only, never
+          // logged); fall back to the generic typed-result message.
+          const authored = result.status === 'applied' ? chosen?.outcome.resultText : undefined
+          setResultMessage(authored ?? encounterResultMessage(result))
+        })
+        .catch(() => {
+          if (activeEncounterRef.current !== active) return
+          createConsoleLogger().error('encounter resolution threw', { code: 'encounter-failed' })
+          setResultMessage('This encounter is unavailable.')
+        })
+    },
+    [encounterService],
+  )
 
   const closeDialogue = useCallback(() => {
     engineRef.current?.setInteractionLock(false) // resume movement/look
+    activeEncounterRef.current = null
     setDialogue(null)
     setResultMessage(undefined)
+    setChoices(undefined)
   }, [])
 
   // A single safe-fallback string from any host failure (FAILURE-MODES). Null on
@@ -200,6 +269,8 @@ export function RoomViewer({
         <DialoguePanel
           target={dialogue}
           resultMessage={resultMessage}
+          choices={choices}
+          onChoose={handleChoose}
           onClose={closeDialogue}
         />
       )}

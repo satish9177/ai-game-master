@@ -2,18 +2,27 @@ import { useEffect } from 'react'
 import type { Interactable } from '../../domain/ports/interaction'
 
 /**
- * Static interact panel for v0 — no dialogue tree, no choices. Shows the
- * interactable's title/body (with sensible fallbacks) and closes on the close
- * button or Escape. A full-screen backdrop captures pointer events so drags
- * don't reach the canvas while it's open (input is also locked in the engine).
+ * Static interact panel for v0. Shows the interactable's title/body (with
+ * sensible fallbacks) and closes on the close button or Escape. A full-screen
+ * backdrop captures pointer events so drags don't reach the canvas while it's
+ * open (input is also locked in the engine).
+ *
+ * For an encounter (ADR-0015) the composition root passes the threat
+ * description through `target.body` plus presentational `choices`; picking one
+ * calls `onChoose`. This component stays purely presentational — it never
+ * imports world-session/encounters and never mutates state.
  */
 export function DialoguePanel({
   target,
   resultMessage,
+  choices,
+  onChoose,
   onClose,
 }: {
   target: Interactable
   resultMessage?: string
+  choices?: { id: string; label: string }[]
+  onChoose?: (id: string) => void
   onClose: () => void
 }) {
   useEffect(() => {
@@ -43,6 +52,19 @@ export function DialoguePanel({
           </button>
         </div>
         <p className="panel-body">{body}</p>
+        {choices && choices.length > 0 && onChoose && (
+          <div className="panel-choices">
+            {choices.map((choice) => (
+              <button
+                key={choice.id}
+                className="panel-btn"
+                onClick={() => onChoose(choice.id)}
+              >
+                {choice.label}
+              </button>
+            ))}
+          </div>
+        )}
         {resultMessage && <p className="panel-result">{resultMessage}</p>}
         <div className="panel-foot">
           <button className="panel-btn" onClick={onClose}>

@@ -127,6 +127,13 @@ body {
   color: #cfc7b6;
 }
 
+.panel-choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 0 0 1.2rem;
+}
+
 .panel-result {
   margin: -0.45rem 0 1.2rem;
   color: #f3d58a;

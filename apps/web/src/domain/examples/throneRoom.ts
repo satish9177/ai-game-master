@@ -38,16 +38,74 @@ export const throneRoom = {
         effect: { kind: 'inspect' },
       },
     },
+    // A coffer of tribute — open it for the coin the steward expects.
+    {
+      type: 'crate',
+      id: 'offering-coffer',
+      position: [3, 0, 4],
+      interaction: {
+        key: 'E',
+        prompt: 'Press E to open the offering coffer',
+        body: 'A coffer of tribute left for the court. A single gold coin remains.',
+        effect: {
+          kind: 'take-item',
+          item: { itemId: 'gold-coin', name: 'Gold Coin', quantity: 1 },
+        },
+      },
+    },
     {
       type: 'npc',
       id: 'steward-malik',
       name: 'Malik',
       position: [-2, 0, 0],
+      // Both an effect and an encounter: the encounter takes precedence
+      // (ADR-0015 decision 3), so pressing F opens the confrontation. A
+      // fantasy/mystery encounter — distract gates on the coin without spending
+      // it, negotiate spends it for a writ, and fighting costs health.
       interaction: {
         key: 'F',
-        prompt: 'Press F to speak with Malik',
-        body: 'The steward Malik regards you warily.',
+        prompt: 'Press F to confront Malik',
+        body: 'The steward Malik bars the dais, hand resting on his sword.',
         effect: { kind: 'inspect' },
+        encounter: {
+          id: 'malik-encounter',
+          title: 'Steward Malik',
+          description: 'Malik blocks the way to the throne. "None pass without tribute."',
+          choices: [
+            {
+              id: 'distract',
+              action: 'distract',
+              label: 'Dangle the coin to distract him',
+              requires: { itemId: 'gold-coin', quantity: 1 },
+              outcome: {
+                effects: [],
+                resultText: "You jingle the coin; as his eyes follow it, you slip past.",
+              },
+            },
+            {
+              id: 'negotiate',
+              action: 'negotiate',
+              label: 'Offer the coin for passage',
+              requires: { itemId: 'gold-coin', quantity: 1 },
+              outcome: {
+                effects: [
+                  { kind: 'remove-item', itemId: 'gold-coin', quantity: 1 },
+                  { kind: 'add-item', item: { itemId: 'royal-writ', name: 'Royal Writ', quantity: 1 } },
+                ],
+                resultText: 'Malik pockets the coin and presses a sealed writ into your hand.',
+              },
+            },
+            {
+              id: 'fight',
+              action: 'fight',
+              label: 'Force your way past',
+              outcome: {
+                effects: [{ kind: 'damage', amount: 15 }],
+                resultText: "His blade opens your side before you wrestle past him.",
+              },
+            },
+          ],
+        },
       },
     },
     { type: 'arch', position: [0, 0, -10] }, // at the north exit
