@@ -339,6 +339,26 @@ only the existing `moved-to-room`; visited marking is the reducer's existing
 behavior. The active cached room rebuilds the engine for presentation, while the
 session/cache persist and the renderer remains intent-only.
 
+## 15. NPC dialogue resolution ✅
+
+NPC dialogue is a read-only conversation path over the existing interaction
+intent ([ADR-0017](./decisions/ADR-0017-npc-dialogue-foundation-v0.md)).
+
+| Situation | Detection | Handling / result | Logging |
+| --- | --- | --- | --- |
+| Object/NPC has no `dialogue` | composition dialogue-lookup miss | `rejected: missing-dialogue`; fall through to effect or plain panel | reason code only |
+| Id-less or unknown NPC id | lookup skip/miss | `rejected: missing-dialogue`; never key by an id-less object | reason code only |
+| Missing session on read | `getWorldState` → not-found | `failed: not-found`; no append | ids/code only |
+| Provider throws/unavailable | service catch | `failed: provider-unavailable`; calm panel message | ids/code only |
+| Repeated talk | repeatable component action | fresh deterministic reply; no event, flag, or world-state change | ids/turn count only |
+| Generated-room NPC | no authored dialogue marker | existing effect/plain-panel path | reason code only |
+
+`NPCDialogueService` receives only the `getWorldState` read capability. Repeated
+replies leave the authoritative event log and projected snapshot unchanged;
+conversation history resets with component state. Dialogue text, NPC names,
+personas, greetings, prompt labels, player lines, item names, and status strings
+never reach logs.
+
 ---
 
 ## Summary
@@ -360,6 +380,7 @@ session/cache persist and the renderer remains intent-only.
 | 12 | Object interaction resolution | pure effect plan + sequential typed appends | no-op/rejection/conflict/partial result; safe panel message | ✅ |
 | 13 | Encounter resolution | pure encounter plan + shared `applyCommands` typed appends | already-resolved/rejection/conflict/partial result; safe panel message; health clamps, no death state | ✅ |
 | 14 | Multi-room navigation | cache/registry resolve before `WorldSession.move` | rejection/failure with no move, or cached room + persistent flags | ✅ |
+| 15 | NPC dialogue resolution | read-only world context + provider reply | typed failure or component-only conversation; no event/state change | ✅ |
 
 The through-line: **validate at the boundary, degrade visibly and safely, log
 the detail, show the user calm.**

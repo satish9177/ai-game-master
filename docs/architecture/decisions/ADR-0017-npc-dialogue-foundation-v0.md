@@ -1,11 +1,14 @@
 # ADR-0017: NPC Dialogue Foundation v0 — talk intent opens a fake-provider dialogue panel (UI-only, no event)
 
-- **Status:** Accepted — design approved / not yet implemented
+- **Status:** Accepted — **implemented** (NPC Dialogue Foundation v0)
 - **Date:** 2026-06-22
 - **Deciders:** Project owner
 
-> This ADR is an **approved design / implementation brief**. It is binding for the
-> implementer (Codex). No code is written yet; the maintainer commits manually.
+> This ADR began as an **approved design / implementation brief** and is now
+> **implemented**: a deterministic fake provider behind the domain
+> `NPCDialogueProvider` port, a pure context builder, and a read-only
+> `NPCDialogueService` are wired to a dedicated canned-prompt panel. The event
+> union and renderer engine remain unchanged.
 
 ## Context
 

@@ -40,6 +40,11 @@ data-only interaction exits. `App` keeps one in-memory session and room cache
 across transitions, `NavigationService` resolves before appending the existing
 `moved-to-room`, and the unchanged engine remains intent-only and rebuilds for
 each active room ([ADR-0016](./docs/architecture/decisions/ADR-0016-multi-room-navigation-cache-v0.md)).
+**NPC Dialogue Foundation v0** adds validated dialogue descriptors, a pure
+world-to-dialogue context builder, and a read-only `NPCDialogueService` behind a
+deterministic fake provider. F-talk opens a dedicated canned-prompt panel; no
+dialogue event, memory, free-text input, network, or renderer state mutation is
+introduced ([ADR-0017](./docs/architecture/decisions/ADR-0017-npc-dialogue-foundation-v0.md)).
 "2.5D" means camera/presentation, **not** a new engine; full first-person /
 free-camera 3D remains future/optional. No real LLM/API, backend, or database yet
 — those are coming and the architecture is built so they slot in without breaking
@@ -116,6 +121,7 @@ Dependencies point **inward**, toward the domain. Full rules in
 | **World session** | `apps/web/src/world-session/` (v0, headless) | domain, logger port | UI, renderer, React, Three.js, DB |
 | **Interactions** | `apps/web/src/interactions/` (v0, headless) | domain, world-session, logger port | UI, renderer, React, Three.js, DB |
 | **Encounters** | `apps/web/src/encounters/` (v0, headless) | domain, world-session, logger port | UI, renderer, React, Three.js, DB |
+| **Dialogue** | `apps/web/src/dialogue/` (v0, headless) | domain, world-session read path, logger port | UI, renderer, React, Three.js, DB |
 | **Backend / Persistence** | not built yet | domain | UI, renderer |
 
 ## Logging rules
