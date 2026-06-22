@@ -18,9 +18,11 @@ a **RoomSpec** (pure data) and rendered by **trusted, hand-written Three.js**.
 Today: a single Vite app at `apps/web` (React 19 + TypeScript + Three.js + zod).
 **Renderer Foundation v0** renders one hardcoded room; **Generation Foundation
 v0** adds a deterministic *fake* room generator behind a prompt bar, validated
-through the same `loadRoomSpec` boundary. No real LLM/API, backend, or database
-yet — those are coming and the architecture is built so they slot in without
-breaking boundaries.
+through the same `loadRoomSpec` schema boundary and a pure semantic `validateRoom`
+playability check (**Semantic Room Validator v0**,
+[ADR-0011](./docs/architecture/decisions/ADR-0011-semantic-room-validator-v0.md)).
+No real LLM/API, backend, or database yet — those are coming and the architecture
+is built so they slot in without breaking boundaries.
 
 ## Engineering standards (non-negotiable)
 
@@ -111,9 +113,11 @@ ground objects. Full details in [CONVENTIONS](./docs/architecture/CONVENTIONS.md
 Unless the maintainer explicitly asks, do **not**:
 
 - add **real** LLM/API generation, a backend, or a database — the deterministic
-  *fake* generator (Generation Foundation v0) is the only generation code; do not
-  extend it into a real model, a multi-stage pipeline, a code validator, a
-  reviewer, a repair loop, memory, or adjacent-room pre-generation without
+  *fake* generator plus the deterministic semantic `validateRoom` (Generation
+  Foundation v0 + Semantic Room Validator v0) are the only generation-pipeline
+  code; do not extend them into a real model, a multi-stage pipeline, a **deeper**
+  code validator (reachability / object↔object collision / quest consistency), an
+  LLM reviewer, a repair loop, memory, or adjacent-room pre-generation without
   explicit approval;
 - add npm workspaces or extract `packages/contracts`
   ([ADR-0005](./docs/architecture/decisions/ADR-0005-defer-shared-package-extraction.md));
@@ -133,7 +137,7 @@ npm install        # first time
 npm run dev        # Vite dev server
 npm run build      # tsc -b + vite build  (use this to prove a change type-checks)
 npm run lint       # eslint
-npm run test       # vitest (PRNG, fake generator, GeneratedRoomSource failure paths)
+npm run test       # vitest (PRNG, fake generator, validateRoom, GeneratedRoomSource paths)
 ```
 
 For a docs-only or non-`src` change, `npm run build --prefix apps/web` from the

@@ -50,8 +50,9 @@ User prompt
   → App composition root
   → FakeRoomGenerator      (behind the RoomGenerator port; seeded by the prompt)
   → raw, untrusted JSON text
-  → GeneratedRoomSource    (owns JSON.parse + loadRoomSpec)
-  → loadRoomSpec           ✅ the trust boundary, unchanged
+  → GeneratedRoomSource    (owns JSON.parse + loadRoomSpec + validateRoom)
+  → loadRoomSpec           ✅ schema boundary (well-formed?), unchanged
+  → validateRoom           ✅ semantic boundary (playable?) — NEW, pure domain
   → RoomLoadResult         (typed ok / invalid-room / unavailable)
   → existing trusted Three.js renderer
 ```
@@ -64,22 +65,34 @@ What it proves — and what it deliberately is **not**:
 - **The generator returns raw, untrusted JSON *text*** — the exact shape a future
   LLM completion would have. It emits **data, never code** ([ADR-0001](./decisions/ADR-0001-data-only-room-spec-trusted-renderer.md)).
 - **`GeneratedRoomSource` owns parse + validation.** It runs the text through
-  `JSON.parse` then the **same `loadRoomSpec`** every source uses, and maps the
-  outcome to a typed `RoomLoadResult` (`invalid-room` on bad JSON/envelope,
-  `unavailable` if the generator throws). The renderer still executes only
-  **trusted, hand-written builders**.
+  `JSON.parse`, then the **same `loadRoomSpec`** every source uses (schema), then
+  the new **`validateRoom`** semantic check, and maps the outcome to a typed
+  `RoomLoadResult` (`invalid-room` on bad JSON/envelope **or a fatal semantic
+  issue**, `unavailable` if the generator throws). The renderer still executes
+  only **trusted, hand-written builders**.
+- **Semantic validation (`validateRoom`) is the new playability boundary.** A pure
+  domain function checks an already-loaded room for *playability* — sane
+  dimensions, spawn inside the walkable bounds, object/light budgets, usable
+  interactions. A **fatal** issue folds into the existing `invalid-room` outcome so
+  an unplayable room never renders; **warnings** are logged as counts and the room
+  still loads. `loadRoomSpec` answers *well-formed?*; `validateRoom` answers
+  *playable?* ([ADR-0011](./decisions/ADR-0011-semantic-room-validator-v0.md)).
 - **Logging is length-only.** The prompt *text* is never logged — only its length
-  and safe result counts ([ADR-0003](./decisions/ADR-0003-logging-abstraction.md)).
+  and safe result counts/codes ([ADR-0003](./decisions/ADR-0003-logging-abstraction.md)).
 - **Tested.** Vitest covers the seeded PRNG, the fake generator (determinism,
   known-vocabulary-only, passes `loadRoomSpec`, data-only round-trip), and the
   `GeneratedRoomSource` failure paths (bad JSON, bad envelope, generator throws,
   lenient object-skip).
 
-The full generation **pipeline** (real LLM, deterministic code validator, LLM
-reviewer, bounded repair/regenerate, adjacent-room pre-generation) and the
-**backend/persistence** that will host it remain **planned / not built** — see
-[Generation pipeline](#generation-pipeline-planned) and
-[ADR-0010](./decisions/ADR-0010-generation-foundation-v0.md).
+A first slice of the **deterministic code validator** now ships too — semantic
+playability ([ADR-0011](./decisions/ADR-0011-semantic-room-validator-v0.md)). The
+rest of the generation **pipeline** (real LLM, the validator's deeper
+reachability/collision checks, an LLM reviewer, bounded repair/regenerate,
+adjacent-room pre-generation) and the **backend/persistence** that will host it
+remain **planned / not built** — see
+[Generation pipeline](#generation-pipeline-planned),
+[ADR-0010](./decisions/ADR-0010-generation-foundation-v0.md), and
+[ADR-0011](./decisions/ADR-0011-semantic-room-validator-v0.md).
 
 ## Layered architecture
 
@@ -185,7 +198,8 @@ PromptBar.onSubmit(prompt)              (app chrome — not renderer UI)
             └─ GeneratedRoomSource.getRoom()
                  ├─ FakeRoomGenerator.generate(prompt) → raw untrusted JSON text
                  ├─ JSON.parse                          (never eval)
-                 ├─ loadRoomSpec(parsed)                ✅ same trust boundary
+                 ├─ loadRoomSpec(parsed)                ✅ schema boundary (shape)
+                 ├─ validateRoom(room)                  ✅ semantic boundary (playable)
                  └─ RoomLoadResult  (ok | invalid-room | unavailable)
                       └─ engine.setRoom(room)           ✅ trusted builders only
 ```
@@ -216,14 +230,19 @@ generator exists, and the prompt *text* is never logged — only its length.
 | `domain/ports/RoomGenerator.ts` | The `RoomGenerator` port: `generate(prompt) → Promise<string>` of **raw, untrusted JSON text**. Domain-pure contract; the trust-boundary rules live in its doc comment. |
 | `generation/prng.ts` | Deterministic seeded PRNG (`xmur3` + `mulberry32`) and a small `Rng` helper. Pure — no I/O, no `Math.random`/`Date.now`. |
 | `generation/FakeRoomGenerator.ts` | A deterministic `RoomGenerator`: prompt → seeded PRNG → RoomSpec **data**, serialized with `JSON.stringify`. Emits only the published vocabulary; same prompt → byte-identical output. No real model. |
-| `room/GeneratedRoomSource.ts` | A `RoomSource` adapter (composition layer) that runs the generator's text through `JSON.parse` + `loadRoomSpec` and maps the outcome to a typed `RoomLoadResult`. Owns parse + validation; logs length/counts only. |
+| `domain/validateRoom.ts` | Pure semantic validator: `validateRoom(room) → RoomValidationResult` of severity-tagged issues. Checks *playability* (dimensions, spawn-in-bounds, object/light budgets, usable interactions) over a loaded room — a domain peer of `loadRoomSpec`. No I/O, no logger, no React/Three ([ADR-0011](./decisions/ADR-0011-semantic-room-validator-v0.md)). |
+| `room/GeneratedRoomSource.ts` | A `RoomSource` adapter (composition layer) that runs the generator's text through `JSON.parse` → `loadRoomSpec` (schema) → `validateRoom` (semantic), and maps the outcome to a typed `RoomLoadResult` (a fatal semantic issue → `invalid-room`). Owns parse + validation; logs length/counts/codes only. |
 | `app/PromptBar.tsx` | Presentational prompt input + Generate button — app composition chrome, **not** renderer UI. Trims/validates; emits `onSubmit(prompt)`. |
 | `App.tsx` | Composition root: holds the active `RoomSource` in state; on submit, swaps to `GeneratedRoomSource(FakeRoomGenerator, prompt, logger)`. The only place a generator is named. |
 
 Tested with **Vitest**: the PRNG (determinism/divergence/ranges), the fake
 generator (determinism, known-vocabulary-only, passes `loadRoomSpec`, data-only
-round-trip), and the `GeneratedRoomSource` failure paths (bad JSON, bad envelope,
-generator throws, lenient object-skip) — with prompt text never logged.
+round-trip), `validateRoom` (one fixture per rule, false-positive guards,
+determinism + no input mutation, stable ordering), and the `GeneratedRoomSource`
+paths (bad JSON, bad envelope, generator throws, lenient object-skip, semantic
+fatal → `invalid-room`, semantic warnings → `ok:true`, and a regression guard that
+every `FakeRoomGenerator` output has zero fatal semantic issues) — with prompt
+text never logged.
 
 ## Object & entity system (compositional builders)
 
@@ -293,7 +312,10 @@ today's seams in the right place.
   whether the room is static, generated, or fetched.
 - 🔜 Generation is more than one model call: a prompt becomes a *validated,
   playable* room through a multi-stage pipeline with bounded repair and a safe
-  fallback. v0 implements only stage 1 (generate) + schema validation. See
+  fallback. v0 now implements stage 1 (generate) + schema validation **plus a
+  first slice of stage 2** (a deterministic semantic validator,
+  [ADR-0011](./decisions/ADR-0011-semantic-room-validator-v0.md)); the LLM reviewer
+  and bounded repair remain future. See
   **[Generation pipeline](#generation-pipeline-planned)** below and
   [ADR-0007](./decisions/ADR-0007-generated-room-validation-and-repair.md).
 - 🔜 Rooms are pre-generated ahead of the player so transitions feel instant. See
@@ -316,7 +338,9 @@ today's seams in the right place.
 
 ## Generation pipeline (planned)
 
-🔜 **Designed, not built.** Full rationale and the retry/repair policy live in
+🔜 **Designed, not built** — except the **deterministic code validator**, whose
+first slice now ships ([ADR-0011](./decisions/ADR-0011-semantic-room-validator-v0.md)).
+Full rationale and the retry/repair policy live in
 [ADR-0007](./decisions/ADR-0007-generated-room-validation-and-repair.md);
 per-case failure handling is in [FAILURE-MODES](./FAILURE-MODES.md).
 
@@ -354,7 +378,10 @@ bounded cost and a guaranteed safe outcome:
 
 - **Schema validation** checks **JSON/shape** (the existing trust boundary).
 - **Code validator** is **deterministic code, not an LLM** — it checks semantic
-  playability (reachability, collision, quest consistency, budgets).
+  playability. ✅ A v0 slice ships now (sane dimensions, spawn inside the walkable
+  bounds, anchors within the footprint, object/light budgets, usable interactions;
+  [ADR-0011](./decisions/ADR-0011-semantic-room-validator-v0.md)); 🔜 deeper
+  reachability, object↔object collision, and quest consistency remain future.
 - **LLM reviewer** checks **creative/story quality** — taste, not shape; it
   returns a verdict that feeds the repair loop, it does not edit the spec.
 - **Valid JSON does not mean the room is playable or good.** Schema validation is
