@@ -1,15 +1,18 @@
 # ADR-0018: Backend SQLite Persistence v0 — headless, Node-only durable store behind the existing ports
 
-- **Status:** Accepted — **design approved / not yet implemented**
+- **Status:** Accepted — **implemented** (Backend SQLite Persistence v0)
 - **Date:** 2026-06-22
 - **Deciders:** Project owner
 
-> This ADR is the **binding implementation brief** for the
-> `backend-sqlite-persistence-v0` slice. The design was reviewed and approved;
-> the code is **not yet written**. The implementation pass (Codex or a separate
-> Claude pass) must follow this document; the maintainer commits manually. If any
-> rule below proves impossible to honor, **STOP and ask the maintainer** rather
-> than working around it.
+> This ADR began as the **binding implementation brief** for the
+> `backend-sqlite-persistence-v0` slice and is now **implemented**: a headless,
+> Node-only `src/persistence/**` build unit (a `node:sqlite` connection/migration
+> runner, `SqliteWorldStore` over the unchanged `WorldStore` port, and a new
+> `RoomStore` port with `SqliteRoomStore`) provably excluded from the browser
+> bundle by tsconfig + Vite reachability + bidirectional ESLint walls. The
+> `WorldStore` port and `domain/world/**` are unchanged, and no frontend is wired
+> to SQLite. See [Implementation notes (as built)](#implementation-notes-as-built)
+> for the two places the shipped code refines this brief.
 
 ## Context
 
@@ -586,6 +589,37 @@ implemented.
   `world-session/InMemoryWorldStore.ts`, `world-session/WorldSession.ts`,
   `domain/ports/WorldStore.ts`, `domain/world/**`, `room/RoomRegistry.ts`,
   `vite.config.ts`.
+
+## Implementation notes (as built)
+
+Two places where the shipped code refines the brief's literal text while
+preserving its architecture exactly:
+
+1. **ESLint reciprocal wall — composed, not a single clobbering block.** The
+   brief's reciprocal block (`files: ['src/**'], ignores: ['src/persistence/**']`)
+   was verified to **clobber** every per-folder `no-restricted-imports` rule:
+   ESLint flat config is **last-match-wins per rule** (no option merging), so a
+   broad `src/**` block placed last silently disables the renderer/engine,
+   domain, world-session, etc. boundary bans for those folders. The same intent
+   is implemented without weakening anything by (a) adding the shared
+   `node:sqlite` + `**/persistence/**` restriction **into each existing
+   per-folder block**, and (b) keeping one reciprocal block scoped (via
+   `ignores`) to the **un-foldered** composition/platform files (`App.tsx`,
+   `RoomViewer.tsx`, `app/**`, `room/**`, `platform/**`, `main.tsx`). The
+   persistence-self wall is the single block specified. Net effect: both walls
+   enforced, **no existing rule weakened**, and the persistence ban now covers
+   every non-persistence folder (stronger than a clobbering single block).
+2. **Projection-consistency test — driven through domain primitives, not
+   `WorldSession`.** The persistence-self wall forbids importing
+   `**/world-session/**` (the brief flagged that a `WorldSession`-driven test
+   would trip it). The shipped projection-consistency test drives
+   `SqliteWorldStore` directly with domain-reduced events (`applyEvent` + the
+   event schema) and asserts `projectWorldState(listEvents) deepEquals
+   getSnapshot`, proving the same invariant **without** importing `world-session/`
+   and **without** any lint carve-out. A `WorldSession`-driven composition test
+   would require weakening the wall (a test-file carve-out) and is **deferred
+   pending maintainer approval**, per the brief's standing instruction to stop
+   and ask before relaxing the boundary.
 
 ## Consequences
 

@@ -153,19 +153,41 @@ The app can't reach the backend, or it returns 5xx / times out.
 - **Logging** — request id / correlation id, status, latency; server logs the
   full error, the client logs a summary.
 
-## 6. Persistence / database failure ❌ (future)
+## 6. Persistence / database failure ✅ v0 (headless, Node-only) · 🔜 hosted backend
 
-The DB is unavailable, a migration mismatch occurs, or a stored spec is an older
-`schemaVersion`.
+The headless SQLite layer ([ADR-0018](./decisions/ADR-0018-backend-sqlite-persistence-v0.md))
+is the first durable store: a `node:sqlite` connection + forward-only migration
+runner, `SqliteWorldStore` (the unchanged `WorldStore` port), and `SqliteRoomStore`
+(the new `RoomStore` port). It is browser-excluded and wired to nothing in the
+browser, so there is **no user-facing surface yet** — a future API edge maps the
+genuine faults below to safe errors.
 
-- **Detection** — repository adapters translate driver errors into typed domain
-  errors at the persistence boundary; a startup migration check detects schema
-  drift; reads check `schemaVersion`.
-- **Handling** — degrade to read-only or a safe error if the store is down;
-  refuse to start on migration mismatch (fail fast, server-side); migrate or
-  tolerate old `schemaVersion` on read rather than mutating rows silently.
-- **User-facing** — "temporarily unavailable", never a SQL error.
-- **Logging** — server-side structured error with context; no secrets/PII.
+**Two error classes at the persistence boundary** (mirrors ADR-0013): expected
+content/concurrency outcomes are **typed results**; genuine infrastructure faults
+(DB cannot open, migration failure, corrupted *session* JSON) **fail fast / throw**.
+
+| Situation | Detection | Handling / result | Logging |
+| --- | --- | --- | --- |
+| DB cannot open / unavailable | `open` / `runMigrations` throws | **fail fast** — a genuine fault, not control flow; a future API edge maps it to a safe error | code only |
+| Migration fails midway | per-migration `withTransaction` (`BEGIN IMMEDIATE`) | the migration **rolls back wholesale**, records nothing, and `runMigrations` rethrows; the DB stays at the prior version (refuse a half-migrated DB) | migration `version` only |
+| Unknown stored `schema_version` | read-boundary check | reject rather than silently migrate; tolerate the current version | code only |
+| Corrupt session snapshot / event JSON | read-boundary `JSON.parse` + `safeParse` | **throw** — corruption is a fault, never masked as `null` / `not-found`; the row text is never included in the error or logs | code only |
+| Concurrent world append | CAS `UPDATE … WHERE revision = expected` → 0 rows | existence probe → typed `conflict` (stale) or `not-found` (no row); `UNIQUE(session_id, seq)` backstops a racing writer; the snapshot update rolls back | ids / revision / code |
+| Append + snapshot atomicity | one transaction per `commit` | append and snapshot replace are **both-or-neither**; the projection-consistency test and `projectWorldState` re-projection detect any drift | ids / seq / revision |
+| Append-only violation attempt | `BEFORE UPDATE`/`BEFORE DELETE` triggers on `world_events` | the DB `RAISE(ABORT)`s; the adapter also exposes no event mutation/delete path | code only |
+| Corrupt **stored room** JSON/envelope | `getRoom` `JSON.parse` → `loadRoomSpec` | typed `invalid-stored-room` (an **expected** content failure, unlike a session fault) | `roomId` / code |
+| Room not found | `getRoom` lookup miss | typed `not-found` | `roomId` / code |
+| Duplicate room id | `saveRoom` `ON CONFLICT(room_id) DO UPDATE` | create-or-replace, last-writer-wins (rooms are content, not event-sourced truth) | `roomId` only |
+| Cross-session / room leakage | every query scoped by `session_id` / `room_id` | sessions and rooms never see each other; SQLite returns freshly parsed objects (no aliasing) — isolation tests | ids only |
+
+- **User-facing** 🔜 — none in this headless slice; a future API maps faults to
+  "temporarily unavailable" / a safe load screen, never a SQL error.
+- **Logging** ✅ — ids / counts / codes only (`sessionId`, `roomId`, `revision`,
+  `eventCount`, error `code`, migration `version`); **never** event payloads, item
+  names, `reason` strings, room `name`, dialogue, or any story content.
+- **🔜 hosted backend** — a startup migration check on a shared DB, read-only
+  degradation when the store is down, and the dual-dialect PostgreSQL path
+  ([ADR-0004](./decisions/ADR-0004-persistence-sqlite-to-postgres.md)) remain future.
 
 ## 7. Adjacent-room pre-generation not ready at a door ❌ (future)
 
@@ -371,7 +393,7 @@ never reach logs.
 | 4 | Invalid generated JSON | same `loadRoomSpec` boundary → typed result | safe load screen; retry/fallback 🔜 | ✅ v0 |
 | 4b | Valid spec, bad room | `validateRoom` (semantic) + 🔜 LLM reviewer | fatal → `invalid-room`; 🔜 repair/fallback | ✅ v0 |
 | 5 | Backend/network | typed HTTP results | retry state | ❌ |
-| 6 | DB failure | adapter → typed error | read-only / safe error | ❌ |
+| 6 | DB / persistence failure | typed results (rooms, conflicts) + fail-fast throws (open/migration/corrupt session) | safe error at a future edge; no browser surface yet | ✅ v0 headless |
 | 7 | Pre-gen not ready | room status at door | "Opening the way…" / fallback | ❌ |
 | 8 | Iso camera/player presentation | resize→frustum; player-position proximity; scene-graph disposal; cutaway curbs | stable framing, no occlusion or leak | ✅ |
 | 9 | Concurrent world append | optimistic revision check | typed conflict; neither event nor snapshot committed | ✅ headless |
