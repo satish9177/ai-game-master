@@ -35,6 +35,11 @@ E/F flow — a pure `planEncounter` and an `EncounterService` (sharing
 `world-session/applyCommands` with interactions) compose existing world commands;
 an encounter rides the shared `Interaction` and takes precedence over its
 `effect` ([ADR-0015](./docs/architecture/decisions/ADR-0015-encounter-system-v0.md)).
+**Multi-Room Navigation & Cache v0** connects the two example rooms through
+data-only interaction exits. `App` keeps one in-memory session and room cache
+across transitions, `NavigationService` resolves before appending the existing
+`moved-to-room`, and the unchanged engine remains intent-only and rebuilds for
+each active room ([ADR-0016](./docs/architecture/decisions/ADR-0016-multi-room-navigation-cache-v0.md)).
 "2.5D" means camera/presentation, **not** a new engine; full first-person /
 free-camera 3D remains future/optional. No real LLM/API, backend, or database yet
 — those are coming and the architecture is built so they slot in without breaking

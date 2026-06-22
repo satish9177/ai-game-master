@@ -1,14 +1,14 @@
 # ADR-0016: Multi-Room Navigation & Cache v0 — entering rooms through `moved-to-room` with an in-memory session cache
 
-- **Status:** Accepted — **design / not yet implemented** (implementation brief for Codex)
+- **Status:** Accepted — **implemented** (Multi-Room Navigation & Cache v0)
 - **Date:** 2026-06-22
 - **Deciders:** Project owner
 
-> This ADR is an **approved design / implementation brief**, not yet built. It is
-> the binding brief Codex implements; the maintainer commits manually. When the
-> code lands, the final docs commit flips this status to *implemented* (mirroring
-> [ADR-0014](./ADR-0014-object-interactions-v0.md) /
-> [ADR-0015](./ADR-0015-encounter-system-v0.md)).
+> This ADR began as an **approved design / implementation brief** and is now
+> **implemented**: room exits resolve through a cache-first registry before the
+> existing `moved-to-room` event is appended, while `App` keeps one session and
+> cache alive across engine rebuilds. The renderer remains intent-only and the
+> event union remains unchanged.
 
 ## Context
 
