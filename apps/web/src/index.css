@@ -127,6 +127,11 @@ body {
   color: #cfc7b6;
 }
 
+.panel-turns {
+  list-style: none;
+  padding-left: 0;
+}
+
 .panel-choices {
   display: flex;
   flex-wrap: wrap;

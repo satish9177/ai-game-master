@@ -53,6 +53,27 @@ export const throneRoom = {
         },
       },
     },
+    // A friendly guide for the read-only NPC dialogue foundation (ADR-0017).
+    {
+      type: 'npc',
+      id: 'herald-asha',
+      name: 'Asha',
+      position: [-3, 0, 5],
+      color: '#597a9b',
+      interaction: {
+        key: 'F',
+        prompt: 'Press F to talk to Asha',
+        body: 'Asha watches the hall with a patient, welcoming smile.',
+        dialogue: {
+          persona: 'friendly-aide',
+          greeting: 'Welcome, traveler. I am Asha, aide to the scattered court.',
+          prompts: [
+            { id: 'ask-hall', label: 'What happened to the court?' },
+            { id: 'ask-exit', label: 'Where does the north arch lead?' },
+          ],
+        },
+      },
+    },
     {
       type: 'npc',
       id: 'steward-malik',

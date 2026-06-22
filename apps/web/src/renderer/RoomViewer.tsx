@@ -4,11 +4,14 @@ import type { Interactable } from '../domain/ports/interaction'
 import type { RoomSource } from '../domain/ports/RoomSource'
 import { Hud } from './ui/Hud'
 import { DialoguePanel } from './ui/DialoguePanel'
+import { NPCDialoguePanel } from './ui/NPCDialoguePanel'
 import { createConsoleLogger } from '../platform/logger/consoleLogger'
 import { isWebGL2Available } from '../platform/browser/webglSupport'
 import type { EncounterSpec } from '../domain/encounters/encounterSpec'
+import type { NPCDialogueTurn } from '../domain/dialogue/contracts'
 import type { InteractionService } from '../interactions/InteractionService'
 import type { EncounterService } from '../encounters/EncounterService'
+import type { NPCDialogueService } from '../dialogue/NPCDialogueService'
 import type { NavigationResult } from '../app/NavigationService'
 import {
   buildInteractionEffectLookup,
@@ -19,6 +22,8 @@ import { buildEncounterLookup, encounterResultMessage } from '../app/encounters'
 import type { EncounterLookup } from '../app/encounters'
 import { buildExitLookup, navigationResultMessage } from '../app/exits'
 import type { ExitLookup } from '../app/exits'
+import { buildDialogueLookup, dialogueResultMessage } from '../app/dialogue'
+import type { NPCDialogueLookup, NPCDialogueTarget } from '../app/dialogue'
 
 const ROOM_UNAVAILABLE = 'This room could not be loaded.'
 const WEBGL2_UNAVAILABLE =
@@ -33,6 +38,7 @@ type RoomViewerProps = {
   sessionId: string
   interactionService: InteractionService
   encounterService: EncounterService
+  npcDialogueService: NPCDialogueService
   onNavigate: (toRoomId: string) => Promise<NavigationResult>
 }
 
@@ -41,6 +47,7 @@ export function RoomViewer({
   sessionId,
   interactionService,
   encounterService,
+  npcDialogueService,
   onNavigate,
 }: RoomViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null)
@@ -48,13 +55,21 @@ export function RoomViewer({
   const effectLookupRef = useRef<InteractionEffectLookup>(new Map())
   const encounterLookupRef = useRef<EncounterLookup>(new Map())
   const exitLookupRef = useRef<ExitLookup>(new Map())
+  const npcDialogueLookupRef = useRef<NPCDialogueLookup>(new Map())
   const activeEncounterRef = useRef<{ encounter: EncounterSpec; ref: string | undefined } | null>(
     null,
   )
+  const activeNPCDialogueRef = useRef<NPCDialogueTarget | null>(null)
+  const npcDialogueRequestRef = useRef(0)
+  const npcDialoguePendingRef = useRef(false)
   const [active, setActive] = useState<Interactable | null>(null)
   const [dialogue, setDialogue] = useState<Interactable | null>(null)
   const [resultMessage, setResultMessage] = useState<string | undefined>()
   const [navigationMessage, setNavigationMessage] = useState<string | undefined>()
+  const [npcDialogueTarget, setNPCDialogueTarget] = useState<NPCDialogueTarget | null>(null)
+  const [npcDialogueTurns, setNPCDialogueTurns] = useState<NPCDialogueTurn[]>([])
+  const [npcDialogueMessage, setNPCDialogueMessage] = useState<string | undefined>()
+  const [npcDialoguePending, setNPCDialoguePending] = useState(false)
   const [choices, setChoices] = useState<{ id: string; label: string }[] | undefined>()
   const [webgl2Available] = useState(isWebGL2Available)
   const [fatalMessage, setFatalMessage] = useState<string | null>(null)
@@ -81,15 +96,28 @@ export function RoomViewer({
 
     engineRef.current = engine
     let cancelled = false
+
+    const resetNPCDialogue = () => {
+      npcDialogueRequestRef.current += 1
+      npcDialoguePendingRef.current = false
+      activeNPCDialogueRef.current = null
+      setNPCDialogueTarget(null)
+      setNPCDialogueTurns([])
+      setNPCDialogueMessage(undefined)
+      setNPCDialoguePending(false)
+    }
+
     engine.onActiveInteractionChange = (target) => {
       setActive(target)
       setNavigationMessage(undefined)
     }
+
     engine.onRequestOpenInteraction = (target) => {
       setResultMessage(undefined)
       setNavigationMessage(undefined)
+      resetNPCDialogue()
 
-      // Composition precedence is exit, then encounter, then effect.
+      // Composition precedence: exit, then encounter, dialogue, then effect.
       const exitTarget = target.id ? exitLookupRef.current.get(target.id) : undefined
       if (exitTarget) {
         engine.setInteractionLock(true)
@@ -132,6 +160,50 @@ export function RoomViewer({
         return
       }
 
+      const dialogueTarget = target.id
+        ? npcDialogueLookupRef.current.get(target.id)
+        : undefined
+      if (dialogueTarget) {
+        activeEncounterRef.current = null
+        setDialogue(null)
+        setChoices(undefined)
+        activeNPCDialogueRef.current = dialogueTarget
+        setNPCDialogueTarget(dialogueTarget)
+        const seed: NPCDialogueTurn[] = dialogueTarget.dialogue.greeting
+          ? [{ speaker: 'npc', text: dialogueTarget.dialogue.greeting }]
+          : []
+        setNPCDialogueTurns(seed)
+        npcDialoguePendingRef.current = true
+        setNPCDialoguePending(true)
+        const requestId = npcDialogueRequestRef.current
+
+        void npcDialogueService.reply({
+          sessionId,
+          npcId: dialogueTarget.npcId,
+          npcName: dialogueTarget.npcName,
+          dialogue: dialogueTarget.dialogue,
+          persona: dialogueTarget.persona,
+          history: [],
+          playerLine: undefined,
+        }).then((result) => {
+          if (cancelled || npcDialogueRequestRef.current !== requestId) return
+          npcDialoguePendingRef.current = false
+          setNPCDialoguePending(false)
+          if (result.status === 'replied') {
+            setNPCDialogueTurns((current) => [...current, result.turn])
+          } else {
+            setNPCDialogueMessage(dialogueResultMessage(result))
+          }
+        }).catch(() => {
+          if (cancelled || npcDialogueRequestRef.current !== requestId) return
+          npcDialoguePendingRef.current = false
+          setNPCDialoguePending(false)
+          logger.error('npc dialogue resolution threw', { code: 'dialogue-failed' })
+          setNPCDialogueMessage('They have nothing to say right now.')
+        })
+        return
+      }
+
       activeEncounterRef.current = null
       setChoices(undefined)
       setDialogue(target)
@@ -164,6 +236,7 @@ export function RoomViewer({
       }
       exitLookupRef.current = buildExitLookup(result.room)
       encounterLookupRef.current = buildEncounterLookup(result.room)
+      npcDialogueLookupRef.current = buildDialogueLookup(result.room)
       effectLookupRef.current = buildInteractionEffectLookup(result.room)
       try {
         engine.setRoom(result.room)
@@ -186,22 +259,99 @@ export function RoomViewer({
       effectLookupRef.current = new Map()
       encounterLookupRef.current = new Map()
       exitLookupRef.current = new Map()
+      npcDialogueLookupRef.current = new Map()
       activeEncounterRef.current = null
+      activeNPCDialogueRef.current = null
+      npcDialogueRequestRef.current += 1
+      npcDialoguePendingRef.current = false
       setActive(null)
       setDialogue(null)
       setResultMessage(undefined)
       setNavigationMessage(undefined)
+      setNPCDialogueTarget(null)
+      setNPCDialogueTurns([])
+      setNPCDialogueMessage(undefined)
+      setNPCDialoguePending(false)
       setChoices(undefined)
       setFatalMessage(null)
     }
   }, [
     encounterService,
     interactionService,
+    npcDialogueService,
     onNavigate,
     roomSource,
     sessionId,
     webgl2Available,
   ])
+
+  const handleNPCSay = useCallback(
+    (promptId: string | undefined) => {
+      const target = activeNPCDialogueRef.current
+      if (!target || npcDialoguePendingRef.current) return
+      const prompt = promptId
+        ? target.dialogue.prompts?.find((candidate) => candidate.id === promptId)
+        : undefined
+      if (promptId && !prompt) return
+
+      const playerTurn: NPCDialogueTurn | undefined = prompt
+        ? { speaker: 'player', text: prompt.label }
+        : undefined
+      const history = playerTurn
+        ? [...npcDialogueTurns, playerTurn]
+        : [...npcDialogueTurns]
+      setNPCDialogueTurns(history)
+      setNPCDialogueMessage(undefined)
+      npcDialoguePendingRef.current = true
+      setNPCDialoguePending(true)
+      const requestId = npcDialogueRequestRef.current
+
+      void npcDialogueService.reply({
+        sessionId,
+        npcId: target.npcId,
+        npcName: target.npcName,
+        dialogue: target.dialogue,
+        persona: target.persona,
+        history,
+        playerLine: prompt?.id,
+      }).then((result) => {
+        if (
+          activeNPCDialogueRef.current !== target
+          || npcDialogueRequestRef.current !== requestId
+        ) return
+        npcDialoguePendingRef.current = false
+        setNPCDialoguePending(false)
+        if (result.status === 'replied') {
+          setNPCDialogueTurns((current) => [...current, result.turn])
+        } else {
+          setNPCDialogueMessage(dialogueResultMessage(result))
+        }
+      }).catch(() => {
+        if (
+          activeNPCDialogueRef.current !== target
+          || npcDialogueRequestRef.current !== requestId
+        ) return
+        npcDialoguePendingRef.current = false
+        setNPCDialoguePending(false)
+        createConsoleLogger().error('npc dialogue resolution threw', {
+          code: 'dialogue-failed',
+        })
+        setNPCDialogueMessage('They have nothing to say right now.')
+      })
+    },
+    [npcDialogueService, npcDialogueTurns, sessionId],
+  )
+
+  const closeNPCDialogue = useCallback(() => {
+    engineRef.current?.setInteractionLock(false)
+    npcDialogueRequestRef.current += 1
+    npcDialoguePendingRef.current = false
+    activeNPCDialogueRef.current = null
+    setNPCDialogueTarget(null)
+    setNPCDialogueTurns([])
+    setNPCDialogueMessage(undefined)
+    setNPCDialoguePending(false)
+  }, [])
 
   const handleChoose = useCallback(
     (choiceId: string) => {
@@ -245,11 +395,24 @@ export function RoomViewer({
           {fallback}
         </div>
       )}
-      {!fallback && !dialogue && navigationMessage && (
+      {!fallback && !dialogue && !npcDialogueTarget && navigationMessage && (
         <div className="hud" role="status">{navigationMessage}</div>
       )}
-      {!fallback && !dialogue && !navigationMessage && <Hud active={active} />}
-      {!fallback && dialogue && (
+      {!fallback && !dialogue && !npcDialogueTarget && !navigationMessage && (
+        <Hud active={active} />
+      )}
+      {!fallback && npcDialogueTarget && (
+        <NPCDialoguePanel
+          npcName={npcDialogueTarget.npcName}
+          turns={npcDialogueTurns}
+          prompts={npcDialogueTarget.dialogue.prompts}
+          message={npcDialogueMessage}
+          busy={npcDialoguePending}
+          onSay={handleNPCSay}
+          onClose={closeNPCDialogue}
+        />
+      )}
+      {!fallback && !npcDialogueTarget && dialogue && (
         <DialoguePanel
           target={dialogue}
           resultMessage={resultMessage}
