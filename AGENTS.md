@@ -45,10 +45,19 @@ world-to-dialogue context builder, and a read-only `NPCDialogueService` behind a
 deterministic fake provider. F-talk opens a dedicated canned-prompt panel; no
 dialogue event, memory, free-text input, network, or renderer state mutation is
 introduced ([ADR-0017](./docs/architecture/decisions/ADR-0017-npc-dialogue-foundation-v0.md)).
+**Backend SQLite Persistence v0** adds the first durable store as a **headless,
+Node-only** build unit (`apps/web/src/persistence/**`): a `node:sqlite`
+connection + forward-only migration runner, a `SqliteWorldStore` implementing the
+unchanged `WorldStore` port (append-only events + projection-cache snapshot, CAS
+concurrency), and a new `RoomStore` port with `SqliteRoomStore` (validated
+RoomSpec JSON). It is **provably excluded from the browser bundle** (tsconfig +
+Vite reachability + bidirectional ESLint walls) and **wired to nothing in the
+browser** ([ADR-0018](./docs/architecture/decisions/ADR-0018-backend-sqlite-persistence-v0.md)).
 "2.5D" means camera/presentation, **not** a new engine; full first-person /
-free-camera 3D remains future/optional. No real LLM/API, backend, or database yet
-— those are coming and the architecture is built so they slot in without breaking
-boundaries.
+free-camera 3D remains future/optional. No real LLM/API and no hosted
+backend/HTTP server yet; the only persistence is the headless, Node-only SQLite
+layer above (no `apps/api`, no browser DB access) — those remaining pieces are
+coming and the architecture is built so they slot in without breaking boundaries.
 
 ## Engineering standards (non-negotiable)
 
@@ -122,7 +131,8 @@ Dependencies point **inward**, toward the domain. Full rules in
 | **Interactions** | `apps/web/src/interactions/` (v0, headless) | domain, world-session, logger port | UI, renderer, React, Three.js, DB |
 | **Encounters** | `apps/web/src/encounters/` (v0, headless) | domain, world-session, logger port | UI, renderer, React, Three.js, DB |
 | **Dialogue** | `apps/web/src/dialogue/` (v0, headless) | domain, world-session read path, logger port | UI, renderer, React, Three.js, DB |
-| **Backend / Persistence** | not built yet | domain | UI, renderer |
+| **Persistence** | `apps/web/src/persistence/` (v0, headless, Node-only) | domain contracts/ports, logger **types**, `node:sqlite` | React, Three.js, renderer, UI, generation, world-session, interactions, encounters, dialogue, room, app |
+| **Backend / HTTP API** | not built yet (future `apps/api`) | domain, persistence | UI, renderer |
 
 ## Logging rules
 
@@ -142,13 +152,18 @@ ground objects. Full details in [CONVENTIONS](./docs/architecture/CONVENTIONS.md
 
 Unless the maintainer explicitly asks, do **not**:
 
-- add **real** LLM/API generation, a backend, or a database — the deterministic
+- add **real** LLM/API generation, a hosted backend / HTTP server / `apps/api`,
+  browser-side DB access, or a non-SQLite/Postgres datastore — the deterministic
   *fake* generator plus the deterministic semantic `validateRoom` (Generation
   Foundation v0 + Semantic Room Validator v0) are the only generation-pipeline
   code; do not extend them into a real model, a multi-stage pipeline, a **deeper**
   code validator (reachability / object↔object collision / quest consistency), an
   LLM reviewer, a repair loop, memory, or adjacent-room pre-generation without
-  explicit approval;
+  explicit approval. The **headless, Node-only SQLite persistence**
+  (`src/persistence/**`, [ADR-0018](./docs/architecture/decisions/ADR-0018-backend-sqlite-persistence-v0.md))
+  is built and approved, but keep it server-side and browser-excluded; do **not**
+  wire it into the frontend, add an HTTP layer, swap in another SQLite driver/ORM,
+  or change the `WorldStore` port without explicit approval;
 - add npm workspaces or extract `packages/contracts`
   ([ADR-0005](./docs/architecture/decisions/ADR-0005-defer-shared-package-extraction.md));
 - introduce a state-management library, a DI framework, or a heavy ORM;

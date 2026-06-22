@@ -23,7 +23,8 @@ Throughout these docs:
 - ✅ **Implemented** — exists today in `apps/web` (Renderer Foundation v0;
   Generation Foundation v0; Semantic Room Validator v0; Isometric Camera
   Foundation; World State & Event Log v0; Object Interactions v0; Encounter
-  System v0; Multi-Room Navigation & Cache v0; NPC Dialogue Foundation v0).
+  System v0; Multi-Room Navigation & Cache v0; NPC Dialogue Foundation v0;
+  Backend SQLite Persistence v0 — headless, Node-only).
 - 🔜 **Planned** — designed and approved, not yet built (next slices).
 - ❌ **Not built** — future shape only; documented so we don't paint into a corner.
 
@@ -230,6 +231,40 @@ resets on close or room change. Dialogue appends no event, sets no room flag,
 and changes no world state. See
 [ADR-0017](./decisions/ADR-0017-npc-dialogue-foundation-v0.md).
 
+## Backend SQLite Persistence v0
+
+✅ **Implemented, headless and Node-only.** The first durable store lands as a
+physically separate, browser-excluded build unit under
+`apps/web/src/persistence/**` — proving ADR-0013's promise that "a server-side
+SQLite adapter implements the same `WorldStore` port with **no domain change**".
+The running browser app is **not** wired to SQLite in this slice; it keeps its
+in-memory adapters.
+
+- **Driver.** Node v24's built-in `node:sqlite` (`DatabaseSync`) — zero new
+  runtime dependencies, no native build. `db.ts` opens a connection (file path or
+  `:memory:`), sets per-connection PRAGMAs (`foreign_keys`, `busy_timeout`, WAL),
+  and exposes a `withTransaction` (`BEGIN IMMEDIATE`) helper and a forward-only
+  `runMigrations`. Parameterized SQL lives **only** in the adapter/migration files.
+- **Migrations.** Numbered, forward-only; `0001_init` creates `world_sessions`,
+  `world_events`, `rooms`, and the append-only `world_events` triggers, while
+  `runMigrations` owns the idempotent `schema_migrations` bookkeeping. Each
+  migration runs in one transaction and rolls back wholesale on failure.
+- **`SqliteWorldStore`** implements the unchanged `WorldStore` port: append-only
+  events (`UNIQUE(session_id, seq)` + DB triggers), the session-computed
+  `WorldState` snapshot persisted **atomically** alongside its event, and
+  optimistic concurrency as a `revision` compare-and-set. The store never computes
+  projections — the `WorldSession` hands it `{ event, snapshot }`.
+- **`RoomStore` + `SqliteRoomStore`** (new port) persist the validated RoomSpec
+  **data document** (never renderer objects), upsert by stable `roomId`
+  (last-writer-wins), and load back through the same `loadRoomSpec` boundary.
+- **Provably excluded from the browser bundle:** `tsconfig.app.json` excludes
+  `src/persistence`, a Node `tsconfig.persistence.json` type-checks it via
+  `tsc -b`, Vite never reaches it from `main.tsx`, and bidirectional ESLint walls
+  forbid the browser surface from importing `node:sqlite`/persistence and forbid
+  persistence from importing React/Three/renderer/app layers. Validation happens
+  at the read/write boundary; logs carry ids/counts/codes only. See
+  [ADR-0018](./decisions/ADR-0018-backend-sqlite-persistence-v0.md).
+
 ## Layered architecture
 
 Dependencies point **inward**, toward the domain. Outer layers may depend on
@@ -263,7 +298,8 @@ inner layers; inner layers never depend on outer layers.
 | ✅ **Interactions (v0, headless)** | Pure effect plans executed through `WorldSession.appendEvent`; typed outcomes for composition. | Domain, World session, Logger port | React, Three.js, Renderer, DB |
 | ✅ **Encounters (v0, headless)** | Pure encounter plans executed through `WorldSession.appendEvent` (shared `applyCommands`); typed two-phase outcomes for composition. | Domain, World session, Logger port | React, Three.js, Renderer, DB |
 | ✅ **Dialogue (v0, headless)** | Pure dialogue context plus a read-only service over `WorldSession.getWorldState` and an injected provider port. | Domain, World session, Logger port | React, Three.js, Renderer, DB |
-| ❌ **Backend / Persistence** | Host generation; store rooms/sessions. | Domain | UI, Renderer |
+| ✅ **Persistence (v0, headless, Node-only)** | `node:sqlite` migrations + `SqliteWorldStore` (existing `WorldStore` port) + `SqliteRoomStore` (new `RoomStore` port). Browser-excluded; wired to nothing in the browser. | Domain contracts/ports, Logger **types**, `node:sqlite` | React, Three.js, Renderer, UI, Generation, World session, Interactions, Encounters, Dialogue, App |
+| ❌ **Backend / HTTP API** | Host generation; expose HTTP in front of the persistence adapters. | Domain, Persistence | UI, Renderer |
 
 The current code already honors the top three rows: `Engine` is pure Three.js
 with no React import; the React host talks to it through methods and callbacks;
@@ -473,7 +509,7 @@ is to keep each replacement local to its port.
   **[Adjacent-room pre-generation](#adjacent-room-pre-generation-planned)** below
   and [ADR-0009](./decisions/ADR-0009-adjacent-room-pre-generation.md).
 
-### ✅ World State & Event Log v0  ·  🔜 database adapter
+### ✅ World State & Event Log v0  ·  ✅ SQLite adapter (headless)  ·  🔜 PostgreSQL / API
 
 - ✅ `CanonSeed`, `WorldEvent`, `WorldCommand`, `WorldState`, and `SaveGame` are
   versioned neutral-JSON domain schemas. The event log is authoritative; the
@@ -485,10 +521,15 @@ is to keep each replacement local to its port.
   deletion path.
 - ✅ Save/load revalidates schemas, log shape, seed identity, and snapshot
   integrity. Unknown versions and tampering are rejected, never silently fixed.
-- 🔜 A server-side SQLite/PostgreSQL adapter may implement the same `WorldStore`
-  port. No real DB, API, or memory system exists yet; current renderer/UI access
-  is composition-only through Object Interactions, Encounters, and Multi-Room
-  Navigation v0.
+- ✅ A server-side **SQLite** adapter now implements the same `WorldStore` port
+  with **no domain change** (`SqliteWorldStore`, headless and Node-only,
+  [ADR-0018](./decisions/ADR-0018-backend-sqlite-persistence-v0.md)): append-only
+  events behind `UNIQUE(session_id, seq)` + DB triggers, atomic snapshot commit,
+  and `revision` compare-and-set concurrency.
+- 🔜 A **PostgreSQL** dialect and an HTTP/API edge in front of the adapter remain
+  future ([ADR-0004](./decisions/ADR-0004-persistence-sqlite-to-postgres.md)); no
+  hosted backend or memory system exists yet, and the browser still uses the
+  in-memory adapters (the SQLite store is wired to nothing in the browser).
 
 ### ✅ Object Interactions v0  ·  🔜 richer gameplay effects
 
@@ -534,8 +575,14 @@ is to keep each replacement local to its port.
 - ✅ `App` keeps the session/cache alive while `RoomViewer` rebuilds the unchanged
   engine for each active room. Return visits preserve visited and resolution
   flags, with exit → encounter → dialogue → effect precedence at composition.
-- 🔜 Durable room storage, more than two rooms, adjacent-room pre-generation,
-  entry-aligned spawn, transition animation, and a minimap remain future work.
+- ✅ A headless **`RoomStore` port + `SqliteRoomStore`** now persist validated
+  RoomSpec data documents by stable `roomId` (upsert, last-writer-wins), loaded
+  back through `loadRoomSpec` — the durable analog of `RoomRegistry.resolve`
+  ([ADR-0018](./decisions/ADR-0018-backend-sqlite-persistence-v0.md)). It is not
+  yet wired into navigation (the browser keeps `RoomRegistry`/`SessionRoomCache`).
+- 🔜 Wiring durable rooms into navigation, more than two rooms, adjacent-room
+  pre-generation, entry-aligned spawn, transition animation, and a minimap remain
+  future work.
 
 ### ✅ NPC Dialogue Foundation v0  ·  🔜 real provider
 
@@ -557,12 +604,17 @@ is to keep each replacement local to its port.
 - Validates incoming/outgoing RoomSpecs with the **same** domain schema at its
   own boundary (validate at every trust boundary, not just the browser).
 
-### ❌ Persistence (SQLite now → PostgreSQL later)
+### ✅ Persistence (SQLite, headless v0)  ·  🔜 PostgreSQL later
 
-- Repository interfaces live in the domain; adapters live in the backend.
-  UI and renderer **never** touch SQL or a DB driver.
-- SQLite is a *server-side* store, not an in-browser database. See
-  [ADR-0004](./decisions/ADR-0004-persistence-sqlite-to-postgres.md).
+- ✅ Repository **ports** live in the domain (`WorldStore`, the new `RoomStore`);
+  the SQLite adapters live in the Node-only `src/persistence/**` build unit. UI
+  and renderer **never** touch SQL or a DB driver — enforced by tsconfig
+  exclusion, Vite reachability, and the reciprocal ESLint wall.
+- ✅ SQLite is a *server-side*, Node-only store (`node:sqlite`), **not** an
+  in-browser database; it is wired to nothing in the browser in this slice.
+- 🔜 The dual-dialect query layer and the PostgreSQL migration remain future shape
+  only. See [ADR-0004](./decisions/ADR-0004-persistence-sqlite-to-postgres.md),
+  [ADR-0018](./decisions/ADR-0018-backend-sqlite-persistence-v0.md).
 
 ## Generation pipeline (planned)
 
