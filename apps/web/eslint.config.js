@@ -7,9 +7,8 @@ import { defineConfig, globalIgnores } from 'eslint/config'
 
 // Architecture boundaries are documented in docs/architecture/BOUNDARIES.md and
 // the ADRs. The rules below make the most important ones mechanical. The
-// generation boundary is encoded now that src/generation/ exists; persistence and
-// backend boundaries are intentionally NOT encoded yet — those folders don't
-// exist, so enforcing them now would be speculative (see BOUNDARIES.md).
+// generation and world-session boundaries are encoded now that those folders
+// exist. Real persistence/backend boundaries remain deferred with those layers.
 export default defineConfig([
   globalIgnores(['dist']),
   {
@@ -121,6 +120,29 @@ export default defineConfig([
             { group: ['three/*'], message: 'generation must not import Three.js (ADR-0001, BOUNDARIES.md).' },
             { group: ['**/renderer/**'], message: 'generation must not import the renderer or UI; its output is validated at the loadRoomSpec boundary (BOUNDARIES.md).' },
             { group: ['**/platform/**'], message: 'generation must not import platform adapters such as the logger; it returns data and the caller logs (ADR-0003, BOUNDARIES.md).' },
+          ],
+        },
+      ],
+    },
+  },
+
+  // Boundary: world-session is the headless application layer for authoritative
+  // gameplay truth (ADR-0013). It may use domain contracts/ports and the Logger
+  // interface, but it must not reach into React, Three.js, or renderer internals.
+  {
+    files: ['src/world-session/**/*.{ts,tsx}'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: [
+            { name: 'react', message: 'world-session is headless and must not import React (ADR-0013, BOUNDARIES.md).' },
+            { name: 'react-dom', message: 'world-session is headless and must not import React (ADR-0013, BOUNDARIES.md).' },
+            { name: 'three', message: 'world-session holds neutral world data and must not import Three.js (ADR-0013).' },
+          ],
+          patterns: [
+            { group: ['three/*'], message: 'world-session must not import Three.js (ADR-0013).' },
+            { group: ['**/renderer/**'], message: 'world-session must not import renderer or UI internals (ADR-0013, BOUNDARIES.md).' },
           ],
         },
       ],
