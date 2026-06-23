@@ -1,10 +1,15 @@
 import { UuidSchema, WORLD_SCHEMA_VERSION } from '../../domain/world/worldState'
-import { CreateSessionRequestSchema, parseSinceSeqQuery } from '../contracts'
+import type { WorldSessionErrorCode } from '../../world-session/WorldSession'
+import {
+  CreateSessionRequestSchema,
+  MoveRequestSchema,
+  parseSinceSeqQuery,
+} from '../contracts'
 import { errorResponse, jsonResponse } from '../http'
 import type { ApiResponse } from '../http'
 import type { Route, RouteParams } from '../router'
 
-/** Session-only HTTP edge for commit 2 of ADR-0019. */
+/** Session HTTP edge (ADR-0019). */
 export const sessionRoutes: readonly Route[] = [
   {
     method: 'POST',
@@ -68,6 +73,35 @@ export const sessionRoutes: readonly Route[] = [
       return jsonResponse(200, { events: result.events })
     },
   },
+  {
+    method: 'POST',
+    pattern: '/sessions/:sessionId/move',
+    handler: async (req, params, deps) => {
+      const sessionId = parseSessionId(params)
+      const body = MoveRequestSchema.safeParse(req.body)
+      if (!sessionId || !body.success) {
+        deps.logger.warn('session move request rejected', {
+          route: '/sessions/:sessionId/move',
+          code: 'invalid-request',
+        })
+        return errorResponse('invalid-request')
+      }
+
+      const moved = await deps.session.move(
+        sessionId,
+        body.data.toRoomId,
+        body.data.expectedRevision,
+        body.data.fromRoomId,
+      )
+      if (!moved.ok) return mapMoveError(moved.error.code)
+
+      deps.logger.info('session moved through api', {
+        sessionId,
+        revision: moved.state.revision,
+      })
+      return jsonResponse(200, { state: moved.state, event: moved.event })
+    },
+  },
 ]
 
 function parseSessionId(params: RouteParams): string | null {
@@ -78,5 +112,12 @@ function parseSessionId(params: RouteParams): string | null {
 function mapCreateError(code: string): ApiResponse {
   if (code === 'invalid-canon') return errorResponse('invalid-request')
   if (code === 'already-exists' || code === 'conflict') return errorResponse('conflict')
+  return errorResponse('internal')
+}
+
+function mapMoveError(code: WorldSessionErrorCode): ApiResponse {
+  if (code === 'not-found') return errorResponse('not-found')
+  if (code === 'conflict') return errorResponse('conflict')
+  if (code === 'invalid-command') return errorResponse('invalid-request')
   return errorResponse('internal')
 }

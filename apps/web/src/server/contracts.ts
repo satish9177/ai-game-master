@@ -18,6 +18,17 @@ export const CreateSessionRequestSchema = z
 
 export type CreateSessionRequest = z.infer<typeof CreateSessionRequestSchema>
 
+/** Strict HTTP body for `POST /sessions/:sessionId/move`. */
+export const MoveRequestSchema = z
+  .object({
+    toRoomId: z.string().min(1),
+    expectedRevision: z.number().int().min(1),
+    fromRoomId: z.string().min(1).optional(),
+  })
+  .strict()
+
+export type MoveRequest = z.infer<typeof MoveRequestSchema>
+
 const SinceSeqValueSchema = z
   .string()
   .regex(/^(0|[1-9]\d*)$/)
