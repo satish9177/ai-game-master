@@ -1,14 +1,13 @@
 # Implementation Plan — `feature/world-bible-seed-v0`
 
-> Status: **approved design, not yet implemented.** Docs-only reference for the
-> implementer (human or coding agent). Code lands in later slices, one at a time,
-> committed manually by the maintainer.
+> Status: **implemented.** Slices 1–6 are complete on
+> `feature/world-bible-seed-v0`; commits are made manually by the maintainer.
 >
 > Companion docs: [ARCHITECTURE](../ARCHITECTURE.md) ·
 > [BOUNDARIES](../BOUNDARIES.md) · [FAILURE-MODES](../FAILURE-MODES.md) ·
 > roadmap context: `room-generation-repair-fallback-v0` (ADR-0020),
-> `adjacent-room-pregeneration-v0` (ADR-0021). The decision record for this slice
-> will be **ADR-0022** (written in the final docs slice).
+> `adjacent-room-pregeneration-v0` (ADR-0021). Decision:
+> [ADR-0022](../decisions/ADR-0022-world-bible-seed-v0.md).
 
 ## Goal
 
@@ -25,34 +24,36 @@ The prompt path lives entirely in the composition root and the generation seam.
 The renderer/engine are untouched by it.
 
 ```
-PromptBar.onSubmit(trimmedPrompt)                      app/PromptBar.tsx
-  → App.handlePrompt(prompt)                            App.tsx (handlePrompt)
-       logger.info('prompt submitted', { promptLength })   // length only, never text
-       source = new GeneratedRoomSource(generator, prompt, logger, fallbackRoom)
-       → source.getRoom()                               room/GeneratedRoomSource.ts
-            → generator.generate(prompt)                generation/FakeRoomGenerator.ts
-                 createRng(prompt) → seeded PRNG        // the prompt IS the PRNG seed
-                 buildRoom(prompt) → raw JSON text      // prompt echoed only as inert label/body text
-            → assembleRoom(rawText, fallbackRoom)       domain/assembleRoom.ts
-                 JSON.parse → loadRoomSpec → validateRoom → repairRoom → re-validate → fallback
-            → { ok:true, room, provenance }             // generated | repaired | fallback
-       → startRoomSession(result.room)                  // fresh single-room WorldSession
-       → setActivePlay({ roomSource, sessionId, roomCache })   // no navigation, no warming
+PromptBar.onSubmit(trimmedPrompt)                         app/PromptBar.tsx
+  → App.handlePrompt(prompt)                              App.tsx
+       logger.info('prompt submitted', { promptLength }) // length only
+       → prepareGeneratedRoomSeed(prompt, seeder, logger) app/worldBible.ts
+            → FakeWorldBibleSeeder.seed(prompt)          generation/
+                 → WorldBibleSeedSchema.parse            strict/bounded
+            → worldBibleToGeneratorSeed(worldBible)      deterministic, ≤160 chars
+            └─ failure → raw prompt seed + no worldBible
+       → new GeneratedRoomSource(generator, generatorSeed, logger, fallbackRoom)
+            → FakeRoomGenerator.generate(generatorSeed)  raw JSON text
+            → assembleRoom(rawText, fallbackRoom)
+                 JSON.parse → loadRoomSpec → validateRoom → repairRoom → fallback
+            → { ok:true, room, provenance }              generated|repaired|fallback
+       → startRoomSession(result.room)                   unchanged fresh session
+       → setActivePlay({ roomSource, sessionId, roomCache, worldBible? })
        → if repaired|fallback: setNotice(FALLBACK_NOTICE)
 ```
 
 Facts this plan relies on:
 
-- The **prompt string is the only generation input today** — it is both the PRNG
-  seed (`createRng(prompt)`) and the source of inert label/body text
-  (`clampPrompt`). The `RoomGenerator` port is `generate(prompt: string): Promise<string>`.
-- The prompt **text is never logged** — only `promptLength` (`App.handlePrompt`,
-  `GeneratedRoomSource` constructor binds `logger.child({ promptLength })`).
+- The PromptBar prompt is input to `WorldBibleSeeder`; the validated bible's
+  compact projection is the normal `RoomGenerator` seed. If seeding fails, the
+  raw prompt remains the safe compatibility seed. `RoomGenerator` itself is unchanged.
+- Prompt/bible/derived-seed **text is never logged**. Logs contain prompt/seed
+  lengths, safe enums/counts/codes, and assembly diagnostics only.
 - The prompt path is a **fresh single-room session + fresh cache, no navigation
   and no warming**. The authored two-room bootstrap path (`bootstrapExamplePlay`)
   is separate and uses `AdjacentRoomPregenerator`.
 - `generation/**` may import the domain + PRNG but **must not import the logger**
-  (BOUNDARIES). `FakeRoomGenerator` is pure/silent; the caller logs.
+  (BOUNDARIES). Both fake adapters are pure/silent; prompt composition logs.
 
 ## 2. Current backend / session boundary
 
@@ -115,11 +116,12 @@ This slice must **not**:
 - Bypass `assembleRoom` / `repairRoom` / `fallbackRoom` — generated rooms still
   flow through them.
 - **Log** the raw prompt, any World Bible text (title/premise/conflict/NPC/faction/
-  location text/keywords), or the derived seed string.
+  location/opening-arc text/keywords), derived seed, generated JSON, or thrown
+  error details.
 - Apply the bible to the **authored bootstrap** or `AdjacentRoomPregenerator`
   (prompt path only — see decisions 5/6).
 
-## 5. Recommended option — B
+## 5. Implemented option — B
 
 **Shared domain `WorldBibleSeed` + generator port + browser fake implementation.**
 
@@ -185,7 +187,7 @@ generator via the seed string and is recorded as canon; `FakeRoomGenerator` does
 The **authored bootstrap path and `AdjacentRoomPregenerator` are not changed**
 (decisions 5/6) — no bible there in v0.
 
-## 7. `WorldBibleSeed` schema proposal
+## 7. `WorldBibleSeed` schema
 
 `apps/web/src/domain/worldBible/worldBibleSeed.ts` (zod 4; every string
 length-capped and every array size-capped to keep it compact and prevent
@@ -271,8 +273,8 @@ export function worldBibleToGeneratorSeed(b: WorldBibleSeed): string {
 
 - Prompt handling unchanged at the edge: `PromptBar` trims/validates non-empty;
   `App` logs `promptLength` only.
-- The bible echoes the prompt **only as inert text** (title/premise/etc.), exactly
-  as `FakeRoomGenerator` does — never as code.
+- The bible may carry bounded prompt-derived **inert text** (the fake uses it for
+  the title); it is data only, never code.
 - **The whole bible is user-derived content → never logged in full.** Logs carry
   only: `themePack`, `tone`, `npcCount`, `locationCount`, `factionCount`,
   `keywordCount`, `seedLength`, booleans, and stable codes. **Never** title,
@@ -281,7 +283,7 @@ export function worldBibleToGeneratorSeed(b: WorldBibleSeed): string {
 - The **seeder is silent** (no logger import, per the `generation/**` boundary).
   The composition root emits the one safe log line.
 - `GeneratedRoomSource` keeps logging `promptLength` — now the length of the
-  compact derived seed (even less revealing than before).
+  compact derived seed normally, or the raw prompt length on degradation.
 
 ## 9. Failure / degrade behavior
 
@@ -290,7 +292,7 @@ today's behavior.
 
 | Situation | Detection | Handling | Logging |
 | --- | --- | --- | --- |
-| Seeder throws/rejects (future LLM) | `try/catch` in `App.handlePrompt` | **Degrade to today's path**: feed the raw `prompt` to `GeneratedRoomSource`; store no bible; proceed | `warn` code only (e.g. `world-bible-unavailable`) |
+| Seeder throws/rejects (future LLM) | `try/catch` in `prepareGeneratedRoomSeed` | **Degrade to the previous path**: feed the raw `prompt` to `GeneratedRoomSource`; store no bible; proceed | fixed `world-bible-unavailable` code only |
 | Seeder returns schema-invalid bible | `WorldBibleSeedSchema.parse` inside the fake throws → caught as above | same degrade-to-prompt path | code only |
 | Empty/edge prompt | `PromptBar` blocks empty; fake clamps and uses a theme-default title | valid minimal bible | counts only |
 | Room generation still bad | unchanged | `assembleRoom` → repaired/fallback room + existing notice | unchanged |
@@ -326,11 +328,9 @@ stand.
   prompt, and no derived seed string appears — only safe enums/counts/length/codes
   (mirrors the ADR-0020/0021 log-safety tests).
 
-## 11. Proposed implementation slices
+## 11. Implemented slices
 
-Each slice builds, lints, and tests green on its own; the maintainer commits each
-manually. Slices 1–4 are pure additions with no behavior change; the user-visible
-change lands only in slice 5.
+Slices 1–6 were implemented independently; the maintainer commits each manually.
 
 1. **`feat(domain): add WorldBibleSeed schema + types`** —
    `domain/worldBible/worldBibleSeed.ts` + schema tests (§10 bullet 1). No wiring,
@@ -347,21 +347,21 @@ change lands only in slice 5.
    theme mapping, schema-valid output, log-safe / no inert-text leakage).
 5. **`feat(app): seed generated rooms from a world bible`** — wire
    `App.handlePrompt`, add `ActivePlay.worldBible`, non-blocking degrade, the one
-   safe log line; composition + log-safety tests. Optional thin
-   `app/worldBible.ts` helper to keep `App.tsx` tidy.
-6. **`docs(architecture): record world-bible-seed v0`** — add **ADR-0022**;
+   safe log line; the landed `app/worldBible.ts` helper owns projection/degrade
+   and has focused composition + log-safety tests.
+6. **`docs(architecture): record world-bible-seed v0`** — record **ADR-0022**;
    update `ARCHITECTURE.md` (Generation plug-in point), `BOUNDARIES.md` (note the
    new domain/generation modules; no new lint rule), `FAILURE-MODES.md` (new
    "World Bible seeding" non-blocking-degrade row), and `AGENTS.md` (status
-   paragraph + out-of-scope note); flip this plan/ADR to *implemented*.
+   paragraph + out-of-scope note); record this plan/ADR as *implemented*.
 
-## 12. Files likely to change
+## 12. Files added / changed
 
 - **New (domain):** `domain/worldBible/worldBibleSeed.ts`,
   `domain/worldBible/worldBibleToSeed.ts`, `domain/ports/WorldBibleSeeder.ts`
   (+ co-located `*.test.ts`).
 - **New (generation):** `generation/FakeWorldBibleSeeder.ts` (+ test).
-- **New (composition, optional):** `app/worldBible.ts` helper + test.
+- **New (composition):** `app/worldBible.ts` helper + test.
 - **Edited:** `App.tsx` (construct the seeder once; wire `handlePrompt`; add
   `ActivePlay.worldBible`). Docs: `ARCHITECTURE.md`, `BOUNDARIES.md`,
   `FAILURE-MODES.md`, `AGENTS.md`; new `ADR-0022`; this plan.

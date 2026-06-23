@@ -31,12 +31,12 @@ layers, never the reverse. The domain depends on nothing in this repo.
 
 | Layer | Folder (today) | What lives here |
 | --- | --- | --- |
-| **Domain / Contracts** | `apps/web/src/domain/` | RoomSpec plus versioned world/event/save schemas, pure loaders/validators/projection, and ports (`RoomSource`, `RoomGenerator`, `WorldStore`, `Clock`, `IdGenerator`, interaction). Pure. |
+| **Domain / Contracts** | `apps/web/src/domain/` | RoomSpec, versioned world/event/save schemas, bounded initial-canon `WorldBibleSeed`, pure loaders/validators/projections, and ports including `WorldBibleSeeder`. Pure. |
 | **Renderer** | `apps/web/src/renderer/engine/` | Three.js engine, builders, controls, **camera controllers** (`camera/`: `CameraController` / `IsometricCameraController`), the **player object/marker**, disposal. |
 | **UI** | `apps/web/src/renderer/ui/` | Presentational React components. |
-| **App / Composition root** | `apps/web/src/App.tsx`, `RoomViewer.tsx`, `app/`, `room/` | Wires concrete implementations together, including room sources, persistent play-session/cache ownership, the adjacent-room pre-generation / resolver seam, navigation, prompt bar, and error boundary. |
+| **App / Composition root** | `apps/web/src/App.tsx`, `RoomViewer.tsx`, `app/`, `room/` | Wires concrete implementations, including prompt-only world-bible seeding/degradation, room sources, play-session/cache ownership, adjacent-room resolution, navigation, and UI hosts. |
 | **Platform** | `apps/web/src/platform/` | Cross-cutting adapters: logger (`logger/`) and real clock/UUID implementations (`system/`); 🔜 config/env. |
-| **Generation** | ✅ v0 (fake): `apps/web/src/generation/` | Prompt → RoomSpec **data** via a deterministic fake generator; 🔜 real LLM. |
+| **Generation** | ✅ v0 (fake): `apps/web/src/generation/` | Prompt → validated WorldBibleSeed **data** and compact seed → RoomSpec **data** via deterministic silent fakes; 🔜 real LLM adapters. |
 | **World session** | ✅ v0 (headless): `apps/web/src/world-session/` | Application use-cases, in-memory `WorldStore`, and the SaveGame JSON boundary. No React/renderer wiring. |
 | **Interactions** | ✅ v0 (headless): `apps/web/src/interactions/` | Plans validated interaction effects and executes their commands through `WorldSession`; composition wiring stays outside this folder. |
 | **Encounters** | ✅ v0 (headless): `apps/web/src/encounters/` | Plans validated encounter outcomes and executes their commands through `WorldSession` (shared `world-session/applyCommands`); composition wiring stays outside this folder. |
@@ -91,7 +91,8 @@ adapter or any other `platform/**`.
 | **Interaction effects are fixed-vocabulary data, never behavior/code.** | The pure domain planner maps validated descriptors to existing commands, and the application service can write only through `WorldSession.appendEvent`. ([ADR-0014](./decisions/ADR-0014-object-interactions-v0.md)) |
 | **Encounters are fixed-vocabulary data, never behavior/code.** | An `EncounterSpec` rides the shared `Interaction`; the pure `planEncounter` maps the chosen choice to existing commands (no new event type, encounter wins over `effect`), and `EncounterService` writes only through `WorldSession.appendEvent` via the shared `applyCommands` helper. ([ADR-0015](./decisions/ADR-0015-encounter-system-v0.md)) |
 | **NPC dialogue is read-only display data.** | `NPCDialogueSpec` and provider replies are neutral data; `NPCDialogueService` may only read `WorldState`, never append events, and dialogue/history/text remain outside authoritative state and logs. ([ADR-0017](./decisions/ADR-0017-npc-dialogue-foundation-v0.md)) |
-| **Generation must never emit executable code** — only RoomSpec data. | The trust boundary. Model output is data validated at the boundary, never `eval`'d, never turned into JS/Three/React — and never Unity C#, Godot GDScript, or any scene script. ([ADR-0001](./decisions/ADR-0001-data-only-room-spec-trusted-renderer.md), [ADR-0008](./decisions/ADR-0008-renderer-portability-strategy.md)) |
+| **WorldBibleSeed is initial canon, never authoritative current state.** | It may live in generated-play composition memory and seed generation, but must not become a `WorldEvent`, `WorldState`, `CanonSeed`, SaveGame, API/SQLite row, renderer input, quest engine, or branching planner. `WorldSession` and its event-log projection remain authoritative. ([ADR-0022](./decisions/ADR-0022-world-bible-seed-v0.md)) |
+| **Generation must never emit executable code** — only WorldBibleSeed/RoomSpec-shaped data. | The trust boundary. Provider output remains data until its schema/assembly boundary validates it; it is never `eval`'d or turned into JS/Three/React/scene scripts. ([ADR-0001](./decisions/ADR-0001-data-only-room-spec-trusted-renderer.md), [ADR-0008](./decisions/ADR-0008-renderer-portability-strategy.md), [ADR-0022](./decisions/ADR-0022-world-bible-seed-v0.md)) |
 | **No raw `RoomSpec` may reach the renderer unvalidated.** | All dynamic/external data is validated by `loadRoomSpec` at the boundary first. |
 | **No engine objects in the domain or DB; keep `RoomSpec`/domain renderer-agnostic.** | The renderer is an *adapter* over the data contract — a Three.js adapter today, possibly Babylon/Unity/Godot later. Engine handles (`THREE.Mesh`, `Material`, `Vector3`, scene nodes) live only inside a renderer adapter; the domain and persisted rows hold neutral data only, so a second renderer is a new adapter, not a rewrite. ([ADR-0008](./decisions/ADR-0008-renderer-portability-strategy.md)) |
 | **The camera and the player marker are renderer-internal presentation — never `RoomSpec`/domain data.** | Camera mode (isometric today, free-camera later), the `CameraController`/`OrthographicCamera`, and the player marker live only inside the renderer engine. A `RoomSpec` describes *what is in the room*, not *how it is filmed*; no camera/player fields exist in the schema, and the model never directs the camera. ([ADR-0012](./decisions/ADR-0012-isometric-camera-foundation.md)) |
@@ -160,7 +161,9 @@ These are enforced mechanically; a violation fails `npm run build` or
   - `renderer/ui/**` may not import `three` or `renderer/engine/**` internals.
   - `domain/**` may not import `react`, `three`, `renderer/**`, or `platform/**`.
   - `generation/**` may not import `react`, `three`, `renderer/**`, or
-    `platform/**` — it emits data and the caller logs ([ADR-0001](./decisions/ADR-0001-data-only-room-spec-trusted-renderer.md), [ADR-0003](./decisions/ADR-0003-logging-abstraction.md)).
+    `platform/**` — both fakes emit validated/data-only contracts and stay silent;
+    prompt-path composition owns safe logging ([ADR-0001](./decisions/ADR-0001-data-only-room-spec-trusted-renderer.md),
+    [ADR-0003](./decisions/ADR-0003-logging-abstraction.md), [ADR-0022](./decisions/ADR-0022-world-bible-seed-v0.md)).
   - `world-session/**` may import domain contracts/ports and the Logger
     interface, but may not import `react`, `react-dom`, `three`, or
     `renderer/**` ([ADR-0013](./decisions/ADR-0013-world-state-event-log-v0.md)).
