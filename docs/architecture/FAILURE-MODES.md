@@ -214,24 +214,44 @@ content/concurrency outcomes are **typed results**; genuine infrastructure fault
   degradation when the store is down, and the dual-dialect PostgreSQL path
   ([ADR-0004](./decisions/ADR-0004-persistence-sqlite-to-postgres.md)) remain future.
 
-## 7. Adjacent-room pre-generation not ready at a door ❌ (future)
+## 7. Adjacent-room pre-generation not ready at a door ✅ v0 (browser/session-cache) · 🔜 backend status lifecycle
 
-The player reaches an exit before the next room finished pre-generating, or its
-pre-generation failed. Design in
+The player reaches an exit before its room finished warming, the target was never
+warmed, or warming failed. v0 ships the deterministic browser subset
+([ADR-0021](./decisions/ADR-0021-adjacent-room-pregeneration-v0.md)); the parallel
+real-LLM status lifecycle remains the future shape of
 [ADR-0009](./decisions/ADR-0009-adjacent-room-pre-generation.md).
 
-- **Detection** — each room carries an explicit status:
-  `not_started → generating → validating → repairing → ready`, or `failed`. The
-  transition handler reads the status of the room behind the door.
-- **Handling** — by status: `ready` → instant transition; `generating` /
-  `validating` / `repairing` → a short "Opening the way…" wait; `failed` → retry
-  or fallback room (case 4/4b); `not_started` → generate on demand. Parallel
-  pre-gen is capped (1–3 jobs) and limited to the nearby frontier, so a backtrack
-  wastes little work.
-- **User-facing** — at worst a short "Opening the way…" pause, never a freeze or
-  a broken room.
-- **Logging** — room id, status at the door, wait time, pre-gen hit/miss; reuse
-  the generation logging from case 4/4b.
+- **Detection** ✅ — there is no per-room status machine in v0; the single
+  `AdjacentRoomPregenerator.resolveRoom(id)` seam serves both the door and the
+  background warmer over **one** cache and **one** in-flight map. A door request
+  is a cache hit, or **joins** an in-flight warm for the same id, or runs a fresh
+  resolve. Every generated adjacent room must pass through `GeneratedRoomSource →
+  assembleRoom → repairRoom → fallbackRoom` before it can enter the cache;
+  authored adjacents warm through `RoomRegistry` and are never fake-generated.
+- **Handling** ✅ — by case: **warmed** → instant cache hit; **warming in flight**
+  → the door joins that one job (no duplicate generation); **never warmed**
+  (authored *or* non-authored) → resolved on demand, generating safely if
+  non-authored; a generator **throw/reject** → typed `unavailable` (nothing
+  cached, the next attempt retries). Bad *content* never blocks — `assembleRoom`
+  yields a repaired/fallback room (case 4/4b). Warming is **fire-and-forget,
+  capped at `maxJobs` (default 3)**, deduped against cache + in-flight, and
+  **depth-1** (a warmed room never warms its own neighbours), so a backtrack
+  wastes little work and pre-generation cannot fan out.
+- **User-facing** ✅ — with the synchronous deterministic generator a transition is
+  either an instant cache hit or an on-demand resolve in the same tick, so there is
+  no "Opening the way…" state to show in v0; the player never freezes or sees a
+  broken room. In the authored two-room loop both rooms warm through the registry,
+  so behavior is unchanged. 🔜 with a slow real model, the ADR-0009 status
+  lifecycle (`not_started → generating → validating → repairing → ready` / `failed`)
+  and a short "Opening the way…" wait become observable.
+- **Logging** ✅ — ids / codes / counts / booleans / provenance only: `room
+  resolved` (`roomId`, `source`, `cacheHit`, optional `provenance`), `room resolve
+  failed` (`roomId`, `source`, `code`), `adjacent warm requested` (`adjacentCount`,
+  `started`). The generation seed is the **structural room id** (`adjacent:${id}`),
+  never a user prompt; **no raw prompt/seed text, generated JSON, story text, or
+  object names** are logged (reuses the case 4/4b discipline). 🔜 per-room status,
+  wait time, and model/latency arrive with the backend pipeline.
 
 ## 8. Isometric camera / player presentation ✅
 
@@ -419,7 +439,7 @@ never reach logs.
 | 4b | Valid spec, bad room | `validateRoom` (semantic) + deterministic `repairRoom` / fallback; 🔜 LLM reviewer | fatal → repair → render, else trusted fallback room | ✅ v0 |
 | 5 | Backend/network | validated API requests + typed results | safe API envelope; browser retry state 🔜 | ✅ API edge v0 |
 | 6 | DB / persistence failure | typed results (rooms, conflicts) + fail-fast throws (open/migration/corrupt session) | safe API error; no browser surface yet | ✅ API-backed v0 |
-| 7 | Pre-gen not ready | room status at door | "Opening the way…" / fallback | ❌ |
+| 7 | Pre-gen not ready | one `resolveRoom` seam: cache hit / in-flight join / on-demand resolve (capped, depth-1 warming) | instant cached room, or safe on-demand resolve/generate; never a freeze | ✅ v0 (browser); status lifecycle 🔜 |
 | 8 | Iso camera/player presentation | resize→frustum; player-position proximity; scene-graph disposal; cutaway curbs | stable framing, no occlusion or leak | ✅ |
 | 9 | Concurrent world append | optimistic revision check | typed conflict; neither event nor snapshot committed | ✅ headless |
 | 10 | Save integrity mismatch | validate log + seed + projected snapshot | reject whole save | ✅ headless |

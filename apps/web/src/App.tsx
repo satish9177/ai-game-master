@@ -6,6 +6,7 @@ import { RoomRegistry } from './room/RoomRegistry'
 import { SessionRoomCache } from './room/SessionRoomCache'
 import { FakeRoomGenerator } from './generation/FakeRoomGenerator'
 import { ErrorBoundary } from './app/ErrorBoundary'
+import { AdjacentRoomPregenerator } from './app/AdjacentRoomPregenerator'
 import { NavigationService } from './app/NavigationService'
 import type { NavigationResult } from './app/NavigationService'
 import { PromptBar } from './app/PromptBar'
@@ -39,12 +40,20 @@ const npcDialogueService = new NPCDialogueService(worldSession, dialogueProvider
 const fallbackRoom = loadRoomSpec(fallbackRoomSpec)
 const roomRegistry = new RoomRegistry()
 const exampleRoomCache = new SessionRoomCache()
-const exampleNavigation = new NavigationService(
-  worldSession,
-  roomRegistry,
+// The session's room-acquisition seam: it warms the rooms behind the current
+// room's exits in the background and resolves rooms on demand at a door
+// (cache → authored registry → generated). Generated adjacents go through
+// GeneratedRoomSource → assembleRoom, so only valid rooms reach the cache. The
+// generation seed is the structural room id only (never a user prompt), and
+// GeneratedRoomSource logs its length, never its text.
+const adjacentPregenerator = new AdjacentRoomPregenerator(
   exampleRoomCache,
+  roomRegistry,
+  (roomId) => new GeneratedRoomSource(generator, `adjacent:${roomId}`, logger, fallbackRoom),
+  fallbackRoom,
   logger,
 )
+const exampleNavigation = new NavigationService(worldSession, adjacentPregenerator, logger)
 
 const STARTING_ROOM_ID = 'throne-room'
 const ROOM_UNAVAILABLE = 'This room could not be loaded.'
@@ -78,7 +87,7 @@ let exampleBootstrap: Promise<ActivePlay | null> | undefined
 
 function bootstrapExamplePlay(): Promise<ActivePlay | null> {
   exampleBootstrap ??= (async () => {
-    const resolved = await exampleNavigation.resolveRoom(STARTING_ROOM_ID)
+    const resolved = await adjacentPregenerator.resolveRoom(STARTING_ROOM_ID)
     if (!resolved.ok) {
       logger.error('starting room resolution failed', { code: resolved.reason })
       return null
@@ -88,6 +97,9 @@ function bootstrapExamplePlay(): Promise<ActivePlay | null> {
       logger.error('world session start failed', { code: started.error.code })
       return null
     }
+    // Warm the rooms behind the starting room's exits so the first transition is
+    // instant (or safely generated on demand if warming hasn't finished).
+    adjacentPregenerator.warmAdjacent(resolved.room)
     return {
       roomSource: preloadedRoomSource(resolved.room),
       sessionId: started.state.sessionId,
@@ -170,6 +182,8 @@ function App() {
             navigation: activePlay.navigation,
           }
         : current)
+      // Warm the next frontier from the room we just entered.
+      adjacentPregenerator.warmAdjacent(result.room)
     }
     return result
   }, [activePlay])

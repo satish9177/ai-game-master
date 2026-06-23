@@ -1,8 +1,7 @@
 import type { LoadedRoom } from '../domain/loadRoomSpec'
 import type { WorldState } from '../domain/world/worldState'
 import type { Logger } from '../platform/logger/Logger'
-import type { RoomRegistryResult } from '../room/RoomRegistry'
-import { SessionRoomCache } from '../room/SessionRoomCache'
+import type { RoomResolver } from './AdjacentRoomPregenerator'
 import type { WorldSession } from '../world-session/WorldSession'
 
 export type NavigationResult =
@@ -13,56 +12,28 @@ export type NavigationResult =
       reason: 'conflict' | 'not-found' | 'invalid-room' | 'unavailable'
     }
 
-export type ResolveRoomResult =
-  | { ok: true; room: LoadedRoom; cacheHit: boolean }
-  | { ok: false; reason: 'unknown-room' | 'invalid-room' | 'unavailable' }
-
 export type NavigationSession = Pick<WorldSession, 'getWorldState' | 'move'>
-
-export type NavigationRoomRegistry = {
-  resolve(roomId: string): RoomRegistryResult | Promise<RoomRegistryResult>
-}
 
 export class NavigationService {
   private readonly session: NavigationSession
-  private readonly registry: NavigationRoomRegistry
-  private readonly cache: SessionRoomCache
+  private readonly resolver: RoomResolver
   private readonly log: Logger
 
-  constructor(
-    session: NavigationSession,
-    registry: NavigationRoomRegistry,
-    cache: SessionRoomCache,
-    logger: Logger,
-  ) {
+  constructor(session: NavigationSession, resolver: RoomResolver, logger: Logger) {
     this.session = session
-    this.registry = registry
-    this.cache = cache
+    this.resolver = resolver
     this.log = logger
-  }
-
-  async resolveRoom(roomId: string): Promise<ResolveRoomResult> {
-    const cached = this.cache.get(roomId)
-    if (cached) return { ok: true, room: cached, cacheHit: true }
-
-    let resolved: RoomRegistryResult
-    try {
-      resolved = await this.registry.resolve(roomId)
-    } catch {
-      return { ok: false, reason: 'unavailable' }
-    }
-    if (!resolved.ok) return resolved
-    this.cache.set(roomId, resolved.room)
-    return { ok: true, room: resolved.room, cacheHit: false }
   }
 
   async navigate(input: { sessionId: string; toRoomId: string }): Promise<NavigationResult> {
     const { sessionId, toRoomId } = input
-    const resolved = await this.resolveRoom(toRoomId)
+
+    // RESOLVE-BEFORE-APPEND: the shared resolver acquires the target room
+    // (cache → authored registry → on-demand generation) before any move is
+    // recorded, so the log never claims a move into an unrenderable room.
+    const resolved = await this.resolver.resolveRoom(toRoomId)
     if (!resolved.ok) {
-      const result: NavigationResult = resolved.reason === 'unknown-room'
-        ? { status: 'rejected', reason: 'unknown-room' }
-        : { status: 'failed', reason: resolved.reason }
+      const result: NavigationResult = { status: 'failed', reason: resolved.reason }
       this.logResult(sessionId, toRoomId, result)
       return result
     }
