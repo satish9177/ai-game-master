@@ -1,10 +1,8 @@
 # Implementation Plan — `feature/session-save-load-v0`
 
-> Status: **approved — pending implementation.** Design is locked (see §3); no
-> source code exists yet. This plan is the docs-only artifact that must precede
-> any code for this slice. **ADR-0027 is NOT written yet** — it is created in the
-> docs closeout *after* the source implementation is reviewed (§17). Commits are
-> made manually by the maintainer; agents do not commit.
+> Status: **implemented — closed.** Source implementation is complete and reviewed.
+> ADR-0027 is written ([decisions/ADR-0027-session-save-load-v0.md](../decisions/ADR-0027-session-save-load-v0.md)).
+> Commits are made manually by the maintainer; agents do not commit.
 >
 > Companion docs: [ARCHITECTURE](../ARCHITECTURE.md) · [BOUNDARIES](../BOUNDARIES.md) ·
 > [FAILURE-MODES](../FAILURE-MODES.md) · [CONVENTIONS](../CONVENTIONS.md). Direct
@@ -51,8 +49,8 @@ tiny UI control, and (c) the App glue that rebuilds `ActivePlay` after a load.
 
 ## 1. Status
 
-**Approved — pending implementation.** Design locked; no source written. This
-docs-only plan precedes code. ADR-0027 follows in closeout, not now (§17).
+**Implemented — closed.** Source implementation complete and reviewed. ADR-0027 written
+in docs closeout ([decisions/ADR-0027-session-save-load-v0.md](../decisions/ADR-0027-session-save-load-v0.md)).
 
 ## 2. Current repo facts (verified against source)
 

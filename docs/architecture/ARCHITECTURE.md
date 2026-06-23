@@ -31,7 +31,8 @@ Throughout these docs:
   Real Room Generator Provider v0 — opt-in, browser-direct/dev-only BYOK;
   NPC Memory Persistence v0 — headless, Node-only, browser-unwired;
   Living-World Room Memory v0 — headless, Node-only, browser-unwired;
-  Inventory & Health UI v0 — browser).
+  Inventory & Health UI v0 — browser;
+  Session Save/Load v0 — browser).
 - 🔜 **Planned** — designed and approved, not yet built (next slices).
 - ❌ **Not built** — future shape only; documented so we don't paint into a corner.
 
@@ -628,6 +629,58 @@ or renderer change of any kind
   status strings are never logged (mirrors the ADR-0013/ADR-0014/ADR-0015
   content-free log discipline).
 
+## Session Save/Load v0
+
+✅ **Implemented, browser.** A player can now **save the current session** to a single
+named `localStorage` slot and **resume it later** in the same browser, restoring from
+the integrity-checked `SaveGame` document through the **already-existing, already-tested**
+`SaveGameService` and `WorldStore.restoreSession`
+([ADR-0027](./decisions/ADR-0027-session-save-load-v0.md)).
+
+The defining property: **`localStorage` is a byte parking spot, never truth.** Every load
+re-parses, version-checks, integrity-checks, and reconstructs the snapshot from the event log
+before anything is shown. The slot wrapper's `label`/`savedAt`/`currentRoomId` are display
+hints; only `saveGameJson` crosses the integrity boundary.
+
+- **`SaveSlotStore`.** A `KeyValueStore`-seamed interface (`app/saveSlotStore.ts`) with a
+  thin `LocalStorageSaveSlotStore` browser binding (key `aigm.save.slot`). `read()` returns
+  the parsed wrapper or `null`; `write()` JSON-stringifies the full wrapper. All `localStorage`
+  access is wrapped in try/catch: unavailable reads → treat as no slot; quota exceeded on write
+  → typed `quota-exceeded` code. Never throws into the render cycle. Tested over an in-memory
+  `KeyValueStore` fake; the `localStorage` binding is exercised manually.
+- **`buildRestoredPlay` (pure helper).** `app/buildRestoredPlay.ts` takes `(state,
+  resolveResult, fallbackRoom)` and returns `{ play: ActivePlay; degraded: boolean }`.
+  `roomSource` wraps the resolved room (or the fallback under `currentRoomId` when resolution
+  fails). `degraded = !resolveResult.ok || resolveResult.source !== 'registry'` — authored
+  current room → `false`, generated or unresolvable → `true`. `navigation = exampleNavigation`;
+  `initialPlayer = projectPlayerHud(state)`. Imports no store/service; never mutates inputs.
+  Tested with Vitest (authored/generated/failed-resolve cases; purity/no-mutation).
+- **`SaveLoadBar` (presentational).** `renderer/ui/SaveLoadBar.tsx` receives
+  `{ canSave, hasSave, busy, error, onSave, onContinue }`. Save enabled when `canSave`;
+  Continue shown/enabled only when `hasSave`; both disabled during `busy`. Calm `role="alert"`
+  errors — never raw error text, never save content. App-level overlay sibling of `RoomViewer`
+  and `StatusHud`.
+- **`App` wiring.** `App` constructs `SaveGameService` over the existing `worldStore` and a
+  `LocalStorageSaveSlotStore`. `handleSave` writes on success; `handleLoad` reads → validates
+  → restores → rebuilds `ActivePlay` via `buildRestoredPlay` → `setActivePlay` /
+  `setPlayerHud` / notice; bumps the existing `requestVersion` ref to prevent a stale
+  in-flight bootstrap from clobbering the restored `ActivePlay`; on any typed failure shows a
+  calm error, current play untouched.
+- **Honest restoration.** Authored current room → faithful (`source:'registry'`, no notice).
+  Generated/non-authored or unresolvable → re-resolve by id; if not through the authored path,
+  `FALLBACK_NOTICE` shown and `degraded:true`. In every case the player resumes at the correct
+  `currentRoomId` with correct inventory/health/status/`roomStates`; only room visuals are
+  best-effort for non-authored rooms.
+- **Room cache not restored.** `resolveRoom` naturally populates the resolved current room;
+  neighbours warm on demand as in normal play.
+- **Not changed:** `domain/world/saveGame.ts` · `world-session/saveGame.ts` ·
+  `domain/ports/WorldStore.ts` · `world-session/InMemoryWorldStore.ts` · `persistence/**` ·
+  `server/**` · `renderer/engine/**` · `renderer/RoomViewer.tsx` · `eslint.config.js` ·
+  `package.json`. No new dependency was added.
+- **Log-safe.** `handleSave`/`handleLoad` log ids/counts/codes/enums only — never the SaveGame
+  JSON, slot wrapper, seed name, event payloads, item names/ids, room names, dialogue, prompt
+  text, or any narrative/PII.
+
 ## Layered architecture
 
 Dependencies point **inward**, toward the domain. Outer layers may depend on
@@ -713,6 +766,7 @@ skipped. There is no code path from "model output" to "executed JavaScript".
 App.tsx
   ├─ playerHud: PlayerHudView | null    ✅ App-owned read-only render cache (seeded at session start)
   ├─ <StatusHud view={playerHud} />     ✅ App-level overlay (sibling of RoomViewer)
+  ├─ <SaveLoadBar .../>                 ✅ App-level save/load control (sibling of RoomViewer)
   └─ RoomViewer.tsx                     (React host — owns the engine lifecycle)
        ├─ loadRoomSpec(throneRoom)       ✅ validation boundary (today: static data)
        ├─ new Engine(container)          ✅ pure Three.js
@@ -785,7 +839,7 @@ the raw-prompt seed, and only a room-generator throw/reject is `unavailable`.
 | `renderer/engine/builders/` | `buildShell` (floor + walls, with isometric **cutaway curbs** on the camera-facing walls), `buildLighting`, and the object `registry` + `buildObjects` with magenta-placeholder fallback. |
 | `renderer/engine/controls/` | `MovementControls` (screen-relative WASD/arrows driving the **player**, room-clamped); `LookControls` (drag-look) **retained but not instantiated** in isometric mode. |
 | `renderer/engine/disposables.ts` | `Disposables` + `disposeObject` — explicit GPU teardown (Three.js does not GC geometries/materials/textures). |
-| `renderer/ui/` | Presentational React overlays: `Hud` (interaction prompt); `DialoguePanel` (result messages); `StatusHud` (read-only player health/inventory/status HUD; `pointer-events:none`; `aria-live`); `playerHud.ts` (pure `projectPlayerHud(WorldState) → PlayerHudView` projection + `PlayerHudView`/`PlayerHudHealth`/`PlayerHudItem` types). |
+| `renderer/ui/` | Presentational React overlays: `Hud` (interaction prompt); `DialoguePanel` (result messages); `StatusHud` (read-only player health/inventory/status HUD; `pointer-events:none`; `aria-live`); `playerHud.ts` (pure `projectPlayerHud(WorldState) → PlayerHudView` projection + `PlayerHudView`/`PlayerHudHealth`/`PlayerHudItem` types); `SaveLoadBar.tsx` (save/load bar; receives `{ canSave, hasSave, busy, error, onSave, onContinue }`; calm `role="alert"` errors; no save content shown). |
 | `renderer/RoomViewer.tsx` | The composition seam: constructs/disposes the engine, bridges engine callbacks to React state. StrictMode-safe (mount → dispose → mount leaks nothing). |
 
 ## Generation Foundation v0 — module summary
@@ -812,7 +866,9 @@ the raw-prompt seed, and only a room-generator throw/reject is `unavailable`.
 | `app/PromptBar.tsx` | Presentational prompt input + Generate button — app composition chrome, **not** renderer UI. Trims/validates; emits `onSubmit(prompt)`. |
 | `app/worldBible.ts` | Prompt-path composition helper: seed + project + safe enum/count/length logging; on failure return the raw prompt and no bible. |
 | `app/fallbackNotice.ts` | The static, prompt-free notice copy + the pure `shouldShowFallbackNotice(provenance)` decision (show for `repaired`/`fallback`). |
-| `App.tsx` | Composition root: selects the prompt-path generator once via `selectRoomGenerator(readLlmConfig())` (real provider when configured, else fake) and logs the safe selection summary; keeps a separate `FakeRoomGenerator` for adjacent pre-generation. PromptBar submit seeds/projects a bible, passes the compact seed to the unchanged `GeneratedRoomSource` (using the selected generator), and stores the optional bible on generated `ActivePlay`. Authored bootstrap/pregeneration remain bible-free and fake. |
+| `App.tsx` | Composition root: selects the prompt-path generator once via `selectRoomGenerator(readLlmConfig())` (real provider when configured, else fake) and logs the safe selection summary; keeps a separate `FakeRoomGenerator` for adjacent pre-generation. PromptBar submit seeds/projects a bible, passes the compact seed to the unchanged `GeneratedRoomSource` (using the selected generator), and stores the optional bible on generated `ActivePlay`. Authored bootstrap/pregeneration remain bible-free and fake. Constructs `SaveGameService` + `LocalStorageSaveSlotStore`; owns `handleSave`/`handleLoad` with `requestVersion` guarding and renders `<SaveLoadBar>`. |
+| `app/saveSlotStore.ts` | `SaveSlotStore` interface + `KeyValueStore` seam + read/write/has/clear slot logic + `LocalStorageSaveSlotStore` browser binding (key `aigm.save.slot`). Reads return parsed `SlotWrapper \| null`; writes JSON-stringify the full wrapper. All `localStorage` access wrapped in try/catch; never throws into the render cycle. Tested over an in-memory `KeyValueStore` fake (key round-trips, absence, throwing fake for unavailable/quota). |
+| `app/buildRestoredPlay.ts` | Pure helper: `buildRestoredPlay(state, resolveResult, fallbackRoom) → { play: ActivePlay; degraded: boolean }`. Wraps the resolved room (or fallback under `currentRoomId`) into `roomSource`; sets `navigation = exampleNavigation`, `initialPlayer = projectPlayerHud(state)`, `degraded = !ok \|\| source !== 'registry'`. Imports no store/service; never mutates inputs. Tested (authored/generated/failed-resolve cases; purity/no-mutation). |
 
 Tested with **Vitest**: the PRNG (determinism/divergence/ranges), the fake
 room generator, `WorldBibleSeed` schema/projection, `FakeWorldBibleSeeder`
@@ -820,6 +876,9 @@ room generator, `WorldBibleSeed` schema/projection, `FakeWorldBibleSeeder`
 non-blocking app helper and its leakage guard, `validateRoom`, repair/fallback,
 and all `GeneratedRoomSource` paths. Log-safety tests cover raw prompts, derived
 seeds, bible/story/opening-arc text, keywords, generated JSON, and error details.
+`buildRestoredPlay` (authored/generated/failed-resolve, purity/no-mutation) and
+`saveSlotStore` (write→read round-trips, absence, throwing-fake for unavailable/quota)
+are covered by pure Vitest tests over in-memory fakes; no DOM/`jsdom` dependency was added.
 
 ## Object & entity system (compositional builders)
 
