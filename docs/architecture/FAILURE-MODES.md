@@ -186,6 +186,41 @@ the composition boundary treats failure as an expected degradable outcome
   text, generated JSON, or thrown error details.
 
 
+## 4d. Real room generator provider failure ✅ opt-in v0 (degrade / unavailable)
+
+The opt-in `OpenAICompatibleRoomGenerator` (OpenAI/DeepSeek; off by default) makes
+one real network call on the PromptBar-generated room path. It is **strictly
+additive and non-blocking**: missing or incomplete config, or any request failure,
+degrades to today's behavior, and malformed output flows through the unchanged
+repair/fallback pipeline ([ADR-0023](./decisions/ADR-0023-real-room-generator-provider-v0.md)).
+
+| Situation | Detection | Handling / result | Logging |
+| --- | --- | --- | --- |
+| Incomplete config (provider/key/model) | `app/llmConfig` + `selectRoomGenerator` (trimmed completeness check) | select `FakeRoomGenerator`; deterministic, offline, never blocked | `provider:'fake'`, fixed reason `config-disabled` |
+| Network error / non-2xx / non-JSON body | `OpenAICompatibleRoomGenerator` | throw fixed-code `Error` → `GeneratedRoomSource` maps to `unavailable` (retry screen) | existing `unavailable` line, fixed code `llm-request-failed` only |
+| Hard timeout (abort) | `AbortController` (`timeoutMs`, default 25s), `timedOut` flag | same: throw → `unavailable` | fixed code `llm-timeout` only |
+| Empty / missing `choices[0].message.content` | response content check | same: throw → `unavailable` | fixed code `llm-empty-response` only |
+| Malformed / non-JSON completion text | unchanged `assembleRoom` | `repaired` or `fallback` room (`ok:true`) + existing static notice (case 4/4b) | provenance/codes (unchanged) |
+| Valid clean JSON completion | unchanged | `generated` room, no notice | provenance (unchanged) |
+
+- **Bounded:** one call, **no retry**, hard timeout (~25s default; within ADR-0007's
+  10–30s target for the first room). Adjacent pre-generation stays fake, so warming
+  never calls the provider or spends.
+- **Sanitized errors are a hard requirement.** The provider catches everything and
+  rethrows a fixed-shape `Error` whose `message` is one of three safe codes —
+  carrying **no** key, request/response body, prompt/seed, or model output. Because
+  `GeneratedRoomSource` logs `err.message` on `unavailable`, this keeps that existing
+  line safe with **no change** to `GeneratedRoomSource`. A unit test asserts the
+  thrown message contains no substring of the key, seed, or body.
+- **Selection log safety.** The composition root logs only
+  `{ provider, model, maxTokens, timeoutMs }` (real) or
+  `{ provider:'fake', reason:'config-disabled' }`. **Never logged:** the API key,
+  raw prompt, world-bible text, derived seed, provider request/response body,
+  generated JSON, completion text, or raw error details.
+- **Dev-only key caveat.** `VITE_*` keys are inlined into a built browser bundle; v0
+  is local-dev/BYOK only and a real-key bundle must never be deployed. Hosted
+  production moves the provider server-side later.
+
 ## 5. Backend / network failure ✅ API edge v0 · 🔜 browser client
 
 The Node API edge exists, but the browser does not call it yet. v0 therefore
@@ -463,6 +498,7 @@ never reach logs.
 | 4 | Invalid generated JSON | `assembleRoom`: parse/schema/semantic stages → typed result | repaired or trusted fallback room + static notice; generator-unavailable → retry | ✅ v0 |
 | 4b | Valid spec, bad room | `validateRoom` (semantic) + deterministic `repairRoom` / fallback; 🔜 LLM reviewer | fatal → repair → render, else trusted fallback room | ✅ v0 |
 | 4c | World Bible seeding | schema validation + composition catch | raw-prompt generator seed; no stored bible; normal room pipeline | ✅ non-blocking v0 |
+| 4d | Real room provider | completeness check; fixed-code throw on network/timeout/empty/non-JSON | incomplete → fake (`config-disabled`); request failure → `unavailable` retry; malformed text → repaired/fallback | ✅ opt-in v0 (dev-only) |
 | 5 | Backend/network | validated API requests + typed results | safe API envelope; browser retry state 🔜 | ✅ API edge v0 |
 | 6 | DB / persistence failure | typed results (rooms, conflicts) + fail-fast throws (open/migration/corrupt session) | safe API error; no browser surface yet | ✅ API-backed v0 |
 | 7 | Pre-gen not ready | one `resolveRoom` seam: cache hit / in-flight join / on-demand resolve (capped, depth-1 warming) | instant cached room, or safe on-demand resolve/generate; never a freeze | ✅ v0 (browser); status lifecycle 🔜 |

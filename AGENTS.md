@@ -78,10 +78,24 @@ never the browser** ([ADR-0018](./docs/architecture/decisions/ADR-0018-backend-s
 save/load. It composes `WorldSession` with the SQLite stores, validates requests,
 and returns safe typed error envelopes; the browser remains on in-memory adapters
 with no API client wiring ([ADR-0019](./docs/architecture/decisions/ADR-0019-backend-world-session-api-v0.md)).
+**Real Room Generator Provider v0** adds the first **real, network-backed**
+`RoomGenerator` behind the unchanged port: one generic `OpenAICompatibleRoomGenerator`
+(OpenAI/DeepSeek via raw `fetch` over an injected transport seam; **no SDK**). It is
+**opt-in and off by default** — `app/selectRoomGenerator` picks it only when
+`provider ∈ {openai, deepseek}` + matching key + model are all complete (read in
+`app/llmConfig` from `import.meta.env`), else `FakeRoomGenerator` with reason
+`config-disabled`. It affects the **PromptBar-generated room path only**;
+`AdjacentRoomPregenerator` stays fake. Output is **raw text only** (no
+parse/validate/fence-strip/structured output), so it still flows through the
+unchanged `GeneratedRoomSource → assembleRoom → repairRoom/fallbackRoom`. The
+provider logs nothing and throws only fixed safe codes; browser-direct keys are
+**local-dev / BYOK only** and a real-key bundle must never be deployed
+([ADR-0023](./docs/architecture/decisions/ADR-0023-real-room-generator-provider-v0.md)).
 "2.5D" means camera/presentation, **not** a new engine; full first-person /
-free-camera 3D remains future/optional. There is still no real LLM/API generation,
-hosted deployment, browser API client, or browser DB access. FastAPI/Python are
-not part of the MVP backend path.
+free-camera 3D remains future/optional. The real room provider is opt-in/dev-only;
+there is still **no hosted/production LLM generation, server-side provider, browser
+API client, or browser DB access**, and no Anthropic adapter, provider router, or
+streaming. FastAPI/Python are not part of the MVP backend path.
 
 ## Engineering standards (non-negotiable)
 
@@ -150,7 +164,7 @@ Dependencies point **inward**, toward the domain. Full rules in
 | **Renderer** | `apps/web/src/renderer/engine/` | domain, logger port | React, network, DB |
 | **UI** (React) | `apps/web/src/renderer/ui/` | domain, host contract, logger port | Three.js, engine internals |
 | **Composition root** | `apps/web/src/App.tsx`, `RoomViewer.tsx`, `app/`, `room/` | concrete wiring, including prompt-only bible seed/project/degrade | — |
-| **Generation** | `apps/web/src/generation/` (v0, fake) | domain contracts/PRNG | logger/platform, UI, renderer, React, Three.js, DB |
+| **Generation** | `apps/web/src/generation/` (v0, fakes + opt-in real room provider) | domain contracts/PRNG, the `fetch` global (real provider) | logger/platform, env, UI, renderer, React, Three.js, DB |
 | **World session** | `apps/web/src/world-session/` (v0, headless) | domain, logger port | UI, renderer, React, Three.js, DB |
 | **Interactions** | `apps/web/src/interactions/` (v0, headless) | domain, world-session, logger port | UI, renderer, React, Three.js, DB |
 | **Encounters** | `apps/web/src/encounters/` (v0, headless) | domain, world-session, logger port | UI, renderer, React, Three.js, DB |
@@ -168,6 +182,11 @@ Dependencies point **inward**, toward the domain. Full rules in
 - World-bible logs may contain safe enums/counts/lengths/fixed codes only—never
   raw prompt, derived seed, bible/story/opening-arc/NPC/faction/location/keyword
   text, generated JSON, or thrown error details ([ADR-0022](./docs/architecture/decisions/ADR-0022-world-bible-seed-v0.md)).
+- The real room provider logs nothing; its selection log carries only the provider
+  enum, model id, and `maxTokens`/`timeoutMs` numbers (or the fixed reason
+  `config-disabled`), and it throws only fixed safe codes. Never log the API key,
+  provider request/response body, completion text, or raw error details
+  ([ADR-0023](./docs/architecture/decisions/ADR-0023-real-room-generator-provider-v0.md)).
 
 ## Conventions
 
@@ -179,17 +198,33 @@ ground objects. Full details in [CONVENTIONS](./docs/architecture/CONVENTIONS.md
 
 Unless the maintainer explicitly asks, do **not**:
 
-- add **real** LLM/API generation, a hosted/cloud deployment, a second backend
+- add a hosted/cloud deployment, a server-side LLM provider, a second backend
   (`apps/api`), a browser API client/CORS proxy, browser-side DB access, or a
-  non-SQLite/Postgres datastore — the deterministic fake World Bible seeder and
-  room generator, deterministic semantic `validateRoom`, and deterministic
-  `assembleRoom`/`repairRoom` + authored fallback room (Generation Foundation v0 +
-  World Bible Seed v0 + Semantic Validator v0 + Repair/Fallback v0) are the only
-  generation-pipeline code; do not extend them into a real model, a **deeper** code
-  validator (reachability / object↔object collision / quest consistency), an LLM
-  reviewer, a **bounded multi-attempt repair/re-prompt loop** (v0 is a single
-  deterministic pass; do not add new repair rules or room resizing), a backend
-  generation endpoint, or memory without explicit approval.
+  non-SQLite/Postgres datastore. The only **real** generation code is the opt-in,
+  dev-only `OpenAICompatibleRoomGenerator` (Real Room Generator Provider v0,
+  [ADR-0023](./docs/architecture/decisions/ADR-0023-real-room-generator-provider-v0.md));
+  alongside it the deterministic fake World Bible seeder and room generator,
+  deterministic semantic `validateRoom`, and deterministic `assembleRoom`/`repairRoom`
+  + authored fallback room (Generation Foundation v0 + World Bible Seed v0 + Semantic
+  Validator v0 + Repair/Fallback v0) are the generation-pipeline code. Do not extend
+  them into a **deeper** code validator (reachability / object↔object collision /
+  quest consistency), an LLM reviewer, a **bounded multi-attempt repair/re-prompt
+  loop** (v0 is a single deterministic pass; do not add new repair rules or room
+  resizing), a backend generation endpoint, or memory without explicit approval.
+
+  **Real Room Generator Provider v0** is built and approved as **opt-in,
+  browser-direct, dev-only / BYOK** ([ADR-0023](./docs/architecture/decisions/ADR-0023-real-room-generator-provider-v0.md)).
+  Keep it that way: one generic OpenAI-compatible `fetch` adapter (OpenAI/DeepSeek)
+  behind the unchanged `RoomGenerator` port, raw text only, fake default, real
+  selected only when provider + matching key + model are complete, prompt path only,
+  adjacent stays fake. Do **not** add an SDK dependency, an Anthropic adapter, a
+  multi-provider router or cross-provider fallback chain, a cost optimizer, a retry
+  loop, streaming, parsing/validation/fence-stripping/structured output in the
+  provider, real-provider wiring for `AdjacentRoomPregenerator`, or any
+  server-side/hosted provider, without explicit approval. Never log the API key,
+  raw prompt, world-bible text, derived seed, provider request/response body,
+  generated JSON, completion text, or raw error details, and never deploy a built
+  bundle compiled with a real `VITE_*` key.
 
   **World Bible Seed v0** is initial canon in generated-play browser composition
   only ([ADR-0022](./docs/architecture/decisions/ADR-0022-world-bible-seed-v0.md)).

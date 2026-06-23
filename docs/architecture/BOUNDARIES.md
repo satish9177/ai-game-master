@@ -36,7 +36,7 @@ layers, never the reverse. The domain depends on nothing in this repo.
 | **UI** | `apps/web/src/renderer/ui/` | Presentational React components. |
 | **App / Composition root** | `apps/web/src/App.tsx`, `RoomViewer.tsx`, `app/`, `room/` | Wires concrete implementations, including prompt-only world-bible seeding/degradation, room sources, play-session/cache ownership, adjacent-room resolution, navigation, and UI hosts. |
 | **Platform** | `apps/web/src/platform/` | Cross-cutting adapters: logger (`logger/`) and real clock/UUID implementations (`system/`); 🔜 config/env. |
-| **Generation** | ✅ v0 (fake): `apps/web/src/generation/` | Prompt → validated WorldBibleSeed **data** and compact seed → RoomSpec **data** via deterministic silent fakes; 🔜 real LLM adapters. |
+| **Generation** | ✅ v0 (fakes + opt-in real room provider): `apps/web/src/generation/` | Prompt → validated WorldBibleSeed **data** and compact seed → RoomSpec **data**: deterministic silent fakes by default, plus the opt-in `OpenAICompatibleRoomGenerator` — the **first generation module that performs network I/O** (raw `fetch` over an injected transport seam; dev-only, off by default). It still imports no logger/env and emits raw text only ([ADR-0023](./decisions/ADR-0023-real-room-generator-provider-v0.md)); 🔜 more real adapters. |
 | **World session** | ✅ v0 (headless): `apps/web/src/world-session/` | Application use-cases, in-memory `WorldStore`, and the SaveGame JSON boundary. No React/renderer wiring. |
 | **Interactions** | ✅ v0 (headless): `apps/web/src/interactions/` | Plans validated interaction effects and executes their commands through `WorldSession`; composition wiring stays outside this folder. |
 | **Encounters** | ✅ v0 (headless): `apps/web/src/encounters/` | Plans validated encounter outcomes and executes their commands through `WorldSession` (shared `world-session/applyCommands`); composition wiring stays outside this folder. |
@@ -161,9 +161,13 @@ These are enforced mechanically; a violation fails `npm run build` or
   - `renderer/ui/**` may not import `three` or `renderer/engine/**` internals.
   - `domain/**` may not import `react`, `three`, `renderer/**`, or `platform/**`.
   - `generation/**` may not import `react`, `three`, `renderer/**`, or
-    `platform/**` — both fakes emit validated/data-only contracts and stay silent;
-    prompt-path composition owns safe logging ([ADR-0001](./decisions/ADR-0001-data-only-room-spec-trusted-renderer.md),
-    [ADR-0003](./decisions/ADR-0003-logging-abstraction.md), [ADR-0022](./decisions/ADR-0022-world-bible-seed-v0.md)).
+    `platform/**` — the fakes emit validated/data-only contracts and the real
+    `OpenAICompatibleRoomGenerator` emits raw text; all stay silent (no logger) and
+    read no env. The real provider **may** use the `fetch` global and reads its
+    config from an injected object; prompt-path composition (`app/llmConfig.ts`,
+    `app/selectRoomGenerator.ts`) owns env reading, selection, and safe logging. New
+    files are already covered by this block — **no new lint rule** ([ADR-0001](./decisions/ADR-0001-data-only-room-spec-trusted-renderer.md),
+    [ADR-0003](./decisions/ADR-0003-logging-abstraction.md), [ADR-0022](./decisions/ADR-0022-world-bible-seed-v0.md), [ADR-0023](./decisions/ADR-0023-real-room-generator-provider-v0.md)).
   - `world-session/**` may import domain contracts/ports and the Logger
     interface, but may not import `react`, `react-dom`, `three`, or
     `renderer/**` ([ADR-0013](./decisions/ADR-0013-world-state-event-log-v0.md)).

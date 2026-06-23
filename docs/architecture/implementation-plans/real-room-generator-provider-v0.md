@@ -1,6 +1,7 @@
 # Implementation Plan — `feature/real-room-generator-provider-v0`
 
-> Status: **planned (docs-only); design approved, awaiting implementation.**
+> Status: **implemented.** All three slices landed as planned; the decision is
+> recorded in [ADR-0023](../decisions/ADR-0023-real-room-generator-provider-v0.md).
 > Commits are made manually by the maintainer; agents do not commit.
 >
 > Companion docs: [ARCHITECTURE](../ARCHITECTURE.md) ·
@@ -9,7 +10,11 @@
 > `world-bible-seed-v0` ([ADR-0022](../decisions/ADR-0022-world-bible-seed-v0.md)),
 > `room-generation-repair-fallback-v0` ([ADR-0020](../decisions/ADR-0020-room-generation-repair-fallback-v0.md)),
 > `adjacent-room-pregeneration-v0` ([ADR-0021](../decisions/ADR-0021-adjacent-room-pregeneration-v0.md)).
-> Decision to be recorded as **ADR-0023** during implementation slice 3.
+>
+> Implementation note: the source matched this plan, with one deliberate addition —
+> a hard `MAX_SEED_CHARS` clamp in `llmRoomPrompt.ts` as a defensive bound above the
+> ≤160-char prompt-path seed, so even a raw-prompt fallback seed cannot send
+> unbounded user text to the model.
 
 ## Goal
 
