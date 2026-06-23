@@ -19,4 +19,11 @@ describe('RoomRegistry', () => {
     expect(registry.resolve('missing')).toEqual({ ok: false, reason: 'unknown-room' })
     expect(registry.resolve('broken')).toEqual({ ok: false, reason: 'invalid-room' })
   })
+
+  it('reports authored ids via has() without loading them', () => {
+    const registry = new RoomRegistry()
+    expect(registry.has('throne-room')).toBe(true)
+    expect(registry.has('ruined-safehouse')).toBe(true)
+    expect(registry.has('unknown-room')).toBe(false)
+  })
 })

@@ -19,6 +19,15 @@ export class RoomRegistry {
     this.rooms = new Map(Object.entries(rooms))
   }
 
+  /**
+   * Whether a room id is authored/registry-known. A pure map check (no
+   * `loadRoomSpec` work), used by the adjacent-room resolver to decide between
+   * resolving an authored room and generating a non-authored one.
+   */
+  has(roomId: string): boolean {
+    return this.rooms.has(roomId)
+  }
+
   resolve(roomId: string): RoomRegistryResult {
     const raw = this.rooms.get(roomId)
     if (raw === undefined) return { ok: false, reason: 'unknown-room' }
