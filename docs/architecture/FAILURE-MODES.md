@@ -534,6 +534,30 @@ Logs carry `memoryId`/`worldId`/`sessionId`/`roomId`/`kind`/`source`/`confidence
 names, provider prompts/responses, generated JSON, API keys, or PII. The firewall and
 the in-memory store are silent; the service and the SQLite store are the only loggers.
 
+## 18. Player HUD display ✅
+
+The read-only `StatusHud` overlay reflects in-memory `WorldState` projected by the
+pure `projectPlayerHud` function. Its absence, stale state, or empty fields never block
+play; it has no write path and cannot corrupt truth
+([ADR-0026](./decisions/ADR-0026-inventory-health-ui-v0.md)).
+
+| Situation | Detection | Handling / result | Logging |
+| --- | --- | --- | --- |
+| No active session / HUD not yet seeded | `playerHud === null` in `App` | `StatusHud` not rendered; no crash | — |
+| Empty inventory | `view.items.length === 0` | explicit "No items" empty state rendered | — |
+| Empty status set | `view.statuses.length === 0` | status chip row omitted entirely | — |
+| Player state changed (item/health/status) | interaction/encounter `applied`/`already-resolved` → `onWorldStateChange(result.state)` | `App` re-projects via `projectPlayerHud`; `StatusHud` re-renders from fresh view | — |
+| Navigation (`moved-to-room`) | does not touch player fields | HUD persists unchanged; `App` does not reset `playerHud` | — |
+| Health clamped to `0` (lethal encounter) | reducer clamp (existing; `applyEvent`) | bar empty, label `0 / max`; **no death/game-over state** (out of scope) | — |
+| Stale HUD after unexpected non-mutating resolve | result.status not `applied`/`already-resolved` | `onWorldStateChange` not called; last known view persists; no write-back possible | — |
+
+The HUD is a pure render cache (`playerHud: PlayerHudView | null` in `App`). It only
+renders after a `WorldState` that has already passed schema validation exists — there is
+no path where a rendered HUD encounters absent or schema-invalid player fields.
+`projectPlayerHud` is silent (pure function); `StatusHud` is presentational. No new
+log lines were added to `App`/`RoomViewer`. Item names/ids, health values/deltas, and
+status strings are never logged.
+
 ---
 
 ## Summary
@@ -560,6 +584,7 @@ the in-memory store are silent; the service and the SQLite store are the only lo
 | 15 | NPC dialogue resolution | read-only world context + provider reply | typed failure or component-only conversation; no event/state change | ✅ |
 | 16 | NPC memory persistence | write firewall + scoped read firewall + FK/UNIQUE/no-update trigger; read-boundary re-validate + JSON-scope re-assert | rejected/failed/empty-recall typed results; corrupt or scope-divergent row skipped; no path to truth | ✅ headless |
 | 17 | Room memory persistence | write firewall + scoped read firewall + FK/UNIQUE/no-update trigger (no FK to `rooms`); read-boundary re-validate + JSON-scope re-assert | rejected/failed/empty-recall typed results; corrupt or scope-divergent row skipped; no path to truth; `roomStates` unchanged | ✅ headless |
+| 18 | Player HUD display | `playerHud === null` guards render; `projectPlayerHud` is pure/silent; `onWorldStateChange` fires only on `applied`/`already-resolved` variants carrying `state` | HUD absent until seeded; empty inventory/status degrade gracefully; health `0/max` renders empty bar; persists across navigation; no write path | ✅ browser |
 
 The through-line: **validate at the boundary, degrade visibly and safely, log
 the detail, show the user calm.**

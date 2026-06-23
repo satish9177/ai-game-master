@@ -95,6 +95,26 @@ injection, and no renderer/RoomSpec/Three.js change.** Logs never include memory
 player lines, room/NPC display names, provider prompts/responses, generated JSON, keys,
 or PII.
 
+## Inventory & Health UI v0 — shipped, browser
+
+A **display-only player HUD** is implemented in the browser, surfacing
+`player.health`, `player.status`, and `inventory` from the existing authoritative
+`WorldState` ([ADR-0026](docs/architecture/decisions/ADR-0026-inventory-health-ui-v0.md)).
+
+| Module | Role |
+| --- | --- |
+| `renderer/ui/playerHud.ts` + `playerHud.test.ts` | Pure `projectPlayerHud(state) → PlayerHudView` projection + Vitest tests (health fraction, item mapping, status copy, purity/no-mutation, structural read-only). No domain/service import. |
+| `renderer/ui/StatusHud.tsx` | Presentational React: health bar + `current/max` text; inventory list (explicit "No items" when empty); status chips (omitted when empty). `pointer-events:none`; `role="status"` + `aria-live="polite"`. |
+| `App.tsx` wiring | Owns `playerHud: PlayerHudView | null`; seeds at both session-start sites; resets on new prompt; renders `<StatusHud>` as an App-level overlay sibling of `RoomViewer` (survives navigation remounts). |
+| `RoomViewer.tsx` wiring | Single `onWorldStateChange?: (state: WorldState) => void` prop; called only after interaction/encounter `applied`/`already-resolved` resolves. No other change. |
+
+**The HUD is a read-only render cache — never truth, never written back.** v0 adds
+**no combat, no health/damage model, no inventory economy, no item actions, no
+equipment, no status-effect engine, no backend wiring, no memory integration, no LLM
+item generation, no `RoomSpec` change, no Three.js engine change, no new dependency,
+and no DOM/component tests.** Logs never include item names/ids, health values/deltas,
+status strings, or any narrative content.
+
 ## Current guardrails
 
 Do not add unless explicitly requested by the maintainer or by the approved implementation plan for the current feature:

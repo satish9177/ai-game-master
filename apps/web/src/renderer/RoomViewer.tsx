@@ -13,6 +13,7 @@ import type { InteractionService } from '../interactions/InteractionService'
 import type { EncounterService } from '../encounters/EncounterService'
 import type { NPCDialogueService } from '../dialogue/NPCDialogueService'
 import type { NavigationResult } from '../app/NavigationService'
+import type { WorldState } from '../domain/world/worldState'
 import {
   buildInteractionEffectLookup,
   interactionResultMessage,
@@ -40,6 +41,7 @@ type RoomViewerProps = {
   encounterService: EncounterService
   npcDialogueService: NPCDialogueService
   onNavigate: (toRoomId: string) => Promise<NavigationResult>
+  onWorldStateChange?: (state: WorldState) => void
 }
 
 export function RoomViewer({
@@ -49,6 +51,7 @@ export function RoomViewer({
   encounterService,
   npcDialogueService,
   onNavigate,
+  onWorldStateChange,
 }: RoomViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const engineRef = useRef<Engine | null>(null)
@@ -214,6 +217,9 @@ export function RoomViewer({
         ref: effectTarget?.ref ?? target.id,
       }).then((result) => {
         if (cancelled) return
+        if (result.status === 'applied' || result.status === 'already-resolved') {
+          onWorldStateChange?.(result.state)
+        }
         setResultMessage(interactionResultMessage(result))
       }).catch(() => {
         if (cancelled) return
@@ -280,6 +286,7 @@ export function RoomViewer({
     interactionService,
     npcDialogueService,
     onNavigate,
+    onWorldStateChange,
     roomSource,
     sessionId,
     webgl2Available,
@@ -366,6 +373,9 @@ export function RoomViewer({
         ref: current.ref,
       }).then((result) => {
         if (activeEncounterRef.current !== current) return
+        if (result.status === 'applied' || result.status === 'already-resolved') {
+          onWorldStateChange?.(result.state)
+        }
         const authored = result.status === 'applied' ? chosen?.outcome.resultText : undefined
         setResultMessage(authored ?? encounterResultMessage(result))
       }).catch(() => {
@@ -374,7 +384,7 @@ export function RoomViewer({
         setResultMessage('This encounter is unavailable.')
       })
     },
-    [encounterService, sessionId],
+    [encounterService, onWorldStateChange, sessionId],
   )
 
   const closeDialogue = useCallback(() => {

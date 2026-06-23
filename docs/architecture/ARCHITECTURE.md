@@ -30,7 +30,8 @@ Throughout these docs:
   Backend World Session API v0 — headless, Node-only;
   Real Room Generator Provider v0 — opt-in, browser-direct/dev-only BYOK;
   NPC Memory Persistence v0 — headless, Node-only, browser-unwired;
-  Living-World Room Memory v0 — headless, Node-only, browser-unwired).
+  Living-World Room Memory v0 — headless, Node-only, browser-unwired;
+  Inventory & Health UI v0 — browser).
 - 🔜 **Planned** — designed and approved, not yet built (next slices).
 - ❌ **Not built** — future shape only; documented so we don't paint into a corner.
 
@@ -581,6 +582,52 @@ stays in-memory and unwired.
   wall (which already re-includes `domain/memory` via negation). No API route, no
   `bootstrap` wiring, no renderer/RoomSpec/Three.js change.
 
+## Inventory & Health UI v0
+
+✅ **Implemented, browser.** The first **player HUD** now surfaces `player.health`,
+`player.status`, and `inventory` from the existing authoritative `WorldState` — a
+**display-only, read-only** overlay with no domain, event, reducer, schema, backend,
+or renderer change of any kind
+([ADR-0026](./decisions/ADR-0026-inventory-health-ui-v0.md)).
+
+- **Pure projection.** `projectPlayerHud(state: WorldState) → PlayerHudView`
+  (`renderer/ui/playerHud.ts`) is a total, deterministic, side-effect-free function.
+  It imports only domain **types** (`WorldState`, `InventoryItem`), returns fresh
+  objects/arrays (no aliasing of the input), and exports no
+  `WorldCommand`/`WorldEvent`-producing function. Covered by pure Vitest tests
+  (health fraction math, item mapping, status copy, purity/no-mutation, structural
+  read-only); no DOM/`jsdom`/`@testing-library` dependency was added.
+- **Presentational component.** `StatusHud` (`renderer/ui/StatusHud.tsx`) is
+  props-in, DOM-out React only — no `three`, no engine internals, no `world-session`,
+  no services, no local state beyond render. Renders: health bar + `current/max` label
+  (bar width = `fraction*100%`; `0/max` graceful empty state); inventory list keyed by
+  `itemId` (`name ×quantity`; explicit "No items" when empty); status chips (row
+  omitted when empty). `pointer-events: none` (canvas input passes through);
+  `role="status"` + `aria-live="polite"` for accessibility. Styled with `.status-hud*`
+  rules in `index.css`, consistent with `.hud`/`.room-notice`.
+- **`App`-owned state.** `App` holds `playerHud: PlayerHudView | null`. Seeded from
+  `result.state` at both session-start sites (bootstrap + prompt) and reset to `null`
+  alongside `setActivePlay(null)` on a new prompt. `StatusHud` renders as an App-level
+  overlay sibling of `RoomViewer`, so it survives `RoomViewer`'s navigation remount.
+  `moved-to-room` does not touch player fields, so the HUD persists across rooms with
+  no special reset.
+- **`RoomViewer` wiring.** A single optional
+  `onWorldStateChange?: (state: WorldState) => void` prop, fired only when an
+  interaction or encounter resolve returns `applied` or `already-resolved` (the
+  variants that already carry `state`). `App` passes
+  `onWorldStateChange={(state) => setPlayerHud(projectPlayerHud(state))}` — no extra
+  `WorldSession.getWorldState` read. No other `RoomViewer` behavior changes.
+- **Not changed:** `domain/world/**` · `domain/roomSpec.ts` · `world-session/**` ·
+  `interactions/**` · `encounters/**` · `dialogue/**` · `memory/**` · `persistence/**`
+  · `server/**` · `renderer/engine/**` · `eslint.config.js` · `package.json`. No new
+  combat, inventory economy, item actions, equipment, status-effect engine, backend
+  wiring, memory integration, LLM item generation, Three.js engine change, or new
+  dependency was added.
+- **Log-safe.** The projection is silent; `StatusHud` is presentational; no new log
+  lines were added to `App`/`RoomViewer`. Item names/ids, health values/deltas, and
+  status strings are never logged (mirrors the ADR-0013/ADR-0014/ADR-0015
+  content-free log discipline).
+
 ## Layered architecture
 
 Dependencies point **inward**, toward the domain. Outer layers may depend on
@@ -664,6 +711,8 @@ skipped. There is no code path from "model output" to "executed JavaScript".
 
 ```
 App.tsx
+  ├─ playerHud: PlayerHudView | null    ✅ App-owned read-only render cache (seeded at session start)
+  ├─ <StatusHud view={playerHud} />     ✅ App-level overlay (sibling of RoomViewer)
   └─ RoomViewer.tsx                     (React host — owns the engine lifecycle)
        ├─ loadRoomSpec(throneRoom)       ✅ validation boundary (today: static data)
        ├─ new Engine(container)          ✅ pure Three.js
@@ -678,11 +727,15 @@ App.tsx
        └─ engine.onRequestOpenInteraction  → RoomViewer id lookup
             ├─ exit? → NavigationService → existing moved-to-room
             ├─ encounter? → present choices → EncounterService (on choose)
+            │    applied/already-resolved → onWorldStateChange(result.state)
+            │                               → App: setPlayerHud(projectPlayerHud(state))
             ├─ dialogue? → NPCDialogueService.getWorldState → fake provider
             │    → component-only history → <NPCDialoguePanel/>
             └─ else effect? → InteractionService
                  → WorldSession.appendEvent (shared applyCommands)
                  → typed result message → <DialoguePanel/>
+                 applied/already-resolved → onWorldStateChange(result.state)
+                                            → App: setPlayerHud(projectPlayerHud(state))
 ```
 
 The React ↔ engine seam is **callbacks + imperative methods**, not shared
@@ -732,7 +785,7 @@ the raw-prompt seed, and only a room-generator throw/reject is `unavailable`.
 | `renderer/engine/builders/` | `buildShell` (floor + walls, with isometric **cutaway curbs** on the camera-facing walls), `buildLighting`, and the object `registry` + `buildObjects` with magenta-placeholder fallback. |
 | `renderer/engine/controls/` | `MovementControls` (screen-relative WASD/arrows driving the **player**, room-clamped); `LookControls` (drag-look) **retained but not instantiated** in isometric mode. |
 | `renderer/engine/disposables.ts` | `Disposables` + `disposeObject` — explicit GPU teardown (Three.js does not GC geometries/materials/textures). |
-| `renderer/ui/` | `Hud` and `DialoguePanel` — presentational React only; the panel accepts a plain optional interaction-result message. |
+| `renderer/ui/` | Presentational React overlays: `Hud` (interaction prompt); `DialoguePanel` (result messages); `StatusHud` (read-only player health/inventory/status HUD; `pointer-events:none`; `aria-live`); `playerHud.ts` (pure `projectPlayerHud(WorldState) → PlayerHudView` projection + `PlayerHudView`/`PlayerHudHealth`/`PlayerHudItem` types). |
 | `renderer/RoomViewer.tsx` | The composition seam: constructs/disposes the engine, bridges engine callbacks to React state. StrictMode-safe (mount → dispose → mount leaks nothing). |
 
 ## Generation Foundation v0 — module summary
