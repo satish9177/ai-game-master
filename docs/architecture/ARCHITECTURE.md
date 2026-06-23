@@ -28,7 +28,8 @@ Throughout these docs:
   Dialogue Foundation v0; Adjacent-Room Pre-generation v0 — browser/session-cache;
   Backend SQLite Persistence v0 — headless, Node-only;
   Backend World Session API v0 — headless, Node-only;
-  Real Room Generator Provider v0 — opt-in, browser-direct/dev-only BYOK).
+  Real Room Generator Provider v0 — opt-in, browser-direct/dev-only BYOK;
+  NPC Memory Persistence v0 — headless, Node-only, browser-unwired).
 - 🔜 **Planned** — designed and approved, not yet built (next slices).
 - ❌ **Not built** — future shape only; documented so we don't paint into a corner.
 
@@ -464,6 +465,63 @@ code ([ADR-0019](./decisions/ADR-0019-backend-world-session-api-v0.md)).
   renderer still use in-memory adapters. No CORS/proxy/browser fetch client,
   hosted deployment, FastAPI, or Python backend is part of this MVP path.
 
+## NPC Memory Persistence v0
+
+✅ **Implemented, headless and Node-only.** The first NPC memory layer lands as a
+durable, scoped store of typed NPC memory records plus the pure **memory firewall**
+that governs how memories are written and read. Memory is **supporting context only
+and can never become world truth**: the `WorldSession` event log + reducers remain
+the sole authority, and the memory layer is constructed with **no reference to
+`WorldSession`/`WorldStore`/`WorldCommand`/`WorldEvent`**, so it has no code path to
+mutate state ([ADR-0024](./decisions/ADR-0024-npc-memory-persistence-v0.md)). v0 adds
+**no API, no frontend/dialogue wiring, and no LLM prompt injection**; the browser
+stays in-memory and unwired.
+
+- **Pure domain contracts + firewall.** `domain/memory/contracts.ts` is the strict,
+  versioned schema (imports only `zod`; exports no `WorldCommand`/`WorldEvent`
+  -producing function). `domain/memory/firewall.ts` is pure/total/deterministic:
+  `validateMemoryDraft` (write firewall — validate + trim + default
+  `confidence:'medium'`), `filterMemoriesForScope` (read firewall — exact-triple
+  re-filter), and `selectRecallMemories` (the only ordering authority).
+- **Strict scope `(worldId, sessionId, npcId)`.** Every read and write is filtered
+  against the exact triple. **No cross-session and no cross-world memory in v0.**
+- **Closed vocabularies.** Memory kinds: `player_claim` · `npc_belief` ·
+  `npc_observation` · `dialogue_summary`. Source: `player` · `npc` · `game` · `llm` —
+  **no `system` source** (hidden system/developer text is never stored). `confidence`
+  (`low`/`medium`/`high`) is **informational only**: it does not update truth and does
+  not drive recall. `text` is opaque, inert, **bounded to 280 chars**, never logged.
+- **Deterministic recall.** Ordering is **`seq` desc, then `memoryId`** — never
+  confidence, never recency-by-clock, never relevance. Recall defaults: `limit = 8`,
+  `maxChars = 600` (cumulative `text.length` cap).
+- **`NpcMemoryStore` port + headless `NpcMemoryService`.** The port mirrors
+  `WorldStore`/`RoomStore` (typed results: `session-not-found`/`conflict`; insert-only,
+  no update/delete). The service injects `NpcMemoryStore`, `Clock`, `IdGenerator`,
+  `Logger` — **no `WorldSession` parameter and no append path** (the structural
+  firewall). `InMemoryNpcMemoryStore` enables full service testing without SQLite.
+- **SQLite store + migration.** `0002_npc_memories` adds the `npc_memories` table with
+  a **FK to `world_sessions`**, a scope index, `UNIQUE(session_id, npc_id, seq)`, and a
+  **`BEFORE UPDATE` no-update trigger** (DELETE is left open for a future
+  forgetting/eviction slice). `SqliteNpcMemoryStore` pre-checks the session
+  (`session-not-found`), assigns a gapless `seq`, and maps a concurrent `UNIQUE`
+  violation to `conflict`. Its **read boundary re-validates each stored row through
+  the schema and re-asserts the parsed JSON scope against the queried SQL scope**; a
+  corrupt or scope-divergent row is an expected content failure → **skipped**
+  (logged `invalid-stored-memory`), never thrown, never blocking — contrast a
+  `SqliteWorldStore` session/event fault, which still throws.
+- **Authority unchanged.** Player claims are claims; NPC beliefs/observations can be
+  wrong; dialogue summaries cannot update truth; `source:'llm'` memories cannot apply
+  state changes; reducers/event log remain the only truth-mutation path. Logs carry
+  ids/enums/seq/counts/codes only — **never** memory `text`, player lines, NPC/room
+  names, provider prompts/responses, generated JSON, keys, or PII.
+- **Provably browser-excluded.** A new `src/memory/**` ESLint block mirrors
+  `src/dialogue/**` but is **stricter — it also forbids `**/world-session/**`** (and
+  `interactions`/`encounters`/`dialogue`); the engine block forbids `**/memory/**`,
+  the persistence-self wall forbids the `src/memory` app layer (still allowing
+  `domain/memory`), and the browser catch-all `ignores` the richer block.
+  `SqliteNpcMemoryStore` is covered by the existing persistence tsconfig
+  exclude + Vite reachability + reciprocal walls. No API route, no `bootstrap`
+  wiring, no renderer/RoomSpec/Three.js change.
+
 ## Layered architecture
 
 Dependencies point **inward**, toward the domain. Outer layers may depend on
@@ -497,7 +555,8 @@ inner layers; inner layers never depend on outer layers.
 | ✅ **Interactions (v0, headless)** | Pure effect plans executed through `WorldSession.appendEvent`; typed outcomes for composition. | Domain, World session, Logger port | React, Three.js, Renderer, DB |
 | ✅ **Encounters (v0, headless)** | Pure encounter plans executed through `WorldSession.appendEvent` (shared `applyCommands`); typed two-phase outcomes for composition. | Domain, World session, Logger port | React, Three.js, Renderer, DB |
 | ✅ **Dialogue (v0, headless)** | Pure dialogue context plus a read-only service over `WorldSession.getWorldState` and an injected provider port. | Domain, World session, Logger port | React, Three.js, Renderer, DB |
-| ✅ **Persistence (v0, headless, Node-only)** | `node:sqlite` migrations + `SqliteWorldStore` + `SqliteRoomStore`. Consumed by the Node API; never by the browser. | Domain contracts/ports, Logger **types**, `node:sqlite` | React, Three.js, Renderer, UI, Generation, World session, Interactions, Encounters, Dialogue, App, Server |
+| ✅ **Memory (v0, headless)** | Scoped NPC memory: pure firewall/contracts, `NpcMemoryStore` port, and a `WorldSession`-free `NpcMemoryService` (`remember`/`recall`). Supporting context only — no write path to truth. | Domain (incl. `domain/memory`), Logger port | React, Three.js, Renderer, DB, **World session**, Interactions, Encounters, Dialogue |
+| ✅ **Persistence (v0, headless, Node-only)** | `node:sqlite` migrations + `SqliteWorldStore` + `SqliteRoomStore` + `SqliteNpcMemoryStore`. World/room stores are consumed by the Node API; the memory store is exercised by tests only in v0. Never by the browser. | Domain contracts/ports, Logger **types**, `node:sqlite` | React, Three.js, Renderer, UI, Generation, World session, Interactions, Encounters, Dialogue, **Memory app layer**, App, Server |
 | ✅ **Backend / HTTP API v0** | Native `node:http` session/room edge over `WorldSession` and SQLite stores. Browser-excluded; no generation hosting or frontend client yet. | Domain, World session, Persistence, Platform | React, Three.js, UI, Renderer |
 
 The current code already honors the top three rows: `Engine` is pure Three.js
@@ -764,8 +823,13 @@ is to keep each replacement local to its port.
   and `revision` compare-and-set concurrency.
 - ✅ The native Node HTTP edge exposes session create/state/events/move over
   `WorldSession` + `SqliteWorldStore` with typed safe errors ([ADR-0019](./decisions/ADR-0019-backend-world-session-api-v0.md)).
-- 🔜 A **PostgreSQL** dialect, hosted deployment, browser API client, and memory
-  system remain future. Browser gameplay still uses the in-memory adapters.
+- ✅ The first **NPC memory** layer now ships behind its own `NpcMemoryStore` port
+  with the same headless, Node/SQLite-only cadence and a pure firewall that keeps
+  memory supporting-context-only (NPC Memory Persistence v0,
+  [ADR-0024](./decisions/ADR-0024-npc-memory-persistence-v0.md), below). It adds no
+  new `WorldEvent` and has no path to truth.
+- 🔜 A **PostgreSQL** dialect, hosted deployment, and a browser API client remain
+  future. Browser gameplay still uses the in-memory adapters.
 
 ### ✅ Object Interactions v0  ·  🔜 richer gameplay effects
 
@@ -834,8 +898,29 @@ is to keep each replacement local to its port.
   typed replies/failures. Repeated turns leave the event log unchanged.
 - ✅ `NPCDialoguePanel` is presentational; canned prompts/Continue and conversation
   history live only in component state. The renderer still emits intent only.
-- 🔜 A real validated LLM adapter, free-text input, persistent memory, relationship
-  state, summaries/vector recall, speech, and quests remain future work.
+- 🔜 A real validated LLM adapter, free-text input, relationship state,
+  summaries/vector recall, speech, and quests remain future work. The first
+  **persistent NPC memory** layer now exists headlessly (below), but is **not yet
+  wired** into dialogue or prompts.
+
+### ✅ NPC Memory Persistence v0  ·  🔜 dialogue/LLM wiring
+
+- ✅ `NpcMemoryStore` is a domain port (mirrors `WorldStore`/`RoomStore`: typed
+  results, insert-only, no update/delete). `domain/memory` holds the pure contracts
+  and the firewall (`validateMemoryDraft`/`filterMemoriesForScope`/`selectRecallMemories`).
+- ✅ The headless `NpcMemoryService` (`remember`/`recall`) injects only the store,
+  `Clock`, `IdGenerator`, and `Logger` — **no `WorldSession`** and no append path, so
+  memory cannot become truth. `InMemoryNpcMemoryStore` and `SqliteNpcMemoryStore`
+  (migration `0002_npc_memories`, FK to `world_sessions`, no-update trigger) implement
+  the port; the SQLite read boundary re-validates and re-asserts scope, skipping
+  corrupt/scope-divergent rows.
+- ✅ Strict `(worldId, sessionId, npcId)` scope, closed kind/source enums (no
+  `system` source), informational-only `confidence`, deterministic `seq`-desc recall,
+  280-char bounded inert text, and content-free logging.
+- 🔜 API endpoints, dialogue integration, an LLM memory writer, memory injection into
+  NPC prompts, a summarizer, vector/embedding search, cross-session/global memory,
+  forgetting/eviction, and a memory UI remain future work
+  ([ADR-0024](./decisions/ADR-0024-npc-memory-persistence-v0.md)).
 
 ### ✅ Backend / API v0  ·  🔜 generation hosting and browser client
 
@@ -850,8 +935,9 @@ is to keep each replacement local to its port.
 
 ### ✅ Persistence (SQLite, headless v0)  ·  🔜 PostgreSQL later
 
-- ✅ Repository **ports** live in the domain (`WorldStore`, the new `RoomStore`);
-  the SQLite adapters live in the Node-only `src/persistence/**` build unit. UI
+- ✅ Repository **ports** live in the domain (`WorldStore`, `RoomStore`, and the new
+  `NpcMemoryStore`); the SQLite adapters (`SqliteWorldStore`, `SqliteRoomStore`,
+  `SqliteNpcMemoryStore`) live in the Node-only `src/persistence/**` build unit. UI
   and renderer **never** touch SQL or a DB driver — enforced by tsconfig
   exclusion, Vite reachability, and the reciprocal ESLint wall.
 - ✅ SQLite is a *server-side*, Node-only store (`node:sqlite`), **not** an

@@ -40,6 +40,32 @@ FastAPI/Python are not part of the MVP backend path.
 * Keep DI simple through constructor/function parameters. Do not add heavy frameworks, Redux, Nest, heavy ORMs, or new package/workspace structure without approval.
 * WorldSession current state plus append-only event log are authoritative; SQLite is authoritative where backend persistence is wired.
 
+## NPC memory (npc-memory-persistence-v0) — shipped, headless
+
+The first NPC memory layer is **implemented, headless, and Node/SQLite-only**; the
+browser stays in-memory and unwired ([ADR-0024](docs/architecture/decisions/ADR-0024-npc-memory-persistence-v0.md)).
+**Memory is supporting context only and can never become world truth.** The
+`WorldSession` event log + reducers remain the sole authority, and the memory layer
+holds **no reference to `WorldSession`/`WorldStore`/`WorldCommand`/`WorldEvent`** — it
+has no code path to mutate state (the *memory firewall*, lint-enforced). Player claims
+are claims, NPC beliefs/observations can be wrong, dialogue summaries can't update
+truth, and `source:'llm'` memories can't apply state changes.
+
+| Module | Role |
+| --- | --- |
+| `domain/memory/contracts.ts` | Strict versioned schema: strict `(worldId, sessionId, npcId)` scope; kinds `player_claim`/`npc_belief`/`npc_observation`/`dialogue_summary`; source `player`/`npc`/`game`/`llm` (**no `system`**); informational-only `confidence`; inert `text` ≤ 280. Imports only `zod`; exports no command/event-producing function. |
+| `domain/memory/firewall.ts` | Pure firewall: `validateMemoryDraft` (write), `filterMemoriesForScope` (read), `selectRecallMemories` (deterministic `seq` desc → `memoryId`; defaults `limit 8`, `maxChars 600`). |
+| `domain/ports/NpcMemoryStore.ts` | Insert-only port (typed `session-not-found`/`conflict`; no update/delete). |
+| `memory/NpcMemoryService.ts` | Headless `remember`/`recall`; injects store/`Clock`/`IdGenerator`/`Logger` — **no `WorldSession`**, no append path. |
+| `memory/InMemoryNpcMemoryStore.ts` | Pure in-memory adapter (tests / future browser path). |
+| `persistence/SqliteNpcMemoryStore.ts` · `persistence/migrations/0002_npc_memories.ts` | SQLite store + migration: FK to `world_sessions`, scope index, `UNIQUE(session_id, npc_id, seq)`, no-update trigger (DELETE left open). Read boundary re-validates and re-asserts JSON scope; corrupt/scope-divergent rows are skipped. |
+
+`src/memory/**` has a lint wall stricter than the other application layers — it also
+forbids importing `world-session`/`interactions`/`encounters`/`dialogue`. v0 adds **no
+API, no dialogue/LLM wiring, no prompt injection, and no renderer/RoomSpec/Three.js
+change**. Logs never include memory `text`, player lines, NPC/room names, provider
+prompts/responses, generated JSON, keys, or PII.
+
 ## Current guardrails
 
 Do not add unless explicitly requested by the maintainer or by the approved implementation plan for the current feature:

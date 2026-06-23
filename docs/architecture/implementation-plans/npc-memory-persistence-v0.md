@@ -1,8 +1,12 @@
 # Implementation Plan — `feature/npc-memory-persistence-v0`
 
-> Status: **approved design — not yet implemented.** Commits are made manually by
-> the maintainer; agents do not commit. **ADR-0024 is deliberately deferred** to
-> docs closeout, written only after the implementation is reviewed.
+> Status: **implemented — closed.** Slices 1–3 shipped under
+> `feature/npc-memory-persistence-v0`; the docs closeout (slice 4) is recorded in
+> **[ADR-0024](../decisions/ADR-0024-npc-memory-persistence-v0.md)** and the updated
+> `ARCHITECTURE.md` / `BOUNDARIES.md` / `FAILURE-MODES.md` / `AGENTS.md`. Verified
+> against `npm run build` / `npm run lint` / `npm run test` (515 tests pass) in
+> `apps/web`. The code matches this plan as written. Commits are made manually by the
+> maintainer; agents do not commit.
 >
 > Companion docs: [ARCHITECTURE](../ARCHITECTURE.md) · [BOUNDARIES](../BOUNDARIES.md) ·
 > [FAILURE-MODES](../FAILURE-MODES.md) · [CONVENTIONS](../CONVENTIONS.md). Roadmap
@@ -526,12 +530,12 @@ Each slice builds and leaves `npm run build` / `npm run lint` / `npm run test`
    `persistence/migrations/0002_npc_memories.ts` (+ register in `index.ts`),
    `persistence/SqliteNpcMemoryStore.ts` + tests (round-trip, seq, FK, conflict,
    corrupt-row, no-update trigger, scope isolation). Node-only.
-4. **`docs(architecture): record npc-memory-persistence-v0`** *(closeout, after
-   review)* — create **ADR-0024**; update `ARCHITECTURE.md` (new "NPC Memory
-   Persistence v0" section + a ✅ plug-in point), `BOUNDARIES.md` (new `memory/`
-   layer row + lint block + dependency-table row), `FAILURE-MODES.md` (new memory
-   case + summary row), and `AGENTS.md` (status paragraph + module table); flip this
-   plan and ADR-0024 to *implemented*.
+4. **`docs(architecture): record npc-memory-persistence-v0`** ✅ *(closeout, done)* —
+   created **ADR-0024**; updated `ARCHITECTURE.md` (new "NPC Memory Persistence v0"
+   section + ✅ plug-in point + layer-table row), `BOUNDARIES.md` (new `memory/`
+   layer row + lint block + dependency-table row/column + footnotes),
+   `FAILURE-MODES.md` (new case 16 + summary row), and `AGENTS.md` (status section +
+   module table); flipped this plan and ADR-0024 to *implemented*.
 
 ## 18. Files added / changed
 

@@ -20,6 +20,7 @@ layers, never the reverse. The domain depends on nothing in this repo.
   Interactions ─┤
   Encounters ───┤
   Dialogue ─────┤
+  Memory ───────┤
   Backend ──────┤
   Persistence ──┤──► (App / Composition root) ──► UI ─┐
                 │                                       ├──► DOMAIN / CONTRACTS
@@ -41,24 +42,26 @@ layers, never the reverse. The domain depends on nothing in this repo.
 | **Interactions** | ✅ v0 (headless): `apps/web/src/interactions/` | Plans validated interaction effects and executes their commands through `WorldSession`; composition wiring stays outside this folder. |
 | **Encounters** | ✅ v0 (headless): `apps/web/src/encounters/` | Plans validated encounter outcomes and executes their commands through `WorldSession` (shared `world-session/applyCommands`); composition wiring stays outside this folder. |
 | **Dialogue** | ✅ v0 (headless): `apps/web/src/dialogue/` | Builds pure dialogue context and coordinates read-only provider replies through `WorldSession.getWorldState`; composition/UI wiring stays outside this folder. |
-| **Persistence** | ✅ v0 (headless, Node-only): `apps/web/src/persistence/` | `node:sqlite` connection + forward-only migration runner, `SqliteWorldStore` (existing `WorldStore` port), and `SqliteRoomStore` (new `RoomStore` port). Consumed by the Node API; never browser-reachable. |
+| **Memory** | ✅ v0 (headless): `apps/web/src/memory/` | Scoped NPC memory: `NpcMemoryService` (`remember`/`recall`) over the `NpcMemoryStore` port and `InMemoryNpcMemoryStore`, with the pure firewall/contracts in `domain/memory`. Supporting context only — **no `WorldSession` reference, no write path to truth.** No composition/UI/API wiring in v0. |
+| **Persistence** | ✅ v0 (headless, Node-only): `apps/web/src/persistence/` | `node:sqlite` connection + forward-only migration runner, `SqliteWorldStore` (`WorldStore` port), `SqliteRoomStore` (`RoomStore` port), and `SqliteNpcMemoryStore` (`NpcMemoryStore` port, migration `0002_npc_memories`). World/room stores are consumed by the Node API; the memory store is test-only in v0. Never browser-reachable. |
 | **Backend / HTTP API** | ✅ v0 (Node-only): `apps/web/src/server/` | Native `node:http` edge for health, world-session commands/queries, and room save/load. Validates HTTP input and composes world-session plus SQLite adapters; no frontend imports. |
 
 ## Allowed dependency directions
 
-| From ↓ → To → | Domain | Renderer | UI | Platform (Logger) | Generation | World session | Interactions | Encounters | Dialogue | Persistence |
-| --- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| **Domain** | — | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
-| **Renderer** | ✓ | — | ✗ | ✓ (port) | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
-| **UI** | ✓ | ✗* | — | ✓ (port) | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
-| **App / Composition root** | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗† |
-| **Generation** | ✓ | ✗ | ✗ | ✓ (port) | — | ✗ | ✗ | ✗ | ✗ | ✗ |
-| **World session** | ✓ | ✗ | ✗ | ✓ (port) | ✗ | — | ✗ | ✗ | ✗ | ✗ |
-| **Interactions** | ✓ | ✗ | ✗ | ✓ (port) | ✗ | ✓ | — | ✗ | ✗ | ✗ |
-| **Encounters** | ✓ | ✗ | ✗ | ✓ (port) | ✗ | ✓ | ✗ | — | ✗ | ✗ |
-| **Dialogue** | ✓ | ✗ | ✗ | ✓ (port) | ✗ | ✓ | ✗ | ✗ | — | ✗ |
-| **Persistence (v0, headless)** | ✓ | ✗ | ✗ | ✓ (types) | ✗ | ✗ | ✗ | ✗ | ✗ | — |
-| **Backend / HTTP (v0)** | ✓ | ✗ | ✗ | ✓ (port) | ✗ | ✓ | ✗ | ✗ | ✗ | ✓ |
+| From ↓ → To → | Domain | Renderer | UI | Platform (Logger) | Generation | World session | Interactions | Encounters | Dialogue | Memory | Persistence |
+| --- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| **Domain** | — | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
+| **Renderer** | ✓ | — | ✗ | ✓ (port) | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
+| **UI** | ✓ | ✗* | — | ✓ (port) | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
+| **App / Composition root** | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓‡ | ✗† |
+| **Generation** | ✓ | ✗ | ✗ | ✓ (port) | — | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
+| **World session** | ✓ | ✗ | ✗ | ✓ (port) | ✗ | — | ✗ | ✗ | ✗ | ✗ | ✗ |
+| **Interactions** | ✓ | ✗ | ✗ | ✓ (port) | ✗ | ✓ | — | ✗ | ✗ | ✗ | ✗ |
+| **Encounters** | ✓ | ✗ | ✗ | ✓ (port) | ✗ | ✓ | ✗ | — | ✗ | ✗ | ✗ |
+| **Dialogue** | ✓ | ✗ | ✗ | ✓ (port) | ✗ | ✓ | ✗ | ✗ | — | ✗ | ✗ |
+| **Memory (v0, headless)** | ✓ | ✗ | ✗ | ✓ (port) | ✗ | ✗‖ | ✗ | ✗ | ✗ | — | ✗ |
+| **Persistence (v0, headless)** | ✓ | ✗ | ✗ | ✓ (types) | ✗ | ✗ | ✗ | ✗ | ✗ | ✗§ | — |
+| **Backend / HTTP (v0)** | ✓ | ✗ | ✗ | ✓ (port) | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | ✓ |
 
 `✗*` UI may not import renderer **internals**. It interacts with the engine only
 through the *approved host interface* (below). The composition root is where
@@ -72,6 +75,20 @@ browser bundle. Browser gameplay continues to use the in-memory adapters
 [ADR-0019](./decisions/ADR-0019-backend-world-session-api-v0.md)). The
 `Persistence (v0)` row imports the Logger **types** only — never the logger
 adapter or any other `platform/**`.
+
+`✗‖` **Memory must not import `world-session`** (nor `interactions`/`encounters`/
+`dialogue`). This is the central memory-firewall rule, enforced by lint: the memory
+layer holds no reference to `WorldSession`/`WorldStore`/`WorldCommand`/`WorldEvent`,
+so it has no code path to mutate truth ([ADR-0024](./decisions/ADR-0024-npc-memory-persistence-v0.md)).
+
+`✗§` Persistence implements the `NpcMemoryStore` port over **pure `domain/memory`
+contracts only**; it must **not** import the headless `src/memory` application layer
+(a negated lint pattern re-includes `domain/memory`).
+
+`✓‡` The browser composition root **may** import the headless memory layer, but v0
+wires nothing: there is no API endpoint, no dialogue/LLM integration, and no
+`bootstrap` wiring. `SqliteNpcMemoryStore` is exercised by tests over a temp DB
+([ADR-0024](./decisions/ADR-0024-npc-memory-persistence-v0.md)).
 
 ## Forbidden imports (and why)
 
@@ -91,6 +108,7 @@ adapter or any other `platform/**`.
 | **Interaction effects are fixed-vocabulary data, never behavior/code.** | The pure domain planner maps validated descriptors to existing commands, and the application service can write only through `WorldSession.appendEvent`. ([ADR-0014](./decisions/ADR-0014-object-interactions-v0.md)) |
 | **Encounters are fixed-vocabulary data, never behavior/code.** | An `EncounterSpec` rides the shared `Interaction`; the pure `planEncounter` maps the chosen choice to existing commands (no new event type, encounter wins over `effect`), and `EncounterService` writes only through `WorldSession.appendEvent` via the shared `applyCommands` helper. ([ADR-0015](./decisions/ADR-0015-encounter-system-v0.md)) |
 | **NPC dialogue is read-only display data.** | `NPCDialogueSpec` and provider replies are neutral data; `NPCDialogueService` may only read `WorldState`, never append events, and dialogue/history/text remain outside authoritative state and logs. ([ADR-0017](./decisions/ADR-0017-npc-dialogue-foundation-v0.md)) |
+| **NPC memory is supporting context only, never truth — and has no path to it.** | Memory records are inert, scoped (`worldId+sessionId+npcId`), closed-enum data. The `src/memory/**` layer must not import `world-session`/`interactions`/`encounters`/`dialogue`; `NpcMemoryService` takes no `WorldSession` and has no append path; `domain/memory` exports no `WorldCommand`/`WorldEvent`-producing function. Player claims are claims, NPC beliefs/observations can be wrong, dialogue summaries can't update truth, and `source:'llm'` memories can't apply state changes — only reducers/the event log mutate truth. Memory `text`/names/player lines are never logged. ([ADR-0024](./decisions/ADR-0024-npc-memory-persistence-v0.md)) |
 | **WorldBibleSeed is initial canon, never authoritative current state.** | It may live in generated-play composition memory and seed generation, but must not become a `WorldEvent`, `WorldState`, `CanonSeed`, SaveGame, API/SQLite row, renderer input, quest engine, or branching planner. `WorldSession` and its event-log projection remain authoritative. ([ADR-0022](./decisions/ADR-0022-world-bible-seed-v0.md)) |
 | **Generation must never emit executable code** — only WorldBibleSeed/RoomSpec-shaped data. | The trust boundary. Provider output remains data until its schema/assembly boundary validates it; it is never `eval`'d or turned into JS/Three/React/scene scripts. ([ADR-0001](./decisions/ADR-0001-data-only-room-spec-trusted-renderer.md), [ADR-0008](./decisions/ADR-0008-renderer-portability-strategy.md), [ADR-0022](./decisions/ADR-0022-world-bible-seed-v0.md)) |
 | **No raw `RoomSpec` may reach the renderer unvalidated.** | All dynamic/external data is validated by `loadRoomSpec` at the boundary first. |
@@ -180,11 +198,18 @@ These are enforced mechanically; a violation fails `npm run build` or
   - `dialogue/**` may import domain, the `world-session` read path, and the
     Logger interface, but may not import `react`, `react-dom`, `three`, or
     `renderer/**` ([ADR-0017](./decisions/ADR-0017-npc-dialogue-foundation-v0.md)).
+  - `memory/**` may import domain (incl. `domain/memory`/`domain/ports`) and the
+    Logger interface, but **stricter than the other application blocks** it may
+    **not** import `**/world-session/**`, `**/interactions/**`, `**/encounters/**`,
+    or `**/dialogue/**` (the lint-level enforcement of "memory has no path to
+    truth"), nor `react`, `react-dom`, `three`, or `renderer/**`
+    ([ADR-0024](./decisions/ADR-0024-npc-memory-persistence-v0.md)).
   - `renderer/engine/**` may not import `world-session/**`, `interactions/**`,
-    `encounters/**`, or `dialogue/**`; it emits interaction intent only
+    `encounters/**`, `dialogue/**`, or `memory/**`; it emits interaction intent only
     ([ADR-0014](./decisions/ADR-0014-object-interactions-v0.md),
     [ADR-0015](./decisions/ADR-0015-encounter-system-v0.md),
-    [ADR-0017](./decisions/ADR-0017-npc-dialogue-foundation-v0.md)).
+    [ADR-0017](./decisions/ADR-0017-npc-dialogue-foundation-v0.md),
+    [ADR-0024](./decisions/ADR-0024-npc-memory-persistence-v0.md)).
   - Every browser-reachable `src/**` file may not import `node:sqlite`,
     `**/persistence/**`, `node:http`, or `**/server/**`. These reciprocal bans
     are folded into the per-folder rules plus a broad browser block because
@@ -192,11 +217,16 @@ These are enforced mechanically; a violation fails `npm run build` or
     ([ADR-0018](./decisions/ADR-0018-backend-sqlite-persistence-v0.md),
     [ADR-0019](./decisions/ADR-0019-backend-world-session-api-v0.md)).
   - `persistence/**` may import the domain (`domain/world/**`, `roomSpec`,
-    `loadRoomSpec`, `domain/ports/**`), the Logger **types**, and `node:sqlite`,
-    but may not import `react`, `react-dom`, `three`/`three/*`, `renderer/**`, or
-    any application layer (`generation/**`, `world-session/**`, `interactions/**`,
-    `encounters/**`, `dialogue/**`, `room/**`, `app/**`, or `server/**`)
-    ([ADR-0018](./decisions/ADR-0018-backend-sqlite-persistence-v0.md)).
+    `loadRoomSpec`, `domain/ports/**`, `domain/memory/**`), the Logger **types**,
+    and `node:sqlite`, but may not import `react`, `react-dom`, `three`/`three/*`,
+    `renderer/**`, or any application layer (`generation/**`, `world-session/**`,
+    `interactions/**`, `encounters/**`, `dialogue/**`, the `src/memory/**` app layer,
+    `room/**`, `app/**`, or `server/**`). `SqliteNpcMemoryStore` implements the
+    `NpcMemoryStore` port over pure `domain/memory` contracts only — a negated lint
+    pattern (`!**/domain/memory/**`) re-includes the contracts while keeping the
+    headless memory app layer out
+    ([ADR-0018](./decisions/ADR-0018-backend-sqlite-persistence-v0.md),
+    [ADR-0024](./decisions/ADR-0024-npc-memory-persistence-v0.md)).
   - `server/**` may import domain, `world-session/**`, `persistence/**`, the
     platform logger/system abstractions, and Node built-ins. It may not import
     React, Three.js, renderer/UI, generation, interactions, encounters, dialogue,
