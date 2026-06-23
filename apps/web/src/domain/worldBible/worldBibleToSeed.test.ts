@@ -23,6 +23,12 @@ const bible: WorldBibleSeed = {
     allowedThemePack: 'fantasy-keep',
     keywords: ['embers', 'rain', 'old stone'],
   },
+  openingArc: {
+    pattern: 'investigate',
+    hook: 'The keep wards are failing without warning.',
+    firstObjective: 'Find the failing ward.',
+    pressure: 'A rival house enters the keep at dawn.',
+  },
   canonNotes: [],
 }
 
@@ -49,9 +55,9 @@ describe('worldBibleToGeneratorSeed', () => {
     expect(worldBibleToGeneratorSeed(maximalBible)).toHaveLength(160)
   })
 
-  it('uses a stable compact order for title, theme, tone, premise, and keywords', () => {
+  it('includes the opening arc in a stable compact field order', () => {
     expect(worldBibleToGeneratorSeed(bible)).toBe(
-      'The Ember Crown | fantasy-keep | mysterious | A sealed keep wakes. | embers,rain,old stone',
+      'The Ember Crown | fantasy-keep | mysterious | investigate:Find the failing ward. | A sealed keep wakes. | embers,rain,old stone',
     )
   })
 
@@ -59,6 +65,7 @@ describe('worldBibleToGeneratorSeed', () => {
     const input = structuredClone(bible)
     const before = structuredClone(input)
     Object.freeze(input.generationHints.keywords)
+    Object.freeze(input.openingArc)
     Object.freeze(input.generationHints)
     Object.freeze(input)
 
@@ -76,6 +83,10 @@ describe('worldBibleToGeneratorSeed', () => {
       {
         ...bible,
         generationHints: { ...bible.generationHints, keywords: ['ash', 'omens'] },
+      },
+      {
+        ...bible,
+        openingArc: { ...bible.openingArc, pattern: 'rescue' },
       },
     ]
     const projections = variants.map(worldBibleToGeneratorSeed)

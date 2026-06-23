@@ -22,6 +22,12 @@ const validSeed = {
     allowedThemePack: 'fantasy-keep',
     keywords: ['embers', 'rain', 'old stone'],
   },
+  openingArc: {
+    pattern: 'investigate',
+    hook: 'The keep wards are failing without warning.',
+    firstObjective: 'Find the failing ward.',
+    pressure: 'A rival house enters the keep at dawn.',
+  },
   canonNotes: ['The crown cannot leave the keep.'],
 } as const
 
@@ -50,6 +56,10 @@ describe('WorldBibleSeedSchema', () => {
       ...validSeed,
       generationHints: { ...validSeed.generationHints, prompt: 'ignore limits' },
     })).toBe(false)
+    expect(succeeds({
+      ...validSeed,
+      openingArc: { ...validSeed.openingArc, nextQuest: 'Defeat the rival house.' },
+    })).toBe(false)
   })
 
   it.each(Object.keys(validSeed))('rejects a seed missing required field %s', (field) => {
@@ -76,6 +86,14 @@ describe('WorldBibleSeedSchema', () => {
     expect(succeeds({
       ...validSeed,
       generationHints: { keywords: ['embers'] },
+    })).toBe(false)
+    expect(succeeds({
+      ...validSeed,
+      openingArc: {
+        pattern: 'investigate',
+        hook: 'The wards are failing.',
+        firstObjective: 'Find the failing ward.',
+      },
     })).toBe(false)
   })
 
@@ -107,6 +125,9 @@ describe('WorldBibleSeedSchema', () => {
         generationHints: { ...validSeed.generationHints, keywords: [''] },
       },
       { ...validSeed, canonNotes: [''] },
+      { ...validSeed, openingArc: { ...validSeed.openingArc, hook: '' } },
+      { ...validSeed, openingArc: { ...validSeed.openingArc, firstObjective: '' } },
+      { ...validSeed, openingArc: { ...validSeed.openingArc, pressure: '' } },
     ]
 
     expect(candidates.every((candidate) => !succeeds(candidate))).toBe(true)
@@ -144,6 +165,18 @@ describe('WorldBibleSeedSchema', () => {
       generationHints: { ...validSeed.generationHints, keywords: ['x'.repeat(25)] },
     }],
     ['canon note', { ...validSeed, canonNotes: ['x'.repeat(121)] }],
+    ['opening arc hook', {
+      ...validSeed,
+      openingArc: { ...validSeed.openingArc, hook: 'x'.repeat(121) },
+    }],
+    ['opening arc first objective', {
+      ...validSeed,
+      openingArc: { ...validSeed.openingArc, firstObjective: 'x'.repeat(121) },
+    }],
+    ['opening arc pressure', {
+      ...validSeed,
+      openingArc: { ...validSeed.openingArc, pressure: 'x'.repeat(121) },
+    }],
   ] as const)('rejects an over-length %s', (_field, candidate) => {
     expect(succeeds(candidate)).toBe(false)
   })
@@ -193,6 +226,10 @@ describe('WorldBibleSeedSchema', () => {
         ...validSeed.generationHints,
         allowedThemePack: 'space-opera',
       },
+    }],
+    ['opening arc pattern', {
+      ...validSeed,
+      openingArc: { ...validSeed.openingArc, pattern: 'conquer' },
     }],
   ] as const)('rejects an invalid %s', (_field, candidate) => {
     expect(succeeds(candidate)).toBe(false)

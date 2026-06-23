@@ -28,6 +28,15 @@ const GenerationHintsSchema = z
   })
   .strict()
 
+const OpeningArcSchema = z
+  .object({
+    pattern: z.enum(['escape', 'investigate', 'survive', 'rescue', 'recover-item']),
+    hook: z.string().min(1).max(120),
+    firstObjective: z.string().min(1).max(120),
+    pressure: z.string().min(1).max(120),
+  })
+  .strict()
+
 export const WorldBibleSeedSchema = z
   .object({
     schemaVersion: z.literal(WORLD_BIBLE_SCHEMA_VERSION),
@@ -42,6 +51,7 @@ export const WorldBibleSeedSchema = z
     locations: z.array(LocationSeedSchema).min(2).max(4),
     generationHints: GenerationHintsSchema,
     canonNotes: z.array(z.string().min(1).max(120)).max(4),
+    openingArc: OpeningArcSchema,
   })
   .strict()
 

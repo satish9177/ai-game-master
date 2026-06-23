@@ -80,8 +80,8 @@ A small, deterministic, browser-only layer that converts the prompt into a
 
 - Fields: world `title`, `themePack`, `tone`, `premise`, `startingLocation`,
   `majorConflict`, a few `factions`, 2–3 `npcs` seeds, 2–4 `locations` seeds,
-  `generationHints` (allowed theme pack + a few keywords), `canonNotes`
-  (safety/canon).
+  `generationHints` (allowed theme pack + a few keywords), a bounded
+  `openingArc`, and `canonNotes` (safety/canon).
 - It is **pure data** (numbers/strings/enums/bounded arrays), produced
   deterministically (same prompt → byte-identical bible), validated by a zod
   schema — mirroring how `FakeRoomGenerator` output is validated by `loadRoomSpec`.
@@ -92,6 +92,9 @@ A small, deterministic, browser-only layer that converts the prompt into a
 - It is **initial canon, not current truth.** `WorldState` and the event log
   remain authoritative; the bible is never written as an event and never read back
   as "the current world".
+- `openingArc` is only the initial hook/objective/pressure that seeds the first
+  generated room. It is not quest state, a branching story plan, an event-log
+  entry, or an assertion about what remains true after play begins.
 
 ## 4. Non-goals
 
@@ -102,6 +105,8 @@ This slice must **not**:
 - Change the **renderer / RoomViewer / engine / builders**.
 - Change **world-session / event-log authority** (no new event type, no bible in
   `WorldState`, no `CanonSeed`/`startRoomSession` change — see decision 3 below).
+- Add a quest engine, branching story planner, or persistence/current-state
+  semantics for `openingArc`.
 - Add **new UI** (no bible panel, no world-title chip).
 - Widen or change the **`RoomGenerator` port** or `FakeRoomGenerator`'s vocabulary
   / theme branching (the fake does **not** branch on `themePack` in v0).
@@ -153,7 +158,8 @@ On prompt submit (`App.handlePrompt`):
    against `WorldBibleSeedSchema` **inside the fake** (decision 1: the port
    returns a typed, already-validated `WorldBibleSeed`).
 3. `seed = worldBibleToGeneratorSeed(worldBible)` — compact deterministic string,
-   **title-first** so the generated room's label reads as the world title.
+   **title-first** so the generated room's label reads as the world title, with
+   `openingArc.pattern:firstObjective` included as compact initial-canon context.
 4. `source = new GeneratedRoomSource(generator, seed, logger, fallbackRoom)` —
    `GeneratedRoomSource` is **unchanged**; it still takes a seed string and runs
    `assembleRoom`.
@@ -207,6 +213,13 @@ const GenerationHintsSchema = z.object({
   allowedThemePack: ThemePackSchema,
   keywords: z.array(z.string().min(1).max(24)).max(6),
 }).strict()
+const OpeningArcSchema = z.object({
+  pattern: z.enum(['escape', 'investigate', 'survive', 'rescue', 'recover-item']),
+  hook: z.string().min(1).max(120),
+  firstObjective: z.string().min(1).max(120),
+  pressure: z.string().min(1).max(120),
+}).strict()
+
 
 export const WorldBibleSeedSchema = z.object({
   schemaVersion: z.literal(WORLD_BIBLE_SCHEMA_VERSION),
@@ -221,6 +234,7 @@ export const WorldBibleSeedSchema = z.object({
   locations: z.array(LocationSeedSchema).min(2).max(4),
   generationHints: GenerationHintsSchema,
   canonNotes: z.array(z.string().min(1).max(120)).max(4),   // may be empty
+  openingArc: OpeningArcSchema,
 }).strict()
 
 export type WorldBibleSeed = z.infer<typeof WorldBibleSeedSchema>
@@ -240,7 +254,14 @@ bounded (~160 chars), title-first:
 
 ```ts
 export function worldBibleToGeneratorSeed(b: WorldBibleSeed): string {
-  return [b.title, b.themePack, b.tone, b.premise, b.generationHints.keywords.join(',')]
+  return [
+    b.title,
+    b.themePack,
+    b.tone,
+    `${b.openingArc.pattern}:${b.openingArc.firstObjective}`,
+    b.premise,
+    b.generationHints.keywords.join(','),
+  ]
     .join(' | ')
     .slice(0, 160)
 }
@@ -255,8 +276,8 @@ export function worldBibleToGeneratorSeed(b: WorldBibleSeed): string {
 - **The whole bible is user-derived content → never logged in full.** Logs carry
   only: `themePack`, `tone`, `npcCount`, `locationCount`, `factionCount`,
   `keywordCount`, `seedLength`, booleans, and stable codes. **Never** title,
-  premise, conflict, NPC/faction/location text, keywords, the raw prompt, or the
-  derived seed string.
+  premise, conflict, NPC/faction/location/opening-arc text, keywords, the raw
+  prompt, or the derived seed string.
 - The **seeder is silent** (no logger import, per the `generation/**` boundary).
   The composition root emits the one safe log line.
 - `GeneratedRoomSource` keeps logging `promptLength` — now the length of the
@@ -284,23 +305,25 @@ stand.
   extra keys at top level and in nested objects (`.strict()`); rejects empty /
   over-length strings; enforces array bounds (npcs 2–3, locations 2–4, factions
   ≤3, keywords ≤6, canonNotes ≤4); closed enums (`themePack`/`tone`/`disposition`/
-  `allowedThemePack`); requires each field; wrong `schemaVersion` rejected; allows
-  empty `factions`/`canonNotes`.
+  `allowedThemePack`/`openingArc.pattern`); requires each field; rejects unknown
+  opening-arc keys and hook/objective/pressure over 120 characters; wrong
+  `schemaVersion` rejected; allows empty `factions`/`canonNotes`.
 - **`worldBibleToGeneratorSeed`:** deterministic, pure, length-bounded,
-  title-first, stable ordering, no input mutation.
+  title-first, stable ordering, compact opening-arc context, no input mutation.
 - **`FakeWorldBibleSeeder`:** determinism (same prompt → byte-identical bible);
   purity (no `Date.now`/`Math.random`/IO/logger); output always passes
   `WorldBibleSeedSchema`; counts within bounds; **theme mapping picks exactly one
   pack** (post-apoc keyword → `post-apoc`, else `fantasy-keep`, and
-  `generationHints.allowedThemePack` agrees); prompt appears only as inert text;
+  `generationHints.allowedThemePack` agrees); opening arc is deterministic and
+  bounded; prompt appears only as inert text;
   data-only (no functions/code); two distinct prompts diverge.
 - **Composition (`app/worldBible` helper and/or `App` wiring unit):** prompt →
   bible derived → `GeneratedRoomSource` constructed with the derived seed (not the
   raw prompt); bible stored in `ActivePlay`; **seeder failure degrades to
   prompt-as-seed and still yields a room** (non-blocking).
 - **Log-safety guard:** drive seeding through a capturing logger and assert no
-  title/premise/conflict/NPC/faction/location/keyword text, no raw prompt, and no
-  derived seed string appears — only `themePack`/`tone`/counts/`seedLength`/codes
+  title/premise/conflict/NPC/faction/location/opening-arc/keyword text, no raw
+  prompt, and no derived seed string appears — only safe enums/counts/length/codes
   (mirrors the ADR-0020/0021 log-safety tests).
 
 ## 11. Proposed implementation slices
@@ -314,6 +337,9 @@ change lands only in slice 5.
    no generation impl.
 2. **`feat(domain): add worldBibleToGeneratorSeed projection`** —
    `domain/worldBible/worldBibleToSeed.ts` + projection tests.
+   **Follow-up:** add the required bounded `openingArc` initial-canon object and
+   include `pattern:firstObjective` in the projection; schema/projection tests
+   and this plan only, with no wiring or quest/event-state semantics.
 3. **`feat(domain): add WorldBibleSeeder port`** —
    `domain/ports/WorldBibleSeeder.ts` (contract only).
 4. **`feat(generation): add deterministic FakeWorldBibleSeeder`** —

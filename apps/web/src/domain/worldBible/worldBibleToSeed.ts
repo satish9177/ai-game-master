@@ -7,6 +7,7 @@ export function worldBibleToGeneratorSeed(bible: WorldBibleSeed): string {
     bible.title,
     bible.themePack,
     bible.tone,
+    `${bible.openingArc.pattern}:${bible.openingArc.firstObjective}`,
     bible.premise,
     bible.generationHints.keywords.join(','),
   ]
