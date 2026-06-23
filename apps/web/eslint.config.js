@@ -83,6 +83,7 @@ export default defineConfig([
             { group: ['**/interactions/**'], message: 'renderer/engine emits intent and must not import interaction application/domain internals (ADR-0014).' },
             { group: ['**/encounters/**'], message: 'renderer/engine emits intent and must not import encounter application/domain internals (ADR-0015).' },
             { group: ['**/dialogue/**'], message: 'renderer/engine emits intent and must not import dialogue application/domain internals (ADR-0017).' },
+            { group: ['**/memory/**'], message: 'renderer/engine emits intent and must not import the NPC memory layer (npc-memory-persistence-v0).' },
             noPersistenceImport,
             noServerImport,
           ],
@@ -285,6 +286,40 @@ export default defineConfig([
     },
   },
 
+  // Boundary: the headless NPC memory layer (npc-memory-persistence-v0,
+  // memory-firewall-v0). Mirrors the dialogue block but STRICTER — it also
+  // forbids importing world-session (and the other gameplay-truth application
+  // layers), the lint-level enforcement of "memory has no path to truth". It may
+  // import pure domain contracts/ports (incl. domain/memory) and the Logger
+  // interface, but never React, Three.js, the renderer, or any write-path layer.
+  {
+    files: ['src/memory/**/*.{ts,tsx}'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: [
+            { name: 'react', message: 'memory is headless and must not import React (npc-memory-persistence-v0).' },
+            { name: 'react-dom', message: 'memory is headless and must not import React (npc-memory-persistence-v0).' },
+            { name: 'three', message: 'memory holds neutral data and must not import Three.js (npc-memory-persistence-v0).' },
+            noSqliteImport,
+            noHttpImport,
+          ],
+          patterns: [
+            { group: ['three/*'], message: 'memory must not import Three.js (npc-memory-persistence-v0).' },
+            { group: ['**/renderer/**'], message: 'memory must not import renderer or UI internals (npc-memory-persistence-v0).' },
+            { group: ['**/world-session/**'], message: 'memory has no path to truth: it must not import world-session (memory-firewall-v0).' },
+            { group: ['**/interactions/**'], message: 'memory must not import interaction write-path internals (memory-firewall-v0).' },
+            { group: ['**/encounters/**'], message: 'memory must not import encounter write-path internals (memory-firewall-v0).' },
+            { group: ['**/dialogue/**'], message: 'memory must not import dialogue application internals (memory-firewall-v0).' },
+            noPersistenceImport,
+            noServerImport,
+          ],
+        },
+      ],
+    },
+  },
+
   // Boundary (reciprocal browser → persistence ban, ADR-0018, ADR-0004): the
   // composition root and any other non-persistence source file not covered by a
   // boundary block above (App.tsx, RoomViewer.tsx, app/**, room/**, platform/**,
@@ -304,6 +339,7 @@ export default defineConfig([
       'src/interactions/**',
       'src/encounters/**',
       'src/dialogue/**',
+      'src/memory/**',
     ],
     rules: {
       'no-restricted-imports': [
@@ -334,6 +370,10 @@ export default defineConfig([
             { group: ['three/*'], message: 'persistence must not import Three.js (ADR-0018).' },
             { group: ['**/renderer/**'], message: 'persistence must not import the renderer or UI (ADR-0018).' },
             { group: ['**/generation/**', '**/world-session/**', '**/interactions/**', '**/encounters/**', '**/dialogue/**', '**/room/**', '**/app/**', '**/server/**'], message: 'persistence may import only pure domain contracts and logger types (ADR-0004, ADR-0018, ADR-0019).' },
+            // Persistence may implement the NpcMemoryStore port over pure domain
+            // contracts (src/domain/memory) but must not import the headless memory
+            // application layer (src/memory) — the negation re-includes domain/memory.
+            { group: ['**/memory/**', '!**/domain/memory/**'], message: 'persistence must not import the headless memory application layer; implement the NpcMemoryStore port over pure domain contracts only (npc-memory-persistence-v0).' },
           ],
         },
       ],

@@ -486,6 +486,30 @@ conversation history resets with component state. Dialogue text, NPC names,
 personas, greetings, prompt labels, player lines, item names, and status strings
 never reach logs.
 
+## 16. NPC memory persistence ✅ v0 (headless)
+
+NPC memory is a durable, scoped store of inert memory records — **supporting
+context only, never world truth** ([ADR-0024](./decisions/ADR-0024-npc-memory-persistence-v0.md)).
+The `NpcMemoryService` has no `WorldSession` reference and no append path; writes go
+through the pure write firewall, reads through a scoped query plus the read firewall.
+Memory's absence or failure never blocks play and never alters truth.
+
+| Situation | Detection | Handling / result | Logging |
+| --- | --- | --- | --- |
+| Invalid memory write | `validateMemoryDraft` (write firewall) | `rejected: <reason>` (`invalid-scope`/`invalid-kind`/`invalid-source`/`empty-text`/`text-too-long`/`invalid-confidence`/`invalid-provenance`); nothing stored | kind/source/reason code only |
+| Missing session (FK) | `record` session pre-check (`SqliteNpcMemoryStore`) | `failed: session-not-found`; nothing stored (the FK to `world_sessions` backs it) | sessionId/code only |
+| Concurrent seq collision | `UNIQUE(session_id, npc_id, seq)` from a true concurrent writer | `failed: conflict`; the insert rolls back | sessionId/code only |
+| Unknown/empty scope on recall | scoped query returns nothing | `recalled` with `memories: []` — **not** an error | count (0) only |
+| Corrupt or scope-divergent stored row | read-boundary `safeParse` + JSON-scope re-assertion against the queried SQL scope | **skip** that row, return the valid rest — an **expected** content failure (contrast a session/event fault, which still throws) | memoryId / `invalid-stored-memory` |
+| Attempted memory mutation | `BEFORE UPDATE` trigger + no update/delete on the port | the DB `RAISE(ABORT)`s; the adapter exposes no mutation path (DELETE left open for a future forgetting slice) | — |
+| Cross-world/session/NPC leak | exact-triple SQL filter + `filterMemoriesForScope` + adapter JSON-scope re-assertion | recall returns only the queried NPC's rows; FK ties memory to a real session; leak tests cover both stores | ids only |
+| Memory used as truth (player claim / NPC belief / summary / `source:'llm'`) | structural — no append path, no `WorldCommand`/`WorldEvent` mapping | the memory is stored/recalled only; the event log and snapshot are unchanged | enums/ids/seq/counts/codes only |
+
+Logs carry `memoryId`/`worldId`/`sessionId`/`npcId`/`kind`/`source`/`confidence`/
+`seq`/`count`/`code` only — **never** memory `text`, player lines, NPC/room names,
+provider prompts/responses, generated JSON, API keys, or PII. The firewall and the
+in-memory store are silent; the service and the SQLite store are the only loggers.
+
 ---
 
 ## Summary
@@ -510,6 +534,7 @@ never reach logs.
 | 13 | Encounter resolution | pure encounter plan + shared `applyCommands` typed appends | already-resolved/rejection/conflict/partial result; safe panel message; health clamps, no death state | ✅ |
 | 14 | Multi-room navigation | cache/registry resolve before `WorldSession.move` | rejection/failure with no move, or cached room + persistent flags | ✅ |
 | 15 | NPC dialogue resolution | read-only world context + provider reply | typed failure or component-only conversation; no event/state change | ✅ |
+| 16 | NPC memory persistence | write firewall + scoped read firewall + FK/UNIQUE/no-update trigger; read-boundary re-validate + JSON-scope re-assert | rejected/failed/empty-recall typed results; corrupt or scope-divergent row skipped; no path to truth | ✅ headless |
 
 The through-line: **validate at the boundary, degrade visibly and safely, log
 the detail, show the user calm.**
