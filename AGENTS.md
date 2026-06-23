@@ -38,7 +38,7 @@ FastAPI/Python are not part of the MVP backend path.
 * Use the logger abstraction. Do not add scattered `console.log`.
 * Never log secrets, API keys, raw prompts, generated JSON, provider request/response bodies, or PII.
 * Keep DI simple through constructor/function parameters. Do not add heavy frameworks, Redux, Nest, heavy ORMs, or new package/workspace structure without approval.
-
+* WorldSession current state plus append-only event log are authoritative; SQLite is authoritative where backend persistence is wired.
 
 ## Current guardrails
 
@@ -62,7 +62,6 @@ Do not add unless explicitly requested by the maintainer or by the approved impl
 * minimap
 * GLTF asset pipeline
 * npm workspaces or extracted packages
-
 
 ## What to read before planning
 
