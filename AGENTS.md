@@ -22,6 +22,12 @@ v0** adds a deterministic *fake* room generator behind a prompt bar, validated
 through the same `loadRoomSpec` schema boundary and a pure semantic `validateRoom`
 playability check (**Semantic Room Validator v0**,
 [ADR-0011](./docs/architecture/decisions/ADR-0011-semantic-room-validator-v0.md)).
+**Room Generation Repair & Fallback v0** adds the deterministic remainder of the
+generation pipeline: a pure domain `assembleRoom` runs parse → schema → semantic →
+a single `repairRoom` pass → re-validate → a trusted authored fallback room, so the
+renderer always receives a valid room and a repaired/fallback outcome shows a small
+static notice; only a generator throw/reject stays `unavailable`
+([ADR-0020](./docs/architecture/decisions/ADR-0020-room-generation-repair-fallback-v0.md)).
 The **Isometric Camera Foundation** makes the default view a fixed orthographic
 isometric camera following a player object — still Three.js, still real 3D, with
 **RoomSpec unchanged** and the camera renderer-internal
@@ -158,13 +164,16 @@ Unless the maintainer explicitly asks, do **not**:
 
 - add **real** LLM/API generation, a hosted/cloud deployment, a second backend
   (`apps/api`), a browser API client/CORS proxy, browser-side DB access, or a
-  non-SQLite/Postgres datastore — the deterministic
-  *fake* generator plus the deterministic semantic `validateRoom` (Generation
-  Foundation v0 + Semantic Room Validator v0) are the only generation-pipeline
-  code; do not extend them into a real model, a multi-stage pipeline, a **deeper**
-  code validator (reachability / object↔object collision / quest consistency), an
-  LLM reviewer, a repair loop, memory, or adjacent-room pre-generation without
-  explicit approval. The **headless, Node-only SQLite persistence**
+  non-SQLite/Postgres datastore — the deterministic *fake* generator, the
+  deterministic semantic `validateRoom`, and the deterministic
+  `assembleRoom`/`repairRoom` + authored fallback room (Generation Foundation v0 +
+  Semantic Room Validator v0 + Room Generation Repair & Fallback v0) are the only
+  generation-pipeline code; do not extend them into a real model, a **deeper** code
+  validator (reachability / object↔object collision / quest consistency), an LLM
+  reviewer, a **bounded multi-attempt repair/re-prompt loop** (v0 is a single
+  deterministic pass; do not add new repair rules or room resizing), a backend
+  generation endpoint, memory, or adjacent-room pre-generation without explicit
+  approval. The **headless, Node-only SQLite persistence**
   (`src/persistence/**`, [ADR-0018](./docs/architecture/decisions/ADR-0018-backend-sqlite-persistence-v0.md))
   and native Node HTTP API (`src/server/**`,
   [ADR-0019](./docs/architecture/decisions/ADR-0019-backend-world-session-api-v0.md))
