@@ -10,6 +10,7 @@ Rules for AI coding agents and contributors. Read this before coding.
 * Do not commit automatically.
 * Keep changes small, reviewable, and independently testable.
 * When unsure about a boundary, ask before coding.
+* For feature work, the approved implementation plan is the task-specific source of truth.
 
 ## Project identity
 
@@ -38,9 +39,10 @@ FastAPI/Python are not part of the MVP backend path.
 * Never log secrets, API keys, raw prompts, generated JSON, provider request/response bodies, or PII.
 * Keep DI simple through constructor/function parameters. Do not add heavy frameworks, Redux, Nest, heavy ORMs, or new package/workspace structure without approval.
 
+
 ## Current guardrails
 
-Do not add unless explicitly requested:
+Do not add unless explicitly requested by the maintainer or by the approved implementation plan for the current feature:
 
 * hosted/cloud deployment
 * server-side LLM provider
@@ -53,13 +55,14 @@ Do not add unless explicitly requested:
 * streaming
 * multi-attempt LLM repair loop
 * deeper validator rules
-* memory system
+* new memory/living-world systems outside the approved memory feature
 * complex combat
 * mobile/touch controls
 * free-camera/first-person mode
 * minimap
 * GLTF asset pipeline
 * npm workspaces or extracted packages
+
 
 ## What to read before planning
 
