@@ -34,7 +34,7 @@ layers, never the reverse. The domain depends on nothing in this repo.
 | **Domain / Contracts** | `apps/web/src/domain/` | RoomSpec plus versioned world/event/save schemas, pure loaders/validators/projection, and ports (`RoomSource`, `RoomGenerator`, `WorldStore`, `Clock`, `IdGenerator`, interaction). Pure. |
 | **Renderer** | `apps/web/src/renderer/engine/` | Three.js engine, builders, controls, **camera controllers** (`camera/`: `CameraController` / `IsometricCameraController`), the **player object/marker**, disposal. |
 | **UI** | `apps/web/src/renderer/ui/` | Presentational React components. |
-| **App / Composition root** | `apps/web/src/App.tsx`, `RoomViewer.tsx`, `app/`, `room/` | Wires concrete implementations together, including room sources, persistent play-session/cache ownership, navigation, prompt bar, and error boundary. |
+| **App / Composition root** | `apps/web/src/App.tsx`, `RoomViewer.tsx`, `app/`, `room/` | Wires concrete implementations together, including room sources, persistent play-session/cache ownership, the adjacent-room pre-generation / resolver seam, navigation, prompt bar, and error boundary. |
 | **Platform** | `apps/web/src/platform/` | Cross-cutting adapters: logger (`logger/`) and real clock/UUID implementations (`system/`); 🔜 config/env. |
 | **Generation** | ✅ v0 (fake): `apps/web/src/generation/` | Prompt → RoomSpec **data** via a deterministic fake generator; 🔜 real LLM. |
 | **World session** | ✅ v0 (headless): `apps/web/src/world-session/` | Application use-cases, in-memory `WorldStore`, and the SaveGame JSON boundary. No React/renderer wiring. |
@@ -121,6 +121,21 @@ Multi-room navigation remains composition-layer code: `RoomRegistry` and
 live in `app/`, and `App` owns the persistent session/cache. `RoomViewer` maps a
 neutral object id to an exit and routes intent upward. The engine imports none of
 these modules, and this slice adds no ESLint platform rule.
+
+Adjacent-room pre-generation stays in the same composition layer
+([ADR-0021](./decisions/ADR-0021-adjacent-room-pregeneration-v0.md)).
+`AdjacentRoomPregenerator` lives in `app/` and is the one room-acquisition seam:
+it composes `SessionRoomCache`, `RoomRegistry`, the `GeneratedRoomSource`
+factory, the domain `assembleRoom`/`validateRoom` pipeline, and the Logger — all
+imports the composition root is already allowed to make, so **no new lint block is
+needed**. `NavigationService` no longer owns the cache/registry; it depends only
+on the narrow `RoomResolver` interface (DIP) the pregenerator implements.
+`RoomViewer` and the engine stay **presentation- and intent-only** — they import
+neither the pregenerator nor the resolver, and warming/door resolution are driven
+entirely from `App`. There is **no domain, schema, server, or persistence change**:
+generated adjacents reuse the existing `assembleRoom` trust boundary so only
+valid, zero-fatal rooms reach the cache, and no engine object ever enters the
+cache or the resolver result.
 
 NPC dialogue follows the same intent boundary: `RoomViewer` maps a neutral id to
 validated dialogue data and calls the headless read-only service;

@@ -24,7 +24,8 @@ Throughout these docs:
   Generation Foundation v0; Semantic Room Validator v0; Room Generation Repair &
   Fallback v0; Isometric Camera Foundation; World State & Event Log v0; Object
   Interactions v0; Encounter System v0; Multi-Room Navigation & Cache v0; NPC
-  Dialogue Foundation v0; Backend SQLite Persistence v0 — headless, Node-only;
+  Dialogue Foundation v0; Adjacent-Room Pre-generation v0 — browser/session-cache;
+  Backend SQLite Persistence v0 — headless, Node-only;
   Backend World Session API v0 — headless, Node-only).
 - 🔜 **Planned** — designed and approved, not yet built (next slices).
 - ❌ **Not built** — future shape only; documented so we don't paint into a corner.
@@ -276,6 +277,54 @@ resets on close or room change. Dialogue appends no event, sets no room flag,
 and changes no world state. See
 [ADR-0017](./decisions/ADR-0017-npc-dialogue-foundation-v0.md).
 
+## Adjacent-Room Pre-generation v0
+
+✅ **Implemented (browser / session-cache).** The deterministic browser subset of
+[ADR-0009](./decisions/ADR-0009-adjacent-room-pre-generation.md) now ships: while
+the player explores, the rooms behind the current room's exits are **warmed in the
+background**, and a room is **resolved safely on demand at the door** — including
+generating a non-authored target instead of blocking
+([ADR-0021](./decisions/ADR-0021-adjacent-room-pregeneration-v0.md)).
+
+- **One room-acquisition seam (`app/AdjacentRoomPregenerator.ts`).** A single
+  composition-layer object serves **both** background warming and on-demand door
+  resolution over **one** `SessionRoomCache` and **one** in-flight promise map, so
+  a door request and a background warm for the same id collapse into a single job.
+  Constructed once in `App` for the play session.
+- **`resolveRoom(roomId)` is total, cache-first, in-flight-aware.** Cache hit →
+  return; else join an in-flight job; else run one job (cleared in `finally`).
+  Authored ids resolve through `RoomRegistry` (`registry.has` picks the branch and
+  authored rooms are **never** fake-generated); non-authored/unknown ids generate
+  through `GeneratedRoomSource → assembleRoom → repairRoom → fallbackRoom`. It
+  **never throws** — an unexpected fault maps to a typed `unavailable` and caches
+  nothing.
+- **The trust boundary holds.** Every generated adjacent room passes through
+  `assembleRoom` before it can enter the cache, so only valid, zero-fatal rooms
+  are cached. A generated room is **id-normalized** (`withRoomId`, a fresh spread)
+  so the cache key and `room.id` agree; `id` is not a `validateRoom` input, so
+  this is semantics-preserving, with a defensive re-validate as a guard.
+- **`warmAdjacent(room)` is bounded and fire-and-forget.** It warms the current
+  room's exits in declaration order, deduped, skipping cached/in-flight ids,
+  capped at **`maxJobs` (default 3)**. **Depth = 1, never recursive:** it is
+  called only from the composition root (after bootstrap and after each
+  navigation), never from inside `resolveRoom`, so pre-generation cannot fan out
+  through the world.
+- **`NavigationService` depends only on the narrow `RoomResolver` (DIP).** Room
+  acquisition moved out of the service; it resolves the target (now possibly by
+  generating it) before appending `moved-to-room`. A non-authored target now
+  navigates via on-demand generation instead of "the way is blocked".
+- **Safe logging only** — ids, codes, counts, booleans, provenance; the seed is
+  the **structural room id** (`adjacent:${roomId}`), never a user prompt, and
+  neither seed text, raw JSON, story text, nor object names are logged.
+- **Unchanged:** the renderer/engine (still intent-only), the domain/schema, the
+  `RoomSource` port, the Node API, and the PromptBar generated single-room path (a
+  fresh session + cache, no navigation, no warming). In the authored two-room loop
+  both rooms warm through the registry, so transitions stay instant and the
+  user-visible behavior is unchanged; the generation branch is covered by unit
+  tests, not the example world. A backend generation endpoint, a real LLM, the
+  per-room status lifecycle / "Opening the way…" UI, a parallel-job system, and
+  recursive pre-generation remain **future**.
+
 ## Backend SQLite Persistence v0
 
 ✅ **Implemented, headless and Node-only.** The first durable store lands as a
@@ -494,6 +543,7 @@ so only a generator throw/reject reaches the `unavailable` retry path.
 | `domain/assembleRoom.ts` | Pure assembly pipeline: `assembleRoom(rawText, fallbackRoom) → { room, diagnostics }`. Composes `JSON.parse` → `loadRoomSpec` → `validateRoom` → `repairRoom` → re-validate → fallback; **always** returns a zero-fatal room plus safe diagnostics (provenance/stage/codes/counts/booleans). Synchronous, no I/O, never logs ([ADR-0020](./decisions/ADR-0020-room-generation-repair-fallback-v0.md)). |
 | `domain/examples/fallbackRoom.ts` | The trusted, data-only fallback room (the `throneRoom` authoring pattern): a small in-bounds stone antechamber, zero fatal/zero warning, no prompt or story text. Injected by the host as `assembleRoom`'s last resort. |
 | `room/GeneratedRoomSource.ts` | A `RoomSource` adapter (composition layer) that runs the generator, then `assembleRoom`. A generator throw/reject → `unavailable`; otherwise **always** `ok:true` with `provenance` (`generated`/`repaired`/`fallback`). Logs one safe line (provenance/stage/codes/counts) — never prompt/raw JSON/story text/object names. |
+| `app/AdjacentRoomPregenerator.ts` | Composition-layer room-acquisition seam ([ADR-0021](./decisions/ADR-0021-adjacent-room-pregeneration-v0.md)). `resolveRoom(id)` is cache-first, in-flight-aware, and total (authored → `RoomRegistry`; non-authored → `GeneratedRoomSource → assembleRoom`, id-normalized; never throws). `warmAdjacent(room)` warms the current room's exits in the background, capped at `maxJobs` (default 3), depth-1. Implements the narrow `RoomResolver` that `NavigationService` depends on. |
 | `app/PromptBar.tsx` | Presentational prompt input + Generate button — app composition chrome, **not** renderer UI. Trims/validates; emits `onSubmit(prompt)`. |
 | `app/fallbackNotice.ts` | The static, prompt-free notice copy + the pure `shouldShowFallbackNotice(provenance)` decision (show for `repaired`/`fallback`). |
 | `App.tsx` | Composition root: validates/injects the fallback room, holds the active `RoomSource` in state; on submit, swaps to `GeneratedRoomSource(FakeRoomGenerator, prompt, logger, fallbackRoom)` and shows the dismissable fallback notice for repaired/fallback provenance. The only place a generator is named. |
@@ -584,9 +634,13 @@ is to keep each replacement local to its port.
   multi-attempt repair/re-prompt loop remain future. See
   **[Generation pipeline](#generation-pipeline-planned)** below and
   [ADR-0007](./decisions/ADR-0007-generated-room-validation-and-repair.md).
-- 🔜 Rooms are pre-generated ahead of the player so transitions feel instant. See
-  **[Adjacent-room pre-generation](#adjacent-room-pre-generation-planned)** below
-  and [ADR-0009](./decisions/ADR-0009-adjacent-room-pre-generation.md).
+- ✅ Rooms are pre-generated ahead of the player so transitions feel instant — the
+  **browser/session-cache subset** now ships (background frontier warming +
+  safe on-demand door resolution through the shared `assembleRoom` pipeline;
+  [ADR-0021](./decisions/ADR-0021-adjacent-room-pregeneration-v0.md)). 🔜 the
+  backend, real-LLM, per-room status lifecycle, and parallel-job shape remain
+  future. See **[Adjacent-room pre-generation](#adjacent-room-pre-generation-browser-subset-shipped)**
+  below and [ADR-0009](./decisions/ADR-0009-adjacent-room-pre-generation.md).
 
 ### ✅ World State & Event Log v0  ·  ✅ SQLite + Node HTTP API  ·  🔜 PostgreSQL
 
@@ -659,10 +713,13 @@ is to keep each replacement local to its port.
   back through `loadRoomSpec` — the durable analog of `RoomRegistry.resolve`
   ([ADR-0018](./decisions/ADR-0018-backend-sqlite-persistence-v0.md)). The Node
   API exposes validated `PUT/GET /rooms/:roomId` routes ([ADR-0019](./decisions/ADR-0019-backend-world-session-api-v0.md)).
-- 🔜 Browser navigation still uses `RoomRegistry`/`SessionRoomCache`. Wiring it
-  to durable rooms, more than two rooms, adjacent-room
-  pre-generation, entry-aligned spawn, transition animation, and a minimap remain
-  future work.
+- ✅ Browser navigation resolves rooms through `AdjacentRoomPregenerator` — one
+  seam shared by background frontier warming and on-demand door resolution over
+  `RoomRegistry`/`SessionRoomCache`; `NavigationService` depends only on the narrow
+  `RoomResolver` ([ADR-0021](./decisions/ADR-0021-adjacent-room-pregeneration-v0.md)).
+- 🔜 Wiring it to durable rooms, more than two rooms, entry-aligned spawn,
+  transition animation, a minimap, and the backend/real-LLM/status-lifecycle
+  shape of pre-generation remain future work.
 
 ### ✅ NPC Dialogue Foundation v0  ·  🔜 real provider
 
@@ -771,10 +828,18 @@ the renderer always gets a valid room. The multi-attempt loop, the corrective
 re-prompt, the slow-model fallback, and the LLM reviewer remain future — they need
 a real, non-deterministic model.
 
-## Adjacent-room pre-generation (planned)
+## Adjacent-room pre-generation (browser subset shipped)
 
-🔜 **Designed, not built.** Full rationale in
-[ADR-0009](./decisions/ADR-0009-adjacent-room-pre-generation.md).
+✅ **Browser/session-cache subset shipped**
+([ADR-0021](./decisions/ADR-0021-adjacent-room-pregeneration-v0.md), summarized in
+[Adjacent-Room Pre-generation v0](#adjacent-room-pre-generation-v0) above) ·
+🔜 **the backend/real-LLM shape below is still future**
+([ADR-0009](./decisions/ADR-0009-adjacent-room-pre-generation.md)). v0 ships the
+deterministic browser core — one `AdjacentRoomPregenerator` seam that warms the
+current room's exits in the background (capped, depth-1) and resolves rooms safely
+on demand at the door through the shared `assembleRoom` pipeline. The parallel-job
+system, the per-room status lifecycle, the "Opening the way…" wait, priority
+ordering, and a backend remain the future shape described here.
 
 The first room may cost up to ~60s once. To avoid that wait on every transition —
 and because the world is effectively infinite, so it can't be generated up

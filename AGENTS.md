@@ -46,6 +46,14 @@ data-only interaction exits. `App` keeps one in-memory session and room cache
 across transitions, `NavigationService` resolves before appending the existing
 `moved-to-room`, and the unchanged engine remains intent-only and rebuilds for
 each active room ([ADR-0016](./docs/architecture/decisions/ADR-0016-multi-room-navigation-cache-v0.md)).
+**Adjacent-Room Pre-generation v0** adds one browser/session-cache room-acquisition
+seam (`AdjacentRoomPregenerator`) that warms the current room's exits in the
+background (capped, depth-1) and resolves rooms safely on demand at the door —
+authored rooms through `RoomRegistry`, non-authored through `GeneratedRoomSource →
+assembleRoom`, so only valid rooms reach the cache; `NavigationService` depends
+only on the narrow `RoomResolver`. No backend endpoint, real LLM, recursive
+pre-generation, or renderer change
+([ADR-0021](./docs/architecture/decisions/ADR-0021-adjacent-room-pregeneration-v0.md)).
 **NPC Dialogue Foundation v0** adds validated dialogue descriptors, a pure
 world-to-dialogue context builder, and a read-only `NPCDialogueService` behind a
 deterministic fake provider. F-talk opens a dedicated canned-prompt panel; no
@@ -172,8 +180,16 @@ Unless the maintainer explicitly asks, do **not**:
   validator (reachability / object↔object collision / quest consistency), an LLM
   reviewer, a **bounded multi-attempt repair/re-prompt loop** (v0 is a single
   deterministic pass; do not add new repair rules or room resizing), a backend
-  generation endpoint, memory, or adjacent-room pre-generation without explicit
-  approval. The **headless, Node-only SQLite persistence**
+  generation endpoint, or memory without explicit approval. **Adjacent-Room
+  Pre-generation v0** is built and approved as a **browser/session-cache** seam
+  (`app/AdjacentRoomPregenerator.ts`): background frontier warming + safe on-demand
+  door resolution through the existing `assembleRoom` pipeline, so no unsafe
+  generated content reaches the renderer
+  ([ADR-0021](./docs/architecture/decisions/ADR-0021-adjacent-room-pregeneration-v0.md)).
+  Keep it that way — do **not** add a backend generation endpoint, a real LLM, a
+  parallel-job/queue/WebSocket system, a per-room status lifecycle, **recursive
+  (multi-hop) pre-generation** (depth stays 1), or DB persistence of warmed rooms
+  without explicit approval. The **headless, Node-only SQLite persistence**
   (`src/persistence/**`, [ADR-0018](./docs/architecture/decisions/ADR-0018-backend-sqlite-persistence-v0.md))
   and native Node HTTP API (`src/server/**`,
   [ADR-0019](./docs/architecture/decisions/ADR-0019-backend-world-session-api-v0.md))
