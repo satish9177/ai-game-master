@@ -1,14 +1,12 @@
 # Implementation Plan — `feature/inventory-health-ui-v0`
 
-> Status: **approved — pending implementation.** Design locked by the maintainer; this
-> document is the task-specific source of truth (AGENTS.md). Implementation lands in
-> slices 1–2 under `feature/inventory-health-ui-v0`; the docs closeout (slice 3) will
-> create **ADR-0026** and update `ARCHITECTURE.md` / `FAILURE-MODES.md` / `AGENTS.md`
-> (and `BOUNDARIES.md` only if a rule actually changes). **Process adjustment from the
-> maintainer:** ADR-0026 is *deliberately not created until after the source
-> implementation is reviewed* — it belongs to the docs closeout, not before code. Each
-> slice must leave `npm run build` / `npm run lint` / `npm run test` (in `apps/web`)
-> green. Commits are made manually by the maintainer; agents do not commit.
+> Status: **implemented / closed.** All three slices are complete under
+> `feature/inventory-health-ui-v0`. Source (slices 1–2: `renderer/ui/playerHud.ts`,
+> `playerHud.test.ts`, `renderer/ui/StatusHud.tsx`, `index.css`, `App.tsx`,
+> `RoomViewer.tsx`) and docs closeout (slice 3: **ADR-0026**, `ARCHITECTURE.md`,
+> `FAILURE-MODES.md`, `AGENTS.md`) are merged. `BOUNDARIES.md` was not changed — no
+> boundary rule changed. Commits are made manually by the maintainer; agents do not
+> commit.
 >
 > Companion docs: [ARCHITECTURE](../ARCHITECTURE.md) · [BOUNDARIES](../BOUNDARIES.md) ·
 > [FAILURE-MODES](../FAILURE-MODES.md) · [CONVENTIONS](../CONVENTIONS.md). Roadmap
