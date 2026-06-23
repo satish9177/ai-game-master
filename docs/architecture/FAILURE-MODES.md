@@ -558,6 +558,34 @@ no path where a rendered HUD encounters absent or schema-invalid player fields.
 log lines were added to `App`/`RoomViewer`. Item names/ids, health values/deltas, and
 status strings are never logged.
 
+## 19. Browser session save/load ✅ v0 (browser)
+
+Manual save/load via a single named `localStorage` slot, round-tripped through the existing
+`SaveGameService` integrity boundary. `localStorage` is a byte parking spot; only `saveGameJson`
+is read on load; the slot wrapper metadata is display-only and never trusted
+([ADR-0027](./decisions/ADR-0027-session-save-load-v0.md)).
+
+| Situation | Detection | Handling / result | Logging |
+| --- | --- | --- | --- |
+| Corrupt save (bad JSON / wrong shape) | `loadSaveGame`: `invalid-json` / `invalid-schema` | calm "couldn't load"; **nothing restored**; current play untouched (cases 10/11) | error `code` only |
+| Unsupported version | `loadSaveGame`: `unsupported-version` | calm "couldn't load"; no silent migration (case 11) | `code` only |
+| Integrity mismatch (log/seed/snapshot disagree) | `loadSaveGame`: `integrity-mismatch` | reject whole save; nothing restored (case 10) | `code` (+ `sessionId` if known) |
+| Same session already loaded | `restoreSession` → `already-exists` | calm "this session is already loaded"; no-op | `sessionId` / `code` |
+| Generated room cache missing | by design — content was never saved | re-resolve via `AdjacentRoomPregenerator.resolveRoom`; fallback room + `FALLBACK_NOTICE`; correct authoritative state | seam ids/`source` only |
+| Current room cannot be resolved | `resolveRoom` → `{ ok:false }` (`invalid-room`/`unavailable`) | substitute fallback under `currentRoomId`; `degraded:true` → notice; authoritative state still correct | `roomId` / `reason` |
+| Load while a session is active (unsaved progress loss) | always after boot | different `sessionId` restores; `ActivePlay` replaced; unsaved current progress lost (documented behavior) | `sessionId` only |
+| `localStorage` unavailable / blocked | `SaveSlotStore` get/set wrapped in try/catch | reads → treat as no slot (Continue hidden); writes → calm "couldn't save"; never throws into render | `code` only |
+| `localStorage` quota exceeded on save | write throws `QuotaExceededError` | calm "couldn't save your game"; existing slot left intact | `code` only |
+
+- **Authority unchanged.** No load path shows unverified bytes; no UI action has a write path to
+  the event log or store beyond the normal validated `appendEvent`/`restoreSession`.
+- **Logging discipline.** `handleSave`/`handleLoad` log ids/counts/codes/enums only — never the
+  SaveGame JSON, slot wrapper, seed name, event payloads, item names/ids, room names, dialogue,
+  prompt text, or any narrative/PII.
+- **Known limitations.** One local slot only; no file import/export; no session list/browser; no
+  backend/cloud sync; generated room content is not byte-restored; only authoritative
+  state/event log is restored faithfully.
+
 ---
 
 ## Summary
@@ -585,6 +613,7 @@ status strings are never logged.
 | 16 | NPC memory persistence | write firewall + scoped read firewall + FK/UNIQUE/no-update trigger; read-boundary re-validate + JSON-scope re-assert | rejected/failed/empty-recall typed results; corrupt or scope-divergent row skipped; no path to truth | ✅ headless |
 | 17 | Room memory persistence | write firewall + scoped read firewall + FK/UNIQUE/no-update trigger (no FK to `rooms`); read-boundary re-validate + JSON-scope re-assert | rejected/failed/empty-recall typed results; corrupt or scope-divergent row skipped; no path to truth; `roomStates` unchanged | ✅ headless |
 | 18 | Player HUD display | `playerHud === null` guards render; `projectPlayerHud` is pure/silent; `onWorldStateChange` fires only on `applied`/`already-resolved` variants carrying `state` | HUD absent until seeded; empty inventory/status degrade gracefully; health `0/max` renders empty bar; persists across navigation; no write path | ✅ browser |
+| 19 | Browser session save/load | `SaveSlotStore` try/catch for `localStorage`; `loadSaveGame` integrity boundary; `restoreSession` typed results; `resolveRoom` total seam | corrupt/unsupported/mismatch → calm error, nothing restored; same session → calm notice; generated room → re-resolve + notice; unavailable/quota → calm error, play untouched | ✅ v0 browser |
 
 The through-line: **validate at the boundary, degrade visibly and safely, log
 the detail, show the user calm.**

@@ -115,6 +115,28 @@ item generation, no `RoomSpec` change, no Three.js engine change, no new depende
 and no DOM/component tests.** Logs never include item names/ids, health values/deltas,
 status strings, or any narrative content.
 
+## Session Save/Load v0 — shipped, browser
+
+A **manual browser save/load** is implemented: one named `localStorage` slot stores
+the integrity-checked `SaveGame` JSON; every load re-validates through the full
+`SaveGameService` boundary before any state change
+([ADR-0027](docs/architecture/decisions/ADR-0027-session-save-load-v0.md)).
+
+| Module | Role |
+| --- | --- |
+| `app/saveSlotStore.ts` | `SaveSlotStore` interface + `LocalStorageSaveSlotStore` (key `aigm.save.slot`). `localStorage` wrapped in try/catch; never throws into render. `KeyValueStore` seam enables in-memory testing. |
+| `app/buildRestoredPlay.ts` | Pure helper: `(state, resolveResult, fallbackRoom) → { play, degraded }`. Wraps resolved room; `degraded` true when room is non-authored or unresolvable. No store/service import. |
+| `renderer/ui/SaveLoadBar.tsx` | Presentational save/load bar: `{ canSave, hasSave, busy, error, onSave, onContinue }`. Calm `role="alert"` errors only; no save content shown. |
+| `App.tsx` wiring | Constructs `SaveGameService` + `LocalStorageSaveSlotStore`; owns `handleSave`/`handleLoad` with `requestVersion` guarding; renders `<SaveLoadBar>` as an App-level overlay. |
+
+**`localStorage` is a byte parking spot, never truth.** Only `saveGameJson` is read on
+load; slot metadata (`label`/`savedAt`/`currentRoomId`) is display-only and ignored on
+load. v0 adds **no backend, no API client, no autosave, no multiple slots, no file
+export/import, no generated `RoomSpec` / room-cache / world-bible persistence, no
+memory/NPC integration, no LLM replay, no `RoomViewer` change, and no new dependency.**
+Logs never include SaveGame JSON, seed name, event payloads, item names/ids, room names,
+dialogue, prompt text, or any narrative/PII.
+
 ## Current guardrails
 
 Do not add unless explicitly requested by the maintainer or by the approved implementation plan for the current feature:

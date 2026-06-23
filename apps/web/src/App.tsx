@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { RoomViewer } from './renderer/RoomViewer'
 import { StatusHud } from './renderer/ui/StatusHud'
+import { SaveLoadBar } from './renderer/ui/SaveLoadBar'
+import type { SaveLoadStatus } from './renderer/ui/SaveLoadBar'
 import { projectPlayerHud } from './renderer/ui/playerHud'
 import type { PlayerHudView } from './renderer/ui/playerHud'
 import type { WorldState } from './domain/world/worldState'
@@ -17,12 +19,15 @@ import { AdjacentRoomPregenerator } from './app/AdjacentRoomPregenerator'
 import { NavigationService } from './app/NavigationService'
 import type { NavigationResult } from './app/NavigationService'
 import { PromptBar } from './app/PromptBar'
+import { buildRestoredPlay } from './app/buildRestoredPlay'
+import { LocalStorageSaveSlotStore } from './app/saveSlotStore'
 import { createConsoleLogger } from './platform/logger/consoleLogger'
 import { SystemClock } from './platform/system/clock'
 import { UuidGenerator } from './platform/system/idGenerator'
 import { InMemoryWorldStore } from './world-session/InMemoryWorldStore'
 import { WorldSession } from './world-session/WorldSession'
 import type { WorldStateResult } from './world-session/WorldSession'
+import { SaveGameService } from './world-session/saveGame'
 import { InteractionService } from './interactions/InteractionService'
 import { EncounterService } from './encounters/EncounterService'
 import { loadRoomSpec, type LoadedRoom } from './domain/loadRoomSpec'
@@ -51,6 +56,8 @@ const worldBibleSeeder = new FakeWorldBibleSeeder()
 const idGenerator = new UuidGenerator()
 const worldStore = new InMemoryWorldStore()
 const worldSession = new WorldSession(worldStore, new SystemClock(), idGenerator, logger)
+const saveGameService = new SaveGameService(worldStore, logger)
+const saveSlotStore = new LocalStorageSaveSlotStore()
 const interactionService = new InteractionService(worldSession, logger)
 const encounterService = new EncounterService(worldSession, logger)
 const dialogueProvider = new FakeNPCDialogueProvider()
@@ -140,6 +147,9 @@ function App() {
   const [fatalMessage, setFatalMessage] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const requestVersion = useRef(0)
+  const [saveLoadStatus, setSaveLoadStatus] = useState<SaveLoadStatus>('idle')
+  const [saveLoadError, setSaveLoadError] = useState<string | null>(null)
+  const [hasSave, setHasSave] = useState(() => saveSlotStore.has())
 
   useEffect(() => {
     const version = ++requestVersion.current
@@ -207,6 +217,87 @@ function App() {
     })
   }, [])
 
+  const handleSave = useCallback(() => {
+    if (!activePlay) return
+    setSaveLoadStatus('saving')
+    setSaveLoadError(null)
+    void (async () => {
+      const saveResult = await saveGameService.saveSession(activePlay.sessionId)
+      if (!saveResult.ok) {
+        setSaveLoadStatus('error')
+        setSaveLoadError("Couldn't save your game.")
+        return
+      }
+      const writeResult = saveSlotStore.write(saveResult.json, {
+        savedAt: new Date().toISOString(),
+        label: 'Save',
+      })
+      if (!writeResult.ok) {
+        setSaveLoadStatus('error')
+        setSaveLoadError("Couldn't save your game.")
+        return
+      }
+      setHasSave(true)
+      setSaveLoadStatus('saved')
+    })()
+  }, [activePlay])
+
+  const handleLoad = useCallback(() => {
+    const version = ++requestVersion.current
+    setSaveLoadStatus('loading')
+    setSaveLoadError(null)
+    void (async () => {
+      const slotResult = saveSlotStore.read()
+      if (!slotResult.ok) {
+        if (version !== requestVersion.current) return
+        setSaveLoadStatus('error')
+        setSaveLoadError('This save could not be loaded.')
+        return
+      }
+
+      const loadResult = await saveGameService.loadSession(slotResult.saveGameJson)
+      if (!loadResult.ok) {
+        if (version !== requestVersion.current) return
+        setSaveLoadStatus('error')
+        setSaveLoadError(
+          loadResult.error.code === 'already-exists'
+            ? 'This session is already loaded.'
+            : 'This save could not be loaded.',
+        )
+        return
+      }
+
+      const stateResult = await worldSession.getWorldState(loadResult.sessionId)
+      if (!stateResult.ok) {
+        if (version !== requestVersion.current) return
+        setSaveLoadStatus('error')
+        setSaveLoadError('This save could not be loaded.')
+        return
+      }
+
+      const resolved = await adjacentPregenerator.resolveRoom(stateResult.state.currentRoomId)
+      if (version !== requestVersion.current) return
+
+      const { play, degraded } = buildRestoredPlay(stateResult.state, resolved, fallbackRoom)
+
+      if (resolved.ok) adjacentPregenerator.warmAdjacent(resolved.room)
+
+      setActivePlay({ ...play, navigation: exampleNavigation })
+      setPlayerHud(play.initialPlayer)
+      setFatalMessage(null)
+      setNotice(degraded ? FALLBACK_NOTICE : null)
+      setSaveLoadStatus('idle')
+      logger.info('world session restored', {
+        sessionId: play.sessionId,
+        restored: degraded ? 'degraded' : 'authored',
+      })
+    })().catch(() => {
+      if (version !== requestVersion.current) return
+      setSaveLoadStatus('error')
+      setSaveLoadError('This save could not be loaded.')
+    })
+  }, [])
+
   const handleNavigate = useCallback(async (toRoomId: string): Promise<NavigationResult> => {
     if (!activePlay?.navigation) return { status: 'rejected', reason: 'missing-exit' }
     const result = await activePlay.navigation.navigate({
@@ -265,6 +356,14 @@ function App() {
         </div>
       )}
       <PromptBar onSubmit={handlePrompt} />
+      <SaveLoadBar
+        canSave={activePlay != null}
+        hasSave={hasSave}
+        status={saveLoadStatus}
+        errorMessage={saveLoadError}
+        onSave={handleSave}
+        onContinue={handleLoad}
+      />
     </ErrorBoundary>
   )
 }
