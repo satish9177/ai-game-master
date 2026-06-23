@@ -2,6 +2,9 @@ import { describe, it, expect } from 'vitest'
 import { GeneratedRoomSource } from './GeneratedRoomSource'
 import { FakeRoomGenerator } from '../generation/FakeRoomGenerator'
 import type { RoomGenerator } from '../domain/ports/RoomGenerator'
+import { loadRoomSpec } from '../domain/loadRoomSpec'
+import type { LoadedRoom } from '../domain/loadRoomSpec'
+import { fallbackRoom } from '../domain/examples/fallbackRoom'
 import type { Logger, LogContext, LogLevel } from '../platform/logger/Logger'
 
 /* ---------- test doubles ---------- */
@@ -33,7 +36,7 @@ function createSpyLogger(): { logger: Logger; entries: Entry[] } {
 }
 
 // Stub generators — the port only, never FakeRoomGenerator, so each path is
-// controlled. They ignore the prompt; the source's job is parse + validate + map.
+// controlled. They ignore the prompt; the source's job is generate + assemble + map.
 const generatorReturning = (text: string): RoomGenerator => ({
   generate: () => Promise.resolve(text),
 })
@@ -41,28 +44,36 @@ const generatorRejecting = (err: unknown): RoomGenerator => ({
   generate: () => Promise.reject(err),
 })
 
+/** The trusted fallback, validated once (as the App injects it). */
+const FALLBACK: LoadedRoom = loadRoomSpec(fallbackRoom)
+
+const newSource = (gen: RoomGenerator, prompt: string, logger: Logger) =>
+  new GeneratedRoomSource(gen, prompt, logger, FALLBACK)
+
 const base = {
   schemaVersion: 1,
   id: 'stub-room',
   name: 'Stub Room',
-  shell: { dimensions: { width: 10, depth: 12, height: 4 } },
+  shell: { dimensions: { width: 10, depth: 12, height: 4 }, exits: [{ side: 'north', width: 3 }] },
   spawn: { position: [0, 1.7, 4] },
 }
-const VALID_SPEC = JSON.stringify({ ...base, objects: [{ type: 'pillar', position: [0, 0, 0] }] })
+const VALID_SPEC = JSON.stringify({ ...base, objects: [{ type: 'pillar', position: [4, 0, -2] }] })
 const SPEC_WITH_BAD_OBJECT = JSON.stringify({
   ...base,
   objects: [
-    { type: 'pillar', position: [0, 0, 0] }, // valid
+    { type: 'pillar', position: [4, 0, -2] }, // valid
     { type: 'pillar', position: 'not-a-vec' }, // invalid → skipped leniently
   ],
 })
 const BAD_ENVELOPE = JSON.stringify({ schemaVersion: 1, id: 'x' }) // missing name/shell/spawn/objects
 const MALFORMED_JSON = '{ not valid json'
 
-// Schema-valid (loadRoomSpec succeeds) but NOT playable: a 2×2 m room is below
-// the minimum walkable size → a fatal `room-too-small` semantic issue. Exits are
-// declared so the only fatal/warning in play is the one under test.
-const SEMANTIC_FATAL_SPEC = JSON.stringify({
+// Schema-valid but NOT playable, and REPAIRABLE: a spawn far outside a normal-size
+// room → fatal `spawn-out-of-bounds`, which repairRoom clamps back into bounds.
+const REPAIRABLE_SPEC = JSON.stringify({ ...base, spawn: { position: [100, 1.7, 0] }, objects: [] })
+// Schema-valid but NOT playable and UNREPAIRABLE: a 2×2 m room is below the
+// minimum walkable size → fatal `room-too-small`; repair never resizes → fallback.
+const UNREPAIRABLE_SPEC = JSON.stringify({
   schemaVersion: 1,
   id: 'tiny-room',
   name: 'Tiny Room',
@@ -70,56 +81,68 @@ const SEMANTIC_FATAL_SPEC = JSON.stringify({
   spawn: { position: [0, 1.7, 0] },
   objects: [],
 })
-// Schema-valid AND playable, but with a single semantic *warning*: a pillar
-// anchored far outside the footprint → `object-out-of-bounds` (warning, not fatal).
-const SEMANTIC_WARNING_SPEC = JSON.stringify({
-  schemaVersion: 1,
-  id: 'warn-room',
-  name: 'Warn Room',
-  shell: { dimensions: { width: 10, depth: 12, height: 4 }, exits: [{ side: 'north', width: 3 }] },
-  spawn: { position: [0, 1.7, 4] },
-  objects: [{ type: 'pillar', position: [100, 0, 0] }],
-})
 
 /* ---------- tests ---------- */
 
 describe('GeneratedRoomSource', () => {
-  it('valid JSON spec → ok:true with the loaded room', async () => {
+  it('valid JSON spec → ok:true, provenance generated', async () => {
     const { logger } = createSpyLogger()
-    const src = new GeneratedRoomSource(generatorReturning(VALID_SPEC), 'a calm room', logger)
-    const result = await src.getRoom()
+    const result = await newSource(generatorReturning(VALID_SPEC), 'a calm room', logger).getRoom()
     expect(result.ok).toBe(true)
     if (result.ok) {
+      expect(result.provenance).toBe('generated')
       expect(result.room.id).toBe('stub-room')
       expect(result.room.objects).toHaveLength(1)
-      expect(result.room.skipped).toEqual([])
-      expect(result.room.warnings).toEqual([])
     }
   })
 
-  it('malformed JSON → ok:false, code invalid-room', async () => {
+  it('malformed JSON → ok:true with the fallback room (provenance fallback)', async () => {
     const { logger } = createSpyLogger()
-    const src = new GeneratedRoomSource(generatorReturning(MALFORMED_JSON), 'p', logger)
-    const result = await src.getRoom()
-    expect(result.ok).toBe(false)
-    if (!result.ok) {
-      expect(result.error.code).toBe('invalid-room')
-      expect(result.error.message).toBe('This room could not be loaded.')
+    const result = await newSource(generatorReturning(MALFORMED_JSON), 'p', logger).getRoom()
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.provenance).toBe('fallback')
+      expect(result.room.id).toBe('fallback-room')
     }
   })
 
-  it('schema-invalid envelope → ok:false, code invalid-room', async () => {
+  it('schema-invalid envelope → ok:true with the fallback room (provenance fallback)', async () => {
     const { logger } = createSpyLogger()
-    const src = new GeneratedRoomSource(generatorReturning(BAD_ENVELOPE), 'p', logger)
-    const result = await src.getRoom()
-    expect(result.ok).toBe(false)
-    if (!result.ok) expect(result.error.code).toBe('invalid-room')
+    const result = await newSource(generatorReturning(BAD_ENVELOPE), 'p', logger).getRoom()
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.provenance).toBe('fallback')
+      expect(result.room.id).toBe('fallback-room')
+    }
   })
 
-  it('generator rejects → ok:false, code unavailable', async () => {
+  it('repairable semantic fatal → ok:true, provenance repaired (generated room kept)', async () => {
     const { logger } = createSpyLogger()
-    const src = new GeneratedRoomSource(generatorRejecting(new Error('network down')), 'p', logger)
-    const result = await src.getRoom()
+    const result = await newSource(generatorReturning(REPAIRABLE_SPEC), 'p', logger).getRoom()
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.provenance).toBe('repaired')
+      expect(result.room.id).toBe('stub-room') // the repaired generated room, not the fallback
+    }
+  })
+
+  it('unrepairable semantic fatal → ok:true with the fallback room (provenance fallback)', async () => {
+    const { logger } = createSpyLogger()
+    const result = await newSource(generatorReturning(UNREPAIRABLE_SPEC), 'p', logger).getRoom()
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.provenance).toBe('fallback')
+      expect(result.room.id).toBe('fallback-room')
+    }
+  })
+
+  it('generator rejects → ok:false, code unavailable (the retry path)', async () => {
+    const { logger } = createSpyLogger()
+    const result = await newSource(
+      generatorRejecting(new Error('network down')),
+      'p',
+      logger,
+    ).getRoom()
     expect(result.ok).toBe(false)
     if (!result.ok) {
       expect(result.error.code).toBe('unavailable')
@@ -127,103 +150,88 @@ describe('GeneratedRoomSource', () => {
     }
   })
 
-  it('lenient bad object → ok:true with warnings/skipped preserved', async () => {
+  it('lenient bad object → ok:true generated, warnings/skipped preserved', async () => {
     const { logger } = createSpyLogger()
-    const src = new GeneratedRoomSource(generatorReturning(SPEC_WITH_BAD_OBJECT), 'p', logger)
-    const result = await src.getRoom()
+    const result = await newSource(generatorReturning(SPEC_WITH_BAD_OBJECT), 'p', logger).getRoom()
     expect(result.ok).toBe(true)
     if (result.ok) {
+      expect(result.provenance).toBe('generated')
       expect(result.room.objects).toHaveLength(1)
       expect(result.room.skipped).toHaveLength(1)
       expect(result.room.warnings).toHaveLength(1)
     }
   })
 
-  it('logs safe metadata (promptLength + counts) at info on success', async () => {
+  it('logs safe diagnostics (promptLength + provenance + counts) at info on a clean room', async () => {
     const { logger, entries } = createSpyLogger()
     const prompt = 'a haunted hall'
-    const src = new GeneratedRoomSource(generatorReturning(VALID_SPEC), prompt, logger)
-    await src.getRoom()
+    await newSource(generatorReturning(VALID_SPEC), prompt, logger).getRoom()
     expect(entries).toHaveLength(1)
     const entry = entries[0]!
     expect(entry.level).toBe('info')
     expect(entry.context.promptLength).toBe(prompt.length)
+    expect(entry.context.provenance).toBe('generated')
     expect(entry.context.objectCount).toBe(1)
-    expect(entry.context.skippedCount).toBe(0)
-    expect(entry.context.warningCount).toBe(0)
-    // VALID_SPEC declares no exits, so the validator raises one `no-exit` warning;
-    // the room is still playable and the count rides the success info line.
-    expect(entry.context.semanticWarningCount).toBe(1)
+    expect(entry.context.skippedObjectCount).toBe(0)
+    expect(typeof entry.context.warningCount).toBe('number')
   })
 
-  it('logs a failure code without throwing, and only once per call', async () => {
+  it('logs a repaired/fallback outcome once at warn with safe diagnostics', async () => {
     const { logger, entries } = createSpyLogger()
-    const src = new GeneratedRoomSource(generatorReturning(MALFORMED_JSON), 'p', logger)
-    await src.getRoom()
+    await newSource(generatorReturning(UNREPAIRABLE_SPEC), 'p', logger).getRoom()
     expect(entries).toHaveLength(1)
-    expect(entries[0]!.level).toBe('error')
-    expect(entries[0]!.context.code).toBe('invalid-room')
+    const entry = entries[0]!
+    expect(entry.level).toBe('warn')
+    expect(entry.context.provenance).toBe('fallback')
+    expect(entry.context.failedStage).toBe('semantic')
+    expect(entry.context.repairAttempted).toBe(true)
+    expect(entry.context.residualFatalCodes).toEqual(['room-too-small'])
   })
 
-  it('never logs the full prompt text on any path', async () => {
+  it('never leaks the prompt, raw JSON, story text, or object names on any path', async () => {
     const prompt = 'TOP-SECRET-PROMPT-do-not-leak-42'
+    // A valid room carrying unique story/name sentinels we must never see in logs.
+    const STORY_SPEC = JSON.stringify({
+      ...base,
+      objects: [
+        {
+          type: 'npc',
+          name: 'SECRET-NPC-NAME-9000',
+          position: [4, 0, -3],
+          interaction: {
+            key: 'F',
+            prompt: 'SECRET-PROMPT-LABEL',
+            body: 'SECRET-STORY-BODY-TEXT',
+          },
+        },
+      ],
+    })
+    const RAW_WITH_SENTINEL = '{ broken json SECRET-RAW-CONTENT-7777'
     const cases = [
       generatorReturning(VALID_SPEC),
-      generatorReturning(SPEC_WITH_BAD_OBJECT),
-      generatorReturning(SEMANTIC_WARNING_SPEC),
-      generatorReturning(SEMANTIC_FATAL_SPEC),
-      generatorReturning(MALFORMED_JSON),
+      generatorReturning(STORY_SPEC),
+      generatorReturning(REPAIRABLE_SPEC),
+      generatorReturning(UNREPAIRABLE_SPEC),
+      generatorReturning(RAW_WITH_SENTINEL),
       generatorReturning(BAD_ENVELOPE),
       generatorRejecting(new Error('boom')),
     ]
     for (const gen of cases) {
       const { logger, entries } = createSpyLogger()
-      const src = new GeneratedRoomSource(gen, prompt, logger)
-      await src.getRoom()
+      await newSource(gen, prompt, logger).getRoom()
       expect(entries.length).toBeGreaterThan(0) // every path logs at least once
-      expect(JSON.stringify(entries)).not.toContain(prompt) // but never the prompt text
+      const dump = JSON.stringify(entries)
+      expect(dump).not.toContain(prompt)
+      expect(dump).not.toContain('SECRET-NPC-NAME-9000')
+      expect(dump).not.toContain('SECRET-PROMPT-LABEL')
+      expect(dump).not.toContain('SECRET-STORY-BODY-TEXT')
+      expect(dump).not.toContain('SECRET-RAW-CONTENT-7777')
     }
   })
 
-  it('schema-valid but semantically fatal room → ok:false, code invalid-room', async () => {
-    const { logger } = createSpyLogger()
-    const src = new GeneratedRoomSource(generatorReturning(SEMANTIC_FATAL_SPEC), 'p', logger)
-    const result = await src.getRoom()
-    expect(result.ok).toBe(false)
-    if (!result.ok) {
-      expect(result.error.code).toBe('invalid-room')
-      expect(result.error.message).toBe('This room could not be loaded.') // reuses safe copy
-    }
-  })
-
-  it('logs safe semantic-failure metadata once at warn (no issue text)', async () => {
-    const { logger, entries } = createSpyLogger()
-    const src = new GeneratedRoomSource(generatorReturning(SEMANTIC_FATAL_SPEC), 'p', logger)
-    await src.getRoom()
-    expect(entries).toHaveLength(1) // one line per call, preserved
-    const entry = entries[0]!
-    expect(entry.level).toBe('warn')
-    expect(entry.context.code).toBe('invalid-room')
-    expect(entry.context.fatalCount).toBe(1)
-    expect(entry.context.warningCount).toBe(0)
-    expect(entry.context.fatalCodes).toEqual(['room-too-small'])
-  })
-
-  it('schema-valid room with only semantic warnings → ok:true, room returned', async () => {
-    const { logger, entries } = createSpyLogger()
-    const src = new GeneratedRoomSource(generatorReturning(SEMANTIC_WARNING_SPEC), 'p', logger)
-    const result = await src.getRoom()
-    expect(result.ok).toBe(true)
-    if (result.ok) expect(result.room.id).toBe('warn-room')
-    // Success info line carries the semantic warning count (object-out-of-bounds).
-    expect(entries).toHaveLength(1)
-    expect(entries[0]!.level).toBe('info')
-    expect(entries[0]!.context.semanticWarningCount).toBe(1)
-  })
-
-  it('every FakeRoomGenerator output is semantically playable (zero fatal)', async () => {
-    // The fake may legitimately raise warnings (e.g. a prop near spawn), but must
-    // never produce a fatal room — guards both the generator and the validator.
+  it('every FakeRoomGenerator output is generated (playable, no repair/fallback)', async () => {
+    // The fake may legitimately raise warnings, but must never produce a room that
+    // needs repair or fallback — guards both the generator and the pipeline.
     const prompts = [
       'a calm throne room',
       'haunted hall of echoes',
@@ -236,9 +244,9 @@ describe('GeneratedRoomSource', () => {
     ]
     for (const prompt of prompts) {
       const { logger } = createSpyLogger()
-      const src = new GeneratedRoomSource(new FakeRoomGenerator(), prompt, logger)
-      const result = await src.getRoom()
+      const result = await newSource(new FakeRoomGenerator(), prompt, logger).getRoom()
       expect(result.ok).toBe(true)
+      if (result.ok) expect(result.provenance).toBe('generated')
     }
   })
 })

@@ -70,38 +70,51 @@ The browser can't create a WebGL context, or the GPU drops the context at runtim
   with guidance, instead of a blank canvas or an uncaught error.
 - **Logging** 🔜 — `logger.error('webgl unavailable' | 'webgl context lost', …)`.
 
-## 4. Invalid generated JSON / RoomSpec ✅ v0 handling · 🔜 real LLM + repair
+## 4. Invalid generated JSON / RoomSpec ✅ v0 (assemble → repair → fallback) · 🔜 real LLM re-prompt
 
 A generator returns malformed JSON, a schema-invalid spec, a partial spec, or
 (from a future model) hostile content.
 
-- **Detection** ✅ — implemented in `GeneratedRoomSource`: the generator's raw
-  text flows through the **same** `loadRoomSpec` boundary. `JSON.parse` failure
-  and a bad envelope both map to a typed `invalid-room` result (case 1); bad
-  objects are skipped (case 2); a generator throw maps to `unavailable`. Hostile
-  content is *still just data* — there is no code path to execution (see
+- **Detection** ✅ — implemented in `GeneratedRoomSource` + the pure `assembleRoom`
+  pipeline: the generator's raw text flows through `JSON.parse` → the **same**
+  `loadRoomSpec` boundary → `validateRoom`. A `JSON.parse` failure
+  (`failedStage: json`) and a bad envelope (`failedStage: schema`) are caught as
+  pipeline stages; bad *objects* are skipped (case 2); a generator **throw/reject**
+  maps to `unavailable`. Hostile content is *still just data* — there is no code
+  path to execution (see
   [ADR-0001](./decisions/ADR-0001-data-only-room-spec-trusted-renderer.md),
   [ADR-0010](./decisions/ADR-0010-generation-foundation-v0.md)). The deterministic
-  fake can't actually emit bad output, but the failure mapping is real and
-  **unit-tested**.
-- **Handling** — ✅ v0 surfaces the typed failure to the host, which shows the safe
-  room-load screen. 🔜 the bounded retry/repair loop and a fallback known-good room
-  (with a real model) remain future
+  fake can't actually emit bad output, but the mapping is real and **unit-tested**.
+- **Handling** — ✅ v0 **no longer rejects bad content to an error screen**: an
+  unrecoverable room (malformed JSON, bad envelope, or an unrepairable semantic
+  fatal) is replaced by a **trusted fallback room** (`provenance: fallback`,
+  `ok:true`); a salvageable room is **deterministically repaired**
+  (`provenance: repaired`). The renderer always gets a valid room
+  ([ADR-0020](./decisions/ADR-0020-room-generation-repair-fallback-v0.md)). Only a
+  generator throw/reject still yields the `unavailable` retry path. 🔜 the bounded
+  multi-attempt loop and a corrective re-prompt (with a real model) remain future
   ([ADR-0007](./decisions/ADR-0007-generated-room-validation-and-repair.md)).
-- **User-facing** ✅ — a calm "This room could not be loaded." / "Could not
-  generate a room. Please try again." screen; never raw model output or errors.
-- **Logging** ✅ — the caller logs **prompt length** and safe result counts/codes
-  only; **never** full prompts/keys/PII. 🔜 model/latency/token/attempt metadata
-  arrives with the real client.
+- **User-facing** ✅ — a repaired/fallback room **renders normally**, with a small
+  dismissable, static, prompt-free notice ("We couldn't build that room exactly, so
+  here's a safe one. Try another prompt."). A generator-unavailable failure still
+  shows the calm "Could not generate a room. Please try again." retry screen; never
+  raw model output or errors.
+- **Logging** ✅ — the caller logs **prompt length** and safe diagnostics only —
+  provenance, failed stage, fixed issue **codes**, counts, booleans; **never** full
+  prompts, raw JSON, story text, object names, keys, or PII. 🔜 model/latency/token/
+  attempt metadata arrives with the real client.
 
-## 4b. Valid RoomSpec but a bad room ✅ v0 (code validator) · 🔜 reviewer + repair
+## 4b. Valid RoomSpec but a bad room ✅ v0 (validator + deterministic repair/fallback) · 🔜 reviewer + LLM repair
 
 The spec is valid JSON and passes the schema, yet the room is **unplayable or
 poor**. **Valid JSON does not mean a room is playable or good.** This is the gap
 the generation pipeline closes; full design in
-[ADR-0007](./decisions/ADR-0007-generated-room-validation-and-repair.md). A first
-slice of the deterministic code validator now closes part of it
-([ADR-0011](./decisions/ADR-0011-semantic-room-validator-v0.md)).
+[ADR-0007](./decisions/ADR-0007-generated-room-validation-and-repair.md). The
+deterministic code validator
+([ADR-0011](./decisions/ADR-0011-semantic-room-validator-v0.md)) detects it, and
+the deterministic **repair + trusted fallback room**
+([ADR-0020](./decisions/ADR-0020-room-generation-repair-fallback-v0.md)) now
+resolve it so an unplayable room never reaches — and never blocks — the renderer.
 
 - **Detection** — two checks *beyond* schema validation, kept distinct:
   - ✅ a **deterministic code validator** (**not** an LLM) for semantic
@@ -117,29 +130,36 @@ slice of the deterministic code validator now closes part of it
   | Class | Examples | Handling |
   | --- | --- | --- |
   | **Object-level** (room still playable) | one NPC clipping a wall, an overlapping prop, a light over the soft budget | ✅ log a `warning` (counts/codes), keep the room |
-  | **Room-level** (not playable) | unwalkable size, spawn outside the room, object/light over the hard budget | ✅ v0 fatal → `invalid-room` (no render); 🔜 repair or regenerate within the attempt budget |
+  | **Room-level, repairable** | spawn outside the room, object/light over the hard budget | ✅ v0 deterministic `repairRoom` (clamp spawn / truncate over-budget objects/lights) → re-validate → render (`provenance: repaired`) |
+  | **Room-level, unrepairable** | unwalkable / pathological size (no resize), or a fatal that survives one repair pass | ✅ v0 → **trusted fallback room** (`provenance: fallback`); 🔜 LLM repair/regenerate within the attempt budget |
   | **Prompt mismatch / too empty/boring** | output doesn't match the prompt; room is dull | 🔜 reviewer rejects → repair/regenerate |
-  | **Repeated failure** | still unacceptable after max attempts | 🔜 safe fallback room / retry |
+  | **Repeated failure** | still unacceptable after max attempts | ✅ deterministic safe fallback room now ([ADR-0020](./decisions/ADR-0020-room-generation-repair-fallback-v0.md)); 🔜 the LLM attempt budget + retry |
 
-- **v0 handling** ✅ — `GeneratedRoomSource` runs `validateRoom` right after
-  `loadRoomSpec`: a **fatal** (room-level) issue folds into the existing
-  `invalid-room` result so the room never renders; **warnings** (object-level) are
-  logged as counts/codes and the room still loads. The room is never mutated and
-  warnings are not surfaced in the UI yet.
-- **Retry/repair policy (v1)** 🔜 — fast model first → one fast repair attempt →
-  slow/better model fallback only if needed; **no infinite retries, max 3
-  attempts**; target **10–30s** for the first room, **~60s** hard cap. After a
-  hard failure: a **safe error with a retry button or a fallback demo room**.
-- **User-facing** — ✅ on a fatal semantic issue, the same safe "This room could
-  not be loaded." screen as case 4; warnings are not shown in the UI yet (a dev
-  overlay stays future). 🔜 a brief wait, then the room, with repair behind the
-  scenes; on hard failure, a retryable error or a fallback room — never a broken or
-  unplayable room.
-- **Logging** — ✅ v0 logs one safe line: `code: 'invalid-room'`, fatal/warning
-  counts, and the distinct fatal issue **codes** (a fixed enum) — never issue
-  message text, full prompts, raw generated JSON, keys, or PII; the success line
-  carries `semanticWarningCount`. 🔜 per-attempt validator/reviewer outcomes,
-  which class failed, attempt count, model, latency arrive with the real pipeline.
+- **v0 handling** ✅ — `GeneratedRoomSource` runs the pure `assembleRoom` pipeline:
+  it `loadRoomSpec`s then `validateRoom`s; a **fatal** (room-level) issue triggers a
+  single deterministic `repairRoom` pass and a re-validate — if that clears the
+  fatal the **repaired** room renders, otherwise the **trusted fallback** room
+  renders. **Warnings** (object-level) are logged as counts/codes and the room
+  still loads. Neither `repairRoom` nor the pipeline mutates its inputs (repair
+  returns a narrowed copy); warnings are not surfaced in the UI yet
+  ([ADR-0020](./decisions/ADR-0020-room-generation-repair-fallback-v0.md)).
+- **Retry/repair policy** — ✅ v0 is a **single** deterministic repair pass then
+  re-validate, then fallback (no loop, no attempt budget). 🔜 the v1 LLM policy —
+  fast model first → one fast corrective re-prompt → slow/better model fallback;
+  **no infinite retries, max 3 attempts**; target **10–30s** for the first room,
+  **~60s** hard cap; on hard failure a **safe error with a retry button or a
+  fallback room** — needs a real, non-deterministic model.
+- **User-facing** — ✅ a repaired or fallback room **renders normally**, with a
+  small dismissable, static, prompt-free notice; an unplayable room no longer shows
+  an error screen. Warnings are not shown in the UI yet (a dev overlay stays
+  future). 🔜 with a real model, a brief wait then the room, repair behind the
+  scenes — never a broken or unplayable room.
+- **Logging** — ✅ v0 logs one safe line per call: `provenance`, `failedStage`, the
+  distinct fatal issue **codes** (a fixed enum), `repairAttempted`, and
+  object/skipped/warning counts — never issue message text, full prompts, raw
+  generated JSON, object names, keys, or PII. 🔜 per-attempt validator/reviewer
+  outcomes, which class failed, attempt count, model, latency arrive with the real
+  pipeline.
 
 ## 5. Backend / network failure ✅ API edge v0 · 🔜 browser client
 
@@ -395,8 +415,8 @@ never reach logs.
 | 1 | Bad envelope | `parse` throws | safe "couldn't load" screen | 🔜 |
 | 2 | Bad/unknown object | per-object `safeParse` | magenta placeholder | ✅ |
 | 3 | WebGL unavailable/lost | capability check + event | fallback message | 🔜 |
-| 4 | Invalid generated JSON | same `loadRoomSpec` boundary → typed result | safe load screen; retry/fallback 🔜 | ✅ v0 |
-| 4b | Valid spec, bad room | `validateRoom` (semantic) + 🔜 LLM reviewer | fatal → `invalid-room`; 🔜 repair/fallback | ✅ v0 |
+| 4 | Invalid generated JSON | `assembleRoom`: parse/schema/semantic stages → typed result | repaired or trusted fallback room + static notice; generator-unavailable → retry | ✅ v0 |
+| 4b | Valid spec, bad room | `validateRoom` (semantic) + deterministic `repairRoom` / fallback; 🔜 LLM reviewer | fatal → repair → render, else trusted fallback room | ✅ v0 |
 | 5 | Backend/network | validated API requests + typed results | safe API envelope; browser retry state 🔜 | ✅ API edge v0 |
 | 6 | DB / persistence failure | typed results (rooms, conflicts) + fail-fast throws (open/migration/corrupt session) | safe API error; no browser surface yet | ✅ API-backed v0 |
 | 7 | Pre-gen not ready | room status at door | "Opening the way…" / fallback | ❌ |

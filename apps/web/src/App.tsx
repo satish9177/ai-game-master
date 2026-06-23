@@ -17,7 +17,9 @@ import { WorldSession } from './world-session/WorldSession'
 import type { WorldStateResult } from './world-session/WorldSession'
 import { InteractionService } from './interactions/InteractionService'
 import { EncounterService } from './encounters/EncounterService'
-import type { LoadedRoom } from './domain/loadRoomSpec'
+import { loadRoomSpec, type LoadedRoom } from './domain/loadRoomSpec'
+import { fallbackRoom as fallbackRoomSpec } from './domain/examples/fallbackRoom'
+import { FALLBACK_NOTICE, shouldShowFallbackNotice } from './app/fallbackNotice'
 import { FakeNPCDialogueProvider } from './dialogue/FakeNPCDialogueProvider'
 import { NPCDialogueService } from './dialogue/NPCDialogueService'
 
@@ -31,6 +33,10 @@ const interactionService = new InteractionService(worldSession, logger)
 const encounterService = new EncounterService(worldSession, logger)
 const dialogueProvider = new FakeNPCDialogueProvider()
 const npcDialogueService = new NPCDialogueService(worldSession, dialogueProvider, logger)
+// The trusted fallback room, validated once at startup. The assembly pipeline
+// returns it (via GeneratedRoomSource) whenever generated content can't be
+// loaded, validated, or repaired, so the renderer always gets a playable room.
+const fallbackRoom = loadRoomSpec(fallbackRoomSpec)
 const roomRegistry = new RoomRegistry()
 const exampleRoomCache = new SessionRoomCache()
 const exampleNavigation = new NavigationService(
@@ -95,6 +101,7 @@ function bootstrapExamplePlay(): Promise<ActivePlay | null> {
 function App() {
   const [activePlay, setActivePlay] = useState<ActivePlay | null>(null)
   const [fatalMessage, setFatalMessage] = useState<string | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
   const requestVersion = useRef(0)
 
   useEffect(() => {
@@ -113,8 +120,9 @@ function App() {
     const version = ++requestVersion.current
     setActivePlay(null)
     setFatalMessage(null)
+    setNotice(null)
     logger.info('prompt submitted', { promptLength: prompt.length })
-    const source = new GeneratedRoomSource(generator, prompt, logger)
+    const source = new GeneratedRoomSource(generator, prompt, logger, fallbackRoom)
 
     void source.getRoom().then(async (result) => {
       if (version !== requestVersion.current) return
@@ -137,6 +145,9 @@ function App() {
         sessionId: started.state.sessionId,
         roomCache: generatedCache,
       })
+      // A repaired or fallback room couldn't be built exactly as asked — show the
+      // static, prompt-free notice. A clean `generated` room shows nothing.
+      if (shouldShowFallbackNotice(result.provenance)) setNotice(FALLBACK_NOTICE)
     }).catch(() => {
       if (version !== requestVersion.current) return
       logger.error('generated room source threw', { code: 'room-source-failed' })
@@ -177,6 +188,19 @@ function App() {
       ) : (
         <div className="room-viewer-root">
           {fatalMessage && <div className="room-message" role="alert">{fatalMessage}</div>}
+        </div>
+      )}
+      {notice && (
+        <div className="room-notice" role="status">
+          <span className="room-notice-text">{notice}</span>
+          <button
+            type="button"
+            className="room-notice-close"
+            onClick={() => setNotice(null)}
+            aria-label="Dismiss notice"
+          >
+            ×
+          </button>
         </div>
       )}
       <PromptBar onSubmit={handlePrompt} />

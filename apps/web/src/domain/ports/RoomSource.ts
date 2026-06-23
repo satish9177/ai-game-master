@@ -1,4 +1,5 @@
 import type { LoadedRoom } from '../loadRoomSpec'
+import type { RoomProvenance } from '../assembleRoom'
 
 /**
  * RoomSource port (ARCHITECTURE.md "Future plug-in points", FAILURE-MODES.md).
@@ -35,9 +36,16 @@ export type RoomLoadError = {
  * result (rather than a thrown error for expected failures) keeps the host's
  * branch handling explicit; genuine bugs may still throw and reach the host's
  * error boundary.
+ *
+ * `provenance` is optional so static/preloaded sources stay compatible without
+ * setting it. A generating source (which runs the assembly pipeline) reports
+ * whether the room came through cleanly (`generated`), needed a deterministic
+ * repair (`repaired`), or fell back to a trusted room (`fallback`) — enough for
+ * the host to show a safe, prompt-free notice. It is a coarse, safe signal: no
+ * raw text, codes, or counts (those stay in the source's structured logs).
  */
 export type RoomLoadResult =
-  | { ok: true; room: LoadedRoom }
+  | { ok: true; room: LoadedRoom; provenance?: RoomProvenance }
   | { ok: false; error: RoomLoadError }
 
 export interface RoomSource {

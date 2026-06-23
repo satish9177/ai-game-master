@@ -21,11 +21,11 @@ hand-written code* — is preserved as the system grows.
 Throughout these docs:
 
 - ✅ **Implemented** — exists today in `apps/web` (Renderer Foundation v0;
-  Generation Foundation v0; Semantic Room Validator v0; Isometric Camera
-  Foundation; World State & Event Log v0; Object Interactions v0; Encounter
-  System v0; Multi-Room Navigation & Cache v0; NPC Dialogue Foundation v0;
-  Backend SQLite Persistence v0 — headless, Node-only; Backend World Session
-  API v0 — headless, Node-only).
+  Generation Foundation v0; Semantic Room Validator v0; Room Generation Repair &
+  Fallback v0; Isometric Camera Foundation; World State & Event Log v0; Object
+  Interactions v0; Encounter System v0; Multi-Room Navigation & Cache v0; NPC
+  Dialogue Foundation v0; Backend SQLite Persistence v0 — headless, Node-only;
+  Backend World Session API v0 — headless, Node-only).
 - 🔜 **Planned** — designed and approved, not yet built (next slices).
 - ❌ **Not built** — future shape only; documented so we don't paint into a corner.
 
@@ -100,6 +100,48 @@ reviewer, bounded repair/regenerate, and adjacent-room pre-generation) remains
 [Generation pipeline](#generation-pipeline-planned),
 [ADR-0010](./decisions/ADR-0010-generation-foundation-v0.md), and
 [ADR-0011](./decisions/ADR-0011-semantic-room-validator-v0.md).
+
+## Room Generation Repair & Fallback v0
+
+✅ **Implemented.** The **deterministic** remainder of the
+[ADR-0007](./decisions/ADR-0007-generated-room-validation-and-repair.md) pipeline
+now ships: a bad generated room is no longer just rejected to an error screen — it
+is **repaired** when salvageable or replaced by a **trusted fallback room**, so the
+renderer always receives a valid, playable room
+([ADR-0020](./decisions/ADR-0020-room-generation-repair-fallback-v0.md)).
+
+- **A pure domain pipeline `assembleRoom(rawText, fallbackRoom)`** composes the
+  existing boundaries in order — `JSON.parse` → `loadRoomSpec` → `validateRoom` →
+  `repairRoom` → re-`validateRoom` → fallback — and **always returns a valid,
+  zero-fatal `LoadedRoom`** plus safe diagnostics. It is synchronous, does no I/O,
+  imports no logger/React/Three.js/DB, and never logs (problems are returned as
+  data, like `loadRoomSpec`/`validateRoom`).
+- **Deterministic repair only (`repairRoom`).** A pure, non-mutating function that
+  only *removes or clamps*, never invents content: clamp `spawn` into the walkable
+  AABB (the same margin `validateRoom` uses), truncate objects to the hard object
+  budget, and drop torches beyond the hard light budget. It **does not resize
+  rooms** — `room-too-small` / `room-too-large` stay unrepairable and route to the
+  fallback. Repair is **one pass**, then re-validate; no loop, no attempt budget.
+- **An authored fallback room (`domain/examples/fallbackRoom.ts`).** A trusted,
+  data-only literal — a small stone antechamber with a centered in-bounds spawn —
+  authored to raise zero fatal and zero warning semantic issues, with no prompt or
+  story text. The host validates it once and injects it.
+- **Provenance + a static notice.** `GeneratedRoomSource` runs the generator, then
+  `assembleRoom`, and returns `provenance` (`generated` | `repaired` | `fallback`)
+  on an **`ok:true`** result — all three are valid rooms. Only a generator
+  **throw/reject** stays `ok:false` `unavailable` (the retry path); bad *content*
+  never becomes `unavailable`. `App` injects the fallback and shows a small
+  **dismissable, static, prompt-free** notice for `repaired`/`fallback`, nothing
+  for `generated`.
+- **Safe diagnostics/logging only** — provenance, the failed stage, fixed
+  `RoomIssueCode` values, counts, and booleans; never prompt text, raw JSON, story
+  text, object names, or free-form parse/schema errors.
+- **Unchanged:** the renderer/engine/builders, the schema and semantic boundaries,
+  the `RoomSource` port (gains only an optional success-result `provenance`), the
+  deterministic fake (every `FakeRoomGenerator` room is still `generated`), and the
+  Node API. A **real** LLM repair/re-prompt, an LLM reviewer, a bounded
+  multi-attempt loop, adjacent-room pre-generation, and a backend generation
+  endpoint remain **future**.
 
 ## Isometric Camera Foundation
 
@@ -404,20 +446,24 @@ Submitting a prompt swaps the room source; the host path is otherwise identical:
 
 ```
 PromptBar.onSubmit(prompt)              (app chrome — not renderer UI)
-  └─ App: setRoomSource(new GeneratedRoomSource(FakeRoomGenerator, prompt, logger))
+  └─ App: setRoomSource(new GeneratedRoomSource(FakeRoomGenerator, prompt, logger, fallbackRoom))
        └─ RoomViewer (unchanged — sees only a RoomSource; new identity → reload)
             └─ GeneratedRoomSource.getRoom()
                  ├─ FakeRoomGenerator.generate(prompt) → raw untrusted JSON text
-                 ├─ JSON.parse                          (never eval)
-                 ├─ loadRoomSpec(parsed)                ✅ schema boundary (shape)
-                 ├─ validateRoom(room)                  ✅ semantic boundary (playable)
-                 └─ RoomLoadResult  (ok | invalid-room | unavailable)
+                 │     └─ throw/reject → RoomLoadResult unavailable (retry path)
+                 ├─ assembleRoom(rawText, fallbackRoom) ✅ pure domain pipeline
+                 │     JSON.parse → loadRoomSpec → validateRoom → repairRoom → re-validate → fallback
+                 │     └─ ALWAYS { room (zero-fatal), diagnostics }
+                 └─ RoomLoadResult  { ok:true, room, provenance }   (generated | repaired | fallback)
+                      ├─ App: static notice if repaired | fallback
                       └─ engine.setRoom(room)           ✅ trusted builders only
 ```
 
 `RoomViewer` and the engine are **unchanged**: they still consume a `RoomSource`
-and a validated `LoadedRoom`. Only the composition root knows a prompt or a fake
-generator exists, and the prompt *text* is never logged — only its length.
+and a validated `LoadedRoom`. Only the composition root knows a prompt, a fake
+generator, or the fallback room exists, and the prompt *text* is never logged —
+only its length. Bad *content* now yields a repaired or fallback room (`ok:true`),
+so only a generator throw/reject reaches the `unavailable` retry path.
 
 ## Renderer Foundation v0 — module summary
 
@@ -444,9 +490,13 @@ generator exists, and the prompt *text* is never logged — only its length.
 | `generation/prng.ts` | Deterministic seeded PRNG (`xmur3` + `mulberry32`) and a small `Rng` helper. Pure — no I/O, no `Math.random`/`Date.now`. |
 | `generation/FakeRoomGenerator.ts` | A deterministic `RoomGenerator`: prompt → seeded PRNG → RoomSpec **data**, serialized with `JSON.stringify`. Emits only the published vocabulary; same prompt → byte-identical output. No real model. |
 | `domain/validateRoom.ts` | Pure semantic validator: `validateRoom(room) → RoomValidationResult` of severity-tagged issues. Checks *playability* (dimensions, spawn-in-bounds, object/light budgets, usable interactions) over a loaded room — a domain peer of `loadRoomSpec`. No I/O, no logger, no React/Three ([ADR-0011](./decisions/ADR-0011-semantic-room-validator-v0.md)). |
-| `room/GeneratedRoomSource.ts` | A `RoomSource` adapter (composition layer) that runs the generator's text through `JSON.parse` → `loadRoomSpec` (schema) → `validateRoom` (semantic), and maps the outcome to a typed `RoomLoadResult` (a fatal semantic issue → `invalid-room`). Owns parse + validation; logs length/counts/codes only. |
+| `domain/repairRoom.ts` | Pure deterministic repair: `repairRoom(room) → LoadedRoom`. Non-mutating; only clamps spawn into the walkable AABB and truncates over-hard-budget objects/torches — never resizes rooms or invents content. Code peer of `validateRoom` ([ADR-0020](./decisions/ADR-0020-room-generation-repair-fallback-v0.md)). |
+| `domain/assembleRoom.ts` | Pure assembly pipeline: `assembleRoom(rawText, fallbackRoom) → { room, diagnostics }`. Composes `JSON.parse` → `loadRoomSpec` → `validateRoom` → `repairRoom` → re-validate → fallback; **always** returns a zero-fatal room plus safe diagnostics (provenance/stage/codes/counts/booleans). Synchronous, no I/O, never logs ([ADR-0020](./decisions/ADR-0020-room-generation-repair-fallback-v0.md)). |
+| `domain/examples/fallbackRoom.ts` | The trusted, data-only fallback room (the `throneRoom` authoring pattern): a small in-bounds stone antechamber, zero fatal/zero warning, no prompt or story text. Injected by the host as `assembleRoom`'s last resort. |
+| `room/GeneratedRoomSource.ts` | A `RoomSource` adapter (composition layer) that runs the generator, then `assembleRoom`. A generator throw/reject → `unavailable`; otherwise **always** `ok:true` with `provenance` (`generated`/`repaired`/`fallback`). Logs one safe line (provenance/stage/codes/counts) — never prompt/raw JSON/story text/object names. |
 | `app/PromptBar.tsx` | Presentational prompt input + Generate button — app composition chrome, **not** renderer UI. Trims/validates; emits `onSubmit(prompt)`. |
-| `App.tsx` | Composition root: holds the active `RoomSource` in state; on submit, swaps to `GeneratedRoomSource(FakeRoomGenerator, prompt, logger)`. The only place a generator is named. |
+| `app/fallbackNotice.ts` | The static, prompt-free notice copy + the pure `shouldShowFallbackNotice(provenance)` decision (show for `repaired`/`fallback`). |
+| `App.tsx` | Composition root: validates/injects the fallback room, holds the active `RoomSource` in state; on submit, swaps to `GeneratedRoomSource(FakeRoomGenerator, prompt, logger, fallbackRoom)` and shows the dismissable fallback notice for repaired/fallback provenance. The only place a generator is named. |
 
 Tested with **Vitest**: the PRNG (determinism/divergence/ranges), the fake
 generator (determinism, known-vocabulary-only, passes `loadRoomSpec`, data-only
@@ -523,12 +573,15 @@ is to keep each replacement local to its port.
 - ✅ Because `RoomSource.getRoom()` is async by contract, loading/error states and
   the React error boundary (see [FAILURE-MODES](./FAILURE-MODES.md)) are the same
   whether the room is static, generated, or fetched.
-- 🔜 Generation is more than one model call: a prompt becomes a *validated,
+- ✅ Generation is more than one model call: a prompt becomes a *validated,
   playable* room through a multi-stage pipeline with bounded repair and a safe
-  fallback. v0 now implements stage 1 (generate) + schema validation **plus a
-  first slice of stage 2** (a deterministic semantic validator,
-  [ADR-0011](./decisions/ADR-0011-semantic-room-validator-v0.md)); the LLM reviewer
-  and bounded repair remain future. See
+  fallback. v0 now implements stage 1 (generate) + schema validation, the
+  **deterministic semantic validator**
+  ([ADR-0011](./decisions/ADR-0011-semantic-room-validator-v0.md)), and the
+  **deterministic repair + trusted fallback room**
+  ([ADR-0020](./decisions/ADR-0020-room-generation-repair-fallback-v0.md)) — so the
+  renderer always gets a valid room. 🔜 The LLM reviewer and the bounded
+  multi-attempt repair/re-prompt loop remain future. See
   **[Generation pipeline](#generation-pipeline-planned)** below and
   [ADR-0007](./decisions/ADR-0007-generated-room-validation-and-repair.md).
 - 🔜 Rooms are pre-generated ahead of the player so transitions feel instant. See
@@ -650,9 +703,12 @@ is to keep each replacement local to its port.
 
 ## Generation pipeline (planned)
 
-🔜 **Designed, not built** — except the **deterministic code validator**, whose
-first slice now ships ([ADR-0011](./decisions/ADR-0011-semantic-room-validator-v0.md)).
-Full rationale and the retry/repair policy live in
+🔜 **Designed, not built** — except the deterministic stages, which now ship: the
+**code validator** ([ADR-0011](./decisions/ADR-0011-semantic-room-validator-v0.md))
+and the **deterministic repair + safe fallback room**
+([ADR-0020](./decisions/ADR-0020-room-generation-repair-fallback-v0.md)). The
+**real LLM**, the **LLM reviewer**, and the **bounded multi-attempt repair/regenerate
+loop** remain future. Full rationale and the retry/repair policy live in
 [ADR-0007](./decisions/ADR-0007-generated-room-validation-and-repair.md);
 per-case failure handling is in [FAILURE-MODES](./FAILURE-MODES.md).
 
@@ -705,6 +761,15 @@ attempts**; target **10–30s** for the first room, **~60s** hard cap; after a h
 failure, a **safe error with a retry button or a fallback demo room** — never an
 unvalidated or known-bad room. The renderer's contract is unchanged: generation
 adds checks *before* the `loadRoomSpec` boundary, it never weakens it.
+
+✅ The **deterministic** subset of "repair → fallback" now ships
+([ADR-0020](./decisions/ADR-0020-room-generation-repair-fallback-v0.md)): a pure
+`assembleRoom` runs a **single** deterministic `repairRoom` pass (clamp spawn,
+truncate over-budget objects/lights — no resizing) and re-validates, then returns
+a trusted **fallback room** if any JSON/schema/semantic/repair failure remains, so
+the renderer always gets a valid room. The multi-attempt loop, the corrective
+re-prompt, the slow-model fallback, and the LLM reviewer remain future — they need
+a real, non-deterministic model.
 
 ## Adjacent-room pre-generation (planned)
 
