@@ -51,13 +51,17 @@ connection + forward-only migration runner, a `SqliteWorldStore` implementing th
 unchanged `WorldStore` port (append-only events + projection-cache snapshot, CAS
 concurrency), and a new `RoomStore` port with `SqliteRoomStore` (validated
 RoomSpec JSON). It is **provably excluded from the browser bundle** (tsconfig +
-Vite reachability + bidirectional ESLint walls) and **wired to nothing in the
-browser** ([ADR-0018](./docs/architecture/decisions/ADR-0018-backend-sqlite-persistence-v0.md)).
+Vite reachability + bidirectional ESLint walls) and **wired only to the Node API,
+never the browser** ([ADR-0018](./docs/architecture/decisions/ADR-0018-backend-sqlite-persistence-v0.md)).
+**Backend World Session API v0** adds a Node-only native `node:http` edge in
+`apps/web/src/server/**` for health, session create/state/events/move, and room
+save/load. It composes `WorldSession` with the SQLite stores, validates requests,
+and returns safe typed error envelopes; the browser remains on in-memory adapters
+with no API client wiring ([ADR-0019](./docs/architecture/decisions/ADR-0019-backend-world-session-api-v0.md)).
 "2.5D" means camera/presentation, **not** a new engine; full first-person /
-free-camera 3D remains future/optional. No real LLM/API and no hosted
-backend/HTTP server yet; the only persistence is the headless, Node-only SQLite
-layer above (no `apps/api`, no browser DB access) — those remaining pieces are
-coming and the architecture is built so they slot in without breaking boundaries.
+free-camera 3D remains future/optional. There is still no real LLM/API generation,
+hosted deployment, browser API client, or browser DB access. FastAPI/Python are
+not part of the MVP backend path.
 
 ## Engineering standards (non-negotiable)
 
@@ -131,8 +135,8 @@ Dependencies point **inward**, toward the domain. Full rules in
 | **Interactions** | `apps/web/src/interactions/` (v0, headless) | domain, world-session, logger port | UI, renderer, React, Three.js, DB |
 | **Encounters** | `apps/web/src/encounters/` (v0, headless) | domain, world-session, logger port | UI, renderer, React, Three.js, DB |
 | **Dialogue** | `apps/web/src/dialogue/` (v0, headless) | domain, world-session read path, logger port | UI, renderer, React, Three.js, DB |
-| **Persistence** | `apps/web/src/persistence/` (v0, headless, Node-only) | domain contracts/ports, logger **types**, `node:sqlite` | React, Three.js, renderer, UI, generation, world-session, interactions, encounters, dialogue, room, app |
-| **Backend / HTTP API** | not built yet (future `apps/api`) | domain, persistence | UI, renderer |
+| **Persistence** | `apps/web/src/persistence/` (v0, headless, Node-only) | domain contracts/ports, logger **types**, `node:sqlite` | React, Three.js, renderer, UI, generation, world-session, interactions, encounters, dialogue, room, app; browser-reachable code |
+| **Backend / HTTP API** | `apps/web/src/server/` (v0, Node-only) | domain, world-session, persistence, logger/clock/id abstractions, Node built-ins | UI, renderer, React, Three.js, browser composition modules |
 
 ## Logging rules
 
@@ -152,8 +156,9 @@ ground objects. Full details in [CONVENTIONS](./docs/architecture/CONVENTIONS.md
 
 Unless the maintainer explicitly asks, do **not**:
 
-- add **real** LLM/API generation, a hosted backend / HTTP server / `apps/api`,
-  browser-side DB access, or a non-SQLite/Postgres datastore — the deterministic
+- add **real** LLM/API generation, a hosted/cloud deployment, a second backend
+  (`apps/api`), a browser API client/CORS proxy, browser-side DB access, or a
+  non-SQLite/Postgres datastore — the deterministic
   *fake* generator plus the deterministic semantic `validateRoom` (Generation
   Foundation v0 + Semantic Room Validator v0) are the only generation-pipeline
   code; do not extend them into a real model, a multi-stage pipeline, a **deeper**
@@ -161,9 +166,12 @@ Unless the maintainer explicitly asks, do **not**:
   LLM reviewer, a repair loop, memory, or adjacent-room pre-generation without
   explicit approval. The **headless, Node-only SQLite persistence**
   (`src/persistence/**`, [ADR-0018](./docs/architecture/decisions/ADR-0018-backend-sqlite-persistence-v0.md))
-  is built and approved, but keep it server-side and browser-excluded; do **not**
-  wire it into the frontend, add an HTTP layer, swap in another SQLite driver/ORM,
-  or change the `WorldStore` port without explicit approval;
+  and native Node HTTP API (`src/server/**`,
+  [ADR-0019](./docs/architecture/decisions/ADR-0019-backend-world-session-api-v0.md))
+  are built and approved. Keep them Node-only; do **not** wire the frontend, add
+  endpoints or another server framework, swap SQLite drivers/ORMs, or change the
+  `WorldStore` port without explicit approval. FastAPI/Python are not in the MVP
+  backend path;
 - add npm workspaces or extract `packages/contracts`
   ([ADR-0005](./docs/architecture/decisions/ADR-0005-defer-shared-package-extraction.md));
 - introduce a state-management library, a DI framework, or a heavy ORM;
@@ -186,6 +194,7 @@ than guessing.
 cd apps/web
 npm install        # first time
 npm run dev        # Vite dev server
+npm run dev:api    # local Node API (tsx)
 npm run build      # tsc -b + vite build  (use this to prove a change type-checks)
 npm run lint       # eslint
 npm run test       # vitest (PRNG, fake generator, validateRoom, GeneratedRoomSource paths)

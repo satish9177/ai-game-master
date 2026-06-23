@@ -9,8 +9,8 @@ Status legend: ✅ behavior exists today · 🔜 planned (designed, not built) �
 ## Error-handling philosophy
 
 - **Validate at every trust boundary.** Dynamic/external data is checked the
-  moment it enters a layer (the browser via `loadRoomSpec`; later the backend at
-  its HTTP edge). See [BOUNDARIES](./BOUNDARIES.md).
+  moment it enters a layer (the browser via `loadRoomSpec`; the backend at its
+  HTTP edge). See [BOUNDARIES](./BOUNDARIES.md).
 - **Degrade, don't crash.** A single bad *object* must never take down a room. A
   bad *room* must never take down the app — it shows a safe failure screen.
 - **Two error classes.** *Expected* failures (invalid input, a missing room, a
@@ -141,26 +141,31 @@ slice of the deterministic code validator now closes part of it
   carries `semanticWarningCount`. 🔜 per-attempt validator/reviewer outcomes,
   which class failed, attempt count, model, latency arrive with the real pipeline.
 
-## 5. Backend / network failure ❌ (future)
+## 5. Backend / network failure ✅ API edge v0 · 🔜 browser client
 
-The app can't reach the backend, or it returns 5xx / times out.
+The Node API edge exists, but the browser does not call it yet. v0 therefore
+covers safe server-side request and infrastructure failure handling; client
+timeouts, offline handling, retry UX, and hosted-network behavior remain future.
 
-- **Detection** — HTTP status, timeouts, and aborts surfaced by the
-  `RoomSource`/API client as typed results (not thrown strings).
-- **Handling** — loading/error/retry states at the host; idempotent generation
-  jobs so a retry can't double-charge or duplicate work; offline detection.
-- **User-facing** — a retryable error state; never a frozen UI.
-- **Logging** — request id / correlation id, status, latency; server logs the
-  full error, the client logs a summary.
+- **Detection** ✅ — method/path routing, bounded JSON parsing, zod request
+  contracts, typed world-session/store results, and a health probe.
+- **Handling** ✅ — invalid input/commands map to `400`, missing resources to
+  `404`, revision conflicts to `409`, and unexpected/corrupt-state failures to a
+  safe `500` envelope. An unhealthy dependency makes `GET /health` return `503`.
+- **User-facing** 🔜 — there is no browser API client yet. Future wiring needs
+  typed HTTP results, abort/timeouts, offline detection, and retryable UI states.
+- **Logging** ✅ — structured ids/counts/codes only; request bodies, RoomSpec
+  story content, SQL details, and stack traces are never returned or logged.
+  Correlation ids and latency telemetry remain future.
 
 ## 6. Persistence / database failure ✅ v0 (headless, Node-only) · 🔜 hosted backend
 
 The headless SQLite layer ([ADR-0018](./decisions/ADR-0018-backend-sqlite-persistence-v0.md))
 is the first durable store: a `node:sqlite` connection + forward-only migration
 runner, `SqliteWorldStore` (the unchanged `WorldStore` port), and `SqliteRoomStore`
-(the new `RoomStore` port). It is browser-excluded and wired to nothing in the
-browser, so there is **no user-facing surface yet** — a future API edge maps the
-genuine faults below to safe errors.
+(the new `RoomStore` port). The Node API composes these adapters and maps
+request-time faults to safe envelopes. Persistence remains browser-excluded, so
+there is still no frontend user-facing surface.
 
 **Two error classes at the persistence boundary** (mirrors ADR-0013): expected
 content/concurrency outcomes are **typed results**; genuine infrastructure faults
@@ -168,7 +173,7 @@ content/concurrency outcomes are **typed results**; genuine infrastructure fault
 
 | Situation | Detection | Handling / result | Logging |
 | --- | --- | --- | --- |
-| DB cannot open / unavailable | `open` / `runMigrations` throws | **fail fast** — a genuine fault, not control flow; a future API edge maps it to a safe error | code only |
+| DB cannot open / unavailable | `open` / `runMigrations` throws | **fail fast** before listen — the API never starts against an unavailable or unmigrated DB | code only |
 | Migration fails midway | per-migration `withTransaction` (`BEGIN IMMEDIATE`) | the migration **rolls back wholesale**, records nothing, and `runMigrations` rethrows; the DB stays at the prior version (refuse a half-migrated DB) | migration `version` only |
 | Unknown stored `schema_version` | read-boundary check | reject rather than silently migrate; tolerate the current version | code only |
 | Corrupt session snapshot / event JSON | read-boundary `JSON.parse` + `safeParse` | **throw** — corruption is a fault, never masked as `null` / `not-found`; the row text is never included in the error or logs | code only |
@@ -180,8 +185,8 @@ content/concurrency outcomes are **typed results**; genuine infrastructure fault
 | Duplicate room id | `saveRoom` `ON CONFLICT(room_id) DO UPDATE` | create-or-replace, last-writer-wins (rooms are content, not event-sourced truth) | `roomId` only |
 | Cross-session / room leakage | every query scoped by `session_id` / `room_id` | sessions and rooms never see each other; SQLite returns freshly parsed objects (no aliasing) — isolation tests | ids only |
 
-- **User-facing** 🔜 — none in this headless slice; a future API maps faults to
-  "temporarily unavailable" / a safe load screen, never a SQL error.
+- **API-facing** ✅ / **browser-facing** 🔜 — API callers receive safe error
+  envelopes, never SQL or stack details; no frontend error surface is wired yet.
 - **Logging** ✅ — ids / counts / codes only (`sessionId`, `roomId`, `revision`,
   `eventCount`, error `code`, migration `version`); **never** event payloads, item
   names, `reason` strings, room `name`, dialogue, or any story content.
@@ -392,8 +397,8 @@ never reach logs.
 | 3 | WebGL unavailable/lost | capability check + event | fallback message | 🔜 |
 | 4 | Invalid generated JSON | same `loadRoomSpec` boundary → typed result | safe load screen; retry/fallback 🔜 | ✅ v0 |
 | 4b | Valid spec, bad room | `validateRoom` (semantic) + 🔜 LLM reviewer | fatal → `invalid-room`; 🔜 repair/fallback | ✅ v0 |
-| 5 | Backend/network | typed HTTP results | retry state | ❌ |
-| 6 | DB / persistence failure | typed results (rooms, conflicts) + fail-fast throws (open/migration/corrupt session) | safe error at a future edge; no browser surface yet | ✅ v0 headless |
+| 5 | Backend/network | validated API requests + typed results | safe API envelope; browser retry state 🔜 | ✅ API edge v0 |
+| 6 | DB / persistence failure | typed results (rooms, conflicts) + fail-fast throws (open/migration/corrupt session) | safe API error; no browser surface yet | ✅ API-backed v0 |
 | 7 | Pre-gen not ready | room status at door | "Opening the way…" / fallback | ❌ |
 | 8 | Iso camera/player presentation | resize→frustum; player-position proximity; scene-graph disposal; cutaway curbs | stable framing, no occlusion or leak | ✅ |
 | 9 | Concurrent world append | optimistic revision check | typed conflict; neither event nor snapshot committed | ✅ headless |

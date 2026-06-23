@@ -23,6 +23,18 @@ const noPersistenceImport = {
   group: ['**/persistence/**'],
   message: 'UI/renderer/app/domain code must not import persistence; data access is server-side behind ports (ADR-0004, ADR-0018).',
 }
+// Reciprocal browser → server ban (ADR-0019): the Node-only HTTP edge must never
+// enter the browser bundle. Shared by every non-server, non-persistence boundary
+// block so flat-config last-match-wins never drops a folder's restriction. The
+// server is reached over HTTP (fetch) only, never by importing its code.
+const noServerImport = {
+  group: ['**/server/**'],
+  message: 'The HTTP API is Node-only; reach it over HTTP, never by importing src/server (ADR-0019).',
+}
+const noHttpImport = {
+  name: 'node:http',
+  message: 'node:http is server-side only; the browser bundle must never import it (ADR-0019).',
+}
 
 export default defineConfig([
   globalIgnores(['dist']),
@@ -64,6 +76,7 @@ export default defineConfig([
             { name: 'react', message: 'renderer/engine must not import React — the engine is framework-independent (ADR-0002).' },
             { name: 'react-dom', message: 'renderer/engine must not import React — the engine is framework-independent (ADR-0002).' },
             noSqliteImport,
+            noHttpImport,
           ],
           patterns: [
             { group: ['**/world-session/**'], message: 'renderer/engine emits intent and must not import world-session (ADR-0014).' },
@@ -71,6 +84,7 @@ export default defineConfig([
             { group: ['**/encounters/**'], message: 'renderer/engine emits intent and must not import encounter application/domain internals (ADR-0015).' },
             { group: ['**/dialogue/**'], message: 'renderer/engine emits intent and must not import dialogue application/domain internals (ADR-0017).' },
             noPersistenceImport,
+            noServerImport,
           ],
         },
       ],
@@ -89,11 +103,13 @@ export default defineConfig([
           paths: [
             { name: 'three', message: 'renderer/ui must not import Three.js — use the engine host interface (ADR-0002).' },
             noSqliteImport,
+            noHttpImport,
           ],
           patterns: [
             { group: ['three/*'], message: 'renderer/ui must not import Three.js (ADR-0002).' },
             { group: ['**/engine/**'], message: 'renderer/ui must not import engine internals; import shared view-model types from domain (ADR-0002, BOUNDARIES.md).' },
             noPersistenceImport,
+            noServerImport,
           ],
         },
       ],
@@ -115,12 +131,14 @@ export default defineConfig([
             { name: 'react-dom', message: 'domain must not import React (BOUNDARIES.md).' },
             { name: 'three', message: 'domain must not import Three.js (BOUNDARIES.md).' },
             noSqliteImport,
+            noHttpImport,
           ],
           patterns: [
             { group: ['three/*'], message: 'domain must not import Three.js (BOUNDARIES.md).' },
             { group: ['**/renderer/**'], message: 'domain must not import renderer or UI (BOUNDARIES.md).' },
             { group: ['**/platform/**'], message: 'domain must not import the platform logger or other adapters; it returns problems as data (ADR-0003, BOUNDARIES.md).' },
             noPersistenceImport,
+            noServerImport,
           ],
         },
       ],
@@ -143,12 +161,14 @@ export default defineConfig([
             { name: 'react-dom', message: 'generation must not import React — it emits RoomSpec data, not UI (BOUNDARIES.md).' },
             { name: 'three', message: 'generation must not import Three.js — it emits data, never renders (ADR-0001, BOUNDARIES.md).' },
             noSqliteImport,
+            noHttpImport,
           ],
           patterns: [
             { group: ['three/*'], message: 'generation must not import Three.js (ADR-0001, BOUNDARIES.md).' },
             { group: ['**/renderer/**'], message: 'generation must not import the renderer or UI; its output is validated at the loadRoomSpec boundary (BOUNDARIES.md).' },
             { group: ['**/platform/**'], message: 'generation must not import platform adapters such as the logger; it returns data and the caller logs (ADR-0003, BOUNDARIES.md).' },
             noPersistenceImport,
+            noServerImport,
           ],
         },
       ],
@@ -170,11 +190,13 @@ export default defineConfig([
             { name: 'react-dom', message: 'world-session is headless and must not import React (ADR-0013, BOUNDARIES.md).' },
             { name: 'three', message: 'world-session holds neutral world data and must not import Three.js (ADR-0013).' },
             noSqliteImport,
+            noHttpImport,
           ],
           patterns: [
             { group: ['three/*'], message: 'world-session must not import Three.js (ADR-0013).' },
             { group: ['**/renderer/**'], message: 'world-session must not import renderer or UI internals (ADR-0013, BOUNDARIES.md).' },
             noPersistenceImport,
+            noServerImport,
           ],
         },
       ],
@@ -195,11 +217,13 @@ export default defineConfig([
             { name: 'react-dom', message: 'interactions is headless and must not import React (ADR-0014).' },
             { name: 'three', message: 'interactions holds neutral data and must not import Three.js (ADR-0014).' },
             noSqliteImport,
+            noHttpImport,
           ],
           patterns: [
             { group: ['three/*'], message: 'interactions must not import Three.js (ADR-0014).' },
             { group: ['**/renderer/**'], message: 'interactions must not import renderer or UI internals (ADR-0014, BOUNDARIES.md).' },
             noPersistenceImport,
+            noServerImport,
           ],
         },
       ],
@@ -221,11 +245,13 @@ export default defineConfig([
             { name: 'react-dom', message: 'encounters is headless and must not import React (ADR-0015).' },
             { name: 'three', message: 'encounters holds neutral data and must not import Three.js (ADR-0015).' },
             noSqliteImport,
+            noHttpImport,
           ],
           patterns: [
             { group: ['three/*'], message: 'encounters must not import Three.js (ADR-0015).' },
             { group: ['**/renderer/**'], message: 'encounters must not import renderer or UI internals (ADR-0015, BOUNDARIES.md).' },
             noPersistenceImport,
+            noServerImport,
           ],
         },
       ],
@@ -246,11 +272,13 @@ export default defineConfig([
             { name: 'react-dom', message: 'dialogue is headless and must not import React (ADR-0017).' },
             { name: 'three', message: 'dialogue holds neutral data and must not import Three.js (ADR-0017).' },
             noSqliteImport,
+            noHttpImport,
           ],
           patterns: [
             { group: ['three/*'], message: 'dialogue must not import Three.js (ADR-0017).' },
             { group: ['**/renderer/**'], message: 'dialogue must not import renderer or UI internals (ADR-0017, BOUNDARIES.md).' },
             noPersistenceImport,
+            noServerImport,
           ],
         },
       ],
@@ -267,6 +295,7 @@ export default defineConfig([
     files: ['src/**/*.{ts,tsx}'],
     ignores: [
       'src/persistence/**',
+      'src/server/**',
       'src/renderer/engine/**',
       'src/renderer/ui/**',
       'src/domain/**',
@@ -280,8 +309,8 @@ export default defineConfig([
       'no-restricted-imports': [
         'error',
         {
-          paths: [noSqliteImport],
-          patterns: [noPersistenceImport],
+          paths: [noSqliteImport, noHttpImport],
+          patterns: [noPersistenceImport, noServerImport],
         },
       ],
     },
@@ -304,7 +333,32 @@ export default defineConfig([
           patterns: [
             { group: ['three/*'], message: 'persistence must not import Three.js (ADR-0018).' },
             { group: ['**/renderer/**'], message: 'persistence must not import the renderer or UI (ADR-0018).' },
-            { group: ['**/generation/**', '**/world-session/**', '**/interactions/**', '**/encounters/**', '**/dialogue/**', '**/room/**', '**/app/**'], message: 'persistence may import only pure domain contracts and logger types (ADR-0004, ADR-0018).' },
+            { group: ['**/generation/**', '**/world-session/**', '**/interactions/**', '**/encounters/**', '**/dialogue/**', '**/room/**', '**/app/**', '**/server/**'], message: 'persistence may import only pure domain contracts and logger types (ADR-0004, ADR-0018, ADR-0019).' },
+          ],
+        },
+      ],
+    },
+  },
+
+  // Boundary (server-self wall, ADR-0019): the HTTP API edge is a Node-only
+  // composition layer over the existing stores. It may import the domain, the
+  // persistence adapters, world-session, and platform adapters (and node:http /
+  // node:sqlite), but it must not import React, Three.js, or the renderer/UI —
+  // it is reached from the browser over HTTP, never by importing browser code.
+  {
+    files: ['src/server/**/*.{ts,tsx}'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: [
+            { name: 'react', message: 'server is headless Node code and must not import React (ADR-0019).' },
+            { name: 'react-dom', message: 'server is headless Node code and must not import React (ADR-0019).' },
+            { name: 'three', message: 'server holds neutral data and must not import Three.js (ADR-0008, ADR-0019).' },
+          ],
+          patterns: [
+            { group: ['three/*'], message: 'server must not import Three.js (ADR-0019).' },
+            { group: ['**/renderer/**'], message: 'server must not import the renderer or UI; it is reached over HTTP (ADR-0019).' },
           ],
         },
       ],
