@@ -6,6 +6,7 @@ import type { AppDeps } from '../bootstrap'
 import { createRouter } from '../router'
 import type { Handler, Route } from '../router'
 import { healthRoutes } from '../routes/health'
+import { sessionRoutes } from '../routes/sessions'
 
 /**
  * Test harness (ADR-0019): build the full router + `AppDeps` over an already-open,
@@ -25,5 +26,5 @@ export function createTestApp(db: DatabaseSync, logger: Logger = silentLogger())
 }
 
 function allRoutes(): Route[] {
-  return [...healthRoutes]
+  return [...healthRoutes, ...sessionRoutes]
 }

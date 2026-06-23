@@ -1,6 +1,7 @@
 import { mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import type { DatabaseSync } from 'node:sqlite'
+import type { IdGenerator } from '../domain/ports/IdGenerator'
 import type { RoomStore } from '../domain/ports/RoomStore'
 import { createConsoleLogger } from '../platform/logger/consoleLogger'
 import type { Logger } from '../platform/logger/Logger'
@@ -20,6 +21,7 @@ import { WorldSession } from '../world-session/WorldSession'
 export type AppDeps = {
   db: DatabaseSync
   session: WorldSession
+  idGenerator: IdGenerator
   roomStore: RoomStore
   logger: Logger
 }
@@ -40,8 +42,9 @@ export function resolveDbPath(env: NodeJS.ProcessEnv = process.env): string {
 export function buildDeps(db: DatabaseSync, logger: Logger): AppDeps {
   const worldStore = new SqliteWorldStore(db, logger)
   const roomStore = new SqliteRoomStore(db, logger)
-  const session = new WorldSession(worldStore, new SystemClock(), new UuidGenerator(), logger)
-  return { db, session, roomStore, logger }
+  const idGenerator = new UuidGenerator()
+  const session = new WorldSession(worldStore, new SystemClock(), idGenerator, logger)
+  return { db, session, roomStore, idGenerator, logger }
 }
 
 /**
