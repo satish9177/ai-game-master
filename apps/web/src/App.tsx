@@ -6,6 +6,8 @@ import { RoomRegistry } from './room/RoomRegistry'
 import { SessionRoomCache } from './room/SessionRoomCache'
 import { FakeRoomGenerator } from './generation/FakeRoomGenerator'
 import { FakeWorldBibleSeeder } from './generation/FakeWorldBibleSeeder'
+import { readLlmConfig } from './app/llmConfig'
+import { selectRoomGenerator } from './app/selectRoomGenerator'
 import { ErrorBoundary } from './app/ErrorBoundary'
 import { AdjacentRoomPregenerator } from './app/AdjacentRoomPregenerator'
 import { NavigationService } from './app/NavigationService'
@@ -30,7 +32,17 @@ import { NPCDialogueService } from './dialogue/NPCDialogueService'
 
 // Composition root: concrete adapters are constructed once and injected.
 const logger = createConsoleLogger()
-const generator = new FakeRoomGenerator()
+// The PromptBar-generated room path uses the configured generator: the
+// FakeRoomGenerator by default, or a real OpenAI-compatible provider when the
+// env config is complete (real-room-generator-provider v0; ADR-0023). The
+// returned `log` carries only safe selection metadata (provider enum, model id,
+// numeric caps, or a fixed reason code) — never the key, prompt, or seed.
+const { generator: promptGenerator, log: roomGeneratorSelectionLog } =
+  selectRoomGenerator(readLlmConfig())
+logger.info('room generator selected', roomGeneratorSelectionLog)
+// Background adjacent pre-generation stays deterministic and offline: it always
+// uses a FakeRoomGenerator, so warming never calls a real provider or spends.
+const adjacentGenerator = new FakeRoomGenerator()
 const worldBibleSeeder = new FakeWorldBibleSeeder()
 const idGenerator = new UuidGenerator()
 const worldStore = new InMemoryWorldStore()
@@ -54,7 +66,7 @@ const exampleRoomCache = new SessionRoomCache()
 const adjacentPregenerator = new AdjacentRoomPregenerator(
   exampleRoomCache,
   roomRegistry,
-  (roomId) => new GeneratedRoomSource(generator, `adjacent:${roomId}`, logger, fallbackRoom),
+  (roomId) => new GeneratedRoomSource(adjacentGenerator, `adjacent:${roomId}`, logger, fallbackRoom),
   fallbackRoom,
   logger,
 )
@@ -145,7 +157,7 @@ function App() {
       const prepared = await prepareGeneratedRoomSeed(prompt, worldBibleSeeder, logger)
       if (version !== requestVersion.current) return
       const source = new GeneratedRoomSource(
-        generator,
+        promptGenerator,
         prepared.generatorSeed,
         logger,
         fallbackRoom,
