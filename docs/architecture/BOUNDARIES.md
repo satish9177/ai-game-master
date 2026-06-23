@@ -41,8 +41,8 @@ layers, never the reverse. The domain depends on nothing in this repo.
 | **Interactions** | ✅ v0 (headless): `apps/web/src/interactions/` | Plans validated interaction effects and executes their commands through `WorldSession`; composition wiring stays outside this folder. |
 | **Encounters** | ✅ v0 (headless): `apps/web/src/encounters/` | Plans validated encounter outcomes and executes their commands through `WorldSession` (shared `world-session/applyCommands`); composition wiring stays outside this folder. |
 | **Dialogue** | ✅ v0 (headless): `apps/web/src/dialogue/` | Builds pure dialogue context and coordinates read-only provider replies through `WorldSession.getWorldState`; composition/UI wiring stays outside this folder. |
-| **Persistence** | ✅ v0 (headless, Node-only): `apps/web/src/persistence/` | `node:sqlite` connection + forward-only migration runner, `SqliteWorldStore` (existing `WorldStore` port), and `SqliteRoomStore` (new `RoomStore` port). Browser-excluded; wired to nothing in the browser. |
-| **Backend / HTTP API** | ❌ not built (future `apps/api`) | HTTP, generation hosting, request/response validation. Would sit in front of the persistence adapters. |
+| **Persistence** | ✅ v0 (headless, Node-only): `apps/web/src/persistence/` | `node:sqlite` connection + forward-only migration runner, `SqliteWorldStore` (existing `WorldStore` port), and `SqliteRoomStore` (new `RoomStore` port). Consumed by the Node API; never browser-reachable. |
+| **Backend / HTTP API** | ✅ v0 (Node-only): `apps/web/src/server/` | Native `node:http` edge for health, world-session commands/queries, and room save/load. Validates HTTP input and composes world-session plus SQLite adapters; no frontend imports. |
 
 ## Allowed dependency directions
 
@@ -58,17 +58,18 @@ layers, never the reverse. The domain depends on nothing in this repo.
 | **Encounters** | ✓ | ✗ | ✗ | ✓ (port) | ✗ | ✓ | ✗ | — | ✗ | ✗ |
 | **Dialogue** | ✓ | ✗ | ✗ | ✓ (port) | ✗ | ✓ | ✗ | ✗ | — | ✗ |
 | **Persistence (v0, headless)** | ✓ | ✗ | ✗ | ✓ (types) | ✗ | ✗ | ✗ | ✗ | ✗ | — |
-| **Backend / HTTP (future)** | ✓ | ✗ | ✗ | ✓ (port) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| **Backend / HTTP (v0)** | ✓ | ✗ | ✗ | ✓ (port) | ✗ | ✓ | ✗ | ✗ | ✗ | ✓ |
 
 `✗*` UI may not import renderer **internals**. It interacts with the engine only
 through the *approved host interface* (below). The composition root is where
 wiring happens.
 
-`✗†` The composition root does **not** import persistence in this slice: the
-headless, Node-only SQLite layer is wired to nothing in the browser, and the
-reciprocal lint wall keeps `node:sqlite` / `**/persistence/**` out of the browser
-bundle. The App imports it only when a backend / wiring slice lands behind the
-ports ([ADR-0018](./decisions/ADR-0018-backend-sqlite-persistence-v0.md)). The
+`✗†` The browser composition root does **not** import persistence. The separate
+Node-only server composition root owns SQLite wiring, while reciprocal lint
+walls keep both `node:sqlite` / `**/persistence/**` and `**/server/**` out of the
+browser bundle. Browser gameplay continues to use the in-memory adapters
+([ADR-0018](./decisions/ADR-0018-backend-sqlite-persistence-v0.md),
+[ADR-0019](./decisions/ADR-0019-backend-world-session-api-v0.md)). The
 `Persistence (v0)` row imports the Logger **types** only — never the logger
 adapter or any other `platform/**`.
 
@@ -80,8 +81,9 @@ adapter or any other `platform/**`.
 | **UI must not import Three.js** (`three`) or engine internals. | UI is presentational. Mixing Three.js objects into React render logic couples the view to engine guts and breaks the lifecycle/disposal contract. |
 | **Domain must not import React, Three.js, the renderer, UI, the platform logger, the DOM, the network, or a DB.** | The contract must be sharable by every consumer (renderer today, backend/generation later) without dragging in a runtime; it returns problems as data instead of logging. |
 | **No layer may call `console.*`** except the browser logger adapter. | One logging seam; structured and swappable. ([ADR-0003](./decisions/ADR-0003-logging-abstraction.md)) |
-| **Persistence/DB code must never appear in UI, renderer, or any browser-reachable layer.** | Data access is server-side, Node-only, behind repository ports. No non-persistence source file may import `node:sqlite` or `**/persistence/**`, so the browser bundle is provably free of DB code (tsconfig exclude + Vite reachability + the reciprocal lint wall). ([ADR-0004](./decisions/ADR-0004-persistence-sqlite-to-postgres.md), [ADR-0018](./decisions/ADR-0018-backend-sqlite-persistence-v0.md)) |
+| **Persistence/DB code must never appear in UI, renderer, or any browser-reachable layer.** | Data access is Node-only, behind repository ports. Only persistence itself and the server composition root may import it; the browser bundle is provably free of DB code (tsconfig excludes + Vite reachability + reciprocal lint walls). ([ADR-0004](./decisions/ADR-0004-persistence-sqlite-to-postgres.md), [ADR-0018](./decisions/ADR-0018-backend-sqlite-persistence-v0.md), [ADR-0019](./decisions/ADR-0019-backend-world-session-api-v0.md)) |
 | **Persistence may import only pure domain contracts and the Logger types.** | The headless SQLite adapters hold neutral JSON and implement the domain ports; they must not import React, Three.js, the renderer/UI, or any application layer (generation, world-session, interactions, encounters, dialogue, room, app). It stores the validated RoomSpec **data document**, never `THREE.*`/renderer objects. ([ADR-0008](./decisions/ADR-0008-renderer-portability-strategy.md), [ADR-0018](./decisions/ADR-0018-backend-sqlite-persistence-v0.md)) |
+| **The server may import only Node/backend-safe layers.** | `server/**` is a Node composition root over domain contracts, world-session, persistence, and platform abstractions. It must not import React, Three.js, renderer/UI, or browser composition modules. HTTP payloads are validated before use, and API errors/log context stay safe. ([ADR-0019](./decisions/ADR-0019-backend-world-session-api-v0.md)) |
 | **The event log stays append-only and the snapshot stays a projection cache in SQLite.** | `SqliteWorldStore` exposes no event update/delete; `UNIQUE(session_id, seq)` plus `BEFORE UPDATE`/`BEFORE DELETE` triggers enforce append-only at the DB; the session-computed snapshot is persisted atomically with its event under a `revision` compare-and-set. ([ADR-0013](./decisions/ADR-0013-world-state-event-log-v0.md), [ADR-0018](./decisions/ADR-0018-backend-sqlite-persistence-v0.md)) |
 | **World session must not import React, Three.js, or renderer/UI internals.** | Authoritative gameplay truth is a headless application layer over neutral domain data and ports; renderer wiring is a separate future slice. ([ADR-0013](./decisions/ADR-0013-world-state-event-log-v0.md)) |
 | **World state changes only by appending a validated event and projecting it.** | The event log is authoritative. Direct snapshot setters would create a second source of truth and break reconstruction/integrity. ([ADR-0013](./decisions/ADR-0013-world-state-event-log-v0.md)) |
@@ -131,11 +133,11 @@ These are enforced mechanically; a violation fails `npm run build` or
 `npm run lint`:
 
 - **TypeScript `strict`** and **`noUncheckedIndexedAccess`** in
-  `tsconfig.app.json`, `tsconfig.node.json`, and `tsconfig.persistence.json`. The
-  app config **excludes `src/persistence`** (the browser build never type-checks
-  Node-only code), and the new Node `tsconfig.persistence.json` (no DOM lib,
-  `types: ['node']`) type-checks it via the root `tsc -b` references — so a
-  persistence type error fails `npm run build`.
+  `tsconfig.app.json`, `tsconfig.node.json`, `tsconfig.persistence.json`, and
+  `tsconfig.server.json`. The app config **excludes `src/persistence` and
+  `src/server`**; the Node-only configs use no DOM lib and `types: ['node']`.
+  Both are included in the root `tsc -b` references, so persistence or server
+  type errors fail `npm run build`.
 - **`no-console`** everywhere except the browser logger adapter
   (`src/platform/logger/consoleLogger.ts`).
 - **`no-restricted-imports`** encoding the forbidden-import table:
@@ -161,20 +163,25 @@ These are enforced mechanically; a violation fails `npm run build` or
     ([ADR-0014](./decisions/ADR-0014-object-interactions-v0.md),
     [ADR-0015](./decisions/ADR-0015-encounter-system-v0.md),
     [ADR-0017](./decisions/ADR-0017-npc-dialogue-foundation-v0.md)).
-  - Every non-persistence `src/**` file may not import `node:sqlite` or
-    `**/persistence/**` (the reciprocal browser → persistence ban). This shared
-    restriction is folded into **each** per-folder block above plus one reciprocal
-    block for the un-foldered composition/platform files, because ESLint flat
-    config is last-match-wins per rule — a single broad block would clobber the
-    per-folder boundaries ([ADR-0018](./decisions/ADR-0018-backend-sqlite-persistence-v0.md)).
+  - Every browser-reachable `src/**` file may not import `node:sqlite`,
+    `**/persistence/**`, `node:http`, or `**/server/**`. These reciprocal bans
+    are folded into the per-folder rules plus a broad browser block because
+    ESLint flat config is last-match-wins per rule
+    ([ADR-0018](./decisions/ADR-0018-backend-sqlite-persistence-v0.md),
+    [ADR-0019](./decisions/ADR-0019-backend-world-session-api-v0.md)).
   - `persistence/**` may import the domain (`domain/world/**`, `roomSpec`,
     `loadRoomSpec`, `domain/ports/**`), the Logger **types**, and `node:sqlite`,
     but may not import `react`, `react-dom`, `three`/`three/*`, `renderer/**`, or
     any application layer (`generation/**`, `world-session/**`, `interactions/**`,
-    `encounters/**`, `dialogue/**`, `room/**`, `app/**`)
+    `encounters/**`, `dialogue/**`, `room/**`, `app/**`, or `server/**`)
     ([ADR-0018](./decisions/ADR-0018-backend-sqlite-persistence-v0.md)).
-- Boundaries lint cannot easily express — and future backend/DB rules, until
-  those folders exist — stay enforced by review + these docs +
+  - `server/**` may import domain, `world-session/**`, `persistence/**`, the
+    platform logger/system abstractions, and Node built-ins. It may not import
+    React, Three.js, renderer/UI, generation, interactions, encounters, dialogue,
+    or browser composition modules
+    ([ADR-0019](./decisions/ADR-0019-backend-world-session-api-v0.md)).
+- Boundaries that lint cannot easily express stay enforced by review + these
+  docs +
   [/AGENTS.md](../../AGENTS.md).
 
 **Treat this document as the contract**: a change that violates a rule above

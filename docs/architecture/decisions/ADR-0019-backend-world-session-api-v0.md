@@ -1,16 +1,12 @@
 # ADR-0019: Backend World Session API v0 — a headless, Node-only HTTP edge over the existing SQLite stores
 
-- **Status:** Accepted — **design approved; not yet implemented** (Backend World
-  Session API v0)
+- **Status:** Implemented — Backend World Session API v0
 - **Date:** 2026-06-23
 - **Deciders:** Project owner
 
-> This ADR is the **binding implementation brief** for the
-> `backend-world-session-api-v0` slice. It is **accepted design that is not yet
-> implemented**: no `src/server/**` code exists at the time of writing. A later
-> coding pass (Codex or a separate Claude pass) implements it; the maintainer
-> commits manually. When the code lands, the final commit flips this status to
-> *implemented* and updates the sibling docs (see [Commit plan](#commit-plan)).
+> Implemented under `apps/web/src/server/**` as a browser-excluded Node/TypeScript
+> build unit. The browser remains on its in-memory adapters; this API is not wired
+> into `App.tsx`, `RoomViewer.tsx`, or the renderer.
 
 ## Context
 
@@ -86,7 +82,7 @@ reachability + ESLint walls — not by convention. The browser must reach the AP
    keep using `:memory:` / temp-file SQLite DBs — never the dev file. The dev DB
    directory is created on demand and `.data/` is git-ignored. Tests run under
    Vitest regardless.
-5. **Include `POST /sessions/:id/move`.** It is the one write-command endpoint in
+5. **Include `POST /sessions/:sessionId/move`.** It is the one write-command endpoint in
    v0 — a thin pass-through to `WorldSession.move` that proves the full
    HTTP → session → SQLite compare-and-set / conflict write path. It does **not**
    check that the target room exists (deferred). No other command endpoints
@@ -107,9 +103,9 @@ relative imports keeps the slice small and the boundaries lint-enforced. The
 extraction stays mechanical when a genuine cross-package consumer (e.g. a shared
 client) actually appears.
 
-## Decision
+## Decision (implemented)
 
-Add a headless, Node-only HTTP edge under `apps/web/src/server/**` that opens
+The implemented headless, Node-only HTTP edge under `apps/web/src/server/**` opens
 SQLite through the existing persistence layer, runs migrations at startup, and
 exposes a small set of validated endpoints by composing the existing
 `SqliteWorldStore`, `SqliteRoomStore`, and `WorldSession`.
@@ -197,14 +193,14 @@ in `world-session/**` and the domain).
 | --- | --- | --- | --- |
 | `GET /health` | Lightweight liveness: confirm the connection answers (`SELECT 1` / migration version). | `200 { status: 'ok', persistenceSchemaVersion: 1 }` | probe throws → `503 unavailable` |
 | `POST /sessions` | Validate body → compose a `CanonSeed` (server stamps `worldId` + `schemaVersion`) → `WorldSession.startSession`. | `201 { sessionId, state }` | bad body → `400 invalid-request`; `invalid-canon` → `400` |
-| `GET /sessions/:id/state` | `WorldSession.getWorldState`. | `200 { state }` | `not-found` → `404` |
-| `GET /sessions/:id/events` | Parse `?sinceSeq=` (non-negative int) → `WorldSession.getEventLog`. | `200 { events }` | bad `sinceSeq` → `400`; `not-found` → `404` |
-| `POST /sessions/:id/move` | Validate body → `WorldSession.move(id, toRoomId, expectedRevision, fromRoomId?)`. Thin pass-through; **no** target-room existence check (deferred). | `200 { state, event }` | bad body → `400`; `not-found` → `404`; `conflict` → `409`; `invalid-command` → `400` |
-| `PUT /rooms/:id` | Validate body with `RoomSpecSchema` and require `body.id === :id` → `SqliteRoomStore.saveRoom`. | `200 { ok: true, roomId }` | invalid spec → `400 invalid-room`; id mismatch → `400 room-id-mismatch` |
-| `GET /rooms/:id` | `SqliteRoomStore.getRoom`. | `200 { room, warnings: <count> }` | `not-found` → `404`; `invalid-stored-room` → `500` |
+| `GET /sessions/:sessionId/state` | `WorldSession.getWorldState`. | `200 { state }` | `not-found` → `404` |
+| `GET /sessions/:sessionId/events` | Parse `?sinceSeq=` (non-negative int) → `WorldSession.getEventLog`. | `200 { events }` | bad `sinceSeq` → `400`; `not-found` → `404` |
+| `POST /sessions/:sessionId/move` | Validate body → `WorldSession.move(sessionId, toRoomId, expectedRevision, fromRoomId?)`. Thin pass-through; **no** target-room existence check (deferred). | `200 { state, event }` | bad body → `400`; `not-found` → `404`; `conflict` → `409`; `invalid-command` → `400` |
+| `PUT /rooms/:roomId` | Validate body with `RoomSpecSchema` and require `body.id === roomId` → `SqliteRoomStore.saveRoom`. | `200 { ok: true, roomId }` | invalid spec → `400 invalid-room`; id mismatch → `400 room-id-mismatch` |
+| `GET /rooms/:roomId` | `SqliteRoomStore.getRoom`. | `200 { room, warnings: <count> }` | `not-found` → `404`; `invalid-stored-room` → safe `500 internal` |
 | _unmatched_ | — | — | unknown path → `404 not-found`; known path, wrong verb → `405 method-not-allowed` |
 
-`GET /rooms/:id` returns the validated RoomSpec **data** derived from the
+`GET /rooms/:roomId` returns the validated RoomSpec **data** derived from the
 `LoadedRoom`; the loader's `skipped` / `warnings` are reduced to a **count**
 (`warnings`) and the raw skipped content is never echoed.
 
@@ -229,12 +225,12 @@ choice; the shapes below are binding.
   ```
   The handler composes a full `CanonSeed` and calls `WorldSession.startSession`,
   which re-validates with `CanonSeedSchema` (defense in depth).
-- **`POST /sessions/:id/move` body:**
+- **`POST /sessions/:sessionId/move` body:**
   `{ toRoomId: string (min 1), expectedRevision: int >= 1, fromRoomId?: string }`.
-- **`GET /sessions/:id/events` query:** `sinceSeq` parsed as a non-negative
+- **`GET /sessions/:sessionId/events` query:** `sinceSeq` parsed as a non-negative
   integer; non-numeric → `400`.
-- **`PUT /rooms/:id` body:** validated by `RoomSpecSchema`; additionally require
-  `body.id === :id` (else `room-id-mismatch`).
+- **`PUT /rooms/:roomId` body:** validated by `RoomSpecSchema`; additionally
+  require `body.id === roomId` (else `room-id-mismatch`).
 
 **Responses** serialize already-validated domain objects (`WorldState`,
 `WorldEvent[]`, RoomSpec data) to known fields only. Defensive re-validation on
@@ -249,7 +245,7 @@ type ApiError = { error: { code: ApiErrorCode; message: string } }
 
 type ApiErrorCode =
   | 'invalid-request'     // 400 — body/param/query failed schema validation
-  | 'room-id-mismatch'    // 400 — PUT /rooms/:id body.id !== :id
+  | 'room-id-mismatch'    // 400 — PUT /rooms/:roomId body.id !== roomId
   | 'invalid-room'        // 400 — RoomSpec failed validation on save
   | 'not-found'           // 404 — session/room/route not found
   | 'method-not-allowed'  // 405 — known path, wrong verb
@@ -272,8 +268,9 @@ runMigrations(db)                       // fail-fast: throws -> process exits no
 const logger = createConsoleLogger()    // reused as-is; Node console is fine, and it is the only no-console-exempt file
 const worldStore = new SqliteWorldStore(db, logger)
 const roomStore  = new SqliteRoomStore(db, logger)
-const session    = new WorldSession(worldStore, new SystemClock(), new UuidGenerator(), logger)
-return { db, session, roomStore, logger }
+const idGenerator = new UuidGenerator()
+const session = new WorldSession(worldStore, new SystemClock(), idGenerator, logger)
+return { db, session, roomStore, idGenerator, logger }
 ```
 
 **Lifecycle.** One process, **one synchronous `DatabaseSync` connection**, one
@@ -300,12 +297,12 @@ in tests (`PUT` then `GET`). The hardcoded example rooms remain browser-side
 
 ## Log-safety
 
-A single log helper emits ids / counts / codes only. Per request: method, route
-**template** (`/sessions/:id/state`, not arbitrary values), status, latency-ms,
-and where relevant `sessionId` / `roomId` / error `code` / `eventCount`. The
-top-level `try/catch` logs a code only for faults. A **log-safety test** asserts
-that no payload / name / spec / dialogue text ever reaches a capturing logger
-(mirrors the ADR-0013–0018 log-safety tests).
+Routes, application services, and stores log only through the injected `Logger`.
+Context is limited to safe ids, revisions, counts, fixed event/error codes, and
+route templates where relevant. Router/socket fault catches return a generic
+`internal` envelope and log no raw error, stack, SQL, stored row, request body,
+RoomSpec text, event payload, item name, or dialogue. Capturing-logger integration
+tests guard these exclusions.
 
 ## Failure modes (to fold into [FAILURE-MODES.md](../FAILURE-MODES.md) in the docs commit)
 
@@ -319,9 +316,9 @@ that no payload / name / spec / dialogue text ever reaches a capturing logger
 | Stale revision / conflict (`move`) | `WorldSession.move` → `conflict` (CAS) → `409`. `sessionId` + revision + code. |
 | Room not found (`GET`) | typed `not-found` → `404`. `roomId` + code. |
 | Malformed persisted JSON | session snapshot/event corruption **throws** in the store → top-level catch → `500 internal` (never the row). Stored-room corruption → typed `invalid-stored-room` → `500`. Code (+ `roomId`). |
-| Unknown route / method | `404 not-found` / `405 method-not-allowed`. Route template + code. |
-| Malformed / oversized body | body reader rejects non-JSON / over a size cap → `400 invalid-request`. Code only. |
-| Unsafe logs | single log helper; ids/counts/codes only; log-safety test guards it. |
+| Unknown route / method | router returns safe `404 not-found` / `405 method-not-allowed` envelopes. |
+| Malformed / oversized body | body reader rejects non-JSON / over a size cap → safe `400 invalid-request`. |
+| Unsafe logs | capturing-logger tests assert that only safe ids/counts/codes/templates are recorded. |
 
 ## Lint / tsconfig / Vite exclusion rules
 
@@ -410,10 +407,10 @@ or file moves; a web framework (Hono / Fastify / Express); raw SQL outside
 
 ## Commit plan
 
-Small, independently buildable / testable commits (AGENTS rule 12). Each commit
-must leave `npm run build`, `npm run lint`, and `npm run test` (in `apps/web`)
-passing. A coding pass implements; the maintainer commits manually. This ADR is
-created **first** (now), as accepted design / not yet implemented.
+Implemented as small, independently buildable / testable commits (AGENTS rule
+12). Each implementation commit left `npm run build`, `npm run lint`, and
+`npm run test` (in `apps/web`) passing; the maintainer committed each step
+manually.
 
 1. **`chore(server): scaffold node-only http build unit and health endpoint`** —
    `tsconfig.server.json` + root reference + `tsconfig.app.json` exclude; the
@@ -439,7 +436,7 @@ created **first** (now), as accepted design / not yet implemented.
 (If an even smaller split is preferred, ship commits 1–2 as
 `backend-api-scaffold-v0` and commits 3–4 as `backend-room-api-v0`.)
 
-## Files likely to change / add
+## Files added / changed
 
 - **New (server):** `apps/web/src/server/main.ts`, `bootstrap.ts`,
   `createServer.ts`, `router.ts`, `http.ts`, `contracts.ts`,
@@ -450,8 +447,8 @@ created **first** (now), as accepted design / not yet implemented.
   `apps/web/tsconfig.app.json` (exclude `src/server`),
   `apps/web/eslint.config.js` (server-self wall + folded reciprocal ban),
   `apps/web/package.json` (`tsx` devDependency + `dev:api` script).
-- **Docs (commit 5, later):** `ARCHITECTURE.md`, `BOUNDARIES.md`,
-  `FAILURE-MODES.md`, `AGENTS.md`, and this ADR's status flip.
+- **Docs (commit 5):** `ARCHITECTURE.md`, `BOUNDARIES.md`,
+  `FAILURE-MODES.md`, `AGENTS.md`, and this ADR's status closeout.
 - **Deliberately NOT changed:** `App.tsx`, `RoomViewer.tsx`, `renderer/**`,
   `persistence/**`, `world-session/**`, `domain/ports/**`, `domain/world/**`,
   `InMemoryWorldStore.ts`, `RoomRegistry.ts`, `vite.config.ts`.
