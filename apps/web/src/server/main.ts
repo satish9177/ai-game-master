@@ -2,6 +2,7 @@ import { bootstrap } from './bootstrap'
 import { createServer } from './createServer'
 import { createRouter } from './router'
 import { healthRoutes } from './routes/health'
+import { roomRoutes } from './routes/rooms'
 import { sessionRoutes } from './routes/sessions'
 
 /**
@@ -16,7 +17,10 @@ const DEFAULT_PORT = 3001
 function main(): void {
   const port = Number(process.env.AIGM_PORT ?? DEFAULT_PORT)
   const deps = bootstrap()
-  const server = createServer(deps, createRouter([...healthRoutes, ...sessionRoutes]))
+  const server = createServer(
+    deps,
+    createRouter([...healthRoutes, ...sessionRoutes, ...roomRoutes]),
+  )
 
   server.listen(port, () => {
     deps.logger.info('api server listening', { port })

@@ -6,6 +6,7 @@ import type { AppDeps } from '../bootstrap'
 import { createRouter } from '../router'
 import type { Handler, Route } from '../router'
 import { healthRoutes } from '../routes/health'
+import { roomRoutes } from '../routes/rooms'
 import { sessionRoutes } from '../routes/sessions'
 
 /**
@@ -26,5 +27,5 @@ export function createTestApp(db: DatabaseSync, logger: Logger = silentLogger())
 }
 
 function allRoutes(): Route[] {
-  return [...healthRoutes, ...sessionRoutes]
+  return [...healthRoutes, ...sessionRoutes, ...roomRoutes]
 }
