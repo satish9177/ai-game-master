@@ -1,6 +1,6 @@
 # Implementation Plan — `feature/living-world-room-memory-v0`
 
-> Status: **approved — not yet implemented.** Design locked by the maintainer; this
+> Status: **implemented — closed (ADR-0025).** Design locked by the maintainer; this
 > document is the task-specific source of truth (AGENTS.md). Implementation lands in
 > slices 1–3 under `feature/living-world-room-memory-v0`; the docs closeout (slice 4)
 > will create **ADR-0025** and update `ARCHITECTURE.md` / `BOUNDARIES.md` /

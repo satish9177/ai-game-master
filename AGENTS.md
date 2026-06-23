@@ -66,6 +66,35 @@ API, no dialogue/LLM wiring, no prompt injection, and no renderer/RoomSpec/Three
 change**. Logs never include memory `text`, player lines, NPC/room names, provider
 prompts/responses, generated JSON, keys, or PII.
 
+## Room memory (living-world-room-memory-v0) — shipped, headless
+
+The first **room** memory layer is **implemented, headless, and Node/SQLite-only**; the
+browser stays in-memory and unwired ([ADR-0025](docs/architecture/decisions/ADR-0025-living-world-room-memory-v0.md)).
+**Room memory is supporting context only and can never become room truth.**
+`WorldState.roomStates` (`.visited`, `.flags`) and the append-only `WorldEvent[]`
+remain the sole authority; the memory layer holds **no reference to
+`WorldSession`/`WorldStore`/`WorldCommand`/`WorldEvent`/`WorldState`** — it has no
+code path to mutate state (the *room-memory firewall*, lint-enforced). Player claims
+are claims, `room_observation` is not authoritative truth, `room_note`/`room_summary`
+are inert supporting context, and `source:'llm'` memories can't apply state changes.
+
+| Module | Role |
+| --- | --- |
+| `domain/memory/roomContracts.ts` | Strict versioned schema: strict `(worldId, sessionId, roomId)` scope; kinds `player_claim`/`room_observation`/`room_note`/`room_summary`; source `player`/`npc`/`game`/`llm` (**no `system`**); informational-only `confidence`; inert `text` ≤ 280. `roomId` is a plain string — not FK'd to `rooms`. Imports only `zod`; exports no command/event-producing function. |
+| `domain/memory/roomFirewall.ts` | Pure firewall: `validateRoomMemoryDraft` (write), `filterRoomMemoriesForScope` (read), `selectRecallRoomMemories` (deterministic `seq` desc → `memoryId`; defaults `limit 8`, `maxChars 600`). Standalone — does not import or alter the NPC firewall. |
+| `domain/ports/RoomMemoryStore.ts` | Insert-only port (typed `session-not-found`/`conflict`; no update/delete). |
+| `memory/RoomMemoryService.ts` | Headless `remember`/`recall`; injects store/`Clock`/`IdGenerator`/`Logger` — **no `WorldSession`**, no append path. |
+| `memory/InMemoryRoomMemoryStore.ts` | Pure in-memory adapter (tests / future browser path). |
+| `persistence/SqliteRoomMemoryStore.ts` · `persistence/migrations/0003_room_memories.ts` | SQLite store + migration: FK to `world_sessions` (**no FK to `rooms`**), scope index, `UNIQUE(session_id, room_id, seq)`, no-update trigger (DELETE left open). Read boundary re-validates and re-asserts JSON scope; corrupt/scope-divergent rows are skipped. |
+
+Covered by the same `src/memory/**` lint wall as NPC memory — also forbids
+`world-session`/`interactions`/`encounters`/`dialogue`. **No `eslint.config.js` change
+was needed** — existing blocks cover all new files. v0 adds **no API, no dialogue/LLM
+wiring, no room-generation injection, no adjacent-room pregeneration wiring, no prompt
+injection, and no renderer/RoomSpec/Three.js change.** Logs never include memory `text`,
+player lines, room/NPC display names, provider prompts/responses, generated JSON, keys,
+or PII.
+
 ## Current guardrails
 
 Do not add unless explicitly requested by the maintainer or by the approved implementation plan for the current feature:

@@ -510,6 +510,30 @@ Logs carry `memoryId`/`worldId`/`sessionId`/`npcId`/`kind`/`source`/`confidence`
 provider prompts/responses, generated JSON, API keys, or PII. The firewall and the
 in-memory store are silent; the service and the SQLite store are the only loggers.
 
+## 17. Room memory persistence ✅ v0 (headless)
+
+Room memory is a durable, scoped store of inert room memory records — **supporting
+context only, never room truth** ([ADR-0025](./decisions/ADR-0025-living-world-room-memory-v0.md)).
+The `RoomMemoryService` has no `WorldSession` reference and no append path;
+`WorldState.roomStates` (`.visited`, `.flags`) remains the only authoritative per-room
+state. Memory's absence or failure never blocks play and never alters truth.
+
+| Situation | Detection | Handling / result | Logging |
+| --- | --- | --- | --- |
+| Invalid memory write | `validateRoomMemoryDraft` (write firewall) | `rejected: <reason>` (`invalid-scope`/`invalid-kind`/`invalid-source`/`empty-text`/`text-too-long`/`invalid-confidence`/`invalid-provenance`); nothing stored | kind/source/reason code only |
+| Missing session (FK) | `record` session pre-check (`SqliteRoomMemoryStore`) | `failed: session-not-found`; nothing stored (the FK to `world_sessions` backs it) | sessionId/code only |
+| Concurrent seq collision | `UNIQUE(session_id, room_id, seq)` from a true concurrent writer | `failed: conflict`; the insert rolls back | sessionId/roomId/code only |
+| Unknown/empty scope on recall | scoped query returns nothing | `recalled` with `memories: []` — **not** an error (an unknown `room_id` is valid — room memory has no FK to `rooms`) | count (0) only |
+| Corrupt or scope-divergent stored row | read-boundary `safeParse` + JSON-scope re-assertion against the queried SQL scope | **skip** that row, return the valid rest — an **expected** content failure (contrast a session/event fault, which still throws) | memoryId / `invalid-stored-memory` |
+| Attempted memory mutation | `BEFORE UPDATE` trigger + no update/delete on the port | the DB `RAISE(ABORT)`s; the adapter exposes no mutation path (DELETE left open for a future forgetting slice) | — |
+| Cross-world/session/room leak | exact-triple SQL filter + `filterRoomMemoriesForScope` + adapter JSON-scope re-assertion | recall returns only the queried room's rows; FK ties memory to a real session; leak tests cover both stores | ids only |
+| Memory used as truth (player claim / room observation / room note / summary / `source:'llm'`) | structural — no append path, no `WorldCommand`/`WorldEvent` mapping; `WorldState.roomStates` is the sole truth source | the memory is stored/recalled only; the event log, snapshot, and `roomStates` are unchanged | enums/ids/seq/counts/codes only |
+
+Logs carry `memoryId`/`worldId`/`sessionId`/`roomId`/`kind`/`source`/`confidence`/
+`seq`/`count`/`code` only — **never** memory `text`, player lines, room/NPC display
+names, provider prompts/responses, generated JSON, API keys, or PII. The firewall and
+the in-memory store are silent; the service and the SQLite store are the only loggers.
+
 ---
 
 ## Summary
@@ -535,6 +559,7 @@ in-memory store are silent; the service and the SQLite store are the only logger
 | 14 | Multi-room navigation | cache/registry resolve before `WorldSession.move` | rejection/failure with no move, or cached room + persistent flags | ✅ |
 | 15 | NPC dialogue resolution | read-only world context + provider reply | typed failure or component-only conversation; no event/state change | ✅ |
 | 16 | NPC memory persistence | write firewall + scoped read firewall + FK/UNIQUE/no-update trigger; read-boundary re-validate + JSON-scope re-assert | rejected/failed/empty-recall typed results; corrupt or scope-divergent row skipped; no path to truth | ✅ headless |
+| 17 | Room memory persistence | write firewall + scoped read firewall + FK/UNIQUE/no-update trigger (no FK to `rooms`); read-boundary re-validate + JSON-scope re-assert | rejected/failed/empty-recall typed results; corrupt or scope-divergent row skipped; no path to truth; `roomStates` unchanged | ✅ headless |
 
 The through-line: **validate at the boundary, degrade visibly and safely, log
 the detail, show the user calm.**
