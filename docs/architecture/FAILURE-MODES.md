@@ -161,6 +161,31 @@ resolve it so an unplayable room never reaches — and never blocks — the rend
   outcomes, which class failed, attempt count, model, latency arrive with the real
   pipeline.
 
+## 4c. World Bible seeding failure ✅ non-blocking v0
+
+The prompt-path seeder rejects, returns schema-invalid data, or projection fails.
+The deterministic fake validates internally and should not fail in normal use, but
+the composition boundary treats failure as an expected degradable outcome
+([ADR-0022](./decisions/ADR-0022-world-bible-seed-v0.md)).
+
+- **Detection** ✅ — `prepareGeneratedRoomSeed` awaits the `WorldBibleSeeder` and
+  projection inside one `try/catch`; `FakeWorldBibleSeeder` parses through
+  `WorldBibleSeedSchema` before returning.
+- **Handling** ✅ — restore the previous behavior: use the raw prompt as the
+  `FakeRoomGenerator` seed, omit `ActivePlay.worldBible`, and continue through
+  unchanged `GeneratedRoomSource → assembleRoom → repair/fallback`. Gameplay is
+  never blocked by bible availability.
+- **User-facing** ✅ — no separate UI or error state. The generated room loads
+  through the same normal/repaired/fallback experience.
+- **Authority** ✅ — a successful bible is initial canon in generated-play
+  composition memory only; `WorldSession`, its event log, and `WorldState` remain
+  authoritative. Failure creates no event/state/persistence placeholder.
+- **Logging** ✅ — success logs only theme/tone enums, counts, and derived-seed
+  length; failure logs fixed code `world-bible-unavailable`. Never raw prompt,
+  derived seed, title/premise/conflict/opening-arc/NPC/faction/location/keyword
+  text, generated JSON, or thrown error details.
+
+
 ## 5. Backend / network failure ✅ API edge v0 · 🔜 browser client
 
 The Node API edge exists, but the browser does not call it yet. v0 therefore
@@ -437,6 +462,7 @@ never reach logs.
 | 3 | WebGL unavailable/lost | capability check + event | fallback message | 🔜 |
 | 4 | Invalid generated JSON | `assembleRoom`: parse/schema/semantic stages → typed result | repaired or trusted fallback room + static notice; generator-unavailable → retry | ✅ v0 |
 | 4b | Valid spec, bad room | `validateRoom` (semantic) + deterministic `repairRoom` / fallback; 🔜 LLM reviewer | fatal → repair → render, else trusted fallback room | ✅ v0 |
+| 4c | World Bible seeding | schema validation + composition catch | raw-prompt generator seed; no stored bible; normal room pipeline | ✅ non-blocking v0 |
 | 5 | Backend/network | validated API requests + typed results | safe API envelope; browser retry state 🔜 | ✅ API edge v0 |
 | 6 | DB / persistence failure | typed results (rooms, conflicts) + fail-fast throws (open/migration/corrupt session) | safe API error; no browser surface yet | ✅ API-backed v0 |
 | 7 | Pre-gen not ready | one `resolveRoom` seam: cache hit / in-flight join / on-demand resolve (capped, depth-1 warming) | instant cached room, or safe on-demand resolve/generate; never a freeze | ✅ v0 (browser); status lifecycle 🔜 |

@@ -28,6 +28,12 @@ a single `repairRoom` pass → re-validate → a trusted authored fallback room,
 renderer always receives a valid room and a repaired/fallback outcome shows a small
 static notice; only a generator throw/reject stays `unavailable`
 ([ADR-0020](./docs/architecture/decisions/ADR-0020-room-generation-repair-fallback-v0.md)).
+**World Bible Seed v0** adds a strict bounded `WorldBibleSeed`, pure compact seed
+projection, `WorldBibleSeeder` port, and deterministic schema-valid
+`FakeWorldBibleSeeder`. Only `App.handlePrompt` uses it; initial canon stays in
+generated-play composition memory, while `WorldSession`/event-log state remains
+authoritative. Failure restores the raw-prompt seed and stores no bible
+([ADR-0022](./docs/architecture/decisions/ADR-0022-world-bible-seed-v0.md)).
 The **Isometric Camera Foundation** makes the default view a fixed orthographic
 isometric camera following a player object — still Three.js, still real 3D, with
 **RoomSpec unchanged** and the camera renderer-internal
@@ -140,11 +146,11 @@ Dependencies point **inward**, toward the domain. Full rules in
 
 | Layer | Location (today) | May import | Must NOT import |
 | --- | --- | --- | --- |
-| **Domain / Contracts** | `apps/web/src/domain/` | zod only | React, Three.js, renderer, UI, platform, DOM, network, DB |
+| **Domain / Contracts** | `apps/web/src/domain/` | zod only; includes bounded initial-canon WorldBible contracts/port/projection | React, Three.js, renderer, UI, platform, DOM, network, DB |
 | **Renderer** | `apps/web/src/renderer/engine/` | domain, logger port | React, network, DB |
 | **UI** (React) | `apps/web/src/renderer/ui/` | domain, host contract, logger port | Three.js, engine internals |
-| **Composition root** | `apps/web/src/App.tsx`, `RoomViewer.tsx`, `app/`, `room/` | everything (this is where wiring lives) | — |
-| **Generation** | `apps/web/src/generation/` (v0, fake) | domain, logger port | UI, renderer, React, Three.js |
+| **Composition root** | `apps/web/src/App.tsx`, `RoomViewer.tsx`, `app/`, `room/` | concrete wiring, including prompt-only bible seed/project/degrade | — |
+| **Generation** | `apps/web/src/generation/` (v0, fake) | domain contracts/PRNG | logger/platform, UI, renderer, React, Three.js, DB |
 | **World session** | `apps/web/src/world-session/` (v0, headless) | domain, logger port | UI, renderer, React, Three.js, DB |
 | **Interactions** | `apps/web/src/interactions/` (v0, headless) | domain, world-session, logger port | UI, renderer, React, Three.js, DB |
 | **Encounters** | `apps/web/src/encounters/` (v0, headless) | domain, world-session, logger port | UI, renderer, React, Three.js, DB |
@@ -159,6 +165,9 @@ Dependencies point **inward**, toward the domain. Full rules in
 - `console.*` only inside the browser logger adapter.
 - Pure code (e.g. the loader) returns problems as data; the caller logs.
 - Never log secrets, API keys, full prompts, or PII.
+- World-bible logs may contain safe enums/counts/lengths/fixed codes only—never
+  raw prompt, derived seed, bible/story/opening-arc/NPC/faction/location/keyword
+  text, generated JSON, or thrown error details ([ADR-0022](./docs/architecture/decisions/ADR-0022-world-bible-seed-v0.md)).
 
 ## Conventions
 
@@ -172,16 +181,26 @@ Unless the maintainer explicitly asks, do **not**:
 
 - add **real** LLM/API generation, a hosted/cloud deployment, a second backend
   (`apps/api`), a browser API client/CORS proxy, browser-side DB access, or a
-  non-SQLite/Postgres datastore — the deterministic *fake* generator, the
-  deterministic semantic `validateRoom`, and the deterministic
+  non-SQLite/Postgres datastore — the deterministic fake World Bible seeder and
+  room generator, deterministic semantic `validateRoom`, and deterministic
   `assembleRoom`/`repairRoom` + authored fallback room (Generation Foundation v0 +
-  Semantic Room Validator v0 + Room Generation Repair & Fallback v0) are the only
+  World Bible Seed v0 + Semantic Validator v0 + Repair/Fallback v0) are the only
   generation-pipeline code; do not extend them into a real model, a **deeper** code
   validator (reachability / object↔object collision / quest consistency), an LLM
   reviewer, a **bounded multi-attempt repair/re-prompt loop** (v0 is a single
   deterministic pass; do not add new repair rules or room resizing), a backend
-  generation endpoint, or memory without explicit approval. **Adjacent-Room
-  Pre-generation v0** is built and approved as a **browser/session-cache** seam
+  generation endpoint, or memory without explicit approval.
+
+  **World Bible Seed v0** is initial canon in generated-play browser composition
+  only ([ADR-0022](./docs/architecture/decisions/ADR-0022-world-bible-seed-v0.md)).
+  Do **not** put it in `WorldState`, events, `CanonSeed`, SaveGame, API/SQLite,
+  renderer data, or UI; do not turn `openingArc` into a quest engine/branching
+  planner; and do not wire authored bootstrap or `AdjacentRoomPregenerator` to
+  it without explicit approval. On seeding failure, retain raw-prompt generation
+  with no stored bible.
+
+  **Adjacent-Room Pre-generation v0** is built and approved as a
+  **browser/session-cache** seam
   (`app/AdjacentRoomPregenerator.ts`): background frontier warming + safe on-demand
   door resolution through the existing `assembleRoom` pipeline, so no unsafe
   generated content reaches the renderer

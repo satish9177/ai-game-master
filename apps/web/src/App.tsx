@@ -5,6 +5,7 @@ import { GeneratedRoomSource } from './room/GeneratedRoomSource'
 import { RoomRegistry } from './room/RoomRegistry'
 import { SessionRoomCache } from './room/SessionRoomCache'
 import { FakeRoomGenerator } from './generation/FakeRoomGenerator'
+import { FakeWorldBibleSeeder } from './generation/FakeWorldBibleSeeder'
 import { ErrorBoundary } from './app/ErrorBoundary'
 import { AdjacentRoomPregenerator } from './app/AdjacentRoomPregenerator'
 import { NavigationService } from './app/NavigationService'
@@ -22,11 +23,15 @@ import { loadRoomSpec, type LoadedRoom } from './domain/loadRoomSpec'
 import { fallbackRoom as fallbackRoomSpec } from './domain/examples/fallbackRoom'
 import { FALLBACK_NOTICE, shouldShowFallbackNotice } from './app/fallbackNotice'
 import { FakeNPCDialogueProvider } from './dialogue/FakeNPCDialogueProvider'
+import type { WorldBibleSeed } from './domain/worldBible/worldBibleSeed'
+import { prepareGeneratedRoomSeed } from './app/worldBible'
+
 import { NPCDialogueService } from './dialogue/NPCDialogueService'
 
 // Composition root: concrete adapters are constructed once and injected.
 const logger = createConsoleLogger()
 const generator = new FakeRoomGenerator()
+const worldBibleSeeder = new FakeWorldBibleSeeder()
 const idGenerator = new UuidGenerator()
 const worldStore = new InMemoryWorldStore()
 const worldSession = new WorldSession(worldStore, new SystemClock(), idGenerator, logger)
@@ -63,6 +68,7 @@ type ActivePlay = {
   sessionId: string
   roomCache: SessionRoomCache
   navigation?: NavigationService
+  worldBible?: WorldBibleSeed
 }
 
 function preloadedRoomSource(room: LoadedRoom): RoomSource {
@@ -134,9 +140,17 @@ function App() {
     setFatalMessage(null)
     setNotice(null)
     logger.info('prompt submitted', { promptLength: prompt.length })
-    const source = new GeneratedRoomSource(generator, prompt, logger, fallbackRoom)
 
-    void source.getRoom().then(async (result) => {
+    void (async () => {
+      const prepared = await prepareGeneratedRoomSeed(prompt, worldBibleSeeder, logger)
+      if (version !== requestVersion.current) return
+      const source = new GeneratedRoomSource(
+        generator,
+        prepared.generatorSeed,
+        logger,
+        fallbackRoom,
+      )
+      const result = await source.getRoom()
       if (version !== requestVersion.current) return
       if (!result.ok) {
         logger.error('generated room load failed', { code: result.error.code })
@@ -156,11 +170,12 @@ function App() {
         roomSource: preloadedRoomSource(result.room),
         sessionId: started.state.sessionId,
         roomCache: generatedCache,
+        ...(prepared.worldBible ? { worldBible: prepared.worldBible } : {}),
       })
       // A repaired or fallback room couldn't be built exactly as asked — show the
       // static, prompt-free notice. A clean `generated` room shows nothing.
       if (shouldShowFallbackNotice(result.provenance)) setNotice(FALLBACK_NOTICE)
-    }).catch(() => {
+    })().catch(() => {
       if (version !== requestVersion.current) return
       logger.error('generated room source threw', { code: 'room-source-failed' })
       setFatalMessage(ROOM_UNAVAILABLE)

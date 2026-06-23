@@ -22,7 +22,8 @@ Throughout these docs:
 
 - ✅ **Implemented** — exists today in `apps/web` (Renderer Foundation v0;
   Generation Foundation v0; Semantic Room Validator v0; Room Generation Repair &
-  Fallback v0; Isometric Camera Foundation; World State & Event Log v0; Object
+  Fallback v0; World Bible Seed v0 — browser-only; Isometric Camera Foundation;
+  World State & Event Log v0; Object
   Interactions v0; Encounter System v0; Multi-Room Navigation & Cache v0; NPC
   Dialogue Foundation v0; Adjacent-Room Pre-generation v0 — browser/session-cache;
   Backend SQLite Persistence v0 — headless, Node-only;
@@ -41,6 +42,8 @@ A single Vite application at `apps/web`:
   server build units under `src/server/**` and `src/persistence/**`.
 - **No real LLM or browser API client.** Browser gameplay still uses the
   in-memory world/session and room/cache adapters.
+- **World Bible Seed v0** deterministically derives validated, bounded initial
+  canon for PromptBar-generated rooms; it has no backend persistence or UI.
 
 It proves one thing: a hardcoded **RoomSpec** (pure data) can be turned into a
 walkable low-poly 3D room rendered entirely by **trusted Three.js code**, with
@@ -56,28 +59,34 @@ real LLM**: a user prompt becomes a validated room through a deterministic,
 User prompt
   → PromptBar              (app composition chrome — not renderer UI)
   → App composition root
-  → FakeRoomGenerator      (behind the RoomGenerator port; seeded by the prompt)
+  → FakeWorldBibleSeeder   (behind WorldBibleSeeder; deterministic, validated)
+  → WorldBibleSeed         (bounded initial canon, not current truth)
+  → worldBibleToGeneratorSeed (title-first compact seed, ≤160 chars)
+  → FakeRoomGenerator      (behind RoomGenerator; seeded by the projection)
   → raw, untrusted JSON text
-  → GeneratedRoomSource    (owns JSON.parse + loadRoomSpec + validateRoom)
-  → loadRoomSpec           ✅ schema boundary (well-formed?), unchanged
-  → validateRoom           ✅ semantic boundary (playable?) — NEW, pure domain
-  → RoomLoadResult         (typed ok / invalid-room / unavailable)
+  → GeneratedRoomSource
+  → assembleRoom           (parse → schema → semantic → repair → fallback)
+  → RoomLoadResult         (valid generated/repaired/fallback room or unavailable)
   → existing trusted Three.js renderer
 ```
 
 What it proves — and what it deliberately is **not**:
 
-- **Deterministic fake only.** `FakeRoomGenerator` is pure: prompt → seeded PRNG
-  → RoomSpec data. The same prompt yields a byte-identical room. This generation
+- **Deterministic fake only.** `FakeRoomGenerator` is pure: seed string → seeded
+  PRNG → RoomSpec data. The same seed yields a byte-identical room. This generation
   path uses **no real LLM, API key, network call, database, or memory**.
+- **Deterministic initial canon.** `FakeWorldBibleSeeder` implements the
+  `WorldBibleSeeder` port, validates through `WorldBibleSeedSchema`, and projects
+  title/theme/tone/opening context/premise/keywords to a stable ≤160-character
+  generator seed. The bible is held only on generated `ActivePlay`; event-sourced
+  `WorldState` remains authoritative ([ADR-0022](./decisions/ADR-0022-world-bible-seed-v0.md)).
 - **The generator returns raw, untrusted JSON *text*** — the exact shape a future
   LLM completion would have. It emits **data, never code** ([ADR-0001](./decisions/ADR-0001-data-only-room-spec-trusted-renderer.md)).
-- **`GeneratedRoomSource` owns parse + validation.** It runs the text through
-  `JSON.parse`, then the **same `loadRoomSpec`** every source uses (schema), then
-  the new **`validateRoom`** semantic check, and maps the outcome to a typed
-  `RoomLoadResult` (`invalid-room` on bad JSON/envelope **or a fatal semantic
-  issue**, `unavailable` if the generator throws). The renderer still executes
-  only **trusted, hand-written builders**.
+- **`GeneratedRoomSource` owns safe assembly.** It routes raw text through
+  `assembleRoom` (`JSON.parse` → `loadRoomSpec` → `validateRoom` → deterministic
+  repair → fallback). Bad content still yields a valid room; only a generator
+  throw/reject is `unavailable`. The renderer executes only trusted, hand-written
+  builders.
 - **Semantic validation (`validateRoom`) is the new playability boundary.** A pure
   domain function checks an already-loaded room for *playability* — sane
   dimensions, spawn inside the walkable bounds, object/light budgets, usable
@@ -92,15 +101,35 @@ What it proves — and what it deliberately is **not**:
   `GeneratedRoomSource` failure paths (bad JSON, bad envelope, generator throws,
   lenient object-skip).
 
-A first slice of the **deterministic code validator** now ships too — semantic
-playability ([ADR-0011](./decisions/ADR-0011-semantic-room-validator-v0.md)). A
-Node/TypeScript API edge and SQLite stores now exist, but the rest of the
-generation **pipeline** (real LLM, deeper reachability/collision checks, an LLM
-reviewer, bounded repair/regenerate, and adjacent-room pre-generation) remains
-**planned / not built** — see
+The deterministic validator, one-pass repair/fallback, adjacent-room browser
+warming, and World Bible seed now ship. The **real LLM**, deeper
+reachability/collision checks, LLM reviewer, and bounded multi-attempt
+repair/re-prompt loop remain **planned / not built** — see
 [Generation pipeline](#generation-pipeline-planned),
 [ADR-0010](./decisions/ADR-0010-generation-foundation-v0.md), and
-[ADR-0011](./decisions/ADR-0011-semantic-room-validator-v0.md).
+[ADR-0022](./decisions/ADR-0022-world-bible-seed-v0.md).
+
+## World Bible Seed v0
+
+✅ **Implemented, deterministic and browser-local.** The PromptBar-generated-room
+path now derives a compact, validated `WorldBibleSeed` before calling the existing
+room generator ([ADR-0022](./decisions/ADR-0022-world-bible-seed-v0.md)).
+
+- **Pure domain contract.** `domain/worldBible/` owns the strict bounded schema
+  and the pure `worldBibleToGeneratorSeed` projection; `WorldBibleSeeder` is a
+  domain port.
+- **Deterministic fake.** `FakeWorldBibleSeeder` uses the seeded PRNG, maps only
+  `fantasy-keep` / `post-apoc`, validates internally, and performs no network,
+  database, clock, global-randomness, or logger work. No real LLM is present.
+- **Prompt path only.** `App.handlePrompt` stores the bible on the fresh generated
+  play and sends its ≤160-character title-first projection to `FakeRoomGenerator`.
+  Authored bootstrap and `AdjacentRoomPregenerator` do not use the bible.
+- **Initial canon, not current truth.** The bible is not an event, `WorldState`,
+  `CanonSeed`, save-game field, API payload, or SQLite row. `WorldSession` and its
+  event-log projection remain authoritative; no UI displays the bible.
+- **Non-blocking.** Seeding failure restores the previous raw-prompt generator
+  seed and stores no bible. Logs contain only safe enums/counts/lengths or a fixed
+  failure code—never prompt, bible, seed, generated JSON, or error text.
 
 ## Room Generation Repair & Fallback v0
 
@@ -406,11 +435,11 @@ inner layers; inner layers never depend on outer layers.
 
 | Layer | Responsibility | May depend on | Must NOT depend on |
 | --- | --- | --- | --- |
-| **Domain / Contracts** | Room and world data contracts, validation/projection, types, and ports. Pure; no I/O. | Nothing (only zod) | React, Three.js, DOM, network, DB |
+| **Domain / Contracts** | Room, authoritative world, and initial-canon `WorldBibleSeed` contracts; pure validation/projection, types, and ports. | Nothing (only zod) | React, Three.js, DOM, network, DB |
 | **Renderer** (`renderer/engine`) | Turn a validated room into a Three.js scene; own the render loop, controls, disposal. | Domain | React, network, DB |
 | **UI** (`renderer/ui`) | Presentational React overlay (HUD, dialogue panel). | Domain, approved host contract | Three.js internals, network, DB |
-| **App / Composition root** | Wire concrete implementations together (logger, room source, engine host). | All of the above | — |
-| ✅ **Generation (v0, fake)** | Prompt → **RoomSpec data** (never code) via a deterministic fake generator. Validated by the same loader. 🔜 real LLM. | Domain | Renderer, React, DB |
+| **App / Composition root** | Wire concrete implementations, including prompt-only bible seeding/degradation and generated-session ownership. | All of the above | — |
+| ✅ **Generation (v0, fake)** | Prompt → validated **WorldBibleSeed data** and compact seed → **RoomSpec data** via deterministic silent fakes. Never code. 🔜 real LLM adapters. | Domain | Logger/platform, Renderer, React, DB |
 | ✅ **World session (v0, headless)** | Commands → validated append-only events → pure `WorldState` projection; in-memory store and SaveGame boundary. | Domain, Logger port | React, Three.js, Renderer, DB |
 | ✅ **Interactions (v0, headless)** | Pure effect plans executed through `WorldSession.appendEvent`; typed outcomes for composition. | Domain, World session, Logger port | React, Three.js, Renderer, DB |
 | ✅ **Encounters (v0, headless)** | Pure encounter plans executed through `WorldSession.appendEvent` (shared `applyCommands`); typed two-phase outcomes for composition. | Domain, World session, Logger port | React, Three.js, Renderer, DB |
@@ -494,25 +523,29 @@ mutable state and not React reaching into Three.js objects. That seam is the
 Submitting a prompt swaps the room source; the host path is otherwise identical:
 
 ```
-PromptBar.onSubmit(prompt)              (app chrome — not renderer UI)
-  └─ App: setRoomSource(new GeneratedRoomSource(FakeRoomGenerator, prompt, logger, fallbackRoom))
-       └─ RoomViewer (unchanged — sees only a RoomSource; new identity → reload)
-            └─ GeneratedRoomSource.getRoom()
-                 ├─ FakeRoomGenerator.generate(prompt) → raw untrusted JSON text
-                 │     └─ throw/reject → RoomLoadResult unavailable (retry path)
-                 ├─ assembleRoom(rawText, fallbackRoom) ✅ pure domain pipeline
-                 │     JSON.parse → loadRoomSpec → validateRoom → repairRoom → re-validate → fallback
-                 │     └─ ALWAYS { room (zero-fatal), diagnostics }
-                 └─ RoomLoadResult  { ok:true, room, provenance }   (generated | repaired | fallback)
-                      ├─ App: static notice if repaired | fallback
-                      └─ engine.setRoom(room)           ✅ trusted builders only
+PromptBar.onSubmit(prompt)                    (app chrome — not renderer UI)
+  └─ App.handlePrompt
+       ├─ FakeWorldBibleSeeder.seed(prompt)   → validated WorldBibleSeed
+       │    └─ failure → raw prompt seed + no worldBible
+       ├─ worldBibleToGeneratorSeed(bible)    → compact title-first generatorSeed
+       └─ GeneratedRoomSource(FakeRoomGenerator, generatorSeed, logger, fallbackRoom)
+            ├─ FakeRoomGenerator.generate(generatorSeed) → raw untrusted JSON text
+            │     └─ throw/reject → RoomLoadResult unavailable (retry path)
+            ├─ assembleRoom(rawText, fallbackRoom) ✅ pure domain pipeline
+            │     JSON.parse → loadRoomSpec → validateRoom → repairRoom → re-validate → fallback
+            │     └─ ALWAYS { room (zero-fatal), diagnostics }
+            └─ RoomLoadResult { ok:true, room, provenance } (generated | repaired | fallback)
+                 ├─ start unchanged WorldSession; keep optional bible in ActivePlay
+                 ├─ static notice if repaired | fallback
+                 └─ RoomViewer/engine receive only the validated room
 ```
 
 `RoomViewer` and the engine are **unchanged**: they still consume a `RoomSource`
-and a validated `LoadedRoom`. Only the composition root knows a prompt, a fake
-generator, or the fallback room exists, and the prompt *text* is never logged —
-only its length. Bad *content* now yields a repaired or fallback room (`ok:true`),
-so only a generator throw/reject reaches the `unavailable` retry path.
+and a validated `LoadedRoom`. Only composition knows the prompt, world bible,
+generator seed, fakes, or fallback exists. Logs contain safe enums/counts/codes/
+lengths only—never prompt/bible/seed/generated JSON/error text. Bad room content
+yields a repaired or fallback room (`ok:true`); world-bible failure degrades to
+the raw-prompt seed, and only a room-generator throw/reject is `unavailable`.
 
 ## Renderer Foundation v0 — module summary
 
@@ -536,6 +569,10 @@ so only a generator throw/reject reaches the `unavailable` retry path.
 | Module | Role |
 | --- | --- |
 | `domain/ports/RoomGenerator.ts` | The `RoomGenerator` port: `generate(prompt) → Promise<string>` of **raw, untrusted JSON text**. Domain-pure contract; the trust-boundary rules live in its doc comment. |
+| `domain/ports/WorldBibleSeeder.ts` | Domain-safe `WorldBibleSeeder` port: prompt → validated `WorldBibleSeed`. |
+| `domain/worldBible/worldBibleSeed.ts` | Strict, versioned, bounded initial-canon schema/types, including the bounded opening arc. Not event/current-state data. |
+| `domain/worldBible/worldBibleToSeed.ts` | Pure deterministic title-first projection to a generator seed capped at 160 characters. |
+| `generation/FakeWorldBibleSeeder.ts` | Browser-local deterministic seeder over the shared PRNG and two theme packs; validates internally, has no real model/I/O/logger. |
 | `generation/prng.ts` | Deterministic seeded PRNG (`xmur3` + `mulberry32`) and a small `Rng` helper. Pure — no I/O, no `Math.random`/`Date.now`. |
 | `generation/FakeRoomGenerator.ts` | A deterministic `RoomGenerator`: prompt → seeded PRNG → RoomSpec **data**, serialized with `JSON.stringify`. Emits only the published vocabulary; same prompt → byte-identical output. No real model. |
 | `domain/validateRoom.ts` | Pure semantic validator: `validateRoom(room) → RoomValidationResult` of severity-tagged issues. Checks *playability* (dimensions, spawn-in-bounds, object/light budgets, usable interactions) over a loaded room — a domain peer of `loadRoomSpec`. No I/O, no logger, no React/Three ([ADR-0011](./decisions/ADR-0011-semantic-room-validator-v0.md)). |
@@ -545,17 +582,16 @@ so only a generator throw/reject reaches the `unavailable` retry path.
 | `room/GeneratedRoomSource.ts` | A `RoomSource` adapter (composition layer) that runs the generator, then `assembleRoom`. A generator throw/reject → `unavailable`; otherwise **always** `ok:true` with `provenance` (`generated`/`repaired`/`fallback`). Logs one safe line (provenance/stage/codes/counts) — never prompt/raw JSON/story text/object names. |
 | `app/AdjacentRoomPregenerator.ts` | Composition-layer room-acquisition seam ([ADR-0021](./decisions/ADR-0021-adjacent-room-pregeneration-v0.md)). `resolveRoom(id)` is cache-first, in-flight-aware, and total (authored → `RoomRegistry`; non-authored → `GeneratedRoomSource → assembleRoom`, id-normalized; never throws). `warmAdjacent(room)` warms the current room's exits in the background, capped at `maxJobs` (default 3), depth-1. Implements the narrow `RoomResolver` that `NavigationService` depends on. |
 | `app/PromptBar.tsx` | Presentational prompt input + Generate button — app composition chrome, **not** renderer UI. Trims/validates; emits `onSubmit(prompt)`. |
+| `app/worldBible.ts` | Prompt-path composition helper: seed + project + safe enum/count/length logging; on failure return the raw prompt and no bible. |
 | `app/fallbackNotice.ts` | The static, prompt-free notice copy + the pure `shouldShowFallbackNotice(provenance)` decision (show for `repaired`/`fallback`). |
-| `App.tsx` | Composition root: validates/injects the fallback room, holds the active `RoomSource` in state; on submit, swaps to `GeneratedRoomSource(FakeRoomGenerator, prompt, logger, fallbackRoom)` and shows the dismissable fallback notice for repaired/fallback provenance. The only place a generator is named. |
+| `App.tsx` | Composition root: constructs both fakes once; PromptBar submit seeds/projects a bible, passes the compact seed to unchanged `GeneratedRoomSource`, and stores the optional bible on generated `ActivePlay`. Authored bootstrap/pregeneration remain bible-free. |
 
 Tested with **Vitest**: the PRNG (determinism/divergence/ranges), the fake
-generator (determinism, known-vocabulary-only, passes `loadRoomSpec`, data-only
-round-trip), `validateRoom` (one fixture per rule, false-positive guards,
-determinism + no input mutation, stable ordering), and the `GeneratedRoomSource`
-paths (bad JSON, bad envelope, generator throws, lenient object-skip, semantic
-fatal → `invalid-room`, semantic warnings → `ok:true`, and a regression guard that
-every `FakeRoomGenerator` output has zero fatal semantic issues) — with prompt
-text never logged.
+room generator, `WorldBibleSeed` schema/projection, `FakeWorldBibleSeeder`
+(determinism, two-way theme mapping, bounds, data-only/no side effects), the
+non-blocking app helper and its leakage guard, `validateRoom`, repair/fallback,
+and all `GeneratedRoomSource` paths. Log-safety tests cover raw prompts, derived
+seeds, bible/story/opening-arc text, keywords, generated JSON, and error details.
 
 ## Object & entity system (compositional builders)
 
@@ -611,15 +647,20 @@ is to keep each replacement local to its port.
 - ✅ A `RoomSource` **port** in the domain answers "give me a room". Two
   implementations exist: `StaticRoomSource` (the hardcoded `throneRoom`) and
   `GeneratedRoomSource` (prompt-driven).
-- ✅ A `RoomGenerator` **port** in the domain turns a prompt into **raw, untrusted
-  JSON text**. Its v0 implementation is the deterministic `FakeRoomGenerator`;
-  `GeneratedRoomSource` runs that text through the *same* `loadRoomSpec`. The
-  generator emits **data, never code**
+- ✅ A `RoomGenerator` **port** in the domain turns a seed string into **raw,
+  untrusted JSON text**. Its v0 implementation is deterministic
+  `FakeRoomGenerator`; `GeneratedRoomSource` runs the text through `assembleRoom`.
+  The generator emits **data, never code**
   ([ADR-0001](./decisions/ADR-0001-data-only-room-spec-trusted-renderer.md),
   [ADR-0010](./decisions/ADR-0010-generation-foundation-v0.md)).
-- 🔜 Swapping the fake for a **real LLM client** is a one-line change at the
-  composition root — the port, the parse/validate boundary, and the renderer do
-  not move. The model will return **RoomSpec JSON only**, never renderer code.
+- ✅ A `WorldBibleSeeder` **port** turns the PromptBar prompt into validated,
+  bounded initial canon. `FakeWorldBibleSeeder` + `WorldBibleSeedSchema` +
+  `worldBibleToGeneratorSeed` provide the deterministic local implementation;
+  authored bootstrap and adjacent pre-generation remain bible-free
+  ([ADR-0022](./decisions/ADR-0022-world-bible-seed-v0.md)).
+- 🔜 Real LLM adapters may replace either fake behind the existing ports; the
+  schema/assembly boundaries, authority model, and renderer do not move. Model
+  output remains validated data only, never renderer code.
 - ✅ Because `RoomSource.getRoom()` is async by contract, loading/error states and
   the React error boundary (see [FAILURE-MODES](./FAILURE-MODES.md)) are the same
   whether the room is static, generated, or fetched.
@@ -761,8 +802,10 @@ is to keep each replacement local to its port.
 ## Generation pipeline (planned)
 
 🔜 **Designed, not built** — except the deterministic stages, which now ship: the
-**code validator** ([ADR-0011](./decisions/ADR-0011-semantic-room-validator-v0.md))
-and the **deterministic repair + safe fallback room**
+**World Bible seed/projection**
+([ADR-0022](./decisions/ADR-0022-world-bible-seed-v0.md)), the **code validator**
+([ADR-0011](./decisions/ADR-0011-semantic-room-validator-v0.md)), and the
+**deterministic repair + safe fallback room**
 ([ADR-0020](./decisions/ADR-0020-room-generation-repair-fallback-v0.md)). The
 **real LLM**, the **LLM reviewer**, and the **bounded multi-attempt repair/regenerate
 loop** remain future. Full rationale and the retry/repair policy live in
@@ -775,6 +818,12 @@ bounded cost and a guaranteed safe outcome:
 
 ```
   user prompt
+      │
+      ▼
+  WorldBibleSeeder ──► validated initial canon  ✅ deterministic fake today
+      │
+      ▼
+  compact seed projection                       ✅ bounded/title-first today
       │
       ▼
   fast LLM  ──►  RoomSpec JSON            cheap, quick first draft
