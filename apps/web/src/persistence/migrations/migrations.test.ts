@@ -18,6 +18,7 @@ describe('migrations / 0001_init', () => {
     try {
       expect(names(db, 'table')).toEqual([
         'npc_memories',
+        'room_memories',
         'rooms',
         'schema_migrations',
         'world_events',
@@ -25,6 +26,7 @@ describe('migrations / 0001_init', () => {
       ])
       expect(names(db, 'trigger')).toEqual([
         'npc_memories_no_update',
+        'room_memories_no_update',
         'world_events_no_delete',
         'world_events_no_update',
       ])
@@ -39,7 +41,7 @@ describe('migrations / 0001_init', () => {
       const rows = db
         .prepare('SELECT version, name, applied_at FROM schema_migrations ORDER BY version')
         .all()
-      expect(rows).toHaveLength(2)
+      expect(rows).toHaveLength(3)
       const row = rows[0]!
       expect(Number(row.version)).toBe(1)
       expect(row.name).toBe('init')
@@ -56,7 +58,7 @@ describe('migrations / 0001_init', () => {
       runMigrations(db)
       runMigrations(db)
       const count = db.prepare('SELECT COUNT(*) AS n FROM schema_migrations').get()
-      expect(Number(count?.n)).toBe(2)
+      expect(Number(count?.n)).toBe(3)
     } finally {
       close()
     }
@@ -124,6 +126,49 @@ describe('migrations / 0002_npc_memories', () => {
   })
 })
 
+describe('migrations / 0003_room_memories', () => {
+  function indexes(db: DatabaseSync): string[] {
+    return db
+      .prepare(`SELECT name FROM sqlite_master WHERE type = 'index' ORDER BY name`)
+      .all()
+      .map((row) => String(row.name))
+  }
+
+  it('creates the room_memories table, scope index, and no-update trigger', () => {
+    const { db, close } = createMemoryDb()
+    try {
+      expect(names(db, 'table')).toContain('room_memories')
+      expect(indexes(db)).toContain('idx_room_memories_scope')
+      expect(names(db, 'trigger')).toContain('room_memories_no_update')
+      // delete is intentionally left open — no no-delete trigger
+      expect(names(db, 'trigger')).not.toContain('room_memories_no_delete')
+    } finally {
+      close()
+    }
+  })
+
+  it('records migration version 3 as room_memories', () => {
+    const { db, close } = createMemoryDb()
+    try {
+      const row = db.prepare('SELECT name FROM schema_migrations WHERE version = 3').get()
+      expect(row?.name).toBe('room_memories')
+    } finally {
+      close()
+    }
+  })
+
+  it('0002 (npc_memories) remains intact and unaltered after 0003 runs', () => {
+    const { db, close } = createMemoryDb()
+    try {
+      expect(names(db, 'table')).toContain('npc_memories')
+      expect(indexes(db)).toContain('idx_npc_memories_scope')
+      expect(names(db, 'trigger')).toContain('npc_memories_no_update')
+    } finally {
+      close()
+    }
+  })
+})
+
 describe('migrations / durability', () => {
   const reopened: string[] = []
 
@@ -146,7 +191,7 @@ describe('migrations / durability', () => {
       // re-running migrations against the persisted file is a no-op.
       runMigrations(reopenedDb)
       const count = reopenedDb.prepare('SELECT COUNT(*) AS n FROM schema_migrations').get()
-      expect(Number(count?.n)).toBe(2)
+      expect(Number(count?.n)).toBe(3)
     } finally {
       reopenedDb.close()
     }
