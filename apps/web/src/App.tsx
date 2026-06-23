@@ -1,5 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { RoomViewer } from './renderer/RoomViewer'
+import { StatusHud } from './renderer/ui/StatusHud'
+import { projectPlayerHud } from './renderer/ui/playerHud'
+import type { PlayerHudView } from './renderer/ui/playerHud'
+import type { WorldState } from './domain/world/worldState'
 import type { RoomSource } from './domain/ports/RoomSource'
 import { GeneratedRoomSource } from './room/GeneratedRoomSource'
 import { RoomRegistry } from './room/RoomRegistry'
@@ -81,6 +85,7 @@ type ActivePlay = {
   roomCache: SessionRoomCache
   navigation?: NavigationService
   worldBible?: WorldBibleSeed
+  initialPlayer: PlayerHudView
 }
 
 function preloadedRoomSource(room: LoadedRoom): RoomSource {
@@ -123,6 +128,7 @@ function bootstrapExamplePlay(): Promise<ActivePlay | null> {
       sessionId: started.state.sessionId,
       roomCache: exampleRoomCache,
       navigation: exampleNavigation,
+      initialPlayer: projectPlayerHud(started.state),
     }
   })()
   return exampleBootstrap
@@ -130,6 +136,7 @@ function bootstrapExamplePlay(): Promise<ActivePlay | null> {
 
 function App() {
   const [activePlay, setActivePlay] = useState<ActivePlay | null>(null)
+  const [playerHud, setPlayerHud] = useState<PlayerHudView | null>(null)
   const [fatalMessage, setFatalMessage] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const requestVersion = useRef(0)
@@ -138,8 +145,10 @@ function App() {
     const version = ++requestVersion.current
     void bootstrapExamplePlay().then((play) => {
       if (version !== requestVersion.current) return
-      if (play) setActivePlay(play)
-      else setFatalMessage(ROOM_UNAVAILABLE)
+      if (play) {
+        setActivePlay(play)
+        setPlayerHud(play.initialPlayer)
+      } else setFatalMessage(ROOM_UNAVAILABLE)
     })
     return () => {
       requestVersion.current += 1
@@ -149,6 +158,7 @@ function App() {
   const handlePrompt = useCallback((prompt: string) => {
     const version = ++requestVersion.current
     setActivePlay(null)
+    setPlayerHud(null)
     setFatalMessage(null)
     setNotice(null)
     logger.info('prompt submitted', { promptLength: prompt.length })
@@ -178,12 +188,15 @@ function App() {
       }
       const generatedCache = new SessionRoomCache()
       generatedCache.set(result.room.id, result.room)
+      const initialPlayer = projectPlayerHud(started.state)
       setActivePlay({
         roomSource: preloadedRoomSource(result.room),
         sessionId: started.state.sessionId,
         roomCache: generatedCache,
         ...(prepared.worldBible ? { worldBible: prepared.worldBible } : {}),
+        initialPlayer,
       })
+      setPlayerHud(initialPlayer)
       // A repaired or fallback room couldn't be built exactly as asked — show the
       // static, prompt-free notice. A clean `generated` room shows nothing.
       if (shouldShowFallbackNotice(result.provenance)) setNotice(FALLBACK_NOTICE)
@@ -207,6 +220,7 @@ function App() {
             sessionId: activePlay.sessionId,
             roomCache: activePlay.roomCache,
             navigation: activePlay.navigation,
+            initialPlayer: activePlay.initialPlayer,
           }
         : current)
       // Warm the next frontier from the room we just entered.
@@ -214,6 +228,10 @@ function App() {
     }
     return result
   }, [activePlay])
+
+  const handleWorldStateChange = useCallback((state: WorldState) => {
+    setPlayerHud(projectPlayerHud(state))
+  }, [])
 
   return (
     <ErrorBoundary logger={logger}>
@@ -225,12 +243,14 @@ function App() {
           encounterService={encounterService}
           npcDialogueService={npcDialogueService}
           onNavigate={handleNavigate}
+          onWorldStateChange={handleWorldStateChange}
         />
       ) : (
         <div className="room-viewer-root">
           {fatalMessage && <div className="room-message" role="alert">{fatalMessage}</div>}
         </div>
       )}
+      {playerHud && <StatusHud view={playerHud} />}
       {notice && (
         <div className="room-notice" role="status">
           <span className="room-notice-text">{notice}</span>

@@ -254,3 +254,88 @@ body {
   opacity: 0.5;
   cursor: not-allowed;
 }
+
+/* ---------- player status HUD (health / inventory / status) ---------- */
+.status-hud {
+  position: fixed;
+  top: 4.2rem; /* clear of the prompt bar at top: 1.1rem */
+  left: 1rem;
+  z-index: 10;
+  min-width: 10rem;
+  max-width: 16rem;
+  padding: 0.65rem 0.8rem;
+  border-radius: 0.5rem;
+  background: rgba(12, 12, 16, 0.82);
+  border: 1px solid #2c2a36;
+  color: #ece6d6;
+  font-size: 0.85rem;
+  pointer-events: none;
+  user-select: none;
+}
+
+.status-hud-health {
+  margin-bottom: 0.55rem;
+}
+
+.status-hud-health-label {
+  display: block;
+  margin-bottom: 0.25rem;
+  color: #f3ead2;
+  font-weight: 600;
+  font-size: 0.8rem;
+}
+
+.status-hud-health-bar-track {
+  height: 0.35rem;
+  border-radius: 0.2rem;
+  background: #2c2a36;
+  overflow: hidden;
+}
+
+.status-hud-health-bar-fill {
+  height: 100%;
+  border-radius: 0.2rem;
+  background: #6fcf7a;
+  transition: width 0.2s ease;
+}
+
+.status-hud-inventory {
+  border-top: 1px solid #2c2a36;
+  padding-top: 0.45rem;
+  margin-bottom: 0.3rem;
+}
+
+.status-hud-empty {
+  color: #8b8576;
+  font-style: italic;
+}
+
+.status-hud-item-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.status-hud-item {
+  margin-bottom: 0.15rem;
+  color: #cfc7b6;
+  font-size: 0.8rem;
+}
+
+.status-hud-statuses {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  padding-top: 0.4rem;
+  border-top: 1px solid #2c2a36;
+  margin-top: 0.2rem;
+}
+
+.status-hud-chip {
+  padding: 0.1rem 0.45rem;
+  border-radius: 0.75rem;
+  background: #3a3230;
+  border: 1px solid #6a5a32;
+  color: #f3d58a;
+  font-size: 0.75rem;
+}
