@@ -10,6 +10,7 @@ import {
   classifyObjectImportance,
   repairGeneratedObjects,
   repairGeneratedSpawn,
+  repairGeneratedExits,
 } from './generatedRoomLayout'
 import { loadRoomSpec } from './loadRoomSpec'
 import { validateRoom, LIMITS } from './validateRoom'
@@ -561,6 +562,189 @@ describe('repairGeneratedSpawn', () => {
   })
 })
 
+/** Build a LoadedRoom with the given objects; spawn placed safely in south half. */
+function makeExitRoom(objects: unknown[]) {
+  return loadRoomSpec({
+    schemaVersion: 1,
+    id: 'exit-test',
+    name: 'exit-test',
+    shell: {
+      dimensions: { width: 18, depth: 18, height: 4 },
+      exits: [{ side: 'north', width: 3 }],
+    },
+    spawn: { position: [0, 1.7, 6] },
+    objects,
+  })
+}
+
+/** A minimal arch object carrying an exit interaction. */
+function exitArch(position: [number, number, number]): unknown {
+  return {
+    type: 'arch',
+    id: 'exit-arch',
+    position,
+    interaction: { key: 'E', prompt: 'Enter', exit: { toRoomId: 'next-room' } },
+  }
+}
+
+describe('repairGeneratedExits', () => {
+  // halfW = halfD = 9 for the 18×18 test rooms.
+  const HALF = 9
+
+  it('returns same reference when exit is already on the north wall (z = -halfD)', () => {
+    const room = makeExitRoom([exitArch([0, 0, -HALF])])
+    expect(repairGeneratedExits(room)).toBe(room)
+    expect(repairGeneratedExits(room).objects[0]).toBe(room.objects[0])
+  })
+
+  it('returns same reference when exit is already on the south wall (z = +halfD)', () => {
+    const room = makeExitRoom([exitArch([0, 0, HALF])])
+    expect(repairGeneratedExits(room)).toBe(room)
+  })
+
+  it('returns same reference when exit is already on the east wall (x = +halfW)', () => {
+    const room = makeExitRoom([exitArch([HALF, 0, 0])])
+    expect(repairGeneratedExits(room)).toBe(room)
+  })
+
+  it('returns same reference when exit is already on the west wall (x = -halfW)', () => {
+    const room = makeExitRoom([exitArch([-HALF, 0, 0])])
+    expect(repairGeneratedExits(room)).toBe(room)
+  })
+
+  it('exit outside room on X axis is moved to nearest valid edge (east wall)', () => {
+    // [15, 0, 0]: distEast=|15-9|=6, distWest=|15+9|=24, distNorth=|0+9|=9, distSouth=|0-9|=9
+    const room = makeExitRoom([exitArch([15, 0, 0])])
+    const fixed = repairGeneratedExits(room)
+    expect(fixed).not.toBe(room)
+    const [x, , z] = fixed.objects[0]!.position
+    expect(x).toBeCloseTo(HALF)   // east wall
+    expect(z).toBeCloseTo(0)      // cross-axis unchanged
+  })
+
+  it('exit outside room on Z axis is moved to nearest valid edge (south wall)', () => {
+    // [0, 0, 15]: distSouth=|15-9|=6, distNorth=|15+9|=24, distEast=|0-9|=9, distWest=|0+9|=9
+    const room = makeExitRoom([exitArch([0, 0, 15])])
+    const fixed = repairGeneratedExits(room)
+    expect(fixed).not.toBe(room)
+    const [x, , z] = fixed.objects[0]!.position
+    expect(x).toBeCloseTo(0)
+    expect(z).toBeCloseTo(HALF)   // south wall
+  })
+
+  it('exit inside room aligned to nearest valid edge (south wall)', () => {
+    // [0, 0, 3]: distSouth=|3-9|=6, distNorth=|3+9|=12, distEast=|0-9|=9, distWest=|0+9|=9
+    const room = makeExitRoom([exitArch([0, 0, 3])])
+    const fixed = repairGeneratedExits(room)
+    expect(fixed).not.toBe(room)
+    const [x, , z] = fixed.objects[0]!.position
+    expect(x).toBeCloseTo(0)
+    expect(z).toBeCloseTo(HALF)
+  })
+
+  it('exit inside room aligned to nearest valid edge (north wall)', () => {
+    // [0, 0, -3]: distNorth=|-3+9|=6, distSouth=|-3-9|=12, distEast=9, distWest=9
+    const room = makeExitRoom([exitArch([0, 0, -3])])
+    const fixed = repairGeneratedExits(room)
+    expect(fixed).not.toBe(room)
+    const [x, , z] = fixed.objects[0]!.position
+    expect(x).toBeCloseTo(0)
+    expect(z).toBeCloseTo(-HALF)
+  })
+
+  it('exit Y coordinate is preserved (height unchanged by snap)', () => {
+    const room = makeExitRoom([exitArch([0, 0.5, 3])])
+    const fixed = repairGeneratedExits(room)
+    expect(fixed.objects[0]!.position[1]).toBe(0.5)
+  })
+
+  it('cross-axis is clamped to wall extent when exit is far from wall origin', () => {
+    // [100, 0, 0]: snap to east wall (nearest), z=0 clamped to [-9, 9] → z=0
+    const room = makeExitRoom([exitArch([100, 0, 100])])
+    const fixed = repairGeneratedExits(room)
+    const [x, , z] = fixed.objects[0]!.position
+    // Nearest wall from [100, 0, 100]: north=109, south=91, east=91, west=109 → south (first at 91)
+    expect(Math.abs(z)).toBeCloseTo(HALF)   // on south wall
+    expect(Math.abs(x)).toBeLessThanOrEqual(HALF) // cross-axis clamped within wall
+  })
+
+  it('non-exit arch (no interaction) is not moved', () => {
+    const room = makeExitRoom([{ type: 'arch', position: [3, 0, 3] }])
+    expect(repairGeneratedExits(room)).toBe(room)
+  })
+
+  it('room with no exit-carrying objects returns same reference', () => {
+    const room = makeRoom([
+      { type: 'pillar', position: [3, 0, -3] },
+      { type: 'torch', position: [3, 3, -3] },
+    ])
+    expect(repairGeneratedExits(room)).toBe(room)
+  })
+
+  it('arch with interaction but no exit field is not moved', () => {
+    const room = makeExitRoom([{
+      type: 'arch',
+      position: [3, 0, 3],
+      interaction: { key: 'E', prompt: 'Inspect' },
+    }])
+    expect(repairGeneratedExits(room)).toBe(room)
+  })
+
+  it('generated room with multiple exit objects: all snapped deterministically', () => {
+    const room = makeExitRoom([
+      exitArch([0, 0, 3]),   // → south wall
+      {
+        type: 'arch',
+        id: 'exit-arch-2',
+        position: [0, 0, -3],
+        interaction: { key: 'E', prompt: 'Enter', exit: { toRoomId: 'other-room' } },
+      }, // → north wall
+    ])
+    const first = repairGeneratedExits(room)
+    const second = repairGeneratedExits(room)
+    expect(first).toEqual(second)
+    expect(first.objects[0]!.position[2]).toBeCloseTo(HALF)  // south
+    expect(first.objects[1]!.position[2]).toBeCloseTo(-HALF) // north
+  })
+
+  it('exit-only repair keeps provenance: validateRoom still passes with zero fatals', () => {
+    const room = makeExitRoom([exitArch([0, 0, 3])])
+    const fixed = repairGeneratedExits(room)
+    expect(validateRoom(fixed).ok).toBe(true)
+    expect(validateRoom(fixed).issues.filter((i) => i.severity === 'fatal')).toEqual([])
+  })
+
+  it('does not mutate the input room', () => {
+    const room = makeExitRoom([exitArch([0, 0, 3])])
+    const posBefore = [...room.objects[0]!.position] as [number, number, number]
+    repairGeneratedExits(room)
+    expect(room.objects[0]!.position).toEqual(posBefore)
+  })
+
+  it('is deterministic', () => {
+    const room = makeExitRoom([exitArch([5, 0, -5])])
+    expect(repairGeneratedExits(room)).toEqual(repairGeneratedExits(room))
+  })
+
+  it('snaps an exit-carrying object without an id (spatial repair is id-independent)', () => {
+    // buildExitLookup (app/exits.ts) skips id-less objects, so they are never
+    // navigable at runtime — but exit placement is purely spatial and must still
+    // snap them to a wall face so the room geometry is consistent.
+    const room = makeExitRoom([{
+      type: 'arch',
+      position: [0, 0, 3] as [number, number, number], // no `id`
+      interaction: { key: 'E', prompt: 'Enter', exit: { toRoomId: 'next-room' } },
+    }])
+    const fixed = repairGeneratedExits(room)
+    // [0, 0, 3]: distSouth=|3-9|=6 (nearest), so snap → south wall z=+9.
+    expect(fixed).not.toBe(room)
+    expect(fixed.objects[0]!.position[2]).toBeCloseTo(9)  // south wall
+    expect(fixed.objects[0]!.position[0]).toBeCloseTo(0)  // cross-axis unchanged
+    // Input room must not be mutated.
+    expect(room.objects[0]!.position[2]).toBe(3)
+  })
+})
+
 describe('authored fallback room is unchanged by this slice', () => {
   it('fallback room validates with zero fatal issues', () => {
     const result = validateRoom(loadRoomSpec(fallbackRoom))
@@ -582,5 +766,18 @@ describe('authored fallback room is unchanged by this slice', () => {
     const spawnBefore = [...loaded.spawn.position] as [number, number, number]
     repairGeneratedSpawn(loaded) // fallback room spawn is already safe — same ref returned
     expect(loaded.spawn.position).toEqual(spawnBefore)
+  })
+
+  it('repairGeneratedExits returns same reference for fallback room (arch has no exit interaction)', () => {
+    const loaded = loadRoomSpec(fallbackRoom)
+    // The fallback arch at [0, 0, -4] has no interaction at all → not exit-carrying.
+    expect(repairGeneratedExits(loaded)).toBe(loaded)
+  })
+
+  it('repairGeneratedExits does not mutate fallback room objects', () => {
+    const loaded = loadRoomSpec(fallbackRoom)
+    const objectsBefore = JSON.parse(JSON.stringify(loaded.objects))
+    repairGeneratedExits(loaded)
+    expect(loaded.objects).toEqual(objectsBefore)
   })
 })

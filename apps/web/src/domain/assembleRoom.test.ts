@@ -88,6 +88,34 @@ const RAW_TOO_MANY_OBJECTS = raw(
     objects: Array.from({ length: 35 }, () => ({ type: 'crate', position: [3, 0, 3] })),
   }),
 )
+// Exit arch placed in the room interior (z=3 → nearest wall = south at z=9) → snapped
+// to south wall by Stage 2.8. Provenance stays 'generated' (benign normalization).
+const RAW_MISPLACED_EXIT = raw(
+  validSpec({
+    shell: { dimensions: { width: 18, depth: 18, height: 4 }, exits: [{ side: 'north', width: 3 }] },
+    spawn: { position: [0, 1.7, 0] },
+    objects: [{
+      type: 'arch',
+      id: 'north-arch',
+      position: [0, 0, 3],
+      interaction: { key: 'E', prompt: 'Enter', exit: { toRoomId: 'next-room' } },
+    }],
+  }),
+)
+// Room with an exit arch already at the south wall (z=9) so Stage 2.6 clamps it
+// inward then Stage 2.8 snaps it back. Both objectsRepaired and exitsRepaired fire.
+const RAW_WALL_EXIT = raw(
+  validSpec({
+    shell: { dimensions: { width: 18, depth: 18, height: 4 }, exits: [{ side: 'north', width: 3 }] },
+    spawn: { position: [0, 1.7, 0] },
+    objects: [{
+      type: 'arch',
+      id: 'south-arch',
+      position: [0, 0, 9],
+      interaction: { key: 'E', prompt: 'Leave', exit: { toRoomId: 'lobby' } },
+    }],
+  }),
+)
 
 /** The fatal codes the v0 validator can emit — used to prove diagnostics are safe. */
 const KNOWN_FATAL_CODES = [
@@ -207,6 +235,7 @@ describe('assembleRoom', () => {
       'sizeRepaired',
       'objectsRepaired',
       'spawnRepaired',
+      'exitsRepaired',
       'initialFatalCodes',
       'repairAttempted',
       'residualFatalCodes',
@@ -230,6 +259,7 @@ describe('assembleRoom', () => {
       expect(typeof diagnostics.sizeRepaired).toBe('boolean')
       expect(typeof diagnostics.objectsRepaired).toBe('boolean')
       expect(typeof diagnostics.spawnRepaired).toBe('boolean')
+      expect(typeof diagnostics.exitsRepaired).toBe('boolean')
       expect(typeof diagnostics.skippedObjectCount).toBe('number')
       expect(typeof diagnostics.warningCount).toBe('number')
       for (const code of [
@@ -474,5 +504,75 @@ describe('assembleRoom', () => {
 
   it('spawn repair is deterministic', () => {
     expect(assembleRoom(RAW_REPAIRABLE, fallback)).toEqual(assembleRoom(RAW_REPAIRABLE, fallback))
+  })
+
+  // --- generated-room exit placement repair (Slice 5) ---
+  //
+  // Exit-carrying objects (those with interaction.exit) are snapped to the
+  // nearest room wall face. This is a benign normalization: the room stays
+  // provenance 'generated' (no notice) and the repair is reported via the
+  // safe `exitsRepaired` flag only.
+
+  it('misplaced exit arch in room interior is snapped to wall, stays "generated" (exitsRepaired true)', () => {
+    // arch at [0, 0, 3]: Stage 2.8 snaps to south wall (nearest at z=9).
+    const { room, diagnostics } = assembleRoom(RAW_MISPLACED_EXIT, fallback)
+    expect(diagnostics.provenance).toBe('generated')
+    expect(diagnostics.exitsRepaired).toBe(true)
+    expect(diagnostics.repairAttempted).toBe(false)
+    expect(diagnostics.failedStage).toBeUndefined()
+    expect(validateRoom(room).ok).toBe(true)
+    // The arch must be on a wall face
+    const arch = room.objects.find((o) => o.type === 'arch')!
+    const halfD = room.shell.dimensions.depth / 2
+    const halfW = room.shell.dimensions.width / 2
+    const [x, , z] = arch.position
+    const onWall =
+      Math.abs(Math.abs(z) - halfD) < 0.001 ||
+      Math.abs(Math.abs(x) - halfW) < 0.001
+    expect(onWall).toBe(true)
+  })
+
+  it('exit arch already at a wall: Stage 2.6 clamps inward; Stage 2.8 snaps back (exitsRepaired true)', () => {
+    // arch at [0, 0, 9] (south wall): Stage 2.6 clamps to playable bounds (inward),
+    // Stage 2.8 snaps back to z=9. Both objectsRepaired and exitsRepaired are true.
+    const { room, diagnostics } = assembleRoom(RAW_WALL_EXIT, fallback)
+    expect(diagnostics.provenance).toBe('generated')
+    expect(diagnostics.exitsRepaired).toBe(true)
+    expect(diagnostics.repairAttempted).toBe(false)
+    expect(validateRoom(room).ok).toBe(true)
+    const arch = room.objects.find((o) => o.type === 'arch')!
+    expect(arch.position[2]).toBeCloseTo(9)  // south wall restored
+  })
+
+  it('room with no exit-carrying objects: exitsRepaired false', () => {
+    const { diagnostics } = assembleRoom(RAW_VALID, fallback)
+    expect(diagnostics.exitsRepaired).toBe(false)
+  })
+
+  it('exit-only repair does not show fallback notice (provenance stays "generated")', () => {
+    const { diagnostics } = assembleRoom(RAW_MISPLACED_EXIT, fallback)
+    expect(diagnostics.provenance).toBe('generated')
+    expect(diagnostics.failedStage).toBeUndefined()
+  })
+
+  it('exitsRepaired is false for all fallback paths (authored fallback is untouched)', () => {
+    const paths = [RAW_INVALID_JSON, RAW_INVALID_SCHEMA, RAW_UNREPAIRABLE, RAW_REPAIR_THEN_FAIL]
+    for (const input of paths) {
+      const { diagnostics } = assembleRoom(input, fallback)
+      expect(diagnostics.exitsRepaired).toBe(false)
+    }
+  })
+
+  it('authored fallback room objects are not mutated by exit repair', () => {
+    const objectsBefore = JSON.parse(JSON.stringify(fallback.objects))
+    assembleRoom(RAW_MISPLACED_EXIT, fallback)
+    assembleRoom(RAW_WALL_EXIT, fallback)
+    expect(fallback.objects).toEqual(objectsBefore)
+  })
+
+  it('exit repair is deterministic', () => {
+    expect(assembleRoom(RAW_MISPLACED_EXIT, fallback)).toEqual(
+      assembleRoom(RAW_MISPLACED_EXIT, fallback),
+    )
   })
 })

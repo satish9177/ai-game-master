@@ -3,7 +3,7 @@ import type { LoadedRoom } from './loadRoomSpec'
 import { repairRoom } from './repairRoom'
 import { validateRoom } from './validateRoom'
 import type { RoomIssueCode, RoomValidationResult } from './validateRoom'
-import { clampGeneratedShell, repairGeneratedObjects, repairGeneratedSpawn } from './generatedRoomLayout'
+import { clampGeneratedShell, repairGeneratedObjects, repairGeneratedSpawn, repairGeneratedExits } from './generatedRoomLayout'
 
 /**
  * Room assembly pipeline (room-generation-repair-fallback v0). A pure,
@@ -77,6 +77,13 @@ export type RoomDiagnostics = {
    * repair/fallback notice. Always false for a fallback room.
    */
   spawnRepaired: boolean
+  /**
+   * Whether any exit-carrying generated room object was snapped to a valid wall
+   * face (nearest of north/south/east/west). This is a benign normalization —
+   * keeps provenance `generated` and must NOT trigger the host's repair/fallback
+   * notice. Always false for a fallback room.
+   */
+  exitsRepaired: boolean
   /** Distinct fatal codes from the FIRST semantic validation (empty if none ran). */
   initialFatalCodes: RoomIssueCode[]
   /** Whether deterministic repair ran (only when an initial fatal was present). */
@@ -136,36 +143,45 @@ export function assembleRoom(
   const spawnFixed = repairGeneratedSpawn(objectsFixed)
   const spawnRepaired = spawnFixed !== objectsFixed
 
+  // Stage 2.8 — snap each exit-carrying object to the nearest wall face
+  // (±halfW or ±halfD). Runs after Stage 2.6 so that objects already clamped
+  // to the playable interior are moved back to wall positions. Keeps provenance
+  // `generated`; reported via `exitsRepaired`.
+  const exitsFixed = repairGeneratedExits(spawnFixed)
+  const exitsRepaired = exitsFixed !== spawnFixed
+
   // Stage 3 — semantic playability. No fatal issue → accept as generated. Benign
-  // normalizations (Stages 2.5–2.7) keep provenance `generated` and show no notice;
-  // they are reported via `sizeRepaired`/`objectsRepaired`/`spawnRepaired` for logs
-  // only. A `repairRoom` pass (Stage 4) is the only thing that yields `repaired`.
-  const initial = validateRoom(spawnFixed)
+  // normalizations (Stages 2.5–2.8) keep provenance `generated` and show no notice;
+  // they are reported via `sizeRepaired`/`objectsRepaired`/`spawnRepaired`/
+  // `exitsRepaired` for logs only. A `repairRoom` pass (Stage 4) is the only
+  // thing that yields `repaired`.
+  const initial = validateRoom(exitsFixed)
   if (initial.ok) {
     return {
-      room: spawnFixed,
+      room: exitsFixed,
       diagnostics: {
         provenance: 'generated',
         sizeRepaired,
         objectsRepaired,
         spawnRepaired,
+        exitsRepaired,
         initialFatalCodes: [],
         repairAttempted: false,
         residualFatalCodes: [],
-        skippedObjectCount: spawnFixed.skipped.length,
+        skippedObjectCount: exitsFixed.skipped.length,
         warningCount: countWarnings(initial),
       },
     }
   }
 
   // Stage 4 — one deterministic repair pass on the normalized room, then re-validate.
-  // NOTE: Stages 2.5–2.7 currently pre-empt every fatal that repairRoom can fix
+  // NOTE: Stages 2.5–2.8 currently pre-empt every fatal that repairRoom can fix
   // (spawn-out-of-bounds and object/light hard budgets), so the "repaired" branch
   // is intentionally dormant through this pipeline today. It is retained for future
   // repairable fatals that are not covered by generated-room normalizers.
   // repairRoom itself remains unit-tested directly.
   const initialFatalCodes = distinctFatalCodes(initial)
-  const repaired = repairRoom(spawnFixed)
+  const repaired = repairRoom(exitsFixed)
   const revalidated = validateRoom(repaired)
   if (revalidated.ok) {
     return {
@@ -175,6 +191,7 @@ export function assembleRoom(
         sizeRepaired,
         objectsRepaired,
         spawnRepaired,
+        exitsRepaired,
         initialFatalCodes,
         repairAttempted: true,
         residualFatalCodes: [],
@@ -194,6 +211,7 @@ export function assembleRoom(
       sizeRepaired: false,
       objectsRepaired: false,
       spawnRepaired: false,
+      exitsRepaired: false,
       initialFatalCodes,
       repairAttempted: true,
       residualFatalCodes: distinctFatalCodes(revalidated),
@@ -216,6 +234,7 @@ function toFallback(
       sizeRepaired: false,
       objectsRepaired: false,
       spawnRepaired: false,
+      exitsRepaired: false,
       initialFatalCodes: [],
       repairAttempted: false,
       residualFatalCodes: [],

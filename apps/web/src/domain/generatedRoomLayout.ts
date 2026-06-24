@@ -301,3 +301,69 @@ function isSpawnCrowded(x: number, z: number, objects: RoomObject[]): boolean {
       Math.hypot(obj.position[0] - x, obj.position[2] - z) < LIMITS.SPAWN_CLEARANCE,
   )
 }
+
+/**
+ * Returns true when `obj` carries a navigable exit in its interaction.
+ * Used to identify which objects need wall-edge snapping in repairGeneratedExits.
+ */
+function hasExitInteraction(obj: RoomObject): boolean {
+  return 'interaction' in obj && obj.interaction != null && obj.interaction.exit != null
+}
+
+/**
+ * Snaps [x, y, z] to the nearest room wall face (±halfW for east/west,
+ * ±halfD for north/south). The cross-axis is clamped to the wall extent.
+ * Y is unchanged. Ties are broken north > south > east > west.
+ */
+function snapExitToNearestWall(
+  position: [number, number, number],
+  halfW: number,
+  halfD: number,
+): [number, number, number] {
+  const [x, y, z] = position
+  const candidates: { dist: number; idx: number; result: [number, number, number] }[] = [
+    { dist: Math.abs(z + halfD), idx: 0, result: [halfClamp(x, halfW), y, -halfD] }, // north
+    { dist: Math.abs(z - halfD), idx: 1, result: [halfClamp(x, halfW), y, halfD] },  // south
+    { dist: Math.abs(x - halfW), idx: 2, result: [halfW, y, halfClamp(z, halfD)] },  // east
+    { dist: Math.abs(x + halfW), idx: 3, result: [-halfW, y, halfClamp(z, halfD)] }, // west
+  ]
+  candidates.sort((a, b) => a.dist - b.dist || a.idx - b.idx)
+  return candidates[0]!.result
+}
+
+/**
+ * Snaps each exit-carrying object's position to the nearest room wall face
+ * for generated rooms only. An exit-carrying object is any object with a
+ * non-null `interaction.exit` (typically an arch, but any type may carry one).
+ *
+ * Repair rule: find the wall face nearest to the current [x, z] position
+ * (north: z = -halfD, south: z = +halfD, east: x = +halfW, west: x = -halfW),
+ * set the axis for that wall to its face coordinate, and clamp the cross-axis
+ * to the wall extent. Y (height) is unchanged.
+ *
+ * Returns the SAME object reference when the snap produces the same coordinates
+ * (i.e. the object is already on a wall face), and the SAME room reference when
+ * no exit object needed repair. Never mutates the input room.
+ *
+ * This is a benign normalization — keeps provenance `generated` and must NOT
+ * trigger the host's repair/fallback notice. Authored/static/fallback rooms are
+ * never passed through this function.
+ */
+export function repairGeneratedExits(room: LoadedRoom): LoadedRoom {
+  const { width, depth } = room.shell.dimensions
+  const halfW = width / 2
+  const halfD = depth / 2
+
+  let anyMoved = false
+  const repairedObjects = room.objects.map((obj) => {
+    if (!hasExitInteraction(obj)) return obj
+    const [x, y, z] = obj.position
+    const [sx, sy, sz] = snapExitToNearestWall([x, y, z], halfW, halfD)
+    if (sx === x && sy === y && sz === z) return obj
+    anyMoved = true
+    return { ...obj, position: [sx, sy, sz] as [number, number, number] } as RoomObject
+  })
+
+  if (!anyMoved) return room
+  return { ...room, objects: repairedObjects }
+}
