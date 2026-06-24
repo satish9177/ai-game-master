@@ -32,7 +32,8 @@ Throughout these docs:
   NPC Memory Persistence v0 — headless, Node-only, browser-unwired;
   Living-World Room Memory v0 — headless, Node-only, browser-unwired;
   Inventory & Health UI v0 — browser;
-  Session Save/Load v0 — browser).
+  Session Save/Load v0 — browser;
+  Demo Quest Loop v0 — browser).
 - 🔜 **Planned** — designed and approved, not yet built (next slices).
 - ❌ **Not built** — future shape only; documented so we don't paint into a corner.
 
@@ -681,6 +682,56 @@ hints; only `saveGameJson` crosses the integrity boundary.
   JSON, slot wrapper, seed name, event payloads, item names/ids, room names, dialogue, prompt
   text, or any narrative/PII.
 
+## Demo Quest Loop v0
+
+✅ **Implemented, browser.** A **deterministic authored demo quest** ("The Steward's Toll") now
+surfaces as a **read-only quest tracker** overlay — a pure projection of authoritative
+`WorldState` with no domain, event, reducer, schema, authored-room, backend, or renderer change
+of any kind ([ADR-0028](./decisions/ADR-0028-demo-quest-loop-v0.md)).
+
+The defining property: **the quest is a derived lens, not a system.** The tracker observes three
+conditions that existing services already write; it has no write path and cannot advance an
+objective itself.
+
+- **Authored quest data + pure evaluator.** `domain/quests/questSpec.ts` defines the
+  zod-validated `QuestSpec` schema with a closed condition vocabulary (`room-flag`, `room-visited`,
+  `has-item`, `has-status`). `domain/examples/demoQuest.ts` holds the hand-authored
+  `demoQuestSpec` literal ("The Steward's Toll"). `domain/quests/evaluateQuest.ts` is the pure,
+  total, deterministic `evaluateQuest(spec, state) → QuestView` — reads defensively via optional
+  chaining, never throws on absent rooms/flags/visited, imports only domain types, exports no
+  `WorldCommand`/`WorldEvent`-producing function.
+- **Three objectives, all gated on existing authoritative state.** Objective 1
+  (`roomStates['throne-room'].flags['interaction:offering-coffer'] === true`) is written by
+  `object-interactions-v0`; Objective 2
+  (`roomStates['throne-room'].flags['encounter:malik-encounter'] === true`) is written by
+  `encounter-system-v0`; Objective 3 (`roomStates['ruined-safehouse'].visited === true`) is
+  written by `multi-room-navigation-cache-v0`. No new event, command, reducer, or authored-room
+  edit was needed.
+- **Presentational overlay.** `renderer/ui/QuestTracker.tsx` is props-in, DOM-out React only —
+  receives `{ view: QuestView }`, renders quest title + objectives + done markers; `pointer-events:
+  none`; `role="status"` + `aria-live="polite"`. Imports no `three`, engine internals,
+  `world-session`, or services.
+- **App-owned state, four re-projection points.** `App` holds `quest: QuestView | null`. A single
+  `refreshDerivedViews(state)` helper sets both `playerHud` and (when the spec is attached)
+  `quest`; it is called at bootstrap, on `onWorldStateChange` (interaction/encounter), on
+  `handleNavigate` `navigated` (Objective 3 flips immediately on entering the safehouse), and on
+  load.
+- **Gated to the authored example world.** The spec is attached only when
+  `'throne-room' in state.roomStates` — deterministic anchor-room-presence check. Prompt-generated
+  sessions leave `quest === null` and never render the tracker.
+- **Save/load restores quest progress for free.** `evaluateQuest` is a pure function of
+  `WorldState`; the same `refreshDerivedViews` call at load re-projects exact mid-quest progress.
+  No `SaveGame` schema change.
+- **Not changed:** `domain/world/**` · `domain/examples/throneRoom.ts` / `ruinedRoom.ts` ·
+  `domain/interactions/**` · `domain/encounters/**` · `world-session/**` ·
+  `domain/world/saveGame.ts` / `world-session/saveGame.ts` · `app/NavigationService.ts` ·
+  `app/buildRestoredPlay.ts` · `renderer/RoomViewer.tsx` · `renderer/engine/**` · `dialogue/**` ·
+  `memory/**` · `persistence/**` · `server/**` · `eslint.config.js` · `package.json`.
+- **Log-safe.** The evaluator is pure and silent; `QuestTracker` is presentational. No new log
+  lines were added to `App`/`RoomViewer`. Quest/objective text, ids, flag keys, item names/ids,
+  status strings, room display names, and narrative content are never logged — mirrors the
+  ADR-0013/0014/0015/0026 content-free log discipline.
+
 ## Layered architecture
 
 Dependencies point **inward**, toward the domain. Outer layers may depend on
@@ -766,6 +817,8 @@ skipped. There is no code path from "model output" to "executed JavaScript".
 App.tsx
   ├─ playerHud: PlayerHudView | null    ✅ App-owned read-only render cache (seeded at session start)
   ├─ <StatusHud view={playerHud} />     ✅ App-level overlay (sibling of RoomViewer)
+  ├─ quest: QuestView | null            ✅ App-owned read-only quest cache; null for prompt-generated sessions
+  ├─ <QuestTracker view={quest} />      ✅ App-level overlay; hidden when quest === null (pointer-events:none; aria-live)
   ├─ <SaveLoadBar .../>                 ✅ App-level save/load control (sibling of RoomViewer)
   └─ RoomViewer.tsx                     (React host — owns the engine lifecycle)
        ├─ loadRoomSpec(throneRoom)       ✅ validation boundary (today: static data)
@@ -839,8 +892,11 @@ the raw-prompt seed, and only a room-generator throw/reject is `unavailable`.
 | `renderer/engine/builders/` | `buildShell` (floor + walls, with isometric **cutaway curbs** on the camera-facing walls), `buildLighting`, and the object `registry` + `buildObjects` with magenta-placeholder fallback. |
 | `renderer/engine/controls/` | `MovementControls` (screen-relative WASD/arrows driving the **player**, room-clamped); `LookControls` (drag-look) **retained but not instantiated** in isometric mode. |
 | `renderer/engine/disposables.ts` | `Disposables` + `disposeObject` — explicit GPU teardown (Three.js does not GC geometries/materials/textures). |
-| `renderer/ui/` | Presentational React overlays: `Hud` (interaction prompt); `DialoguePanel` (result messages); `StatusHud` (read-only player health/inventory/status HUD; `pointer-events:none`; `aria-live`); `playerHud.ts` (pure `projectPlayerHud(WorldState) → PlayerHudView` projection + `PlayerHudView`/`PlayerHudHealth`/`PlayerHudItem` types); `SaveLoadBar.tsx` (save/load bar; receives `{ canSave, hasSave, busy, error, onSave, onContinue }`; calm `role="alert"` errors; no save content shown). |
+| `renderer/ui/` | Presentational React overlays: `Hud` (interaction prompt); `DialoguePanel` (result messages); `StatusHud` (read-only player health/inventory/status HUD; `pointer-events:none`; `aria-live`); `playerHud.ts` (pure `projectPlayerHud(WorldState) → PlayerHudView` projection + `PlayerHudView`/`PlayerHudHealth`/`PlayerHudItem` types); `SaveLoadBar.tsx` (save/load bar; receives `{ canSave, hasSave, busy, error, onSave, onContinue }`; calm `role="alert"` errors; no save content shown); `QuestTracker.tsx` (read-only quest tracker; receives `{ view: QuestView }`; renders title + objective done markers; `pointer-events:none`; `role="status"` + `aria-live="polite"`; no service or engine import). |
 | `renderer/RoomViewer.tsx` | The composition seam: constructs/disposes the engine, bridges engine callbacks to React state. StrictMode-safe (mount → dispose → mount leaks nothing). |
+| `domain/quests/questSpec.ts` | `QuestSpec`/`QuestSpecSchema` — zod-validated authored data descriptor; closed condition vocabulary (`room-flag`, `room-visited`, `has-item`, `has-status`). Imports only `zod`; exports no command/event-producing function. |
+| `domain/quests/evaluateQuest.ts` | Pure `evaluateQuest(spec: QuestSpec, state: WorldState) → QuestView`. Total, deterministic, no I/O; reads defensively (optional chaining); missing rooms/flags/visited → `false`, never throws. Covered by co-located `evaluateQuest.test.ts` (pure Vitest, no DOM). |
+| `domain/examples/demoQuest.ts` | Hand-authored `demoQuestSpec` literal ("The Steward's Toll"): three objectives wired to the existing `throne-room` interaction/encounter flags and `ruined-safehouse` visited mark. |
 
 ## Generation Foundation v0 — module summary
 

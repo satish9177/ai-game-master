@@ -1,10 +1,8 @@
 # Implementation Plan — `feature/demo-quest-loop-v0`
 
-> Status: **approved — pending implementation.** Design is approved; **no source code
-> is written yet**, **ADR-0028 is not created yet**, and **nothing is committed** (commits
-> are made manually by the maintainer; agents do not commit). The ADR and the
-> ARCHITECTURE/FAILURE-MODES/AGENTS updates land in **docs closeout, after the source is
-> reviewed** (§17).
+> Status: **implemented — closed.** Source reviewed and merged on
+> `feature/demo-quest-loop-v0`. ADR-0028 created; ARCHITECTURE, FAILURE-MODES, and AGENTS
+> updated. Closed 2026-06-24.
 >
 > Companion docs: [ARCHITECTURE](../ARCHITECTURE.md) · [BOUNDARIES](../BOUNDARIES.md) ·
 > [FAILURE-MODES](../FAILURE-MODES.md) · [CONVENTIONS](../CONVENTIONS.md). Direct
@@ -50,8 +48,8 @@ few lines of App glue that re-project from state the app already holds.
 
 ## 1. Status
 
-**Approved — pending implementation.** This plan is the pre-code artifact. No source,
-no ADR, no commit yet (§17).
+**Implemented — closed.** Source merged; docs closeout complete 2026-06-24. See
+[ADR-0028](../decisions/ADR-0028-demo-quest-loop-v0.md).
 
 ## 2. Current repo facts (verified against source)
 
