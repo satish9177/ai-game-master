@@ -228,7 +228,7 @@ Do not add unless explicitly requested by the maintainer or by the approved impl
 Always read:
 
 1. `AGENTS.md`
-2. `docs/status/CURRENT.md`
+2. `docs/architecture/ARCHITECTURE.md` (see the status legend at the top for what is currently implemented)
 3. `docs/architecture/BOUNDARIES.md`
 
 Read only if relevant:
