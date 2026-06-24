@@ -14,11 +14,13 @@ import type { LoadedRoom } from './loadRoomSpec'
  * Conventions: Y-up, meters, -Z = north.
  */
 
-/** Size envelope for generated rooms (meters). Authored rooms ignore these. */
+/** Size envelope and object cap for generated rooms. Authored rooms ignore these. */
 export const GENERATED_ROOM = {
   DEFAULT_SIZE: 18,
   MIN_SIZE: 14,
   MAX_SIZE: 24,
+  /** Max objects per generated room (benign normalization; below the soft budget of 60). */
+  MAX_OBJECTS: 30,
 } as const
 
 /** Returns the default generated room floor dimensions (18 × 18 m). */
@@ -147,4 +149,63 @@ export function classifyObjectImportance(obj: RoomObject): ObjectImportance {
     default:
       return 'decorative'
   }
+}
+
+/**
+ * Clamps each object's X/Z position into the playable floor area and caps the
+ * total object count at GENERATED_ROOM.MAX_OBJECTS for generated rooms only.
+ *
+ * Returns the SAME object reference when no object needed repair (same-reference
+ * optimization), so callers can use a reference check (`fixed !== room`) to
+ * detect whether any change was applied. Never mutates the input room or any
+ * of its objects.
+ *
+ * Cap drop order (least important first): decorative → structural → critical.
+ * Critical objects are never dropped.
+ *
+ * This is a benign normalization — like clampGeneratedShell it keeps provenance
+ * 'generated' and must NOT trigger the host's repair/fallback notice.
+ * Authored/static/fallback rooms are never passed through this function.
+ */
+export function repairGeneratedObjects(room: LoadedRoom): LoadedRoom {
+  const bounds = computePlayableBounds(room.shell.dimensions, room.shell.wallThickness)
+
+  // Step 1: clamp each object's X/Z position into playable bounds.
+  let anyMoved = false
+  const positioned = room.objects.map((obj) => {
+    const [x, y, z] = obj.position
+    const cx = halfClamp(x, bounds.halfX)
+    const cz = halfClamp(z, bounds.halfZ)
+    if (cx === x && cz === z) return obj
+    anyMoved = true
+    return { ...obj, position: [cx, y, cz] as [number, number, number] } as RoomObject
+  })
+
+  // Step 2: cap total object count; drop least-important objects first.
+  const needsCap = positioned.length > GENERATED_ROOM.MAX_OBJECTS
+  const final = needsCap ? dropLeastImportant(positioned, GENERATED_ROOM.MAX_OBJECTS) : positioned
+
+  if (!anyMoved && !needsCap) return room
+  return { ...room, objects: final }
+}
+
+/** Clamp `value` to [–max, +max]. Returns 0 for degenerate (non-positive) max. */
+function halfClamp(value: number, max: number): number {
+  if (max <= 0) return 0
+  return Math.min(Math.max(value, -max), max)
+}
+
+/**
+ * Drop lowest-importance objects until `objects.length === target`. Preserves
+ * the original index order of the kept objects (stable).
+ */
+function dropLeastImportant(objects: RoomObject[], target: number): RoomObject[] {
+  const rank: Record<ObjectImportance, number> = { decorative: 0, structural: 1, critical: 2 }
+  const indexed = objects.map((obj, i) => ({ obj, rank: rank[classifyObjectImportance(obj)], i }))
+  // Sort ascending: lowest rank = dropped first. Secondary sort by index for stability.
+  indexed.sort((a, b) => a.rank - b.rank || a.i - b.i)
+  // Keep the last `target` entries (highest importance), then restore original order.
+  const kept = indexed.slice(objects.length - target)
+  kept.sort((a, b) => a.i - b.i)
+  return kept.map(({ obj }) => obj)
 }

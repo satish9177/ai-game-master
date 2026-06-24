@@ -3,7 +3,7 @@ import type { LoadedRoom } from './loadRoomSpec'
 import { repairRoom } from './repairRoom'
 import { validateRoom } from './validateRoom'
 import type { RoomIssueCode, RoomValidationResult } from './validateRoom'
-import { clampGeneratedShell } from './generatedRoomLayout'
+import { clampGeneratedShell, repairGeneratedObjects } from './generatedRoomLayout'
 
 /**
  * Room assembly pipeline (room-generation-repair-fallback v0). A pure,
@@ -62,6 +62,14 @@ export type RoomDiagnostics = {
    * fallback room (the authored fallback is never clamped).
    */
   sizeRepaired: boolean
+  /**
+   * Whether any generated room object's position was clamped into the playable
+   * floor area, or the object list was trimmed to the generated-room object cap.
+   * This is a benign normalization, NOT a playability repair: object repair keeps
+   * provenance `generated` and must NOT trigger the host's repair/fallback notice.
+   * Always false for a fallback room (the authored fallback objects are untouched).
+   */
+  objectsRepaired: boolean
   /** Distinct fatal codes from the FIRST semantic validation (empty if none ran). */
   initialFatalCodes: RoomIssueCode[]
   /** Whether deterministic repair ran (only when an initial fatal was present). */
@@ -108,29 +116,37 @@ export function assembleRoom(
   const clamped = clampGeneratedShell(loaded)
   const sizeRepaired = clamped !== loaded
 
-  // Stage 3 — semantic playability. No fatal issue → accept as generated. A
-  // size-only clamp is a benign normalization (not a playability repair), so the
-  // room stays `generated` and shows no notice; the clamp is reported via
-  // `sizeRepaired` for logs. Only a `repairRoom` pass (Stage 4) yields `repaired`.
-  const initial = validateRoom(clamped)
+  // Stage 2.6 — clamp object X/Z positions into the playable floor area and cap
+  // the object count at GENERATED_ROOM.MAX_OBJECTS. Both are benign normalizations
+  // (like sizeRepaired): they keep provenance `generated` and must NOT trigger the
+  // host's notice. Authored/fallback rooms never pass through this step.
+  const objectsFixed = repairGeneratedObjects(clamped)
+  const objectsRepaired = objectsFixed !== clamped
+
+  // Stage 3 — semantic playability. No fatal issue → accept as generated. Benign
+  // normalizations (Stages 2.5–2.6) keep provenance `generated` and show no notice;
+  // they are reported via `sizeRepaired`/`objectsRepaired` for logs only. A
+  // `repairRoom` pass (Stage 4) is the only thing that yields provenance `repaired`.
+  const initial = validateRoom(objectsFixed)
   if (initial.ok) {
     return {
-      room: clamped,
+      room: objectsFixed,
       diagnostics: {
         provenance: 'generated',
         sizeRepaired,
+        objectsRepaired,
         initialFatalCodes: [],
         repairAttempted: false,
         residualFatalCodes: [],
-        skippedObjectCount: clamped.skipped.length,
+        skippedObjectCount: objectsFixed.skipped.length,
         warningCount: countWarnings(initial),
       },
     }
   }
 
-  // Stage 4 — one deterministic repair pass on the clamped room, then re-validate.
+  // Stage 4 — one deterministic repair pass on the normalized room, then re-validate.
   const initialFatalCodes = distinctFatalCodes(initial)
-  const repaired = repairRoom(clamped)
+  const repaired = repairRoom(objectsFixed)
   const revalidated = validateRoom(repaired)
   if (revalidated.ok) {
     return {
@@ -138,6 +154,7 @@ export function assembleRoom(
       diagnostics: {
         provenance: 'repaired',
         sizeRepaired,
+        objectsRepaired,
         initialFatalCodes,
         repairAttempted: true,
         residualFatalCodes: [],
@@ -153,8 +170,9 @@ export function assembleRoom(
     diagnostics: {
       provenance: 'fallback',
       failedStage: 'semantic',
-      // The returned room is the authored fallback, which is never clamped.
+      // The returned room is the authored fallback, which is never normalized.
       sizeRepaired: false,
+      objectsRepaired: false,
       initialFatalCodes,
       repairAttempted: true,
       residualFatalCodes: distinctFatalCodes(revalidated),
@@ -175,6 +193,7 @@ function toFallback(
       provenance: 'fallback',
       failedStage,
       sizeRepaired: false,
+      objectsRepaired: false,
       initialFatalCodes: [],
       repairAttempted: false,
       residualFatalCodes: [],

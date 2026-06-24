@@ -71,6 +71,20 @@ const RAW_HUGE_DIMS = raw(
 const RAW_SHORT_HEIGHT = raw(
   validSpec({ shell: { dimensions: { width: 18, depth: 18, height: 1 }, exits: [{ side: 'north', width: 3 }] } }),
 )
+// Object with X position well outside 18×18 room bounds → position clamped.
+const RAW_OUT_OF_BOUNDS_OBJ = raw(
+  validSpec({
+    shell: { dimensions: { width: 18, depth: 18, height: 4 }, exits: [{ side: 'north', width: 3 }] },
+    objects: [{ type: 'pillar', position: [100, 0, 0] }],
+  }),
+)
+// 35 crates at an in-bounds position → count capped to GENERATED_ROOM.MAX_OBJECTS (30).
+const RAW_TOO_MANY_OBJECTS = raw(
+  validSpec({
+    shell: { dimensions: { width: 18, depth: 18, height: 4 }, exits: [{ side: 'north', width: 3 }] },
+    objects: Array.from({ length: 35 }, () => ({ type: 'crate', position: [3, 0, 3] })),
+  }),
+)
 
 /** The fatal codes the v0 validator can emit — used to prove diagnostics are safe. */
 const KNOWN_FATAL_CODES = [
@@ -184,6 +198,7 @@ describe('assembleRoom', () => {
       'provenance',
       'failedStage',
       'sizeRepaired',
+      'objectsRepaired',
       'initialFatalCodes',
       'repairAttempted',
       'residualFatalCodes',
@@ -205,6 +220,7 @@ describe('assembleRoom', () => {
       }
       expect(typeof diagnostics.repairAttempted).toBe('boolean')
       expect(typeof diagnostics.sizeRepaired).toBe('boolean')
+      expect(typeof diagnostics.objectsRepaired).toBe('boolean')
       expect(typeof diagnostics.skippedObjectCount).toBe('number')
       expect(typeof diagnostics.warningCount).toBe('number')
       for (const code of [
@@ -298,5 +314,64 @@ describe('assembleRoom', () => {
     expect(diagnostics.sizeRepaired).toBe(false) // returned room is the authored fallback
     expect(diagnostics.initialFatalCodes).toContain('room-too-small')
     expect(diagnostics.residualFatalCodes).toContain('room-too-small')
+  })
+
+  // --- generated-room object bounds repair (Slice 3) ---
+  //
+  // Object position clamping and count capping are benign normalizations: the
+  // room stays provenance 'generated' (no notice) and the repair is reported via
+  // the safe `objectsRepaired` flag only. Only a repairRoom pass or fallback
+  // changes provenance away from 'generated'.
+
+  it('out-of-bounds object position is clamped into the playable area, stays "generated"', () => {
+    const { room, diagnostics } = assembleRoom(RAW_OUT_OF_BOUNDS_OBJ, fallback)
+    expect(diagnostics.provenance).toBe('generated')
+    expect(diagnostics.objectsRepaired).toBe(true)
+    expect(diagnostics.repairAttempted).toBe(false)
+    expect(diagnostics.failedStage).toBeUndefined()
+    expect(room.objects).toHaveLength(1)
+    // pillar was at x=100; must be clamped inside the 18×18 playable area
+    const [x] = room.objects[0]!.position
+    expect(Math.abs(x)).toBeLessThan(9) // strictly inside the room half-extent (9 m)
+    expect(validateRoom(room).ok).toBe(true)
+  })
+
+  it('object count is capped to GENERATED_ROOM.MAX_OBJECTS (30), objectsRepaired true', () => {
+    const { room, diagnostics } = assembleRoom(RAW_TOO_MANY_OBJECTS, fallback)
+    expect(diagnostics.provenance).toBe('generated')
+    expect(diagnostics.objectsRepaired).toBe(true)
+    expect(diagnostics.repairAttempted).toBe(false)
+    expect(diagnostics.failedStage).toBeUndefined()
+    expect(room.objects).toHaveLength(30) // capped from 35 to MAX_OBJECTS
+    expect(validateRoom(room).ok).toBe(true)
+  })
+
+  it('generated room with all in-bounds objects and count ≤ MAX_OBJECTS: objectsRepaired false', () => {
+    const { diagnostics } = assembleRoom(RAW_VALID, fallback)
+    expect(diagnostics.objectsRepaired).toBe(false)
+  })
+
+  it('objectsRepaired is false for all fallback paths (authored fallback objects are untouched)', () => {
+    const paths = [RAW_INVALID_JSON, RAW_INVALID_SCHEMA, RAW_UNREPAIRABLE, RAW_REPAIR_THEN_FAIL]
+    for (const input of paths) {
+      const { diagnostics } = assembleRoom(input, fallback)
+      expect(diagnostics.objectsRepaired).toBe(false)
+    }
+  })
+
+  it('authored fallback room objects are not mutated by generated-room object repair', () => {
+    const objectsBefore = JSON.parse(JSON.stringify(fallback.objects))
+    assembleRoom(RAW_OUT_OF_BOUNDS_OBJ, fallback)
+    assembleRoom(RAW_TOO_MANY_OBJECTS, fallback)
+    expect(fallback.objects).toEqual(objectsBefore)
+  })
+
+  it('object bounds repair is deterministic', () => {
+    expect(assembleRoom(RAW_OUT_OF_BOUNDS_OBJ, fallback)).toEqual(
+      assembleRoom(RAW_OUT_OF_BOUNDS_OBJ, fallback),
+    )
+    expect(assembleRoom(RAW_TOO_MANY_OBJECTS, fallback)).toEqual(
+      assembleRoom(RAW_TOO_MANY_OBJECTS, fallback),
+    )
   })
 })

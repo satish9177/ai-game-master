@@ -8,6 +8,7 @@ import {
   isInsidePlayableBounds,
   isSpawnSafeAreaOverlap,
   classifyObjectImportance,
+  repairGeneratedObjects,
 } from './generatedRoomLayout'
 import { loadRoomSpec } from './loadRoomSpec'
 import { validateRoom, LIMITS } from './validateRoom'
@@ -346,6 +347,106 @@ describe('clampGeneratedShell', () => {
       spawn: { position: [0, 1.7, 0] }, objects: [],
     })
     expect(clampGeneratedShell(room)).toEqual(clampGeneratedShell(room))
+  })
+})
+
+/** Build a LoadedRoom with the given objects in an 18×18×4 shell. */
+function makeRoom(objects: unknown[]) {
+  return loadRoomSpec({
+    schemaVersion: 1,
+    id: 'test',
+    name: 'test',
+    shell: {
+      dimensions: { width: 18, depth: 18, height: 4 },
+      exits: [{ side: 'north', width: 3 }],
+    },
+    spawn: { position: [0, 1.7, 0] },
+    objects,
+  })
+}
+
+describe('repairGeneratedObjects', () => {
+  const STD_BOUNDS = computePlayableBounds({ width: 18, depth: 18 }, 0.3)
+
+  it('returns the same reference when all objects are in bounds and count ≤ MAX_OBJECTS', () => {
+    const room = makeRoom([{ type: 'pillar', position: [3, 0, -3] }])
+    expect(repairGeneratedObjects(room)).toBe(room)
+  })
+
+  it('object outside room is clamped to the playable boundary', () => {
+    const room = makeRoom([{ type: 'pillar', position: [100, 0, 0] }])
+    const fixed = repairGeneratedObjects(room)
+    expect(fixed).not.toBe(room)
+    const [x, y, z] = fixed.objects[0]!.position
+    expect(x).toBeCloseTo(STD_BOUNDS.halfX)
+    expect(y).toBe(0) // y unchanged
+    expect(z).toBe(0) // z was already 0
+  })
+
+  it('object outside on only the Z axis is clamped on Z only', () => {
+    const room = makeRoom([{ type: 'crate', position: [3, 0, -50] }])
+    const fixed = repairGeneratedObjects(room)
+    const [x, , z] = fixed.objects[0]!.position
+    expect(x).toBe(3) // x already in bounds, unchanged
+    expect(z).toBeCloseTo(-STD_BOUNDS.halfZ)
+  })
+
+  it('object exactly at the playable boundary stays unchanged (same object reference)', () => {
+    const room = makeRoom([{ type: 'pillar', position: [STD_BOUNDS.halfX, 0, 0] }])
+    const fixed = repairGeneratedObjects(room)
+    expect(fixed).toBe(room)
+    expect(fixed.objects[0]).toBe(room.objects[0])
+  })
+
+  it('object near wall (just inside boundary) stays unchanged', () => {
+    const room = makeRoom([{ type: 'pillar', position: [STD_BOUNDS.halfX - 0.01, 0, 0] }])
+    expect(repairGeneratedObjects(room)).toBe(room)
+  })
+
+  it('object count is capped at GENERATED_ROOM.MAX_OBJECTS (30)', () => {
+    const objects = Array.from({ length: 35 }, () => ({ type: 'crate', position: [2, 0, 2] }))
+    const room = makeRoom(objects)
+    const fixed = repairGeneratedObjects(room)
+    expect(fixed).not.toBe(room)
+    expect(fixed.objects).toHaveLength(GENERATED_ROOM.MAX_OBJECTS)
+  })
+
+  it('critical objects are preserved when dropping by count', () => {
+    // 35 objects: 34 decorative (prop) + 1 critical (npc) — after cap to 30 the npc must survive.
+    const objects: unknown[] = Array.from({ length: 34 }, () => ({
+      type: 'prop',
+      position: [2, 0, 2],
+    }))
+    objects.push({
+      type: 'npc',
+      name: 'Guard',
+      position: [1, 0, -1],
+      interaction: { key: 'F', prompt: 'Talk', body: 'Hello.' },
+    })
+    const room = makeRoom(objects)
+    const fixed = repairGeneratedObjects(room)
+    expect(fixed.objects).toHaveLength(GENERATED_ROOM.MAX_OBJECTS)
+    const npc = fixed.objects.find((o) => o.type === 'npc')
+    expect(npc).toBeDefined()
+  })
+
+  it('generated room remains valid (no fatals) after object repair', () => {
+    const objects = Array.from({ length: 35 }, () => ({ type: 'crate', position: [100, 0, -100] }))
+    const room = makeRoom(objects)
+    const fixed = repairGeneratedObjects(room)
+    expect(validateRoom(fixed).ok).toBe(true)
+  })
+
+  it('does not mutate the input room', () => {
+    const room = makeRoom([{ type: 'pillar', position: [100, 0, 0] }])
+    const xBefore = room.objects[0]!.position[0]
+    repairGeneratedObjects(room)
+    expect(room.objects[0]!.position[0]).toBe(xBefore)
+  })
+
+  it('is deterministic', () => {
+    const room = makeRoom([{ type: 'pillar', position: [100, 0, -50] }])
+    expect(repairGeneratedObjects(room)).toEqual(repairGeneratedObjects(room))
   })
 })
 
