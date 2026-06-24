@@ -4,6 +4,7 @@ import { repairRoom } from './repairRoom'
 import { validateRoom } from './validateRoom'
 import type { RoomIssueCode, RoomValidationResult } from './validateRoom'
 import { clampGeneratedShell, repairGeneratedObjects, repairGeneratedSpawn, repairGeneratedExits } from './generatedRoomLayout'
+import { composeGeneratedRoom } from './generatedRoomComposition'
 
 /**
  * Room assembly pipeline (room-generation-repair-fallback v0). A pure,
@@ -71,6 +72,12 @@ export type RoomDiagnostics = {
    * Always false for a fallback room (the authored fallback objects are untouched).
    */
   objectsRepaired: boolean
+  /** Whether composition relocated existing objects. Always false for fallback. */
+  composed: boolean
+  /** Whether the generated room had no story anchor. False for fallback. */
+  lacksAnchor: boolean
+  /** Whether the generated room had no interactable. False for fallback. */
+  lacksInteractable: boolean
   /**
    * Whether the generated room spawn position was clamped into the playable floor
    * area or nudged away from a spawn-blocking object. This is a benign
@@ -138,13 +145,17 @@ export function assembleRoom(
   const objectsFixed = repairGeneratedObjects(clamped)
   const objectsRepaired = objectsFixed !== clamped
 
-  // Stage 2.7 — clamp and nudge the generated spawn into a safe floor position.
+  // Stage 2.7 — arrange existing objects before the finalizers get the final say.
+  const composition = composeGeneratedRoom(objectsFixed)
+  const { composed, lacksAnchor, lacksInteractable } = composition.diagnostics
+
+  // Stage 2.8 — clamp and nudge the generated spawn into a safe floor position.
   // Handles spawn outside the playable area, too close to wall, or crowded by a
   // blocking object. Keeps provenance `generated`; reported via `spawnRepaired`.
-  const spawnFixed = repairGeneratedSpawn(objectsFixed)
-  const spawnRepaired = spawnFixed !== objectsFixed
+  const spawnFixed = repairGeneratedSpawn(composition.room)
+  const spawnRepaired = spawnFixed !== composition.room
 
-  // Stage 2.8 — snap each exit-carrying object to the nearest wall face
+  // Stage 2.9 — snap each exit-carrying object to the nearest wall face
   // (±halfW or ±halfD). Runs after Stage 2.6 so that objects already clamped
   // to the playable interior are moved back to wall positions. Keeps provenance
   // `generated`; reported via `exitsRepaired`.
@@ -152,7 +163,7 @@ export function assembleRoom(
   const exitsRepaired = exitsFixed !== spawnFixed
 
   // Stage 3 — semantic playability. No fatal issue → accept as generated. Benign
-  // normalizations (Stages 2.5–2.8) keep provenance `generated` and show no notice;
+  // normalizations (Stages 2.5–2.9) keep provenance `generated` and show no notice;
   // they are reported via `sizeRepaired`/`objectsRepaired`/`spawnRepaired`/
   // `exitsRepaired` for logs only. A `repairRoom` pass (Stage 4) is the only
   // thing that yields `repaired`.
@@ -164,6 +175,9 @@ export function assembleRoom(
         provenance: 'generated',
         sizeRepaired,
         objectsRepaired,
+        composed,
+        lacksAnchor,
+        lacksInteractable,
         spawnRepaired,
         exitsRepaired,
         initialFatalCodes: [],
@@ -176,7 +190,7 @@ export function assembleRoom(
   }
 
   // Stage 4 — one deterministic repair pass on the normalized room, then re-validate.
-  // NOTE: Stages 2.5–2.8 currently pre-empt every fatal that repairRoom can fix
+  // NOTE: Stages 2.5–2.9 currently pre-empt every fatal that repairRoom can fix
   // (spawn-out-of-bounds and object/light hard budgets), so the "repaired" branch
   // is intentionally dormant through this pipeline today. It is retained for future
   // repairable fatals that are not covered by generated-room normalizers.
@@ -191,6 +205,9 @@ export function assembleRoom(
         provenance: 'repaired',
         sizeRepaired,
         objectsRepaired,
+        composed,
+        lacksAnchor,
+        lacksInteractable,
         spawnRepaired,
         exitsRepaired,
         initialFatalCodes,
@@ -211,6 +228,9 @@ export function assembleRoom(
       // The returned room is the authored fallback, which is never normalized.
       sizeRepaired: false,
       objectsRepaired: false,
+      composed: false,
+      lacksAnchor: false,
+      lacksInteractable: false,
       spawnRepaired: false,
       exitsRepaired: false,
       initialFatalCodes,
@@ -234,6 +254,9 @@ function toFallback(
       failedStage,
       sizeRepaired: false,
       objectsRepaired: false,
+      composed: false,
+      lacksAnchor: false,
+      lacksInteractable: false,
       spawnRepaired: false,
       exitsRepaired: false,
       initialFatalCodes: [],
