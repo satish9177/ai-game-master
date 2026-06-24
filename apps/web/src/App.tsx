@@ -4,12 +4,17 @@ import { StatusHud } from './renderer/ui/StatusHud'
 import { SaveLoadBar } from './renderer/ui/SaveLoadBar'
 import type { SaveLoadStatus } from './renderer/ui/SaveLoadBar'
 import { QuestTracker } from './renderer/ui/QuestTracker'
+import { JournalPanel } from './renderer/ui/JournalPanel'
 import { projectPlayerHud } from './renderer/ui/playerHud'
 import type { PlayerHudView } from './renderer/ui/playerHud'
 import { evaluateQuest } from './domain/quests/evaluateQuest'
 import type { QuestView } from './domain/quests/evaluateQuest'
 import type { QuestSpec } from './domain/quests/questSpec'
 import { demoQuestSpec } from './domain/examples/demoQuest'
+import { projectJournal } from './domain/journal/projectJournal'
+import type { JournalView } from './domain/journal/projectJournal'
+import type { JournalSpec } from './domain/journal/journalSpec'
+import { demoJournalSpec } from './domain/examples/demoJournal'
 import type { WorldState } from './domain/world/worldState'
 import type { RoomSource } from './domain/ports/RoomSource'
 import { GeneratedRoomSource } from './room/GeneratedRoomSource'
@@ -99,6 +104,7 @@ type ActivePlay = {
   worldBible?: WorldBibleSeed
   initialPlayer: PlayerHudView
   questSpec?: QuestSpec
+  journalSpec?: JournalSpec
 }
 
 function preloadedRoomSource(room: LoadedRoom): RoomSource {
@@ -119,7 +125,7 @@ function startRoomSession(room: LoadedRoom): Promise<WorldStateResult> {
   })
 }
 
-type ExampleBootstrapResult = ActivePlay & { initialQuest: QuestView }
+type ExampleBootstrapResult = ActivePlay & { initialQuest: QuestView; initialJournal: JournalView }
 
 let exampleBootstrap: Promise<ExampleBootstrapResult | null> | undefined
 
@@ -145,7 +151,9 @@ function bootstrapExamplePlay(): Promise<ExampleBootstrapResult | null> {
       navigation: exampleNavigation,
       initialPlayer: projectPlayerHud(started.state),
       questSpec: demoQuestSpec,
+      journalSpec: demoJournalSpec,
       initialQuest: evaluateQuest(demoQuestSpec, started.state),
+      initialJournal: projectJournal(demoJournalSpec, started.state),
     }
   })()
   return exampleBootstrap
@@ -155,10 +163,20 @@ function App() {
   const [activePlay, setActivePlay] = useState<ActivePlay | null>(null)
   const [playerHud, setPlayerHud] = useState<PlayerHudView | null>(null)
   const [quest, setQuest] = useState<QuestView | null>(null)
+  const [journal, setJournal] = useState<JournalView | null>(null)
   const [fatalMessage, setFatalMessage] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const requestVersion = useRef(0)
   const questSpecRef = useRef<QuestSpec | null>(null)
+  const journalSpecRef = useRef<JournalSpec | null>(null)
+
+  function refreshDerivedViews(state: WorldState) {
+    setPlayerHud(projectPlayerHud(state))
+    const qSpec = questSpecRef.current
+    if (qSpec) setQuest(evaluateQuest(qSpec, state))
+    const jSpec = journalSpecRef.current
+    setJournal(jSpec ? projectJournal(jSpec, state) : null)
+  }
   const [saveLoadStatus, setSaveLoadStatus] = useState<SaveLoadStatus>('idle')
   const [saveLoadError, setSaveLoadError] = useState<string | null>(null)
   const [hasSave, setHasSave] = useState(() => saveSlotStore.has())
@@ -169,9 +187,11 @@ function App() {
       if (version !== requestVersion.current) return
       if (result) {
         questSpecRef.current = result.questSpec ?? null
+        journalSpecRef.current = result.journalSpec ?? null
         setActivePlay(result)
         setPlayerHud(result.initialPlayer)
         setQuest(result.initialQuest)
+        setJournal(result.initialJournal)
       } else setFatalMessage(ROOM_UNAVAILABLE)
     })
     return () => {
@@ -184,7 +204,9 @@ function App() {
     setActivePlay(null)
     setPlayerHud(null)
     setQuest(null)
+    setJournal(null)
     questSpecRef.current = null
+    journalSpecRef.current = null
     setFatalMessage(null)
     setNotice(null)
     logger.info('prompt submitted', { promptLength: prompt.length })
@@ -298,15 +320,23 @@ function App() {
 
       if (resolved.ok) adjacentPregenerator.warmAdjacent(resolved.room)
 
-      // Gate the demo quest to the authored example world: only restore it when
-      // the anchor room is present in the saved session's roomStates.
-      const restoredQuestSpec =
-        stateResult.state.roomStates['throne-room'] != null ? demoQuestSpec : undefined
+      // Gate demo quest + journal to the authored example world: only restore
+      // them when the anchor room is present in the saved session's roomStates.
+      const isAuthoredWorld = stateResult.state.roomStates['throne-room'] != null
+      const restoredQuestSpec = isAuthoredWorld ? demoQuestSpec : undefined
+      const restoredJournalSpec = isAuthoredWorld ? demoJournalSpec : undefined
       questSpecRef.current = restoredQuestSpec ?? null
+      journalSpecRef.current = restoredJournalSpec ?? null
 
-      setActivePlay({ ...play, navigation: exampleNavigation, questSpec: restoredQuestSpec })
+      setActivePlay({
+        ...play,
+        navigation: exampleNavigation,
+        questSpec: restoredQuestSpec,
+        journalSpec: restoredJournalSpec,
+      })
       setPlayerHud(play.initialPlayer)
       setQuest(restoredQuestSpec ? evaluateQuest(restoredQuestSpec, stateResult.state) : null)
+      setJournal(restoredJournalSpec ? projectJournal(restoredJournalSpec, stateResult.state) : null)
       setFatalMessage(null)
       setNotice(degraded ? FALLBACK_NOTICE : null)
       setSaveLoadStatus('idle')
@@ -336,23 +366,20 @@ function App() {
             navigation: activePlay.navigation,
             initialPlayer: activePlay.initialPlayer,
             questSpec: activePlay.questSpec,
+            journalSpec: activePlay.journalSpec,
           }
         : current)
       // Warm the next frontier from the room we just entered.
       adjacentPregenerator.warmAdjacent(result.room)
       // Re-project derived views from the post-move WorldState so objective 3
       // (ruined-safehouse visited) flips done immediately on entering the room.
-      setPlayerHud(projectPlayerHud(result.state))
-      const spec = questSpecRef.current
-      if (spec) setQuest(evaluateQuest(spec, result.state))
+      refreshDerivedViews(result.state)
     }
     return result
   }, [activePlay])
 
   const handleWorldStateChange = useCallback((state: WorldState) => {
-    setPlayerHud(projectPlayerHud(state))
-    const spec = questSpecRef.current
-    if (spec) setQuest(evaluateQuest(spec, state))
+    refreshDerivedViews(state)
   }, [])
 
   return (
@@ -374,6 +401,7 @@ function App() {
       )}
       {playerHud && <StatusHud view={playerHud} />}
       {quest && <QuestTracker view={quest} />}
+      {journal && <JournalPanel view={journal} />}
       {notice && (
         <div className="room-notice" role="status">
           <span className="room-notice-text">{notice}</span>
