@@ -4,11 +4,11 @@ import type { LoadedRoom } from './loadRoomSpec'
 import type { RoomObject } from './roomSpec'
 
 /**
- * Generated-room composition (generated-room-composition-v0, stage 2.9).
+ * Generated-room composition (generated-room-composition-v0, stage 2.7).
  *
  * Deterministic, pure, non-mutating layout composer for generated rooms only.
  * Runs after object-legality repair (stage 2.6) and before spawn/exit repair
- * (stages 2.7–2.8), so spawn and exit wall-snap get the final safety say.
+ * (stages 2.8–2.9), so spawn and exit wall-snap get the final safety say.
  *
  * Contract:
  * - Relocates existing objects only.  Never adds, removes, or edits any non-position
@@ -185,7 +185,7 @@ export function computeGeneratedCompositionZones(
 // ─── composer ─────────────────────────────────────────────────────────────────
 
 /**
- * Deterministic generated-room composition normalizer (stage 2.9 in assembleRoom).
+ * Deterministic generated-room composition normalizer (stage 2.7 in assembleRoom).
  *
  * Re-arranges existing objects into a readable layout:
  *  1. The first throne (story anchor) is placed in the north-center anchor zone.
@@ -193,7 +193,7 @@ export function computeGeneratedCompositionZones(
  *  3. Interactable clues/resources in the corridor are moved to a visible flank.
  *  4. Decorative clutter in the corridor is pushed to the east/west side zones.
  *  5. Structural objects (pillars, torches, non-exit arches) are left in place.
- *  6. Exit-carrying objects are left for stage 2.8 (wall-snap).
+ *  6. Exit-carrying objects are left for stage 2.9 (wall-snap).
  *
  * Returns the SAME room reference when no object needed relocation.
  * Never mutates the input room or its objects.
