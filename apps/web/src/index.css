@@ -340,6 +340,67 @@ body {
   font-size: 0.75rem;
 }
 
+/* ---------- quest tracker overlay ---------- */
+.quest-tracker {
+  position: fixed;
+  top: 4.2rem; /* clear of the prompt bar at top: 1.1rem */
+  right: 1rem;
+  z-index: 10;
+  min-width: 10rem;
+  max-width: 16rem;
+  padding: 0.65rem 0.8rem;
+  border-radius: 0.5rem;
+  background: rgba(12, 12, 16, 0.82);
+  border: 1px solid #2c2a36;
+  color: #ece6d6;
+  font-size: 0.85rem;
+  pointer-events: none;
+  user-select: none;
+}
+
+.quest-tracker-title {
+  font-weight: 600;
+  font-size: 0.85rem;
+  color: #f3ead2;
+  margin-bottom: 0.5rem;
+}
+
+.quest-tracker-objectives {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.quest-tracker-objective {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.4rem;
+  margin-bottom: 0.25rem;
+  color: #cfc7b6;
+  font-size: 0.8rem;
+}
+
+.quest-tracker-objective--done {
+  color: #8b8576;
+}
+
+.quest-tracker-check {
+  flex: none;
+}
+
+.quest-tracker-objective-text {
+  line-height: 1.3;
+}
+
+.quest-tracker-complete {
+  margin-top: 0.45rem;
+  padding-top: 0.4rem;
+  border-top: 1px solid #2c2a36;
+  color: #6fcf7a;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
 /* ---------- save/load bar ---------- */
 .save-load-bar {
   position: fixed;
