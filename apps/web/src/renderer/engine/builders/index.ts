@@ -9,10 +9,10 @@ import { buildHumanoid } from './parts/humanoid'
 /**
  * Builds the room's props from RoomSpec objects via a type-to-builder registry.
  *
- * Safety contract: nothing here can crash the renderer. A valid schema type
- * with no builder yet (torch/npc/scroll) and any unknown/malformed object
- * (room.skipped) both fall back to a magenta placeholder box, so unsupported
- * content is visible rather than fatal.
+ * Safety contract: every valid schema type has a trusted builder. Any defensive
+ * registry miss and every unknown/malformed object in `room.skipped` render as
+ * the same bounded mystery marker, so unsupported content stays visible without
+ * exposing its raw content or becoming interactive.
  *
  * Conventions: Y-up, meters, -Z = north, rotationY in degrees. Each builder
  * constructs its prop resting on the local floor plane (y=0); one material per
@@ -35,9 +35,9 @@ export function buildObjects(room: LoadedRoom, logger: Logger): THREE.Group {
     }
   }
 
-  // Unknown/malformed objects the loader skipped — placeholder, never crash.
+  // Unknown/malformed objects the loader skipped — mystery marker, never crash.
   for (const item of room.skipped) {
-    const node = buildPlaceholder(item.type)
+    const node = buildMysteryMarker()
     applyTransform(node, readPosition(item.raw), 0, 1)
     enableShadows(node)
     group.add(node)
@@ -49,8 +49,10 @@ export function buildObjects(room: LoadedRoom, logger: Logger): THREE.Group {
 type Vec3 = [number, number, number]
 type ObjectOf<K extends RoomObject['type']> = Extract<RoomObject, { type: K }>
 type ObjectBuilder<K extends RoomObject['type']> = (obj: ObjectOf<K>) => THREE.Object3D
+type ObjectBuilderRegistry = { [K in RoomObject['type']]: ObjectBuilder<K> }
 
-const registry: { [K in RoomObject['type']]?: ObjectBuilder<K> } = {
+// Adding a RoomObject type without a trusted builder is a compile error.
+const registry = {
   throne: buildThrone,
   pillar: buildPillar,
   rug: buildRug,
@@ -64,16 +66,17 @@ const registry: { [K in RoomObject['type']]?: ObjectBuilder<K> } = {
   debris: buildDebris,
   barricade: buildBarricade,
   zombie: buildZombie,
-}
+} satisfies ObjectBuilderRegistry
 
 function buildKnownObject(obj: RoomObject, logger: Logger): THREE.Object3D {
-  const builder = registry[obj.type] as ((o: RoomObject) => THREE.Object3D) | undefined
+  const builder = (
+    registry as Record<string, ((o: RoomObject) => THREE.Object3D) | undefined>
+  )[obj.type]
   if (!builder) {
-    logger.warn('no builder for object type — rendering placeholder', {
+    logger.warn('no builder for object type — rendering mystery marker', {
       objectType: obj.type,
-      objectId: obj.id,
     })
-    return buildPlaceholder(obj.type)
+    return buildMysteryMarker()
   }
   return builder(obj)
 }
@@ -236,19 +239,47 @@ function buildProp(obj: ObjectOf<'prop'>): THREE.Object3D {
   return new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: obj.color }))
 }
 
-function buildPlaceholder(type: string): THREE.Object3D {
+/**
+ * Neutral fallback for skipped content: a dark plinth, warm faceted core, and
+ * bronze orbit. Its XZ diameter stays below the prior 0.8 m placeholder cube.
+ * It carries no raw type/name/id, light, text, or interaction affordance.
+ */
+function buildMysteryMarker(): THREE.Object3D {
   const g = new THREE.Group()
-  g.name = `placeholder:${type}`
-  const m = new THREE.Mesh(
-    new THREE.BoxGeometry(0.8, 0.8, 0.8),
+  g.name = 'mystery-marker'
+
+  const plinth = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.34, 0.38, 0.12, 10),
+    new THREE.MeshStandardMaterial({ color: '#35343a', roughness: 0.9 }),
+  )
+  plinth.position.y = 0.06
+  g.add(plinth)
+
+  const core = new THREE.Mesh(
+    new THREE.OctahedronGeometry(0.26, 0),
     new THREE.MeshStandardMaterial({
-      color: '#ff00ff',
-      emissive: '#ff00ff',
-      emissiveIntensity: 0.4,
+      color: '#c58a52',
+      emissive: '#6b3f24',
+      emissiveIntensity: 0.65,
+      roughness: 0.55,
     }),
   )
-  m.position.y = 0.4
-  g.add(m)
+  core.position.y = 0.45
+  core.rotation.y = Math.PI / 4
+  g.add(core)
+
+  const orbit = new THREE.Mesh(
+    new THREE.TorusGeometry(0.31, 0.025, 6, 20),
+    new THREE.MeshStandardMaterial({
+      color: '#806449',
+      metalness: 0.45,
+      roughness: 0.55,
+    }),
+  )
+  orbit.position.y = 0.45
+  orbit.rotation.x = Math.PI / 2
+  g.add(orbit)
+
   return g
 }
 

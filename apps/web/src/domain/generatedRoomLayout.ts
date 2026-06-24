@@ -235,9 +235,9 @@ function isWallLight(obj: RoomObject): boolean {
 }
 
 /**
- * Footprint radius (m) of the magenta placeholder cube the renderer draws for
- * skipped/unknown objects (a 0.8 m box → 0.4 m half-extent), padded like any
- * other footprint.
+ * Footprint radius (m) of the bounded mystery marker the renderer draws for
+ * skipped/unknown objects (maximum 0.8 m diameter → 0.4 m half-extent), padded
+ * like any other footprint.
  */
 const PLACEHOLDER_FOOTPRINT = 0.4 + FOOTPRINT_SAFETY
 
@@ -245,7 +245,7 @@ const PLACEHOLDER_FOOTPRINT = 0.4 + FOOTPRINT_SAFETY
  * Clamps each object so its full FOOTPRINT — not just its anchor — stays inside
  * the playable floor, caps the total object count at GENERATED_ROOM.MAX_OBJECTS,
  * nudges wall-light objects to a safe wall-side position, and clamps the skipped
- * placeholder ("magenta cube") anchors into bounds too. Generated rooms only.
+ * mystery-marker anchors into bounds too. Generated rooms only.
  *
  * Bounds are the playable floor (computePlayableBounds) shrunk by each object's
  * own footprint radius, so a crate/barrel/debris/prop/torch/placeholder centered
