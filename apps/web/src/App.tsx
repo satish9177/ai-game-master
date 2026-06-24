@@ -3,6 +3,7 @@ import { RoomViewer } from './renderer/RoomViewer'
 import { StatusHud } from './renderer/ui/StatusHud'
 import { SaveLoadBar } from './renderer/ui/SaveLoadBar'
 import type { SaveLoadStatus } from './renderer/ui/SaveLoadBar'
+import { UsageMeter } from './renderer/ui/UsageMeter'
 import { QuestTracker } from './renderer/ui/QuestTracker'
 import { JournalPanel } from './renderer/ui/JournalPanel'
 import { projectPlayerHud } from './renderer/ui/playerHud'
@@ -24,6 +25,8 @@ import { FakeRoomGenerator } from './generation/FakeRoomGenerator'
 import { FakeWorldBibleSeeder } from './generation/FakeWorldBibleSeeder'
 import { readLlmConfig } from './app/llmConfig'
 import { selectRoomGenerator } from './app/selectRoomGenerator'
+import { evaluate, recordAttempt, initialUsageState } from './domain/usage/usageGuard'
+import type { UsageGuardConfig } from './domain/usage/usageGuard'
 import { ErrorBoundary } from './app/ErrorBoundary'
 import { AdjacentRoomPregenerator } from './app/AdjacentRoomPregenerator'
 import { NavigationService } from './app/NavigationService'
@@ -56,9 +59,14 @@ const logger = createConsoleLogger()
 // env config is complete (real-room-generator-provider v0; ADR-0023). The
 // returned `log` carries only safe selection metadata (provider enum, model id,
 // numeric caps, or a fixed reason code) — never the key, prompt, or seed.
+const llmConfig = readLlmConfig()
 const { generator: promptGenerator, log: roomGeneratorSelectionLog } =
-  selectRoomGenerator(readLlmConfig())
+  selectRoomGenerator(llmConfig)
 logger.info('room generator selected', roomGeneratorSelectionLog)
+// Usage guardrail (cost-usage-guardrails v0): enabled only for real providers.
+// The enabled flag is derived from the selection result, not the raw API key.
+const guardEnabled = roomGeneratorSelectionLog.provider !== 'fake'
+const guardCap = llmConfig.sessionCap
 // Background adjacent pre-generation stays deterministic and offline: it always
 // uses a FakeRoomGenerator, so warming never calls a real provider or spends.
 const adjacentGenerator = new FakeRoomGenerator()
@@ -169,6 +177,17 @@ function App() {
   const requestVersion = useRef(0)
   const questSpecRef = useRef<QuestSpec | null>(null)
   const journalSpecRef = useRef<JournalSpec | null>(null)
+  // Usage guardrail state (real provider only; fake path stays inert).
+  // Refs hold the live values for reading inside stable useCallback closures;
+  // the parallel state values trigger re-renders for the UsageMeter display.
+  const usageCountRef = useRef(initialUsageState().count)
+  const [usageCount, setUsageCount] = useState(0)
+  const inFlightRef = useRef(false)
+  const [inFlight, setInFlight] = useState(false)
+  const confirmGrantedRef = useRef(false)
+  const pendingPromptRef = useRef<string | null>(null)
+  const guardConfig: UsageGuardConfig = { cap: guardCap, enabled: guardEnabled }
+  const usageStatus = evaluate({ count: usageCount }, guardConfig)
 
   function refreshDerivedViews(state: WorldState) {
     setPlayerHud(projectPlayerHud(state))
@@ -200,6 +219,27 @@ function App() {
   }, [])
 
   const handlePrompt = useCallback((prompt: string) => {
+    // In-flight lock: prevent a second call while one is pending.
+    if (inFlightRef.current) return
+
+    // At-cap gate (real provider only): block and store the prompt until the
+    // user explicitly confirms via "Generate anyway".
+    if (guardEnabled) {
+      const status = evaluate({ count: usageCountRef.current }, { cap: guardCap, enabled: true })
+      if (status === 'at-cap' && !confirmGrantedRef.current) {
+        pendingPromptRef.current = prompt
+        return
+      }
+      // Record the attempt before the async call so failures/fallbacks still count.
+      confirmGrantedRef.current = false
+      const next = recordAttempt({ count: usageCountRef.current })
+      usageCountRef.current = next.count
+      setUsageCount(next.count)
+      inFlightRef.current = true
+      setInFlight(true)
+      logger.info('usage attempt', { count: next.count, cap: guardCap, status })
+    }
+
     const version = ++requestVersion.current
     setActivePlay(null)
     setPlayerHud(null)
@@ -212,47 +252,68 @@ function App() {
     logger.info('prompt submitted', { promptLength: prompt.length })
 
     void (async () => {
-      const prepared = await prepareGeneratedRoomSeed(prompt, worldBibleSeeder, logger)
-      if (version !== requestVersion.current) return
-      const source = new GeneratedRoomSource(
-        promptGenerator,
-        prepared.generatorSeed,
-        logger,
-        fallbackRoom,
-      )
-      const result = await source.getRoom()
-      if (version !== requestVersion.current) return
-      if (!result.ok) {
-        logger.error('generated room load failed', { code: result.error.code })
-        setFatalMessage(result.error.message)
-        return
+      try {
+        const prepared = await prepareGeneratedRoomSeed(prompt, worldBibleSeeder, logger)
+        if (version !== requestVersion.current) return
+        const source = new GeneratedRoomSource(
+          promptGenerator,
+          prepared.generatorSeed,
+          logger,
+          fallbackRoom,
+        )
+        const result = await source.getRoom()
+        if (version !== requestVersion.current) return
+        if (!result.ok) {
+          logger.error('generated room load failed', { code: result.error.code })
+          setFatalMessage(result.error.message)
+          return
+        }
+        const started = await startRoomSession(result.room)
+        if (version !== requestVersion.current) return
+        if (!started.ok) {
+          logger.error('world session start failed', { code: started.error.code })
+          setFatalMessage(ROOM_UNAVAILABLE)
+          return
+        }
+        const generatedCache = new SessionRoomCache()
+        generatedCache.set(result.room.id, result.room)
+        const initialPlayer = projectPlayerHud(started.state)
+        setActivePlay({
+          roomSource: preloadedRoomSource(result.room),
+          sessionId: started.state.sessionId,
+          roomCache: generatedCache,
+          ...(prepared.worldBible ? { worldBible: prepared.worldBible } : {}),
+          initialPlayer,
+        })
+        setPlayerHud(initialPlayer)
+        // A repaired or fallback room couldn't be built exactly as asked — show the
+        // static, prompt-free notice. A clean `generated` room shows nothing.
+        if (shouldShowFallbackNotice(result.provenance)) setNotice(FALLBACK_NOTICE)
+      } finally {
+        if (guardEnabled) {
+          inFlightRef.current = false
+          setInFlight(false)
+        }
       }
-      const started = await startRoomSession(result.room)
-      if (version !== requestVersion.current) return
-      if (!started.ok) {
-        logger.error('world session start failed', { code: started.error.code })
-        setFatalMessage(ROOM_UNAVAILABLE)
-        return
-      }
-      const generatedCache = new SessionRoomCache()
-      generatedCache.set(result.room.id, result.room)
-      const initialPlayer = projectPlayerHud(started.state)
-      setActivePlay({
-        roomSource: preloadedRoomSource(result.room),
-        sessionId: started.state.sessionId,
-        roomCache: generatedCache,
-        ...(prepared.worldBible ? { worldBible: prepared.worldBible } : {}),
-        initialPlayer,
-      })
-      setPlayerHud(initialPlayer)
-      // A repaired or fallback room couldn't be built exactly as asked — show the
-      // static, prompt-free notice. A clean `generated` room shows nothing.
-      if (shouldShowFallbackNotice(result.provenance)) setNotice(FALLBACK_NOTICE)
     })().catch(() => {
       if (version !== requestVersion.current) return
       logger.error('generated room source threw', { code: 'room-source-failed' })
       setFatalMessage(ROOM_UNAVAILABLE)
     })
+  }, [])
+
+  const handleGenerateAnyway = useCallback(() => {
+    confirmGrantedRef.current = true
+    const pending = pendingPromptRef.current
+    pendingPromptRef.current = null
+    if (pending !== null) handlePrompt(pending)
+  }, [handlePrompt])
+
+  const handleResetUsage = useCallback(() => {
+    usageCountRef.current = 0
+    setUsageCount(0)
+    confirmGrantedRef.current = false
+    pendingPromptRef.current = null
   }, [])
 
   const handleSave = useCallback(() => {
@@ -415,7 +476,16 @@ function App() {
           </button>
         </div>
       )}
-      <PromptBar onSubmit={handlePrompt} />
+      <PromptBar onSubmit={handlePrompt} disabled={inFlight} />
+      {guardEnabled && (
+        <UsageMeter
+          count={usageCount}
+          cap={guardCap}
+          status={usageStatus}
+          onGenerateAnyway={handleGenerateAnyway}
+          onReset={handleResetUsage}
+        />
+      )}
       <SaveLoadBar
         canSave={activePlay != null}
         hasSave={hasSave}

@@ -5,6 +5,7 @@ import {
   REAL_PROVIDER_BASE_URLS,
   DEFAULT_MAX_TOKENS,
   DEFAULT_TIMEOUT_MS,
+  DEFAULT_SESSION_CAP,
   type LlmRawEnv,
 } from './llmConfig'
 
@@ -106,6 +107,39 @@ describe('isRealProviderComplete', () => {
   it('is false when the model is missing', () => {
     const config = readLlmConfig({ VITE_AIGM_LLM_PROVIDER: 'openai', VITE_OPENAI_API_KEY: 'sk-openai' })
     expect(isRealProviderComplete(config)).toBe(false)
+  })
+})
+
+describe('readLlmConfig sessionCap parsing', () => {
+  it('defaults to DEFAULT_SESSION_CAP when unset', () => {
+    expect(readLlmConfig({}).sessionCap).toBe(DEFAULT_SESSION_CAP)
+    expect(readLlmConfig(complete).sessionCap).toBe(DEFAULT_SESSION_CAP)
+  })
+
+  it('parses a valid positive integer', () => {
+    expect(readLlmConfig({ VITE_AIGM_LLM_SESSION_CAP: '5' }).sessionCap).toBe(5)
+    expect(readLlmConfig({ VITE_AIGM_LLM_SESSION_CAP: '25' }).sessionCap).toBe(25)
+  })
+
+  it('falls back to default for zero', () => {
+    expect(readLlmConfig({ VITE_AIGM_LLM_SESSION_CAP: '0' }).sessionCap).toBe(DEFAULT_SESSION_CAP)
+  })
+
+  it('falls back to default for a negative value', () => {
+    expect(readLlmConfig({ VITE_AIGM_LLM_SESSION_CAP: '-3' }).sessionCap).toBe(DEFAULT_SESSION_CAP)
+  })
+
+  it('falls back to default for a non-numeric value', () => {
+    expect(readLlmConfig({ VITE_AIGM_LLM_SESSION_CAP: 'lots' }).sessionCap).toBe(DEFAULT_SESSION_CAP)
+    expect(readLlmConfig({ VITE_AIGM_LLM_SESSION_CAP: 'NaN' }).sessionCap).toBe(DEFAULT_SESSION_CAP)
+  })
+
+  it('falls back to default for whitespace-only value', () => {
+    expect(readLlmConfig({ VITE_AIGM_LLM_SESSION_CAP: '   ' }).sessionCap).toBe(DEFAULT_SESSION_CAP)
+  })
+
+  it('trims surrounding whitespace before parsing', () => {
+    expect(readLlmConfig({ VITE_AIGM_LLM_SESSION_CAP: '  7  ' }).sessionCap).toBe(7)
   })
 })
 
