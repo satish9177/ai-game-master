@@ -178,6 +178,28 @@ no memory integration, no backend/API/persistence changes, no `SaveGame` schema 
 dependency, and no DOM/component tests.** Journal title/entry text, ids, flag keys, item
 names/ids, status strings, room display names, and any narrative content are never logged.
 
+## Cost/Usage Guardrails v0 — shipped, browser
+
+A **local request-count safety guardrail** wraps the PromptBar prompt-generation path when a
+real provider is selected — counting real attempts against a configurable session cap, warning
+as the cap nears, and requiring an explicit **confirm-to-continue** at cap
+([ADR-0030](docs/architecture/decisions/ADR-0030-cost-usage-guardrails-v0.md)).
+
+| Module | Role |
+| --- | --- |
+| `domain/usage/usageGuard.ts` | Pure types (`UsageGuardConfig`, `UsageGuardState`, `UsageGuardStatus`) + four pure helpers (`initialUsageState`, `recordAttempt`, `resetUsage`, `evaluate`). No I/O, no logger, no React. Covered by pure Vitest; no DOM dependency. |
+| `renderer/ui/UsageMeter.tsx` | Presentational React overlay: props `{ count, cap, status, onGenerateAnyway, onReset }` in, DOM out. Returns `null` when `status === 'inert'`. `role="status"` + `aria-live="polite"`. No `three`, engine internals, `world-session`, or services. |
+| `app/llmConfig.ts` (extended) | `VITE_AIGM_LLM_SESSION_CAP` parsed via existing `parsePositiveInt`; `DEFAULT_SESSION_CAP = 10`. Surfaced as `llmConfig.sessionCap`. |
+| `App.tsx` wiring | `guardEnabled` (real provider selected) and `guardCap` are module-level constants. App holds `usageCountRef`/`usageCount` and `inFlightRef`/`inFlight` pairs. Count increments **before** `getRoom()` resolves so failures still count. In-flight lock passes `disabled={inFlight}` to `PromptBar`. At-cap gate stores the prompt until `handleGenerateAnyway` grants confirm. `UsageMeter` rendered only when `guardEnabled`. |
+
+**The guardrail is a local in-memory counter — never truth, never written back.** v0 adds **no
+token/cost metering, no provider wrapper change, no billing/payments/accounts/analytics, no
+`SaveGame`/`localStorage`/SQLite/backend usage state, no estimated cost display, no
+room-generation safety pipeline change, no new dependency, and no DOM/component tests.** Logs
+carry count/cap/status enum only — never keys, prompts, seeds, provider bodies, generated JSON,
+token counts, or PII. The fake provider path is completely inert: no count, no meter, no gate,
+no UI. Adjacent pregeneration is fake-only and uncounted.
+
 ## Current guardrails
 
 Do not add unless explicitly requested by the maintainer or by the approved implementation plan for the current feature:

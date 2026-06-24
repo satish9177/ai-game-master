@@ -634,6 +634,33 @@ added to `App`/`RoomViewer`. Journal title/entry text, ids, flag keys, item name
 strings, room display names, and narrative content are never logged — mirrors the
 ADR-0013/0014/0015/0026/0028 content-free log discipline.
 
+## 22. Usage guardrail ✅ v0 (browser)
+
+The local request-count safety guardrail applies only when a real provider is selected
+(`guardEnabled`). When the fake (default) provider is active the entire guard is inert; the
+fake-provider experience is completely unchanged
+([ADR-0030](./decisions/ADR-0030-cost-usage-guardrails-v0.md)).
+
+| Situation | Detection | Handling / result | Logging |
+| --- | --- | --- | --- |
+| Fake provider selected | `guardEnabled === false` (module-level; `provider !== 'fake'` at startup) | guard fully inert: no count, no `UsageMeter`, no `PromptBar` disable, no gate | — |
+| Real attempt counted | `handlePrompt`, before `getRoom()` resolves | incremented before the async call so `unavailable` / repaired / fallback outcomes all count; repair/fallback pipeline unchanged | `logger.info('usage attempt', { count, cap, status })` |
+| Approaching cap (`count === cap − 1`) | `evaluate(state, config)` → `'approaching'` | `UsageMeter` shows approaching warning copy; no gate; PromptBar remains enabled | — |
+| At cap (`count >= cap`) | `evaluate` → `'at-cap'`; `confirmGrantedRef.current === false` | prompt stored in `pendingPromptRef`; `handlePrompt` returns without firing a call; `UsageMeter` shows at-cap warning + "Generate anyway" confirm | — |
+| User confirms "Generate anyway" | `handleGenerateAnyway`: sets `confirmGrantedRef`, replays pending prompt | one further real attempt proceeds and still increments; confirm flag cleared before the call | `logger.info('usage attempt', …)` for the replayed call |
+| Double-click / second call in flight | `inFlightRef.current === true` at top of `handlePrompt` | early return; no second generation fired; independent of the cap | — |
+| In-flight lock not cleared on error | `finally` block in `handlePrompt` | `inFlightRef ← false`, `setInFlight(false)` in all code paths when `guardEnabled` | — |
+| Reset usage | `handleResetUsage` | `usageCountRef.current = 0`; `setUsageCount(0)`; clears `confirmGrantedRef` and `pendingPromptRef`; count resets in current App lifetime only | — |
+| Page reload | browser navigation | all guardrail state is in-memory and lost; count resets to 0 | — |
+
+- **No persistence.** Guardrail state lives only in `App` component memory. It is never written
+  to `localStorage`, `SaveGame`, SQLite, or any backend; it does not affect `WorldState` or the
+  event log; "session" here means App/page lifetime, not `WorldSession`.
+- **Not billing truth.** The count is a local safety counter — not authoritative about actual
+  provider calls, tokens, or cost.
+- **Known limitations.** No cross-session quota; no hosted enforcement; resets on reload; no
+  token-accurate cost; no estimated cost display; fake provider shows no meter.
+
 ---
 
 ## Summary
@@ -664,6 +691,7 @@ ADR-0013/0014/0015/0026/0028 content-free log discipline.
 | 19 | Browser session save/load | `SaveSlotStore` try/catch for `localStorage`; `loadSaveGame` integrity boundary; `restoreSession` typed results; `resolveRoom` total seam | corrupt/unsupported/mismatch → calm error, nothing restored; same session → calm notice; generated room → re-resolve + notice; unavailable/quota → calm error, play untouched | ✅ v0 browser |
 | 20 | Quest tracker display | `quest === null` guards render; `evaluateQuest` is pure/total/silent; anchor-room gate; defensive optional chaining on all condition reads | absent/null → tracker hidden; missing room/flag/visited → objective `false`; navigation immediately re-projects Obj 3; all idempotent; no write path | ✅ browser |
 | 21 | Consequence journal display | `journal === null` guards render; `projectJournal` is pure/total/silent via shared `evaluateCondition`; anchor-room gate; defensive optional chaining on all condition reads | absent/null → panel hidden; all conditions `false` → empty state "Nothing of consequence yet."; navigation re-projects safehouse entry immediately; all idempotent; no write path | ✅ browser |
+| 22 | Usage guardrail | `guardEnabled` (provider !== `'fake'`); `evaluate(state, config)` derives status per render; `inFlightRef` lock; `confirmGrantedRef` + `pendingPromptRef` for at-cap gate | fake → fully inert; real → count/cap/status drive `UsageMeter`; `at-cap` gates prompt until confirm; in-flight lock prevents double-click; never persisted; reset in-memory only | ✅ browser |
 
 The through-line: **validate at the boundary, degrade visibly and safely, log
 the detail, show the user calm.**

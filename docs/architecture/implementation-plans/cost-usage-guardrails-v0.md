@@ -1,7 +1,8 @@
 # Implementation Plan — `feature/cost-usage-guardrails-v0`
 
-> Status: **approved — pending implementation.** Design approved by the maintainer; source
-> not yet written; ADR-0030 is deferred to docs closeout after source review (§15).
+> Status: **implemented — closed.** Source implemented and reviewed; ADR-0030 written;
+> ARCHITECTURE, FAILURE-MODES (case 22), and AGENTS updated. See
+> [ADR-0030](../decisions/ADR-0030-cost-usage-guardrails-v0.md).
 >
 > Companion docs: [ARCHITECTURE](../ARCHITECTURE.md) · [BOUNDARIES](../BOUNDARIES.md) ·
 > [FAILURE-MODES](../FAILURE-MODES.md) · [CONVENTIONS](../CONVENTIONS.md). Direct
@@ -41,9 +42,9 @@ selected, the entire guard is **inert** — no count, no warning, no block, no U
 
 ## 1. Status
 
-**Approved — pending implementation.** No source written, no ADR created, nothing
-committed. ADR-0030 is written only during docs closeout after the source is reviewed
-(§12 slice 4, §15).
+**Implemented — closed.** All four source slices shipped and reviewed. ADR-0030 written;
+ARCHITECTURE, FAILURE-MODES (case 22), and AGENTS updated during docs closeout (§12 slice 4).
+See [ADR-0030](../decisions/ADR-0030-cost-usage-guardrails-v0.md).
 
 ## 2. Current repo facts (verified against source)
 
