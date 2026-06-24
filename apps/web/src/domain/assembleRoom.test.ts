@@ -414,6 +414,33 @@ describe('assembleRoom', () => {
     )
   })
 
+  it('out-of-bounds wall-light and unknown placeholder are normalized, stays "generated" (no notice)', () => {
+    // A torch and an unknown ("gargoyle") object, both far outside the room. The
+    // torch is nudged to a wall-side, the unknown is skipped + its placeholder
+    // anchor clamped inside. All benign → provenance stays 'generated', no notice.
+    const rawMixed = raw(
+      validSpec({
+        shell: { dimensions: { width: 18, depth: 18, height: 4 }, exits: [{ side: 'north', width: 3 }] },
+        spawn: { position: [0, 1.7, 5] },
+        objects: [
+          { type: 'torch', position: [0, 3, 0] }, // central light → wall-side
+          { type: 'gargoyle', position: [100, 0, -100] }, // unknown → skipped placeholder
+        ],
+      }),
+    )
+    const { room, diagnostics } = assembleRoom(rawMixed, fallback)
+    expect(diagnostics.provenance).toBe('generated')
+    expect(diagnostics.objectsRepaired).toBe(true)
+    expect(diagnostics.repairAttempted).toBe(false)
+    expect(diagnostics.failedStage).toBeUndefined()
+    expect(validateRoom(room).ok).toBe(true)
+    // The skipped placeholder anchor was clamped inside the visible floor.
+    expect(room.skipped).toHaveLength(1)
+    const placeholder = room.skipped[0]!.raw as { position: [number, number, number] }
+    expect(Math.abs(placeholder.position[0])).toBeLessThan(9)
+    expect(Math.abs(placeholder.position[2])).toBeLessThan(9)
+  })
+
   // --- generated-room spawn safe-area repair (Slice 4) ---
   //
   // Spawn repair is a benign normalization: the room stays provenance 'generated'

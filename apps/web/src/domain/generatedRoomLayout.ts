@@ -152,16 +152,115 @@ export function classifyObjectImportance(obj: RoomObject): ObjectImportance {
 }
 
 /**
- * Clamps each object's X/Z position into the playable floor area and caps the
- * total object count at GENERATED_ROOM.MAX_OBJECTS for generated rooms only.
+ * Extra clearance (m) added to every object footprint so the rendered mesh
+ * stays clear of the wall face, not flush against it.
+ */
+const FOOTPRINT_SAFETY = 0.15
+
+/** Half the XZ diagonal of a w×d box — the rotation-safe bounding radius. */
+function diagRadius(w: number, d: number): number {
+  return Math.hypot(w, d) / 2
+}
+
+/**
+ * Conservative XZ footprint radius (m) the renderer's built object occupies
+ * around its floor anchor, scaled by `obj.scale` and padded by FOOTPRINT_SAFETY.
  *
- * Returns the SAME object reference when no object needed repair (same-reference
+ * It is treated as a rotation-invariant circle (the largest XZ half-extent of
+ * the trusted builder's geometry) so the bound holds for ANY rotationY — the
+ * generated rotation is untrusted. This lets repair keep an object's whole
+ * footprint inside the playable floor, not just its center anchor, which is why
+ * generated props no longer render poking through the walls.
+ *
+ * Values mirror the trusted builders in renderer/engine/builders; they are
+ * intentionally generous (over- not under-estimating) since the cost of being
+ * wrong is only a slightly more inward nudge.
+ */
+export function objectFootprintRadius(obj: RoomObject): number {
+  return baseFootprint(obj) * obj.scale + FOOTPRINT_SAFETY
+}
+
+function baseFootprint(obj: RoomObject): number {
+  switch (obj.type) {
+    case 'pillar':
+      return obj.radius
+    case 'barrel':
+      return obj.radius * 1.06 // rim bands flare slightly past the body
+    case 'throne':
+      return 1.0 // 2 × 1.6 m base box → 1.0 m half-extent
+    case 'scroll':
+      return 0.3
+    case 'npc':
+      return 0.45
+    case 'zombie':
+      return 0.5
+    case 'torch':
+      return WALL_LIGHT_FOOTPRINT
+    case 'arch':
+      return (obj.width + 0.4) / 2 // lintel spans width + post(0.4)
+    case 'rug':
+      return diagRadius(obj.size[0], obj.size[1])
+    case 'prop':
+    case 'crate':
+    case 'debris':
+      return diagRadius(obj.size[0], obj.size[2])
+    case 'barricade':
+      return (obj.length / 2) * 1.04 // diagonal brace overruns the posts a touch
+    default:
+      return 0.5
+  }
+}
+
+/**
+ * Object types that read as wall-mounted lights. Their builders (e.g. the torch
+ * sconce) assume the anchor sits on a wall/pillar surface, so a generated light
+ * dropped in the middle of the floor looks wrong. Repair nudges these to a safe
+ * wall-side position. Only `torch` exists today; the set documents intent for
+ * future light types (candle/lantern would arrive here, not as magic strings).
+ */
+const WALL_LIGHT_TYPES = new Set<RoomObject['type']>(['torch'])
+
+/** Conservative XZ footprint radius (m) used for wall-light objects. */
+const WALL_LIGHT_FOOTPRINT = 0.7
+
+/**
+ * A wall-light already within this distance (m) of a playable edge is treated as
+ * wall-mounted and left in place; only lights generated farther in (central) are
+ * pushed out to a wall.
+ */
+const WALL_LIGHT_BAND = 1.5
+
+function isWallLight(obj: RoomObject): boolean {
+  return WALL_LIGHT_TYPES.has(obj.type)
+}
+
+/**
+ * Footprint radius (m) of the magenta placeholder cube the renderer draws for
+ * skipped/unknown objects (a 0.8 m box → 0.4 m half-extent), padded like any
+ * other footprint.
+ */
+const PLACEHOLDER_FOOTPRINT = 0.4 + FOOTPRINT_SAFETY
+
+/**
+ * Clamps each object so its full FOOTPRINT — not just its anchor — stays inside
+ * the playable floor, caps the total object count at GENERATED_ROOM.MAX_OBJECTS,
+ * nudges wall-light objects to a safe wall-side position, and clamps the skipped
+ * placeholder ("magenta cube") anchors into bounds too. Generated rooms only.
+ *
+ * Bounds are the playable floor (computePlayableBounds) shrunk by each object's
+ * own footprint radius, so a crate/barrel/debris/prop/torch/placeholder centered
+ * near the wall is moved inward far enough that the rendered mesh stays inside.
+ *
+ * Decorative clutter whose footprint cannot fit at all (footprint exceeds the
+ * available half-extent) is dropped; critical/structural objects are never
+ * dropped for fit — they are moved as far inside as possible (anchor toward the
+ * center). The count cap then drops least-important first
+ * (decorative → structural → critical); critical objects are never dropped.
+ *
+ * Returns the SAME object reference when nothing needed repair (same-reference
  * optimization), so callers can use a reference check (`fixed !== room`) to
- * detect whether any change was applied. Never mutates the input room or any
- * of its objects.
- *
- * Cap drop order (least important first): decorative → structural → critical.
- * Critical objects are never dropped.
+ * detect whether any change was applied. Never mutates the input room, its
+ * objects, or its skipped entries.
  *
  * This is a benign normalization — like clampGeneratedShell it keeps provenance
  * 'generated' and must NOT trigger the host's repair/fallback notice.
@@ -170,23 +269,130 @@ export function classifyObjectImportance(obj: RoomObject): ObjectImportance {
 export function repairGeneratedObjects(room: LoadedRoom): LoadedRoom {
   const bounds = computePlayableBounds(room.shell.dimensions, room.shell.wallThickness)
 
-  // Step 1: clamp each object's X/Z position into playable bounds.
-  let anyMoved = false
-  const positioned = room.objects.map((obj) => {
+  // Step 1: place each object so its footprint stays inside the playable floor.
+  // Decorative objects that cannot fit are dropped; others are moved inside.
+  let changed = false
+  const placed: RoomObject[] = []
+  for (const obj of room.objects) {
+    const fp = objectFootprintRadius(obj)
+    const availX = bounds.halfX - fp
+    const availZ = bounds.halfZ - fp
+
+    if ((availX < 0 || availZ < 0) && classifyObjectImportance(obj) === 'decorative') {
+      changed = true // footprint cannot fit and it is only clutter → drop it
+      continue
+    }
+
+    const safeX = Math.max(0, availX)
+    const safeZ = Math.max(0, availZ)
     const [x, y, z] = obj.position
-    const cx = halfClamp(x, bounds.halfX)
-    const cz = halfClamp(z, bounds.halfZ)
-    if (cx === x && cz === z) return obj
-    anyMoved = true
-    return { ...obj, position: [cx, y, cz] as [number, number, number] } as RoomObject
-  })
+    const [nx, nz] = placeObjectXZ(obj, safeX, safeZ)
+    if (nx === x && nz === z) {
+      placed.push(obj)
+    } else {
+      placed.push({ ...obj, position: [nx, y, nz] as [number, number, number] } as RoomObject)
+      changed = true
+    }
+  }
 
   // Step 2: cap total object count; drop least-important objects first.
-  const needsCap = positioned.length > GENERATED_ROOM.MAX_OBJECTS
-  const final = needsCap ? dropLeastImportant(positioned, GENERATED_ROOM.MAX_OBJECTS) : positioned
+  let final = placed
+  if (final.length > GENERATED_ROOM.MAX_OBJECTS) {
+    final = dropLeastImportant(final, GENERATED_ROOM.MAX_OBJECTS)
+    changed = true
+  }
 
-  if (!anyMoved && !needsCap) return room
-  return { ...room, objects: final }
+  // Step 3: clamp skipped placeholder anchors into bounds. The renderer draws
+  // these from room.skipped, so they otherwise bypass every generated-room
+  // normalizer and can render outside the visible floor as magenta cubes.
+  const skipped = clampSkippedPlaceholders(room.skipped, bounds)
+  if (skipped !== room.skipped) changed = true
+
+  if (!changed) return room
+  return { ...room, objects: final, skipped }
+}
+
+/**
+ * Computes the repaired [x, z] anchor for an object given the footprint-adjusted
+ * available half-extents. Wall-light objects are nudged to a wall-side position;
+ * everything else is clamped into the available area. Y is handled by the caller.
+ */
+function placeObjectXZ(
+  obj: RoomObject,
+  availX: number,
+  availZ: number,
+): [number, number] {
+  const [x, , z] = obj.position
+  if (isWallLight(obj)) return wallSidePosition(x, z, availX, availZ)
+  return [halfClamp(x, availX), halfClamp(z, availZ)]
+}
+
+/**
+ * Returns a wall-side [x, z] for a wall-light anchor. First clamps into the
+ * available area; if the clamped anchor is already hugging a wall (within
+ * WALL_LIGHT_BAND of an edge) it is left there, otherwise the nearer axis is
+ * pushed out to its wall edge so a centrally-generated light reads as mounted.
+ * Deterministic; ties and a dead-centered anchor resolve to the +X (east) wall.
+ */
+function wallSidePosition(
+  x: number,
+  z: number,
+  availX: number,
+  availZ: number,
+): [number, number] {
+  const cx = halfClamp(x, availX)
+  const cz = halfClamp(z, availZ)
+  if (availX <= 0 || availZ <= 0) return [cx, cz]
+
+  const gapX = availX - Math.abs(cx) // distance to the nearest east/west edge
+  const gapZ = availZ - Math.abs(cz) // distance to the nearest north/south edge
+  if (gapX <= WALL_LIGHT_BAND || gapZ <= WALL_LIGHT_BAND) return [cx, cz]
+
+  if (gapX <= gapZ) return [cx < 0 ? -availX : availX, cz]
+  return [cx, cz < 0 ? -availZ : availZ]
+}
+
+/**
+ * Clamps the X/Z anchor of each skipped placeholder into a conservative playable
+ * area (using the magenta placeholder cube footprint). Only the `position` of
+ * the raw value is rewritten — no other raw content is read or surfaced — so the
+ * placeholder still renders, just inside the room. Returns the SAME array
+ * reference when nothing needed clamping. Never mutates the input entries.
+ */
+function clampSkippedPlaceholders(
+  skipped: LoadedRoom['skipped'],
+  bounds: PlayableBounds,
+): LoadedRoom['skipped'] {
+  const availX = Math.max(0, bounds.halfX - PLACEHOLDER_FOOTPRINT)
+  const availZ = Math.max(0, bounds.halfZ - PLACEHOLDER_FOOTPRINT)
+  let changed = false
+  const out = skipped.map((item) => {
+    const pos = readRawPosition(item.raw)
+    if (pos === null) return item // no usable anchor → renderer draws it at origin
+    const [x, y, z] = pos
+    const cx = halfClamp(x, availX)
+    const cz = halfClamp(z, availZ)
+    if (cx === x && cz === z) return item
+    changed = true
+    return { ...item, raw: { ...(item.raw as object), position: [cx, y, cz] } }
+  })
+  return changed ? out : skipped
+}
+
+/**
+ * Reads a finite [x, y, z] anchor from a skipped object's raw value, mirroring
+ * the renderer's readPosition. Returns null when there is no length-3 numeric
+ * `position` (the renderer falls back to the origin in that case).
+ */
+function readRawPosition(raw: unknown): [number, number, number] | null {
+  if (raw && typeof raw === 'object' && 'position' in raw) {
+    const p = (raw as { position: unknown }).position
+    if (Array.isArray(p) && p.length === 3 && p.every((n) => typeof n === 'number')) {
+      const [x, y, z] = p as [number, number, number]
+      return [x, y, z]
+    }
+  }
+  return null
 }
 
 /** Clamp `value` to [–max, +max]. Returns 0 for degenerate (non-positive) max. */

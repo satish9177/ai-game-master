@@ -63,8 +63,9 @@ export type RoomDiagnostics = {
    */
   sizeRepaired: boolean
   /**
-   * Whether any generated room object's position was clamped into the playable
-   * floor area, or the object list was trimmed to the generated-room object cap.
+   * Whether any generated room object was normalized for layout: a footprint-aware
+   * clamp into the playable floor, a wall-light nudge to a wall-side, a skipped
+   * placeholder anchor clamp, or a trim to the generated-room object cap.
    * This is a benign normalization, NOT a playability repair: object repair keeps
    * provenance `generated` and must NOT trigger the host's repair/fallback notice.
    * Always false for a fallback room (the authored fallback objects are untouched).

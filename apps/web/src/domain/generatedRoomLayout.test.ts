@@ -8,6 +8,7 @@ import {
   isInsidePlayableBounds,
   isSpawnSafeAreaOverlap,
   classifyObjectImportance,
+  objectFootprintRadius,
   repairGeneratedObjects,
   repairGeneratedSpawn,
   repairGeneratedExits,
@@ -375,12 +376,14 @@ describe('repairGeneratedObjects', () => {
     expect(repairGeneratedObjects(room)).toBe(room)
   })
 
-  it('object outside room is clamped to the playable boundary', () => {
+  it('object outside room is clamped so its footprint stays inside the playable area', () => {
     const room = makeRoom([{ type: 'pillar', position: [100, 0, 0] }])
     const fixed = repairGeneratedObjects(room)
     expect(fixed).not.toBe(room)
-    const [x, y, z] = fixed.objects[0]!.position
-    expect(x).toBeCloseTo(STD_BOUNDS.halfX)
+    const pillar = fixed.objects[0]!
+    const [x, y, z] = pillar.position
+    // Clamped to the playable bound shrunk by the pillar's own footprint radius.
+    expect(x).toBeCloseTo(STD_BOUNDS.halfX - objectFootprintRadius(pillar))
     expect(y).toBe(0) // y unchanged
     expect(z).toBe(0) // z was already 0
   })
@@ -388,21 +391,38 @@ describe('repairGeneratedObjects', () => {
   it('object outside on only the Z axis is clamped on Z only', () => {
     const room = makeRoom([{ type: 'crate', position: [3, 0, -50] }])
     const fixed = repairGeneratedObjects(room)
-    const [x, , z] = fixed.objects[0]!.position
+    const crate = fixed.objects[0]!
+    const [x, , z] = crate.position
     expect(x).toBe(3) // x already in bounds, unchanged
-    expect(z).toBeCloseTo(-STD_BOUNDS.halfZ)
+    expect(z).toBeCloseTo(-(STD_BOUNDS.halfZ - objectFootprintRadius(crate)))
   })
 
-  it('object exactly at the playable boundary stays unchanged (same object reference)', () => {
-    const room = makeRoom([{ type: 'pillar', position: [STD_BOUNDS.halfX, 0, 0] }])
+  it('object exactly at the footprint-adjusted boundary stays unchanged (same reference)', () => {
+    const fp = objectFootprintRadius(loadSingleObject({ type: 'pillar', position: [0, 0, 0] }))
+    const room = makeRoom([{ type: 'pillar', position: [STD_BOUNDS.halfX - fp, 0, 0] }])
     const fixed = repairGeneratedObjects(room)
     expect(fixed).toBe(room)
     expect(fixed.objects[0]).toBe(room.objects[0])
   })
 
-  it('object near wall (just inside boundary) stays unchanged', () => {
-    const room = makeRoom([{ type: 'pillar', position: [STD_BOUNDS.halfX - 0.01, 0, 0] }])
+  it('object well inside the footprint-adjusted boundary stays unchanged', () => {
+    const fp = objectFootprintRadius(loadSingleObject({ type: 'pillar', position: [0, 0, 0] }))
+    const room = makeRoom([{ type: 'pillar', position: [STD_BOUNDS.halfX - fp - 0.5, 0, 0] }])
     expect(repairGeneratedObjects(room)).toBe(room)
+  })
+
+  it('object whose anchor is inside bounds but whose footprint pokes out is pulled inward', () => {
+    // Crate anchor at the raw playable boundary: the center is "inside" by the old
+    // center-only rule, but its box footprint would poke through the wall.
+    const room = makeRoom([{ type: 'crate', position: [STD_BOUNDS.halfX, 0, 0] }])
+    const fixed = repairGeneratedObjects(room)
+    expect(fixed).not.toBe(room)
+    const crate = fixed.objects[0]!
+    expect(crate.position[0]).toBeCloseTo(STD_BOUNDS.halfX - objectFootprintRadius(crate))
+    // The whole footprint now sits within the playable area.
+    expect(Math.abs(crate.position[0]) + objectFootprintRadius(crate)).toBeLessThanOrEqual(
+      STD_BOUNDS.halfX + 1e-9,
+    )
   })
 
   it('object count is capped at GENERATED_ROOM.MAX_OBJECTS (30)', () => {
@@ -448,6 +468,152 @@ describe('repairGeneratedObjects', () => {
 
   it('is deterministic', () => {
     const room = makeRoom([{ type: 'pillar', position: [100, 0, -50] }])
+    expect(repairGeneratedObjects(room)).toEqual(repairGeneratedObjects(room))
+  })
+})
+
+describe('repairGeneratedObjects — footprint, wall-lights, and placeholders (regression)', () => {
+  const STD_BOUNDS = computePlayableBounds({ width: 18, depth: 18 }, 0.3)
+  const RAW_HALF = 9 // raw room half-extent for an 18 × 18 room
+
+  /** Assert an object's whole footprint sits inside the conservative playable floor. */
+  function expectFootprintInside(obj: ReturnType<typeof loadSingleObject>) {
+    const fp = objectFootprintRadius(obj)
+    const [x, , z] = obj.position
+    expect(Math.abs(x) + fp).toBeLessThanOrEqual(STD_BOUNDS.halfX + 1e-9)
+    expect(Math.abs(z) + fp).toBeLessThanOrEqual(STD_BOUNDS.halfZ + 1e-9)
+    // And, more simply, well within the visible floor (raw half-extent).
+    expect(Math.abs(x)).toBeLessThan(RAW_HALF)
+    expect(Math.abs(z)).toBeLessThan(RAW_HALF)
+  }
+
+  it('outside crate/barrel/debris placeholders all land with footprints inside the floor', () => {
+    const room = makeRoom([
+      { type: 'crate', position: [100, 0, 0] },
+      { type: 'barrel', position: [0, 0, -100] },
+      { type: 'debris', position: [50, 0, 50] },
+      { type: 'prop', position: [-80, 0, 12] },
+    ])
+    const fixed = repairGeneratedObjects(room)
+    expect(fixed.objects).toHaveLength(4)
+    for (const obj of fixed.objects) expectFootprintInside(obj)
+  })
+
+  it('a footprint-sized object at the raw playable boundary is nudged fully inside', () => {
+    // A 2 × 2 debris pile centered exactly at the playable boundary would render
+    // poking through the wall under the old center-only clamp.
+    const room = makeRoom([{ type: 'debris', position: [STD_BOUNDS.halfX, 0, 0], size: [2, 0.8, 2] }])
+    const fixed = repairGeneratedObjects(room)
+    expect(fixed).not.toBe(room)
+    expectFootprintInside(fixed.objects[0]!)
+  })
+
+  it('an unknown/magenta placeholder object outside the room is clamped inside (treated as skipped)', () => {
+    // Unknown type → loader skips it; the renderer draws it as a magenta cube at
+    // its raw position. Repair must clamp that raw anchor inside the floor.
+    const room = makeRoom([{ type: 'gargoyle', position: [100, 0, -100] }])
+    expect(room.objects).toHaveLength(0)
+    expect(room.skipped).toHaveLength(1)
+
+    const fixed = repairGeneratedObjects(room)
+    expect(fixed).not.toBe(room)
+    expect(fixed.skipped).toHaveLength(1)
+    const raw = fixed.skipped[0]!.raw as { position: [number, number, number] }
+    expect(Math.abs(raw.position[0])).toBeLessThanOrEqual(STD_BOUNDS.halfX)
+    expect(Math.abs(raw.position[2])).toBeLessThanOrEqual(STD_BOUNDS.halfZ)
+    expect(Math.abs(raw.position[0])).toBeLessThan(RAW_HALF)
+    expect(Math.abs(raw.position[2])).toBeLessThan(RAW_HALF)
+  })
+
+  it('a skipped placeholder already inside the floor is left untouched (same reference)', () => {
+    const room = makeRoom([{ type: 'gargoyle', position: [2, 0, -1] }])
+    const fixed = repairGeneratedObjects(room)
+    expect(fixed).toBe(room)
+  })
+
+  it('excessive decorative objects whose footprint cannot fit are dropped', () => {
+    // A 40 × 40 rug cannot fit in any contract room → its footprint never fits, so
+    // this decorative object is dropped rather than rendered bursting through walls.
+    const room = makeRoom([
+      { type: 'rug', position: [0, 0.01, 0], size: [40, 40] },
+      { type: 'pillar', position: [2, 0, -2] }, // a normal object survives
+    ])
+    const fixed = repairGeneratedObjects(room)
+    expect(fixed.objects.map((o) => o.type)).toEqual(['pillar'])
+  })
+
+  it('a critical (interactable) object outside the room is moved inside, never dropped', () => {
+    const room = makeRoom([
+      {
+        type: 'crate',
+        position: [100, 0, 100],
+        interaction: { key: 'E', prompt: 'Open crate', body: 'Loot.' },
+      },
+    ])
+    const fixed = repairGeneratedObjects(room)
+    const crate = fixed.objects.find((o) => o.type === 'crate')
+    expect(crate).toBeDefined()
+    expect(classifyObjectImportance(crate!)).toBe('critical')
+    expectFootprintInside(crate!)
+  })
+
+  it('a wall-light generated in the center is nudged out to a wall-side edge', () => {
+    const room = makeRoom([{ type: 'torch', position: [0, 3, 0] }])
+    const fixed = repairGeneratedObjects(room)
+    expect(fixed).not.toBe(room)
+    const torch = fixed.objects[0]!
+    const fp = objectFootprintRadius(torch)
+    const [x, y, z] = torch.position
+    expect(y).toBe(3) // mount height preserved
+    // Pushed out to a wall edge on one axis (footprint-adjusted), inside on the other.
+    const onXWall = Math.abs(Math.abs(x) - (STD_BOUNDS.halfX - fp)) < 1e-9
+    const onZWall = Math.abs(Math.abs(z) - (STD_BOUNDS.halfZ - fp)) < 1e-9
+    expect(onXWall || onZWall).toBe(true)
+    expectFootprintInside(torch)
+  })
+
+  it('a wall-light generated outside the room is clamped and snapped to a wall-side', () => {
+    const room = makeRoom([{ type: 'torch', position: [100, 3, 0] }])
+    const fixed = repairGeneratedObjects(room)
+    const torch = fixed.objects[0]!
+    expectFootprintInside(torch)
+  })
+
+  it('a wall-light already near a wall is left in place (not re-snapped)', () => {
+    // Torch already hugging the east wall, inside the footprint-adjusted bound.
+    const fp = objectFootprintRadius(loadSingleObject({ type: 'torch', position: [0, 3, 0] }))
+    const room = makeRoom([{ type: 'torch', position: [STD_BOUNDS.halfX - fp, 3, 1] }])
+    expect(repairGeneratedObjects(room)).toBe(room)
+  })
+
+  it('does not mutate the input room, its objects, or its skipped entries', () => {
+    const room = makeRoom([
+      { type: 'crate', position: [100, 0, 0] },
+      { type: 'gargoyle', position: [100, 0, -100] },
+    ])
+    const objectsBefore = JSON.parse(JSON.stringify(room.objects))
+    const skippedBefore = JSON.parse(JSON.stringify(room.skipped))
+    repairGeneratedObjects(room)
+    expect(room.objects).toEqual(objectsBefore)
+    expect(room.skipped).toEqual(skippedBefore)
+  })
+
+  it('repair (objects + wall-lights + placeholders) keeps the room valid with zero fatals', () => {
+    const room = makeRoom([
+      { type: 'crate', position: [100, 0, 0] },
+      { type: 'torch', position: [0, 3, 0] },
+      { type: 'gargoyle', position: [-100, 0, 100] },
+    ])
+    const fixed = repairGeneratedObjects(room)
+    expect(validateRoom(fixed).ok).toBe(true)
+  })
+
+  it('is deterministic across objects, wall-lights, and placeholders', () => {
+    const room = makeRoom([
+      { type: 'debris', position: [50, 0, -50] },
+      { type: 'torch', position: [0, 3, 0] },
+      { type: 'gargoyle', position: [100, 0, 100] },
+    ])
     expect(repairGeneratedObjects(room)).toEqual(repairGeneratedObjects(room))
   })
 })
