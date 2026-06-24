@@ -137,6 +137,26 @@ memory/NPC integration, no LLM replay, no `RoomViewer` change, and no new depend
 Logs never include SaveGame JSON, seed name, event payloads, item names/ids, room names,
 dialogue, prompt text, or any narrative/PII.
 
+## Demo Quest Loop v0 — shipped, browser
+
+A **deterministic authored demo quest** ("The Steward's Toll") surfaces as a **read-only
+quest tracker** overlay — a pure projection of authoritative `WorldState` for the authored
+example world session ([ADR-0028](docs/architecture/decisions/ADR-0028-demo-quest-loop-v0.md)).
+
+| Module | Role |
+| --- | --- |
+| `domain/quests/questSpec.ts` | `QuestSpec`/`QuestSpecSchema` (zod-validated authored data; closed condition vocabulary: `room-flag`, `room-visited`, `has-item`, `has-status`). Imports only `zod`; exports no command/event-producing function. |
+| `domain/quests/evaluateQuest.ts` | Pure `evaluateQuest(spec, state) → QuestView`. Total, deterministic, no I/O; reads defensively (optional chaining); missing rooms/flags/visited → `false`, never throws. |
+| `domain/examples/demoQuest.ts` | Hand-authored `demoQuestSpec` literal: "The Steward's Toll", three objectives tied to existing `throne-room` flags (`interaction:offering-coffer`, `encounter:malik-encounter`) and `ruined-safehouse` visited. |
+| `renderer/ui/QuestTracker.tsx` | Presentational React: `{ view: QuestView }` in, DOM out. No `three`, engine internals, `world-session`, or services. `pointer-events:none`; `role="status"` + `aria-live="polite"`. |
+| `App.tsx` wiring | Owns `quest: QuestView | null`; attaches `demoQuestSpec` only for the authored example bootstrap and for anchor-gated restores (`'throne-room' in state.roomStates`); re-projects via `refreshDerivedViews(state)` at all four state points (bootstrap, `onWorldStateChange`, `handleNavigate` `navigated`, load); renders `<QuestTracker>` as an App-level overlay. |
+
+**The quest tracker is a read-only lens — never truth, never written back.** v0 adds
+**no quest engine, no new `WorldEvent` or `WorldCommand`, no reducer change, no authored-room
+edit, no LLM quest generation, no backend/memory/persistence wiring, no new dependency,
+and no DOM/component tests.** Quest/objective text, ids, flag keys, item names/ids, status
+strings, and any narrative content are never logged.
+
 ## Current guardrails
 
 Do not add unless explicitly requested by the maintainer or by the approved implementation plan for the current feature:

@@ -586,6 +586,30 @@ is read on load; the slot wrapper metadata is display-only and never trusted
   backend/cloud sync; generated room content is not byte-restored; only authoritative
   state/event log is restored faithfully.
 
+## 20. Quest tracker display ✅ v0 (browser)
+
+The read-only `QuestTracker` overlay reflects the `QuestView` projected by the pure
+`evaluateQuest` function from authoritative `WorldState`. Its absence, stale state, or
+incomplete objectives never block play; it has no write path and cannot corrupt truth
+([ADR-0028](./decisions/ADR-0028-demo-quest-loop-v0.md)).
+
+| Situation | Detection | Handling / result | Logging |
+| --- | --- | --- | --- |
+| No active session / spec not yet attached | `quest === null` in `App` | `QuestTracker` not rendered; no crash | — |
+| Prompt-generated session | no `QuestSpec` attached (anchor-room gate: `'throne-room' not in state.roomStates`) | tracker not rendered; never wrong | — |
+| Missing room / flag / visited | defensive optional chaining in `evaluateQuest` | condition evaluates `false`; quest stays `active`; no throw | — |
+| Player has not yet acted | conditions read `false` | objectives show incomplete; quest stays `active` | — |
+| Objective 1 done, coin spent via `negotiate` | Obj 1 gates on permanent pickup flag, not held inventory | Objective 1 stays `done`; flag is permanent | — |
+| Navigation to safehouse (Objective 3) | `App.handleNavigate` calls `refreshDerivedViews(result.state)` on `navigated` | Objective 3 flips `done` immediately; if re-projection omitted, next resolve refreshes it — never wrong, only lagged | — |
+| All objectives done (quest `complete`) | `status: 'complete'` in `QuestView` | tracker shows "Complete" state; play continues normally, no gate | — |
+| Already-done objective re-triggered | re-project is idempotent; `already-resolved` carries `state` | objective stays `done`; no state change | — |
+| Loaded mid-quest | `refreshDerivedViews(restoredState)` on load | exact mid-quest progress; no special handling | — |
+
+The tracker is read-only with no append path, so no displayed quest state can corrupt truth.
+`evaluateQuest` is pure and silent; `QuestTracker` is presentational. No new log lines were
+added to `App`/`RoomViewer`. Quest/objective text, ids, flag keys, item names/ids, status
+strings, room display names, and narrative content are never logged.
+
 ---
 
 ## Summary
@@ -614,6 +638,7 @@ is read on load; the slot wrapper metadata is display-only and never trusted
 | 17 | Room memory persistence | write firewall + scoped read firewall + FK/UNIQUE/no-update trigger (no FK to `rooms`); read-boundary re-validate + JSON-scope re-assert | rejected/failed/empty-recall typed results; corrupt or scope-divergent row skipped; no path to truth; `roomStates` unchanged | ✅ headless |
 | 18 | Player HUD display | `playerHud === null` guards render; `projectPlayerHud` is pure/silent; `onWorldStateChange` fires only on `applied`/`already-resolved` variants carrying `state` | HUD absent until seeded; empty inventory/status degrade gracefully; health `0/max` renders empty bar; persists across navigation; no write path | ✅ browser |
 | 19 | Browser session save/load | `SaveSlotStore` try/catch for `localStorage`; `loadSaveGame` integrity boundary; `restoreSession` typed results; `resolveRoom` total seam | corrupt/unsupported/mismatch → calm error, nothing restored; same session → calm notice; generated room → re-resolve + notice; unavailable/quota → calm error, play untouched | ✅ v0 browser |
+| 20 | Quest tracker display | `quest === null` guards render; `evaluateQuest` is pure/total/silent; anchor-room gate; defensive optional chaining on all condition reads | absent/null → tracker hidden; missing room/flag/visited → objective `false`; navigation immediately re-projects Obj 3; all idempotent; no write path | ✅ browser |
 
 The through-line: **validate at the boundary, degrade visibly and safely, log
 the detail, show the user calm.**
