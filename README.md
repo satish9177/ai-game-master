@@ -1,14 +1,16 @@
-# AI Game Master — Renderer Foundation v0
+# AI Game Master
 
-The first slice of the AI Game Master project. It proves that a **hardcoded
-RoomSpec JSON** can be turned into a **walkable, low-poly 3D room** rendered
-entirely by **trusted Three.js code** — with no AI, no backend, and no
-arbitrary code execution anywhere in the pipeline.
+A browser-based controlled 3D / isometric solo RPG engine. The world is described
+by validated, data-only **RoomSpec** JSON and rendered entirely by trusted,
+hand-written **Three.js** code — the AI (real or fake) emits only schema-validated
+data that flows through a fixed safety pipeline before anything reaches the
+renderer.
 
-The demo room is a throne room: floor and walls with a north exit, a throne,
-pillars, a rug, an arch, wall torches (real point lights), an NPC (Malik), and a
-readable scroll. You can walk around, look with the mouse, and interact with the
-NPC and the scroll.
+A working demo ships immediately: an authored two-room world with a live quest,
+a consequence journal, a player HUD, and browser save/load. Generation is
+**offline and deterministic by default** — no API key or network needed. An
+optional dev-only real LLM provider (OpenAI / DeepSeek, bring-your-own-key) can
+generate rooms from a text prompt.
 
 ## Architecture & engineering standards
 
@@ -17,27 +19,16 @@ Start with **[AGENTS.md](./AGENTS.md)** (rules for contributors and AI coding
 agents), then the architecture docs in
 **[`docs/architecture/`](./docs/architecture/ARCHITECTURE.md)**:
 
-- [ARCHITECTURE.md](./docs/architecture/ARCHITECTURE.md) — layers, the data-only
-  RoomSpec → trusted-renderer trust boundary, and future plug-in points.
+- [ARCHITECTURE.md](./docs/architecture/ARCHITECTURE.md) — layers, feature status,
+  the data-only RoomSpec → trusted-renderer trust boundary, and future plug-in
+  points.
 - [BOUNDARIES.md](./docs/architecture/BOUNDARIES.md) — allowed/forbidden imports.
-- [CONVENTIONS.md](./docs/architecture/CONVENTIONS.md) — coordinates & RoomSpec authoring.
-- [FAILURE-MODES.md](./docs/architecture/FAILURE-MODES.md) — failure detection & handling.
-- [decisions/](./docs/architecture/decisions/) — architecture decision records (ADRs).
-
-## Goal of v0
-
-Establish the **data → trusted renderer** boundary and the lifecycle discipline
-that everything later depends on:
-
-- A room is described by **data only** (`RoomSpec`). It is never executed.
-- The browser only ever runs **trusted, hand-written renderer code**.
-- Unknown / malformed objects must **degrade gracefully**, never crash.
-- The engine must **fully tear down** (canvas, WebGL context, listeners, GPU
-  memory) on unmount, so repeated mounts leak nothing.
-
-This is deliberately the *plumbing* slice. AI-driven room generation is a later
-concern; v0 only proves the renderer can be trusted with whatever data it's
-handed.
+- [CONVENTIONS.md](./docs/architecture/CONVENTIONS.md) — coordinates & RoomSpec
+  authoring.
+- [FAILURE-MODES.md](./docs/architecture/FAILURE-MODES.md) — failure detection &
+  handling.
+- [decisions/](./docs/architecture/decisions/) — architecture decision records
+  (ADRs).
 
 ## How to run
 
@@ -50,102 +41,112 @@ npm run dev      # start the Vite dev server (prints a localhost URL)
 npm run build    # type-check (tsc -b) + production build
 ```
 
-Open the printed URL (e.g. http://localhost:5173) and you'll spawn near the
-south wall facing the throne.
+Open the printed URL (e.g. `http://localhost:5173`). The authored demo loads
+immediately — no API key or network needed.
 
 > Stack: React 19 + TypeScript + Vite, vanilla Three.js (not react-three-fiber),
-> zod for RoomSpec validation.
+> zod for RoomSpec validation. Node.js + SQLite power a headless backend; browser
+> gameplay uses in-memory adapters.
+
+## First-run experience
+
+On first load you'll see an authored throne room in an isometric 3D view. The
+following overlays are visible immediately:
+
+- **Status HUD** — player health bar, inventory list, and status chips.
+- **Quest tracker** — "The Steward's Toll" with three authored objectives that
+  check off live as you play.
+- **Journal** (collapsible) — six authored consequence entries that unlock as you
+  explore and make choices.
+- **Save / Load bar** — save your session to `localStorage` and resume it after a
+  page reload.
+- **Prompt bar** — type a scene description and hit Generate to build a new room
+  (offline by default; see Generation modes below).
+
+## Try the demo in 60 seconds
+
+1. **Move** with WASD; the isometric camera follows.
+2. **Walk near the throne** and press **E** to offer the tribute coin (quest
+   objective 1 — watch the tracker).
+3. **Walk near Malik** (the steward) and press **F** to trigger the encounter;
+   pick a choice (quest objective 2).
+4. **Walk into the north arch** to enter the ruined safehouse (quest objective 3
+   flips done immediately on entry).
+5. Watch the **journal** entries unlock as you hit each condition.
+6. Press **Save**, reload the page, then **Continue** — your quest progress and
+   inventory are restored.
+7. **Type a scene** in the prompt bar (e.g. "a flooded cellar with a locked
+   chest") and hit **Generate** — a room is built offline from the description,
+   deterministically, with no spend.
+8. *(Optional)* Set up a real API key to try live LLM generation — see
+   **Generation modes** below.
 
 ## Controls
 
 | Input | Action |
 | --- | --- |
-| **W / A / S / D** | Move on the floor plane (delta-time scaled) |
-| **Mouse drag** | Look around (drag-look — **no** pointer lock) |
-| **E** | Interact when the prompt shows "Press E …" (the scroll) |
-| **F** | Interact when the prompt shows "Press F …" (Malik) |
-| **Esc** / Close button / backdrop | Close the dialogue panel |
+| **W / A / S / D** | Move on the floor plane (screen-relative; delta-time scaled) |
+| **E** | Interact when the prompt shows "Press E …" |
+| **F** | Interact when the prompt shows "Press F …" |
+| **Walk into an arch** | Navigate to the next room |
+| **Esc** / Close button / backdrop | Close the open dialogue or encounter panel |
 
-While a dialogue panel is open, movement and drag-look are disabled and the
-E/F keys won't re-open a panel.
+Movement is screen-relative: W moves away from the camera (into the scene), S
+moves toward it, A/D strafe left/right. Diagonals are normalized. Movement and
+E/F are disabled while a panel is open.
 
-## RoomSpec conventions
+## Generation modes
 
-All rooms use one coordinate convention:
+### Offline demo — no key required (default)
 
-- **Y-up**, all units in **meters**.
-- **−Z is north** (so +Z is south, where the player spawns).
-- **rotationY / yaw are in degrees.** Forward = `(sin yaw, cos yaw)`, so
-  `yaw = 180` faces north (−Z).
-- Ground-placed objects treat their `position` as the **base on the floor**
-  (`y = 0`), not their center. Wall/ceiling-mounted props (e.g. torches) use
-  `position` as the mount point.
+By default the app uses a **deterministic fake generator**: your prompt is seeded
+into a PRNG that produces a valid `RoomSpec` with no API key, no network call, and
+no cost. The same prompt always produces the same room.
 
-## Data-only RoomSpec / trusted-renderer boundary
+### Optional dev-only real provider (BYOK)
 
-`RoomSpec` is **pure data** (see `apps/web/src/domain/`). It is validated with
-zod and mapped to trusted builders by its `type` string. Nothing in a RoomSpec
-is ever evaluated as code — no functions, no scripts, no raw JS.
+You can switch to a real LLM provider (OpenAI or DeepSeek) for live generation:
 
-Loading is intentionally split:
+1. Copy `apps/web/.env.example` → `apps/web/.env.local`.
+2. Set `VITE_AIGM_LLM_PROVIDER`, the matching API key, and a model id.
+3. Restart `npm run dev`.
 
-- **`loadRoomSpec(raw)`** validates the room *envelope* strictly (dimensions,
-  spawn, lighting). A broken envelope is a hard error.
-- Each entry in `objects` is validated **leniently**, one at a time. A valid
-  object is kept; an unknown or malformed one is recorded in `skipped` /
-  `warnings` instead of rejecting the whole room.
+See `apps/web/.env.example` for all options and the safety caveat.
 
-So one bad object can never take down the room, and the room can never run code.
+**Browser-key caveat:** Vite inlines `VITE_*` values into the built browser
+bundle. A real API key compiled into a production build is exposed to every
+visitor. Use real keys only with `npm run dev` in a gitignored `.env.local` file.
+Never `npm run build` and deploy a bundle compiled with a real key. Hosted
+production must move the provider server-side.
 
-## Object registry & fallback placeholder
+**Usage guardrail:** When a real provider is active the app counts generation
+attempts against a per-session cap and asks you to confirm before continuing at
+the cap.
 
-The renderer maps each known object `type` to a trusted builder via a registry
-(`apps/web/src/renderer/engine/builders/`):
+## Data-only RoomSpec / trusted-renderer trust boundary
 
-`throne · pillar · rug · torch · arch · scroll · npc · prop`
-
-Anything the registry doesn't cover renders as a **magenta placeholder box**
-rather than crashing. Two distinct paths reach the placeholder:
-
-1. Objects the loader **skipped** (unknown/malformed types).
-2. Valid types that simply don't have a builder yet.
-
-This makes unsupported content *visible* during development while preserving the
-"never crash the renderer" guarantee.
-
-## Lifecycle & disposal
-
-The `Engine` (`apps/web/src/renderer/engine/Engine.ts`) is constructed once with
-a container element and disposed exactly once. `dispose()` is total:
-
-- cancels the animation frame and disconnects the `ResizeObserver`;
-- removes the interaction (E/F) key listener, and tears down movement
-  (keydown/keyup) and drag-look (pointer) listeners;
-- disposes every geometry, material, and texture in the scene graph
-  (one material per mesh, so each is freed exactly once), then
-  `renderer.dispose()` + `forceContextLoss()` and removes the canvas.
-
-The React `DialoguePanel` cleans up its own Escape listener on unmount. This
-symmetry is what keeps the app stable under React StrictMode's dev double-mount
-(mount → dispose → mount) with **exactly one canvas** and no leaked WebGL
-context.
+`RoomSpec` is **pure data** — validated with zod and mapped to trusted builders by
+`type` string. Nothing in a RoomSpec is ever executed as code. The LLM (real or
+fake) returns raw text; the assembly pipeline parses, schema-validates,
+semantically validates, repairs, or falls back to a safe authored room before
+anything reaches the renderer. The renderer executes only trusted, hand-written
+Three.js builders — this boundary holds regardless of what the LLM outputs.
 
 ## Current limitations (by design for v0)
 
-- **No LLM / AI** anywhere in the pipeline.
-- **No backend, no database, no persistence/memory.**
-- **No real collision** — movement is clamped to an axis-aligned room box only
-  (no per-object collision).
-- **No pointer lock** — drag-look only.
-- **Single hardcoded room**; no multi-room or room transitions.
-- **No dialogue tree / branching choices** — the interact panel shows static
-  title/body text only.
-- **No animations, textures, or imported (GLTF) models** — primitives only.
-
-## Next planned slice
-
-Introduce **AI-authored RoomSpecs**: an LLM proposes a room *as RoomSpec data*,
-which flows through the exact same `loadRoomSpec` validation and trusted-builder
-registry proven here. The model never emits renderer code — only data — so the
-trust boundary established in v0 is what makes that step safe. Likely companions:
-a small backend to host generation, and multi-room navigation through exits.
+- **Dev-only real provider** — browser-direct BYOK only; no hosted production
+  path with server-side key management yet.
+- **No real collision** — movement is clamped to the room AABB; no per-object
+  collision detection.
+- **No death / game-over state** — player health can reach 0 but no end-state is
+  shown.
+- **In-memory browser gameplay** — the Node/SQLite backend exists headless but the
+  browser is unwired; gameplay state lives in-memory and `localStorage` only.
+- **Fake NPC dialogue** — the real LLM dialogue provider is a planned follow-up;
+  NPCs respond with canned text today.
+- **Adjacent-room warming uses the fake generator only** — background pre-generation
+  makes no real LLM calls and costs nothing.
+- **Primitives only** — no GLTF / imported models, no textures; rooms are built
+  from hand-constructed Three.js shapes.
+- **Single save slot** — one named `localStorage` slot; no file export/import or
+  multiple slots.
