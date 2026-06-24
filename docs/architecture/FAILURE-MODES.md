@@ -239,8 +239,10 @@ notice — they are silently corrective and keep `provenance: generated`.
 | Layout problem | Detection | Handling | Logging |
 | --- | --- | --- | --- |
 | Floor too small or too large | `clampGeneratedShell` (stage 2.5): width/depth outside `[14..24]` m | clamp to `[14..24]`; height unchanged | `sizeRepaired: true` bool only |
-| Object outside floor bounds | `repairGeneratedObjects` (stage 2.6): object X/Z beyond playable area | clamp X/Z to walkable floor extent (same margin as `validateRoom`) | `objectsRepaired: true` bool only |
+| Object outside floor bounds | `repairGeneratedObjects` (stage 2.6): object footprint outside playable area | position object so its full footprint (rotation-invariant per-type radius, scaled and padded) stays inside walkable floor; decorative objects whose footprint cannot fit are dropped | `objectsRepaired: true` bool only |
 | Too many objects (> 30) | `repairGeneratedObjects` (stage 2.6): list exceeds `MAX_OBJECTS` cap | drop decorative first, then structural; critical objects are never dropped | `objectsRepaired: true` bool only |
+| Wall-light (e.g. torch) in floor interior | `repairGeneratedObjects` (stage 2.6): wall-light anchor farther than `WALL_LIGHT_BAND` from any wall edge | nudge toward nearest wall/side edge (deterministic); lights already near a wall are left in place | `objectsRepaired: true` bool only |
+| Skipped/malformed placeholder anchor outside floor | `repairGeneratedObjects` (stage 2.6): skipped object anchor beyond playable area (using placeholder cube footprint) | clamp anchor inside playable floor; placeholder still renders as magenta cube, just inside bounds | `objectsRepaired: true` bool only |
 | Unsafe or crowded spawn | `repairGeneratedSpawn` (stage 2.7): spawn X/Z outside floor or within `SPAWN_CLEARANCE` of a blocking object | clamp to floor, then search deterministic candidate set (origin, ±step cardinal); fall back to clamped position | `spawnRepaired: true` bool only |
 | Exit arch misplaced | `repairGeneratedExits` (stage 2.8): exit-carrying object not on a wall face | snap to nearest wall face (north/south/east/west; ties north > south > east > west) | `exitsRepaired: true` bool only |
 
@@ -713,7 +715,7 @@ fake-provider experience is completely unchanged
 | 4b | Valid spec, bad room | `validateRoom` (semantic) + deterministic `repairRoom` / fallback; 🔜 LLM reviewer | fatal → repair → render, else trusted fallback room | ✅ v0 |
 | 4c | World Bible seeding | schema validation + composition catch | raw-prompt generator seed; no stored bible; normal room pipeline | ✅ non-blocking v0 |
 | 4d | Real room provider | completeness check; fixed-code throw on network/timeout/empty/non-JSON | incomplete → fake (`config-disabled`); request failure → `unavailable` retry; malformed text → repaired/fallback | ✅ opt-in v0 (dev-only) |
-| 4e | Generated room layout normalization | shell clamp (2.5); object bounds + count cap (2.6); spawn safe-area repair (2.7); exit wall-snap (2.8) — all pre-semantic | benign normalization keeps `provenance: generated` and shows no notice; authored/fallback rooms untouched | ✅ v0 |
+| 4e | Generated room layout normalization | shell clamp (2.5); footprint-aware object bounds + count cap + wall-light nudge + placeholder clamp (2.6); spawn safe-area repair (2.7); exit wall-snap (2.8) — all pre-semantic | benign normalization keeps `provenance: generated` and shows no notice; authored/fallback rooms untouched | ✅ v0 |
 | 5 | Backend/network | validated API requests + typed results | safe API envelope; browser retry state 🔜 | ✅ API edge v0 |
 | 6 | DB / persistence failure | typed results (rooms, conflicts) + fail-fast throws (open/migration/corrupt session) | safe API error; no browser surface yet | ✅ API-backed v0 |
 | 7 | Pre-gen not ready | one `resolveRoom` seam: cache hit / in-flight join / on-demand resolve (capped, depth-1 warming) | instant cached room, or safe on-demand resolve/generate; never a freeze | ✅ v0 (browser); status lifecycle 🔜 |

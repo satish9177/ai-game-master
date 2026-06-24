@@ -253,11 +253,15 @@ geometric mismatch
 - **Four benign normalizers** (`domain/generatedRoomLayout.ts`) run as stages
   2.5–2.8 in `assembleRoom`, before semantic validation at stage 3:
   - **Shell clamp** (`clampGeneratedShell`): width/depth → `[14..24]`.
-  - **Object bounds + count cap** (`repairGeneratedObjects`): each object's X/Z
-    clamped into the walkable floor area (same wall-clearance margin as
-    `validateRoom`); total capped at **30 objects** (drops decorative first,
-    then structural; never critical — NPC, scroll, interactive arch, interactive
-    crate/barrel/debris/barricade/zombie).
+  - **Object bounds + count cap** (`repairGeneratedObjects`): each object
+    positioned so its full **footprint** (rotation-invariant radius per object
+    type, scaled and padded) stays inside the walkable floor; decorative objects
+    whose footprint cannot fit are dropped. Total capped at **30 objects** (drops
+    decorative first, then structural; never critical — NPC, scroll, interactive
+    arch, interactive crate/barrel/debris/barricade/zombie). Wall-light objects
+    such as torches generated in the floor interior are nudged toward a wall/side
+    position. Skipped/malformed placeholder objects are also clamped inside the
+    room bounds.
   - **Spawn safe-area repair** (`repairGeneratedSpawn`): spawn X/Z clamped into
     the playable floor area, then nudged away from any spawn-blocking object via
     a small deterministic candidate set (origin, ±step in four cardinal

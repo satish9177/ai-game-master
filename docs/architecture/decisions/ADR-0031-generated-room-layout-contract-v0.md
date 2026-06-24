@@ -56,7 +56,7 @@ MAX_OBJECTS  = 30     (benign object-count cap, below the soft budget of 60)
 | Stage | Function | What it does |
 | --- | --- | --- |
 | 2.5 | `clampGeneratedShell` | Clamps `width` and `depth` individually to `[14..24]`. Height is unconstrained. |
-| 2.6 | `repairGeneratedObjects` | Clamps each object's X/Z into the walkable floor area (same wall-clearance margin as `validateRoom`), then caps total object count at 30; drops decorative objects first, then structural; never drops critical objects (NPC, scroll, interactive arch, interactive crate/barrel/debris/barricade/zombie). |
+| 2.6 | `repairGeneratedObjects` | Positions each object so its full **footprint** (rotation-invariant radius per type, scaled and padded) stays inside the walkable floor; decorative objects whose footprint cannot fit are dropped. Total capped at 30 (decorative first, then structural; never critical — NPC, scroll, interactive arch, interactive crate/barrel/debris/barricade/zombie). Wall-light objects such as torches generated in the floor interior are nudged toward a wall/side position. Skipped/malformed placeholder anchors are clamped inside the room too. |
 | 2.7 | `repairGeneratedSpawn` | Clamps spawn X/Z into the playable floor area, then searches a small deterministic candidate set (origin, ±step in four cardinal directions) for a position not crowded by a spawn-blocking object. |
 | 2.8 | `repairGeneratedExits` | Snaps each exit-carrying object to the nearest wall face (north: `z = −halfD`; south: `z = +halfD`; east: `x = +halfW`; west: `x = −halfW`). Tie-broken north > south > east > west. |
 
