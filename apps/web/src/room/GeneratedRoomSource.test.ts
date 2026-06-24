@@ -71,8 +71,9 @@ const SPEC_WITH_BAD_OBJECT = JSON.stringify({
 const BAD_ENVELOPE = JSON.stringify({ schemaVersion: 1, id: 'x' }) // missing name/shell/spawn/objects
 const MALFORMED_JSON = '{ not valid json'
 
-// Schema-valid but NOT playable, and REPAIRABLE: a spawn far outside a normal-size
-// room → fatal `spawn-out-of-bounds`, which repairRoom clamps back into bounds.
+// Schema-valid with spawn far outside bounds. After Slice 4, repairGeneratedSpawn
+// (Stage 2.7) clamps the spawn before the semantic validator runs → provenance
+// 'generated', not 'repaired' (benign normalization, not a real repair).
 const REPAIRABLE_SPEC = JSON.stringify({ ...base, spawn: { position: [100, 1.7, 0] }, objects: [] })
 // height=400 exceeds LIMITS.MAX_ROOM_DIM (300) → fatal `room-too-large`.
 // clampGeneratedShell does not touch height; repairRoom does not resize → fallback.
@@ -119,13 +120,13 @@ describe('GeneratedRoomSource', () => {
     }
   })
 
-  it('repairable semantic fatal → ok:true, provenance repaired (generated room kept)', async () => {
+  it('spawn out-of-bounds is clamped at Stage 2.7 → ok:true, provenance generated (benign normalization)', async () => {
     const { logger } = createSpyLogger()
     const result = await newSource(generatorReturning(REPAIRABLE_SPEC), 'p', logger).getRoom()
     expect(result.ok).toBe(true)
     if (result.ok) {
-      expect(result.provenance).toBe('repaired')
-      expect(result.room.id).toBe('stub-room') // the repaired generated room, not the fallback
+      expect(result.provenance).toBe('generated')
+      expect(result.room.id).toBe('stub-room') // the generated room, not the fallback
     }
   })
 

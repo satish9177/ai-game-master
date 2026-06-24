@@ -35,7 +35,9 @@ const RAW_INVALID_SCHEMA = raw({ not: 'a room' })
 const RAW_VALID = raw(
   validSpec({ shell: { dimensions: { width: 18, depth: 18, height: 4 }, exits: [{ side: 'north', width: 3 }] } }),
 )
-// Spawn far outside an 18×18 room → spawn-out-of-bounds fatal, repaired by repairRoom.
+// Spawn far outside an 18×18 room → clamped by repairGeneratedSpawn (Stage 2.7).
+// After Slice 4, Stage 2.7 fixes this before the validator runs, so provenance
+// stays 'generated' (benign normalization, not a real repair).
 const RAW_REPAIRABLE = raw(
   validSpec({
     shell: { dimensions: { width: 18, depth: 18, height: 4 }, exits: [{ side: 'north', width: 3 }] },
@@ -48,16 +50,17 @@ const RAW_REPAIRABLE = raw(
 const RAW_UNREPAIRABLE = raw(
   validSpec({ shell: { dimensions: { width: 18, depth: 18, height: 400 }, exits: [{ side: 'north', width: 3 }] } }),
 )
-// Repairable fatal (spawn oob) AND an unrepairable one (height=400 → room-too-large):
-// repair runs and moves the spawn, but the height fatal survives → fallback.
+// Spawn oob (fixed at Stage 2.7) AND unrepairable height=400 (room-too-large):
+// after spawn is clamped the height fatal still survives Stage 3, repairRoom
+// cannot fix it → fallback. Spawn no longer appears in initialFatalCodes.
 const RAW_REPAIR_THEN_FAIL = raw(
   validSpec({
     shell: { dimensions: { width: 18, depth: 18, height: 400 }, exits: [{ side: 'north', width: 3 }] },
     spawn: { position: [100, 1.7, 0] },
   }),
 )
-// Generated rooms with out-of-contract dimensions — these should be clamped and
-// returned as 'repaired', never reaching the fallback.
+// Generated rooms with out-of-contract dimensions should be clamped and
+// returned as "generated" because size normalization is benign.
 const RAW_TINY_DIMS = raw(
   validSpec({ shell: { dimensions: { width: 5, depth: 5, height: 4 }, exits: [{ side: 'north', width: 3 }] } }),
 )
@@ -124,14 +127,17 @@ describe('assembleRoom', () => {
     expect(diagnostics.repairAttempted).toBe(false)
   })
 
-  it('repairs a repairable semantic fatal as provenance "repaired"', () => {
+  it('spawn out-of-bounds is clamped by Stage 2.7 and stays provenance "generated" (no notice)', () => {
+    // After Slice 4, repairGeneratedSpawn (Stage 2.7) handles this before the
+    // semantic validator runs, so no fatal reaches repairRoom (Stage 4).
     const { room, diagnostics } = assembleRoom(RAW_REPAIRABLE, fallback)
     expect(room.id).toBe('gen-room')
-    expect(diagnostics.provenance).toBe('repaired')
-    expect(diagnostics.sizeRepaired).toBe(false) // a real repairRoom fix, not a size clamp
+    expect(diagnostics.provenance).toBe('generated')
+    expect(diagnostics.spawnRepaired).toBe(true)
+    expect(diagnostics.sizeRepaired).toBe(false)
+    expect(diagnostics.repairAttempted).toBe(false)
     expect(diagnostics.failedStage).toBeUndefined()
-    expect(diagnostics.repairAttempted).toBe(true)
-    expect(diagnostics.initialFatalCodes).toContain('spawn-out-of-bounds')
+    expect(diagnostics.initialFatalCodes).toEqual([])
     expect(diagnostics.residualFatalCodes).toEqual([])
     expect(validateRoom(room).ok).toBe(true)
   })
@@ -153,8 +159,9 @@ describe('assembleRoom', () => {
     expect(diagnostics.provenance).toBe('fallback')
     expect(diagnostics.failedStage).toBe('semantic')
     expect(diagnostics.repairAttempted).toBe(true)
-    // repairRoom clamps the spawn → spawn fatal gone; height=400 fatal survives.
-    expect(diagnostics.initialFatalCodes).toContain('spawn-out-of-bounds')
+    // Stage 2.7 clamps the spawn before Stage 3, so spawn-out-of-bounds never
+    // appears in initialFatalCodes. Only the unrepairable height=400 fatal does.
+    expect(diagnostics.initialFatalCodes).not.toContain('spawn-out-of-bounds')
     expect(diagnostics.initialFatalCodes).toContain('room-too-large')
     expect(diagnostics.residualFatalCodes).toEqual(['room-too-large'])
   })
@@ -199,6 +206,7 @@ describe('assembleRoom', () => {
       'failedStage',
       'sizeRepaired',
       'objectsRepaired',
+      'spawnRepaired',
       'initialFatalCodes',
       'repairAttempted',
       'residualFatalCodes',
@@ -221,6 +229,7 @@ describe('assembleRoom', () => {
       expect(typeof diagnostics.repairAttempted).toBe('boolean')
       expect(typeof diagnostics.sizeRepaired).toBe('boolean')
       expect(typeof diagnostics.objectsRepaired).toBe('boolean')
+      expect(typeof diagnostics.spawnRepaired).toBe('boolean')
       expect(typeof diagnostics.skippedObjectCount).toBe('number')
       expect(typeof diagnostics.warningCount).toBe('number')
       for (const code of [
@@ -373,5 +382,97 @@ describe('assembleRoom', () => {
     expect(assembleRoom(RAW_TOO_MANY_OBJECTS, fallback)).toEqual(
       assembleRoom(RAW_TOO_MANY_OBJECTS, fallback),
     )
+  })
+
+  // --- generated-room spawn safe-area repair (Slice 4) ---
+  //
+  // Spawn repair is a benign normalization: the room stays provenance 'generated'
+  // (so the host shows NO notice) and the repair is reported via the safe
+  // `spawnRepaired` flag only. Only a real repairRoom pass or fallback changes
+  // provenance away from 'generated'.
+
+  it('spawn outside room bounds is clamped at Stage 2.7, stays "generated" (spawnRepaired true)', () => {
+    const rawSpawnOob = raw(
+      validSpec({
+        shell: { dimensions: { width: 18, depth: 18, height: 4 }, exits: [{ side: 'north', width: 3 }] },
+        spawn: { position: [100, 1.7, 0] },
+      }),
+    )
+    const { room, diagnostics } = assembleRoom(rawSpawnOob, fallback)
+    expect(diagnostics.provenance).toBe('generated')
+    expect(diagnostics.spawnRepaired).toBe(true)
+    expect(diagnostics.repairAttempted).toBe(false)
+    expect(diagnostics.failedStage).toBeUndefined()
+    expect(validateRoom(room).ok).toBe(true)
+    // Spawn is now inside the room
+    const [x, , z] = room.spawn.position
+    expect(Math.abs(x)).toBeLessThan(9) // strictly inside half-extent (9 m)
+    expect(Math.abs(z)).toBeLessThan(9)
+  })
+
+  it('spawn crowded by a blocking object is nudged, stays "generated" (spawnRepaired true)', () => {
+    // Pillar at origin crowds spawn at origin; spawn must be nudged.
+    const rawCrowded = raw(
+      validSpec({
+        shell: { dimensions: { width: 18, depth: 18, height: 4 }, exits: [{ side: 'north', width: 3 }] },
+        spawn: { position: [0, 1.7, 0] },
+        objects: [{ type: 'pillar', position: [0, 0, 0] }],
+      }),
+    )
+    const { room, diagnostics } = assembleRoom(rawCrowded, fallback)
+    expect(diagnostics.provenance).toBe('generated')
+    expect(diagnostics.spawnRepaired).toBe(true)
+    expect(diagnostics.repairAttempted).toBe(false)
+    expect(diagnostics.failedStage).toBeUndefined()
+    expect(validateRoom(room).ok).toBe(true)
+  })
+
+  it('safe spawn with no blocking objects nearby: spawnRepaired false', () => {
+    const { diagnostics } = assembleRoom(RAW_VALID, fallback)
+    expect(diagnostics.spawnRepaired).toBe(false)
+  })
+
+  it('objectsRepaired and spawnRepaired can both be true with provenance "generated"', () => {
+    // Crate at X=200 (clamped by Stage 2.6), spawn at X=-100 (clamped by Stage 2.7).
+    // Clamped positions are far apart — no crowding.
+    const rawBothRepaired = raw(
+      validSpec({
+        shell: { dimensions: { width: 18, depth: 18, height: 4 }, exits: [{ side: 'north', width: 3 }] },
+        spawn: { position: [-100, 1.7, 0] },
+        objects: [{ type: 'crate', position: [200, 0, 0] }],
+      }),
+    )
+    const { room, diagnostics } = assembleRoom(rawBothRepaired, fallback)
+    expect(diagnostics.provenance).toBe('generated')
+    expect(diagnostics.objectsRepaired).toBe(true)
+    expect(diagnostics.spawnRepaired).toBe(true)
+    expect(diagnostics.repairAttempted).toBe(false)
+    expect(validateRoom(room).ok).toBe(true)
+  })
+
+  it('spawnRepaired is false for all fallback paths (authored fallback spawn is untouched)', () => {
+    const paths = [RAW_INVALID_JSON, RAW_INVALID_SCHEMA, RAW_UNREPAIRABLE, RAW_REPAIR_THEN_FAIL]
+    for (const input of paths) {
+      const { diagnostics } = assembleRoom(input, fallback)
+      expect(diagnostics.spawnRepaired).toBe(false)
+    }
+  })
+
+  it('authored fallback room spawn is not mutated by generated-room spawn repair', () => {
+    const spawnBefore = JSON.parse(JSON.stringify(fallback.spawn))
+    assembleRoom(RAW_REPAIRABLE, fallback)
+    assembleRoom(
+      raw(validSpec({
+        shell: { dimensions: { width: 18, depth: 18, height: 4 }, exits: [{ side: 'north', width: 3 }] },
+        spawn: { position: [0, 1.7, 0] },
+        objects: [{ type: 'pillar', position: [0, 0, 0] }],
+      })),
+      fallback,
+    )
+    expect(fallback.spawn).toEqual(spawnBefore)
+  })
+
+  it('spawn repair is deterministic', () => {
+    expect(assembleRoom(RAW_REPAIRABLE, fallback)).toEqual(assembleRoom(RAW_REPAIRABLE, fallback))
   })
 })

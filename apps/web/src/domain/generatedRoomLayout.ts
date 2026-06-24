@@ -209,3 +209,95 @@ function dropLeastImportant(objects: RoomObject[], target: number): RoomObject[]
   kept.sort((a, b) => a.i - b.i)
   return kept.map(({ obj }) => obj)
 }
+
+/**
+ * The spawn-blocking object types used for the generated-room spawn safe-area
+ * check. Mirrors SPAWN_BLOCKING_TYPES in validateRoom.ts; kept separate here to
+ * avoid coupling the domain validator to repair logic.
+ */
+const GENERATED_SPAWN_BLOCKING_TYPES = new Set<RoomObject['type']>([
+  'throne',
+  'pillar',
+  'npc',
+  'prop',
+  'crate',
+  'barrel',
+  'barricade',
+  'debris',
+  'zombie',
+])
+
+/** Step distance used when searching for an uncrowded spawn candidate. */
+const SPAWN_STEP = LIMITS.SPAWN_CLEARANCE + 0.5
+
+/**
+ * Repairs the generated room player spawn so it lies inside the playable floor
+ * area and is not crowded by a spawn-blocking object.
+ *
+ * Step 1: Clamps spawn X/Z into the playable floor area. Because the playable
+ * bounds already account for the wall clearance margin, this handles both
+ * out-of-bounds spawns and spawns that are too close to the wall.
+ *
+ * Step 2: If the clamped position is still crowded by a spawn-blocking object,
+ * searches a small, deterministic set of candidate positions for a safe one.
+ *
+ * Spawn Y (height) is preserved; floor-height logic is out of scope here.
+ *
+ * Returns the SAME object reference when spawn is already safe, so callers can
+ * use a reference equality check (`fixed !== room`) to detect a repair.
+ * Never mutates the input room.
+ *
+ * This is a benign normalization — keeps provenance `generated` and must NOT
+ * trigger the host's repair/fallback notice. Authored/static/fallback rooms are
+ * never passed through this function.
+ */
+export function repairGeneratedSpawn(room: LoadedRoom): LoadedRoom {
+  const bounds = computePlayableBounds(room.shell.dimensions, room.shell.wallThickness)
+  const [sx, sy, sz] = room.spawn.position
+
+  const cx = halfClamp(sx, bounds.halfX)
+  const cz = halfClamp(sz, bounds.halfZ)
+
+  const [fx, fz] = findSafeSpawn(cx, cz, room.objects, bounds)
+
+  if (fx === sx && fz === sz) return room
+  return {
+    ...room,
+    spawn: { ...room.spawn, position: [fx, sy, fz] },
+  }
+}
+
+/**
+ * Searches a small, deterministic candidate set for a spawn position that is
+ * inside the playable area and not crowded by any spawn-blocking object.
+ * Falls back to (cx, cz) when all candidates are crowded — best effort.
+ */
+function findSafeSpawn(
+  cx: number,
+  cz: number,
+  objects: RoomObject[],
+  bounds: PlayableBounds,
+): [number, number] {
+  const candidates: [number, number][] = [
+    [cx, cz],
+    [0, 0],
+    [0, SPAWN_STEP],
+    [0, -SPAWN_STEP],
+    [SPAWN_STEP, 0],
+    [-SPAWN_STEP, 0],
+  ]
+  for (const [x, z] of candidates) {
+    if (!isInsidePlayableBounds([x, 0, z], bounds)) continue
+    if (!isSpawnCrowded(x, z, objects)) return [x, z]
+  }
+  return [cx, cz]
+}
+
+/** Returns true when any spawn-blocking object is within SPAWN_CLEARANCE of (x, z). */
+function isSpawnCrowded(x: number, z: number, objects: RoomObject[]): boolean {
+  return objects.some(
+    (obj) =>
+      GENERATED_SPAWN_BLOCKING_TYPES.has(obj.type) &&
+      Math.hypot(obj.position[0] - x, obj.position[2] - z) < LIMITS.SPAWN_CLEARANCE,
+  )
+}

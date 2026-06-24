@@ -3,7 +3,7 @@ import type { LoadedRoom } from './loadRoomSpec'
 import { repairRoom } from './repairRoom'
 import { validateRoom } from './validateRoom'
 import type { RoomIssueCode, RoomValidationResult } from './validateRoom'
-import { clampGeneratedShell, repairGeneratedObjects } from './generatedRoomLayout'
+import { clampGeneratedShell, repairGeneratedObjects, repairGeneratedSpawn } from './generatedRoomLayout'
 
 /**
  * Room assembly pipeline (room-generation-repair-fallback v0). A pure,
@@ -70,6 +70,13 @@ export type RoomDiagnostics = {
    * Always false for a fallback room (the authored fallback objects are untouched).
    */
   objectsRepaired: boolean
+  /**
+   * Whether the generated room spawn position was clamped into the playable floor
+   * area or nudged away from a spawn-blocking object. This is a benign
+   * normalization — keeps provenance `generated` and must NOT trigger the host's
+   * repair/fallback notice. Always false for a fallback room.
+   */
+  spawnRepaired: boolean
   /** Distinct fatal codes from the FIRST semantic validation (empty if none ran). */
   initialFatalCodes: RoomIssueCode[]
   /** Whether deterministic repair ran (only when an initial fatal was present). */
@@ -123,30 +130,42 @@ export function assembleRoom(
   const objectsFixed = repairGeneratedObjects(clamped)
   const objectsRepaired = objectsFixed !== clamped
 
+  // Stage 2.7 — clamp and nudge the generated spawn into a safe floor position.
+  // Handles spawn outside the playable area, too close to wall, or crowded by a
+  // blocking object. Keeps provenance `generated`; reported via `spawnRepaired`.
+  const spawnFixed = repairGeneratedSpawn(objectsFixed)
+  const spawnRepaired = spawnFixed !== objectsFixed
+
   // Stage 3 — semantic playability. No fatal issue → accept as generated. Benign
-  // normalizations (Stages 2.5–2.6) keep provenance `generated` and show no notice;
-  // they are reported via `sizeRepaired`/`objectsRepaired` for logs only. A
-  // `repairRoom` pass (Stage 4) is the only thing that yields provenance `repaired`.
-  const initial = validateRoom(objectsFixed)
+  // normalizations (Stages 2.5–2.7) keep provenance `generated` and show no notice;
+  // they are reported via `sizeRepaired`/`objectsRepaired`/`spawnRepaired` for logs
+  // only. A `repairRoom` pass (Stage 4) is the only thing that yields `repaired`.
+  const initial = validateRoom(spawnFixed)
   if (initial.ok) {
     return {
-      room: objectsFixed,
+      room: spawnFixed,
       diagnostics: {
         provenance: 'generated',
         sizeRepaired,
         objectsRepaired,
+        spawnRepaired,
         initialFatalCodes: [],
         repairAttempted: false,
         residualFatalCodes: [],
-        skippedObjectCount: objectsFixed.skipped.length,
+        skippedObjectCount: spawnFixed.skipped.length,
         warningCount: countWarnings(initial),
       },
     }
   }
 
   // Stage 4 — one deterministic repair pass on the normalized room, then re-validate.
+  // NOTE: Stages 2.5–2.7 currently pre-empt every fatal that repairRoom can fix
+  // (spawn-out-of-bounds and object/light hard budgets), so the "repaired" branch
+  // is intentionally dormant through this pipeline today. It is retained for future
+  // repairable fatals that are not covered by generated-room normalizers.
+  // repairRoom itself remains unit-tested directly.
   const initialFatalCodes = distinctFatalCodes(initial)
-  const repaired = repairRoom(objectsFixed)
+  const repaired = repairRoom(spawnFixed)
   const revalidated = validateRoom(repaired)
   if (revalidated.ok) {
     return {
@@ -155,6 +174,7 @@ export function assembleRoom(
         provenance: 'repaired',
         sizeRepaired,
         objectsRepaired,
+        spawnRepaired,
         initialFatalCodes,
         repairAttempted: true,
         residualFatalCodes: [],
@@ -164,7 +184,7 @@ export function assembleRoom(
     }
   }
 
-  // A fatal issue survived repair (e.g. an unrepairable room size) → fallback.
+  // A fatal issue survived repair (e.g. an unrepairable room height) → fallback.
   return {
     room: fallbackRoom,
     diagnostics: {
@@ -173,6 +193,7 @@ export function assembleRoom(
       // The returned room is the authored fallback, which is never normalized.
       sizeRepaired: false,
       objectsRepaired: false,
+      spawnRepaired: false,
       initialFatalCodes,
       repairAttempted: true,
       residualFatalCodes: distinctFatalCodes(revalidated),
@@ -194,6 +215,7 @@ function toFallback(
       failedStage,
       sizeRepaired: false,
       objectsRepaired: false,
+      spawnRepaired: false,
       initialFatalCodes: [],
       repairAttempted: false,
       residualFatalCodes: [],

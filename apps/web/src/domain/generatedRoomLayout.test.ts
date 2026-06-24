@@ -9,6 +9,7 @@ import {
   isSpawnSafeAreaOverlap,
   classifyObjectImportance,
   repairGeneratedObjects,
+  repairGeneratedSpawn,
 } from './generatedRoomLayout'
 import { loadRoomSpec } from './loadRoomSpec'
 import { validateRoom, LIMITS } from './validateRoom'
@@ -450,6 +451,116 @@ describe('repairGeneratedObjects', () => {
   })
 })
 
+/** Build a room with the given spawn position and optional objects in an 18×18×4 shell. */
+function makeSpawnRoom(spawn: [number, number, number], objects: unknown[] = []) {
+  return loadRoomSpec({
+    schemaVersion: 1,
+    id: 'spawn-test',
+    name: 'spawn-test',
+    shell: {
+      dimensions: { width: 18, depth: 18, height: 4 },
+      exits: [{ side: 'north', width: 3 }],
+    },
+    spawn: { position: spawn },
+    objects,
+  })
+}
+
+describe('repairGeneratedSpawn', () => {
+  const STD_BOUNDS = computePlayableBounds({ width: 18, depth: 18 }, 0.3)
+
+  it('returns same reference when spawn is already safe and no blocking objects nearby', () => {
+    const room = makeSpawnRoom([0, 1.7, 0])
+    expect(repairGeneratedSpawn(room)).toBe(room)
+  })
+
+  it('returns same reference when spawn is at a safe non-origin position', () => {
+    const room = makeSpawnRoom([3, 1.7, -4])
+    expect(repairGeneratedSpawn(room)).toBe(room)
+  })
+
+  it('clamps spawn outside X bounds to within playable area', () => {
+    const room = makeSpawnRoom([100, 1.7, 0])
+    const fixed = repairGeneratedSpawn(room)
+    expect(fixed).not.toBe(room)
+    expect(Math.abs(fixed.spawn.position[0])).toBeLessThanOrEqual(STD_BOUNDS.halfX)
+  })
+
+  it('clamps spawn outside Z bounds to within playable area', () => {
+    const room = makeSpawnRoom([0, 1.7, -100])
+    const fixed = repairGeneratedSpawn(room)
+    expect(fixed).not.toBe(room)
+    expect(Math.abs(fixed.spawn.position[2])).toBeLessThanOrEqual(STD_BOUNDS.halfZ)
+  })
+
+  it('clamps spawn too close to wall (just outside playable area) to safe distance', () => {
+    const outsideX = STD_BOUNDS.halfX + 0.5
+    const room = makeSpawnRoom([outsideX, 1.7, 0])
+    const fixed = repairGeneratedSpawn(room)
+    expect(fixed).not.toBe(room)
+    expect(fixed.spawn.position[0]).toBeCloseTo(STD_BOUNDS.halfX)
+    expect(Math.abs(fixed.spawn.position[0])).toBeLessThanOrEqual(STD_BOUNDS.halfX)
+  })
+
+  it('nudges spawn crowded by a blocking object (pillar at origin) to a safe point', () => {
+    const room = makeSpawnRoom([0, 1.7, 0], [{ type: 'pillar', position: [0, 0, 0] }])
+    const fixed = repairGeneratedSpawn(room)
+    expect(fixed).not.toBe(room)
+    const [fx, , fz] = fixed.spawn.position
+    expect(Math.hypot(fx - 0, fz - 0)).toBeGreaterThanOrEqual(LIMITS.SPAWN_CLEARANCE)
+  })
+
+  it('nudged spawn is inside playable bounds', () => {
+    const room = makeSpawnRoom([0, 1.7, 0], [{ type: 'pillar', position: [0, 0, 0] }])
+    const fixed = repairGeneratedSpawn(room)
+    expect(isInsidePlayableBounds(fixed.spawn.position, STD_BOUNDS)).toBe(true)
+  })
+
+  it('spawn crowded by non-blocking type (rug) stays unchanged — same reference', () => {
+    const room = makeSpawnRoom([0, 1.7, 0], [{ type: 'rug', position: [0, 0.01, 0] }])
+    expect(repairGeneratedSpawn(room)).toBe(room)
+  })
+
+  it('spawn near but not overlapping a blocking object stays unchanged — same reference', () => {
+    // pillar at (5, 0, 5): distance from (0,0) ≈ 7.07 > SPAWN_CLEARANCE (1 m)
+    const room = makeSpawnRoom([0, 1.7, 0], [{ type: 'pillar', position: [5, 0, 5] }])
+    expect(repairGeneratedSpawn(room)).toBe(room)
+  })
+
+  it('does not change spawn Y — floor spawn height is preserved', () => {
+    const room = makeSpawnRoom([100, 1.7, 0])
+    const fixed = repairGeneratedSpawn(room)
+    expect(fixed.spawn.position[1]).toBe(1.7)
+  })
+
+  it('does not mutate the input room', () => {
+    const room = makeSpawnRoom([100, 1.7, 0])
+    const spawnBefore = [...room.spawn.position] as [number, number, number]
+    repairGeneratedSpawn(room)
+    expect(room.spawn.position).toEqual(spawnBefore)
+  })
+
+  it('is deterministic', () => {
+    const room = makeSpawnRoom([100, 1.7, -50])
+    expect(repairGeneratedSpawn(room).spawn.position).toEqual(
+      repairGeneratedSpawn(room).spawn.position,
+    )
+  })
+
+  it('object repair and spawn repair can both happen and result stays provenance "generated"', () => {
+    // Crate at X=200 (clamped by repairGeneratedObjects), spawn at X=-100 (clamped by repairGeneratedSpawn).
+    // The two clamped positions are far apart so there is no crowding.
+    const room = makeSpawnRoom([-100, 1.7, 0], [{ type: 'crate', position: [200, 0, 0] }])
+    // repairGeneratedObjects handles the crate; repairGeneratedSpawn handles the spawn.
+    const objectsFixed = repairGeneratedObjects(room)
+    const spawnFixed = repairGeneratedSpawn(objectsFixed)
+    expect(objectsFixed).not.toBe(room)   // object was clamped
+    expect(spawnFixed).not.toBe(objectsFixed) // spawn was clamped
+    // Result validates with zero fatals — would keep provenance 'generated' in the pipeline.
+    expect(validateRoom(spawnFixed).ok).toBe(true)
+  })
+})
+
 describe('authored fallback room is unchanged by this slice', () => {
   it('fallback room validates with zero fatal issues', () => {
     const result = validateRoom(loadRoomSpec(fallbackRoom))
@@ -465,5 +576,11 @@ describe('authored fallback room is unchanged by this slice', () => {
     expect(dimensions.width).toBe(8)
     expect(dimensions.depth).toBe(8)
     expect(dimensions.height).toBe(4)
+  })
+  it('repairGeneratedSpawn does not mutate the fallback room spawn', () => {
+    const loaded = loadRoomSpec(fallbackRoom)
+    const spawnBefore = [...loaded.spawn.position] as [number, number, number]
+    repairGeneratedSpawn(loaded) // fallback room spawn is already safe — same ref returned
+    expect(loaded.spawn.position).toEqual(spawnBefore)
   })
 })
