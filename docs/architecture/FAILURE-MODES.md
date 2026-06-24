@@ -231,8 +231,9 @@ playability fatals caught by `validateRoom`, so neither `repairRoom` nor the
 fallback applies — but they do produce an unpleasant or unnavigable room.
 
 The **layout contract** ([ADR-0031](./decisions/ADR-0031-generated-room-layout-contract-v0.md))
-normalizes all five classes as **benign pre-semantic steps** (stages 2.5–2.8 in
-`assembleRoom`) before `validateRoom` runs. Unlike `repairRoom`, these
+normalizes all five classes as **benign pre-semantic steps** around the stage 2.7
+composition pass in `assembleRoom`, before `validateRoom` runs. Unlike
+`repairRoom`, these
 normalizations never raise `provenance: repaired` or trigger the dismissable
 notice — they are silently corrective and keep `provenance: generated`.
 
@@ -243,8 +244,8 @@ notice — they are silently corrective and keep `provenance: generated`.
 | Too many objects (> 30) | `repairGeneratedObjects` (stage 2.6): list exceeds `MAX_OBJECTS` cap | drop decorative first, then structural; critical objects are never dropped | `objectsRepaired: true` bool only |
 | Wall-light (e.g. torch) in floor interior | `repairGeneratedObjects` (stage 2.6): wall-light anchor farther than `WALL_LIGHT_BAND` from any wall edge | nudge toward nearest wall/side edge (deterministic); lights already near a wall are left in place | `objectsRepaired: true` bool only |
 | Skipped/malformed placeholder anchor outside floor | `repairGeneratedObjects` (stage 2.6): skipped object anchor beyond playable area (using placeholder cube footprint) | clamp anchor inside playable floor; placeholder still renders as magenta cube, just inside bounds | `objectsRepaired: true` bool only |
-| Unsafe or crowded spawn | `repairGeneratedSpawn` (stage 2.7): spawn X/Z outside floor or within `SPAWN_CLEARANCE` of a blocking object | clamp to floor, then search deterministic candidate set (origin, ±step cardinal); fall back to clamped position | `spawnRepaired: true` bool only |
-| Exit arch misplaced | `repairGeneratedExits` (stage 2.8): exit-carrying object not on a wall face | snap to nearest wall face (north/south/east/west; ties north > south > east > west) | `exitsRepaired: true` bool only |
+| Unsafe or crowded spawn | `repairGeneratedSpawn` (stage 2.8): spawn X/Z outside floor or within `SPAWN_CLEARANCE` of a blocking object | clamp to floor, then search deterministic candidate set (origin, ±step cardinal); fall back to clamped position | `spawnRepaired: true` bool only |
+| Exit arch misplaced | `repairGeneratedExits` (stage 2.9): exit-carrying object not on a wall face | snap to nearest wall face (north/south/east/west; ties north > south > east > west) | `exitsRepaired: true` bool only |
 
 - **Provenance** is always `generated` after layout normalization. A separate
   `repairRoom` pass (stage 4) is the only thing that yields `repaired`, and
@@ -257,10 +258,43 @@ notice — they are silently corrective and keep `provenance: generated`.
   `spawnRepaired`, `exitsRepaired`) are the only new surface. They never carry raw
   generated JSON, prompt text, provider body, room names, object content, or keys.
 - **Known follow-up.** Stage 2.6 currently clamps exit-carrying objects inward
-  before stage 2.8 snaps them back to a wall face. This can cause both
+  before stage 2.9 snaps them back to a wall face. This can cause both
   `objectsRepaired` and `exitsRepaired` to be true for an arch that only needed
   wall-snapping, and a small nearest-wall drift near corners. Both effects are
   harmless; a future cleanup can make stage 2.6 skip exit-carrying objects.
+
+## 4f. Generated room composition normalization ✅ v0 (benign, always `generated`)
+
+A generated room can be spatially safe under the layout contract yet still feel
+like a random prop cluster: eligible clutter blocks the central route, a throne
+has no focal placement, NPCs stand in the path, or interactables are hard to read.
+
+The pure composition pass
+([ADR-0032](./decisions/ADR-0032-generated-room-composition-v0.md)) runs after
+generated object legality repair and before spawn/exit finalization. It arranges
+existing objects only; it does not generate or remove content.
+
+| Composition condition | Detection | Handling | Logging |
+| --- | --- | --- | --- |
+| Eligible object in central corridor | `composeGeneratedRoom` role classification + corridor test | relocate the existing object to its deterministic role zone | `composed: true` bool only |
+| Throne present outside anchor zone | first `anchor` role is not north-center | relocate that existing throne to the anchor zone | `composed: true` bool only |
+| NPC or interactable in corridor | `npc` / `interactable` role inside corridor | move off-path to a deterministic flank | `composed: true` bool only |
+| Missing anchor | no `anchor` role | accept room unchanged; never repair or fallback | `lacksAnchor: true` bool only |
+| Missing interactable | no `interactable` role | accept room unchanged; never repair or fallback | `lacksInteractable: true` bool only |
+
+- **Provenance.** Composition-only relocation keeps `provenance: generated`, sets
+  no `failedStage`, and shows no repaired/fallback notice. Existing repair and
+  fallback notice behavior is unchanged.
+- **Content boundary.** Object count and every non-position field are preserved.
+  No NPC, anchor, clue, chest, light, resource, interaction, or quest object is
+  invented. Missing roles are diagnostics, not failures.
+- **Scope.** Only generated rooms inside `assembleRoom` are composed.
+  Authored/static/fallback rooms and the renderer are untouched; there is no
+  provider prompt, backend, API, persistence, memory, world-session, or gameplay
+  change.
+- **Logging.** `composed`, `lacksAnchor`, and `lacksInteractable` are fixed
+  booleans only. Logs never include raw prompts, provider bodies, generated JSON,
+  room/object text, API keys, or PII.
 
 ## 5. Backend / network failure ✅ API edge v0 · 🔜 browser client
 
@@ -715,7 +749,8 @@ fake-provider experience is completely unchanged
 | 4b | Valid spec, bad room | `validateRoom` (semantic) + deterministic `repairRoom` / fallback; 🔜 LLM reviewer | fatal → repair → render, else trusted fallback room | ✅ v0 |
 | 4c | World Bible seeding | schema validation + composition catch | raw-prompt generator seed; no stored bible; normal room pipeline | ✅ non-blocking v0 |
 | 4d | Real room provider | completeness check; fixed-code throw on network/timeout/empty/non-JSON | incomplete → fake (`config-disabled`); request failure → `unavailable` retry; malformed text → repaired/fallback | ✅ opt-in v0 (dev-only) |
-| 4e | Generated room layout normalization | shell clamp (2.5); footprint-aware object bounds + count cap + wall-light nudge + placeholder clamp (2.6); spawn safe-area repair (2.7); exit wall-snap (2.8) — all pre-semantic | benign normalization keeps `provenance: generated` and shows no notice; authored/fallback rooms untouched | ✅ v0 |
+| 4e | Generated room layout normalization | shell clamp (2.5); footprint-aware object bounds + count cap + wall-light nudge + placeholder clamp (2.6); spawn safe-area repair (2.8); exit wall-snap (2.9) — all pre-semantic | benign normalization keeps `provenance: generated` and shows no notice; authored/fallback rooms untouched | ✅ v0 |
+| 4f | Generated room composition normalization | role classification + deterministic zones (2.7), after object legality and before spawn/exit finalizers | existing objects repositioned only; missing anchor/interactable accepted; `provenance: generated`, no notice; authored/static/fallback untouched | ✅ v0 |
 | 5 | Backend/network | validated API requests + typed results | safe API envelope; browser retry state 🔜 | ✅ API edge v0 |
 | 6 | DB / persistence failure | typed results (rooms, conflicts) + fail-fast throws (open/migration/corrupt session) | safe API error; no browser surface yet | ✅ API-backed v0 |
 | 7 | Pre-gen not ready | one `resolveRoom` seam: cache hit / in-flight join / on-demand resolve (capped, depth-1 warming) | instant cached room, or safe on-demand resolve/generate; never a freeze | ✅ v0 (browser); status lifecycle 🔜 |
