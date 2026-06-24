@@ -1,7 +1,7 @@
 # Implementation Plan — `feature/consequence-journal-v0`
 
-> Status: **approved — pending implementation.** Design reviewed and locked; no source
-> written yet, no ADR yet, no commit yet.
+> Status: **implemented — closed.** Source implemented and reviewed; ADR-0029 written;
+> docs closeout complete.
 >
 > Companion docs: [ARCHITECTURE](../ARCHITECTURE.md) · [BOUNDARIES](../BOUNDARIES.md) ·
 > [FAILURE-MODES](../FAILURE-MODES.md) · [CONVENTIONS](../CONVENTIONS.md). Direct
@@ -48,9 +48,8 @@ and (d) a few lines of App glue that re-project from state the app already holds
 
 ## 1. Status
 
-**Approved — pending implementation.** Design locked; this plan is the pre-code artifact.
-No source, no ADR, no commit yet. ADR-0029 and the ARCHITECTURE / FAILURE-MODES / AGENTS
-updates land in the docs closeout **after** source review (§13, §16).
+**Implemented — closed.** ADR-0029 written; ARCHITECTURE, FAILURE-MODES, and AGENTS updated
+in the docs closeout (slice 3, §13).
 
 ## 2. Current repo facts (verified against source)
 
