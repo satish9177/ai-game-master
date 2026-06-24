@@ -14,7 +14,7 @@ export type QuestView = {
   objectives: QuestObjectiveView[]
 }
 
-function evaluateCondition(condition: ObjectiveCondition, state: WorldState): boolean {
+export function evaluateCondition(condition: ObjectiveCondition, state: WorldState): boolean {
   switch (condition.kind) {
     case 'room-flag':
       return state.roomStates[condition.roomId]?.flags?.[condition.flag] === true

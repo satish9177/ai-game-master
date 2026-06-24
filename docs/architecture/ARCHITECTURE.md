@@ -33,7 +33,8 @@ Throughout these docs:
   Living-World Room Memory v0 — headless, Node-only, browser-unwired;
   Inventory & Health UI v0 — browser;
   Session Save/Load v0 — browser;
-  Demo Quest Loop v0 — browser).
+  Demo Quest Loop v0 — browser;
+  Consequence Journal v0 — browser).
 - 🔜 **Planned** — designed and approved, not yet built (next slices).
 - ❌ **Not built** — future shape only; documented so we don't paint into a corner.
 
@@ -732,6 +733,65 @@ objective itself.
   status strings, room display names, and narrative content are never logged — mirrors the
   ADR-0013/0014/0015/0026 content-free log discipline.
 
+## Consequence Journal v0
+
+✅ **Implemented, browser.** A **six-entry authored consequence journal** now surfaces as a
+**collapsible read-only journal panel** — a pure projection of authoritative `WorldState` with
+no domain, event, reducer, schema, authored-room, backend, or renderer change of any kind
+([ADR-0029](./decisions/ADR-0029-consequence-journal-v0.md)).
+
+The defining property: **the journal is a derived lens, not a system.** It evaluates a list of
+authored consequence predicates and shows only the ones currently true, in stable authored order.
+It reads truth and never writes it.
+
+- **Authored journal data + pure projector.** `domain/journal/journalSpec.ts` defines the
+  zod-validated `JournalSpec`/`JournalEntrySpec` schema, reusing the closed `ObjectiveCondition`
+  vocabulary from `domain/quests/questSpec.ts`. `domain/examples/demoJournal.ts` holds the
+  hand-authored `demoJournalSpec` literal (six entries). `domain/journal/projectJournal.ts` is
+  the pure, total, deterministic `projectJournal(spec, state) → JournalView` — reads defensively
+  via the shared exported `evaluateCondition`, never throws on absent rooms/flags/statuses/items,
+  imports only domain types, exports no `WorldCommand`/`WorldEvent`-producing function.
+- **Six entries, all gated on existing authoritative state.** Each condition watches an existing
+  `WorldState` field written by prior ADRs:
+
+  | Entry | Condition | Source |
+  | --- | --- | --- |
+  | "You claimed the tribute coin." | `room-flag` `throne-room` / `interaction:offering-coffer` | ADR-0014 |
+  | "You dealt with Steward Malik." | `room-flag` `throne-room` / `encounter:malik-encounter` | ADR-0015 |
+  | "You entered the ruined safehouse." | `room-visited` `ruined-safehouse` | ADR-0016 |
+  | "You became infected." | `has-status` `infected` | ADR-0015 |
+  | "You faced a reanimated walker." | `room-flag` `ruined-safehouse` / `encounter:walker-encounter` | ADR-0015 |
+  | "You secured a royal writ." | `has-item` `royal-writ` | ADR-0015 |
+
+  No new event, command, reducer, or authored-room edit was needed.
+- **Shared condition evaluator.** `domain/quests/evaluateQuest.ts` exports its existing pure
+  `evaluateCondition(condition, state): boolean` (previously private). The journal projector
+  imports it; no new shared engine and no behavior change to the quest path.
+- **Presentational overlay.** `renderer/ui/JournalPanel.tsx` is props-in, DOM-out React only —
+  receives `{ view: JournalView }`, collapsible (collapsed by default); empty state "Nothing of
+  consequence yet."; `pointer-events:none` for static text; interactive collapse toggle;
+  `role="status"` + `aria-live="polite"`. Imports no `three`, engine internals, `world-session`,
+  or services.
+- **App-owned state, four re-projection points.** `App` holds `journal: JournalView | null`.
+  The existing `refreshDerivedViews(state)` helper (introduced with ADR-0028) now also sets
+  `journal` (when the spec is attached); called at bootstrap, on `onWorldStateChange`
+  (interaction/encounter), on `handleNavigate` `navigated`, and on load.
+- **Gated to the authored example world.** The spec is attached only when `'throne-room' in
+  state.roomStates` — the same anchor-room-presence check as the quest tracker. Prompt-generated
+  sessions leave `journal === null` and never render the panel.
+- **Save/load restores journal for free.** `projectJournal` is a pure function of `WorldState`;
+  the same `refreshDerivedViews` call at load re-projects the exact set of true entries. No
+  `SaveGame` schema change.
+- **Not changed:** `domain/world/**` · `domain/quests/questSpec.ts` · `domain/examples/throneRoom.ts`
+  / `ruinedRoom.ts` · `domain/interactions/**` · `domain/encounters/**` · `world-session/**` ·
+  `domain/world/saveGame.ts` / `world-session/saveGame.ts` · `app/NavigationService.ts` ·
+  `app/buildRestoredPlay.ts` · `renderer/RoomViewer.tsx` · `renderer/engine/**` · `dialogue/**` ·
+  `memory/**` · `persistence/**` · `server/**` · `eslint.config.js` · `package.json`.
+- **Log-safe.** The projector is pure and silent; `JournalPanel` is presentational. No new log
+  lines were added to `App`/`RoomViewer`. Journal title/entry text, ids, flag keys, item
+  names/ids, status strings, room display names, and narrative content are never logged — mirrors
+  the ADR-0013/0014/0015/0026/0028 content-free log discipline.
+
 ## Layered architecture
 
 Dependencies point **inward**, toward the domain. Outer layers may depend on
@@ -819,6 +879,8 @@ App.tsx
   ├─ <StatusHud view={playerHud} />     ✅ App-level overlay (sibling of RoomViewer)
   ├─ quest: QuestView | null            ✅ App-owned read-only quest cache; null for prompt-generated sessions
   ├─ <QuestTracker view={quest} />      ✅ App-level overlay; hidden when quest === null (pointer-events:none; aria-live)
+  ├─ journal: JournalView | null        ✅ App-owned read-only journal cache; null for prompt-generated sessions
+  ├─ <JournalPanel view={journal} />    ✅ App-level overlay; hidden when journal === null; collapsed by default (pointer-events:none for text; aria-live)
   ├─ <SaveLoadBar .../>                 ✅ App-level save/load control (sibling of RoomViewer)
   └─ RoomViewer.tsx                     (React host — owns the engine lifecycle)
        ├─ loadRoomSpec(throneRoom)       ✅ validation boundary (today: static data)
@@ -835,14 +897,14 @@ App.tsx
             ├─ exit? → NavigationService → existing moved-to-room
             ├─ encounter? → present choices → EncounterService (on choose)
             │    applied/already-resolved → onWorldStateChange(result.state)
-            │                               → App: setPlayerHud(projectPlayerHud(state))
+            │                               → App: refreshDerivedViews(state)
             ├─ dialogue? → NPCDialogueService.getWorldState → fake provider
             │    → component-only history → <NPCDialoguePanel/>
             └─ else effect? → InteractionService
                  → WorldSession.appendEvent (shared applyCommands)
                  → typed result message → <DialoguePanel/>
                  applied/already-resolved → onWorldStateChange(result.state)
-                                            → App: setPlayerHud(projectPlayerHud(state))
+                                            → App: refreshDerivedViews(state)
 ```
 
 The React ↔ engine seam is **callbacks + imperative methods**, not shared
@@ -892,11 +954,14 @@ the raw-prompt seed, and only a room-generator throw/reject is `unavailable`.
 | `renderer/engine/builders/` | `buildShell` (floor + walls, with isometric **cutaway curbs** on the camera-facing walls), `buildLighting`, and the object `registry` + `buildObjects` with magenta-placeholder fallback. |
 | `renderer/engine/controls/` | `MovementControls` (screen-relative WASD/arrows driving the **player**, room-clamped); `LookControls` (drag-look) **retained but not instantiated** in isometric mode. |
 | `renderer/engine/disposables.ts` | `Disposables` + `disposeObject` — explicit GPU teardown (Three.js does not GC geometries/materials/textures). |
-| `renderer/ui/` | Presentational React overlays: `Hud` (interaction prompt); `DialoguePanel` (result messages); `StatusHud` (read-only player health/inventory/status HUD; `pointer-events:none`; `aria-live`); `playerHud.ts` (pure `projectPlayerHud(WorldState) → PlayerHudView` projection + `PlayerHudView`/`PlayerHudHealth`/`PlayerHudItem` types); `SaveLoadBar.tsx` (save/load bar; receives `{ canSave, hasSave, busy, error, onSave, onContinue }`; calm `role="alert"` errors; no save content shown); `QuestTracker.tsx` (read-only quest tracker; receives `{ view: QuestView }`; renders title + objective done markers; `pointer-events:none`; `role="status"` + `aria-live="polite"`; no service or engine import). |
+| `renderer/ui/` | Presentational React overlays: `Hud` (interaction prompt); `DialoguePanel` (result messages); `StatusHud` (read-only player health/inventory/status HUD; `pointer-events:none`; `aria-live`); `playerHud.ts` (pure `projectPlayerHud(WorldState) → PlayerHudView` projection + `PlayerHudView`/`PlayerHudHealth`/`PlayerHudItem` types); `SaveLoadBar.tsx` (save/load bar; receives `{ canSave, hasSave, busy, error, onSave, onContinue }`; calm `role="alert"` errors; no save content shown); `QuestTracker.tsx` (read-only quest tracker; receives `{ view: QuestView }`; renders title + objective done markers; `pointer-events:none`; `role="status"` + `aria-live="polite"`; no service or engine import); `JournalPanel.tsx` (collapsible read-only journal; receives `{ view: JournalView }`; collapsed by default; empty state "Nothing of consequence yet."; `pointer-events:none` for text; interactive collapse toggle; `role="status"` + `aria-live="polite"`; no service or engine import). |
 | `renderer/RoomViewer.tsx` | The composition seam: constructs/disposes the engine, bridges engine callbacks to React state. StrictMode-safe (mount → dispose → mount leaks nothing). |
 | `domain/quests/questSpec.ts` | `QuestSpec`/`QuestSpecSchema` — zod-validated authored data descriptor; closed condition vocabulary (`room-flag`, `room-visited`, `has-item`, `has-status`). Imports only `zod`; exports no command/event-producing function. |
-| `domain/quests/evaluateQuest.ts` | Pure `evaluateQuest(spec: QuestSpec, state: WorldState) → QuestView`. Total, deterministic, no I/O; reads defensively (optional chaining); missing rooms/flags/visited → `false`, never throws. Covered by co-located `evaluateQuest.test.ts` (pure Vitest, no DOM). |
+| `domain/quests/evaluateQuest.ts` | Pure `evaluateQuest(spec: QuestSpec, state: WorldState) → QuestView` and the exported pure `evaluateCondition(condition, state): boolean` (shared with the journal projector — previously private, now a one-line export with no behavior change). Total, deterministic, no I/O; reads defensively (optional chaining); missing rooms/flags/visited → `false`, never throws. Covered by co-located `evaluateQuest.test.ts` (pure Vitest, no DOM). |
 | `domain/examples/demoQuest.ts` | Hand-authored `demoQuestSpec` literal ("The Steward's Toll"): three objectives wired to the existing `throne-room` interaction/encounter flags and `ruined-safehouse` visited mark. |
+| `domain/journal/journalSpec.ts` | `JournalSpec`/`JournalEntrySpec`/`JournalSpecSchema` — zod-validated authored data descriptor; reuses `ObjectiveCondition` from `questSpec.ts`. Imports only `zod` and domain types; exports no command/event-producing function. |
+| `domain/journal/projectJournal.ts` | Pure `projectJournal(spec: JournalSpec, state: WorldState) → JournalView`. Total, deterministic, no I/O; reads defensively via the shared `evaluateCondition` (optional chaining); missing rooms/flags/statuses/items → `false`, never throws; emits only true entries in authored order. Covered by co-located `projectJournal.test.ts` (pure Vitest, no DOM). |
+| `domain/examples/demoJournal.ts` | Hand-authored `demoJournalSpec` literal: six entries wired to existing `WorldState` conditions — `throne-room` interaction/encounter flags, `ruined-safehouse` visited, `infected` status, `encounter:walker-encounter` flag, and `royal-writ` inventory. |
 
 ## Generation Foundation v0 — module summary
 

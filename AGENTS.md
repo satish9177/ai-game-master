@@ -157,6 +157,27 @@ edit, no LLM quest generation, no backend/memory/persistence wiring, no new depe
 and no DOM/component tests.** Quest/objective text, ids, flag keys, item names/ids, status
 strings, and any narrative content are never logged.
 
+## Consequence Journal v0 — shipped, browser
+
+A **six-entry authored consequence journal** surfaces as a **collapsible read-only journal
+panel** — a pure projection of authoritative `WorldState` for the authored example world session
+([ADR-0029](docs/architecture/decisions/ADR-0029-consequence-journal-v0.md)).
+
+| Module | Role |
+| --- | --- |
+| `domain/journal/journalSpec.ts` | `JournalSpec`/`JournalEntrySpec`/`JournalSpecSchema` (zod-validated authored data; reuses the closed `ObjectiveCondition` vocabulary from `questSpec.ts`). Imports only `zod`; exports no command/event-producing function. |
+| `domain/journal/projectJournal.ts` | Pure `projectJournal(spec, state) → JournalView`. Total, deterministic, no I/O; reads defensively via the shared exported `evaluateCondition`; missing rooms/flags/statuses/items → `false`, never throws. Emits only true entries in authored order. |
+| `domain/examples/demoJournal.ts` | Hand-authored `demoJournalSpec` literal: six entries tied to existing `WorldState` conditions — `throne-room` flags (tribute coin, Malik), `ruined-safehouse` visited, `infected` status, `encounter:walker-encounter` flag, and `royal-writ` inventory. |
+| `renderer/ui/JournalPanel.tsx` | Presentational React: `{ view: JournalView }` in, DOM out. Collapsible, collapsed by default; empty state "Nothing of consequence yet."; interactive collapse toggle; `pointer-events:none` for text; `role="status"` + `aria-live="polite"`. No `three`, engine internals, `world-session`, or services. |
+| `domain/quests/evaluateQuest.ts` (export added) | `evaluateCondition(condition, state): boolean` is now exported (previously private) — a pure shared helper for both quest and journal evaluation. No behavior change to the quest path. |
+| `App.tsx` wiring | Owns `journal: JournalView | null`; attaches `demoJournalSpec` only for the authored example bootstrap and for anchor-gated restores (`'throne-room' in state.roomStates`); `refreshDerivedViews(state)` (introduced with ADR-0028) now also sets `journal`; renders `<JournalPanel>` as an App-level overlay. |
+
+**The journal is a read-only lens — never truth, never written back.** v0 adds **no new
+`WorldEvent` or `WorldCommand`, no reducer change, no authored-room edit, no LLM summarization,
+no memory integration, no backend/API/persistence changes, no `SaveGame` schema change, no new
+dependency, and no DOM/component tests.** Journal title/entry text, ids, flag keys, item
+names/ids, status strings, room display names, and any narrative content are never logged.
+
 ## Current guardrails
 
 Do not add unless explicitly requested by the maintainer or by the approved implementation plan for the current feature:

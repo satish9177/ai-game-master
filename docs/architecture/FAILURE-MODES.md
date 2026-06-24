@@ -610,6 +610,30 @@ The tracker is read-only with no append path, so no displayed quest state can co
 added to `App`/`RoomViewer`. Quest/objective text, ids, flag keys, item names/ids, status
 strings, room display names, and narrative content are never logged.
 
+## 21. Consequence journal display ✅ v0 (browser)
+
+The collapsible read-only `JournalPanel` overlay reflects the `JournalView` projected by the
+pure `projectJournal` function from authoritative `WorldState`. Its absence, stale state, or
+empty entry list never block play; it has no write path and cannot corrupt truth
+([ADR-0029](./decisions/ADR-0029-consequence-journal-v0.md)).
+
+| Situation | Detection | Handling / result | Logging |
+| --- | --- | --- | --- |
+| No active session / spec not yet attached | `journal === null` in `App` | panel not rendered; no crash | — |
+| Prompt-generated session | no `JournalSpec` attached (anchor-room gate: `'throne-room' not in state.roomStates`) | panel not rendered; never wrong | — |
+| Nothing has happened yet | all conditions read `false` → `entries: []` | expanded panel shows "Nothing of consequence yet."; collapsed toggle shows `Journal (0)` | — |
+| Missing room / flag / visited / status / item | defensive optional chaining in `evaluateCondition` | condition evaluates `false`; entry omitted; never throws | — |
+| Loaded mid-play | `refreshDerivedViews(restoredState)` on load | exact entries reproduced; no special handling | — |
+| Navigation (`entered-safehouse`) | `App.handleNavigate` calls `refreshDerivedViews(result.state)` on `navigated` | "You entered the ruined safehouse." appears immediately; if omitted, next resolve refreshes it — never wrong, only lagged | — |
+| Entry already shown, re-triggered resolve | re-project is idempotent; `already-resolved` carries `state` | entry stays shown; no state change | — |
+| Status/item later removed (future `clear-status`/consume) | condition re-reads `false` | entry disappears — honest reflection of current truth; no authored removal path exists in the demo world | — |
+
+The panel is read-only with no append path, so no displayed journal state can corrupt truth.
+`projectJournal` is pure and silent; `JournalPanel` is presentational. No new log lines were
+added to `App`/`RoomViewer`. Journal title/entry text, ids, flag keys, item names/ids, status
+strings, room display names, and narrative content are never logged — mirrors the
+ADR-0013/0014/0015/0026/0028 content-free log discipline.
+
 ---
 
 ## Summary
@@ -639,6 +663,7 @@ strings, room display names, and narrative content are never logged.
 | 18 | Player HUD display | `playerHud === null` guards render; `projectPlayerHud` is pure/silent; `onWorldStateChange` fires only on `applied`/`already-resolved` variants carrying `state` | HUD absent until seeded; empty inventory/status degrade gracefully; health `0/max` renders empty bar; persists across navigation; no write path | ✅ browser |
 | 19 | Browser session save/load | `SaveSlotStore` try/catch for `localStorage`; `loadSaveGame` integrity boundary; `restoreSession` typed results; `resolveRoom` total seam | corrupt/unsupported/mismatch → calm error, nothing restored; same session → calm notice; generated room → re-resolve + notice; unavailable/quota → calm error, play untouched | ✅ v0 browser |
 | 20 | Quest tracker display | `quest === null` guards render; `evaluateQuest` is pure/total/silent; anchor-room gate; defensive optional chaining on all condition reads | absent/null → tracker hidden; missing room/flag/visited → objective `false`; navigation immediately re-projects Obj 3; all idempotent; no write path | ✅ browser |
+| 21 | Consequence journal display | `journal === null` guards render; `projectJournal` is pure/total/silent via shared `evaluateCondition`; anchor-room gate; defensive optional chaining on all condition reads | absent/null → panel hidden; all conditions `false` → empty state "Nothing of consequence yet."; navigation re-projects safehouse entry immediately; all idempotent; no write path | ✅ browser |
 
 The through-line: **validate at the boundary, degrade visibly and safely, log
 the detail, show the user calm.**
