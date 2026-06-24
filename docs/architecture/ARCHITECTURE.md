@@ -22,8 +22,9 @@ Throughout these docs:
 
 - ✅ **Implemented** — exists today in `apps/web` (Renderer Foundation v0;
   Generation Foundation v0; Semantic Room Validator v0; Room Generation Repair &
-  Fallback v0; World Bible Seed v0 — browser-only; Isometric Camera Foundation;
-  World State & Event Log v0; Object
+  Fallback v0; Generated Room Layout Contract v0 — generated-room assembly
+  pipeline, browser; World Bible Seed v0 — browser-only; Isometric Camera
+  Foundation; World State & Event Log v0; Object
   Interactions v0; Encounter System v0; Multi-Room Navigation & Cache v0; NPC
   Dialogue Foundation v0; Adjacent-Room Pre-generation v0 — browser/session-cache;
   Backend SQLite Persistence v0 — headless, Node-only;
@@ -232,6 +233,56 @@ renderer always receives a valid, playable room
   Node API. A **real** LLM repair/re-prompt, an LLM reviewer, a bounded
   multi-attempt loop, adjacent-room pre-generation, and a backend generation
   endpoint remain **future**.
+
+## Generated Room Layout Contract v0
+
+✅ **Implemented.** Real LLM providers (e.g., DeepSeek) produce valid `RoomSpec`
+JSON that passes schema and semantic validation, yet the rooms are still
+**spatially broken in practice**: floors too small or too large to navigate, objects
+placed outside the room boundary, too many objects, spawn positions crowded by a
+pillar or NPC, and exit arches floating in open floor space instead of at walls.
+The **layout contract** normalizes all of these as **benign pre-semantic steps** in
+`assembleRoom` so the renderer always receives a spatially sane room and the
+generated-room pipeline never triggers a repair/fallback notice for a purely
+geometric mismatch
+([ADR-0031](./decisions/ADR-0031-generated-room-layout-contract-v0.md)).
+
+- **Generated-room size envelope:** default **18 × 18 m**, min/max **14 × 24 m**.
+  Floor width and depth are clamped individually; height is unconstrained.
+  Authored, static, and fallback rooms are **never** subject to this envelope.
+- **Four benign normalizers** (`domain/generatedRoomLayout.ts`) run as stages
+  2.5–2.8 in `assembleRoom`, before semantic validation at stage 3:
+  - **Shell clamp** (`clampGeneratedShell`): width/depth → `[14..24]`.
+  - **Object bounds + count cap** (`repairGeneratedObjects`): each object's X/Z
+    clamped into the walkable floor area (same wall-clearance margin as
+    `validateRoom`); total capped at **30 objects** (drops decorative first,
+    then structural; never critical — NPC, scroll, interactive arch, interactive
+    crate/barrel/debris/barricade/zombie).
+  - **Spawn safe-area repair** (`repairGeneratedSpawn`): spawn X/Z clamped into
+    the playable floor area, then nudged away from any spawn-blocking object via
+    a small deterministic candidate set (origin, ±step in four cardinal
+    directions); falls back to the clamped position if all candidates are crowded.
+  - **Exit placement repair** (`repairGeneratedExits`): each exit-carrying object
+    snapped to the nearest wall face (north/south/east/west; ties broken north >
+    south > east > west). Y is preserved.
+- **Provenance stays `generated`.** All four stages are benign: they run on every
+  generated room, report via four safe boolean diagnostics (`sizeRepaired`,
+  `objectsRepaired`, `spawnRepaired`, `exitsRepaired`), and the host shows **no
+  notice** for a normalized-only room. Only `repairRoom` (stage 4) yields
+  `repaired`; only a pipeline failure yields `fallback`.
+- **Safe diagnostics only.** The four boolean flags are the only new log surface.
+  They never carry raw generated JSON, prompt text, provider body, room names,
+  object text, or API keys.
+- **Scope boundary.** Normalization runs only inside `assembleRoom` for generated
+  rooms. `validateRoom`, `repairRoom`, the fallback room, `GeneratedRoomSource`,
+  and the renderer are unchanged. No backend, provider, memory, gameplay, or
+  persistence change.
+- **Known follow-up.** Object-bounds repair (stage 2.6) clamps exit-carrying
+  objects inward before exit repair (stage 2.8) snaps them back to a wall. This
+  can cause both `objectsRepaired` and `exitsRepaired` to be true for an arch that
+  only needed wall-snapping, or a small nearest-wall drift near corners. Both
+  effects are harmless; a future cleanup can make stage 2.6 skip exit-carrying
+  objects.
 
 ## Isometric Camera Foundation
 
@@ -977,7 +1028,10 @@ PromptBar.onSubmit(prompt)                    (app chrome — not renderer UI)
             ├─ FakeRoomGenerator.generate(generatorSeed) → raw untrusted JSON text
             │     └─ throw/reject → RoomLoadResult unavailable (retry path)
             ├─ assembleRoom(rawText, fallbackRoom) ✅ pure domain pipeline
-            │     JSON.parse → loadRoomSpec → validateRoom → repairRoom → re-validate → fallback
+            │     JSON.parse → loadRoomSpec
+            │     → clampGeneratedShell (2.5) → repairGeneratedObjects (2.6)
+            │     → repairGeneratedSpawn (2.7) → repairGeneratedExits (2.8)
+            │     → validateRoom → repairRoom → re-validate → fallback
             │     └─ ALWAYS { room (zero-fatal), diagnostics }
             └─ RoomLoadResult { ok:true, room, provenance } (generated | repaired | fallback)
                  ├─ start unchanged WorldSession; keep optional bible in ActivePlay
@@ -1033,7 +1087,8 @@ the raw-prompt seed, and only a room-generator throw/reject is `unavailable`.
 | `app/selectRoomGenerator.ts` | Composition factory: returns the real `OpenAICompatibleRoomGenerator` only when the config is complete, else `FakeRoomGenerator` with reason `config-disabled`. Pure (no I/O at selection time); also returns a log-safe selection summary (provider/model/numbers or the fixed reason). |
 | `domain/validateRoom.ts` | Pure semantic validator: `validateRoom(room) → RoomValidationResult` of severity-tagged issues. Checks *playability* (dimensions, spawn-in-bounds, object/light budgets, usable interactions) over a loaded room — a domain peer of `loadRoomSpec`. No I/O, no logger, no React/Three ([ADR-0011](./decisions/ADR-0011-semantic-room-validator-v0.md)). |
 | `domain/repairRoom.ts` | Pure deterministic repair: `repairRoom(room) → LoadedRoom`. Non-mutating; only clamps spawn into the walkable AABB and truncates over-hard-budget objects/torches — never resizes rooms or invents content. Code peer of `validateRoom` ([ADR-0020](./decisions/ADR-0020-room-generation-repair-fallback-v0.md)). |
-| `domain/assembleRoom.ts` | Pure assembly pipeline: `assembleRoom(rawText, fallbackRoom) → { room, diagnostics }`. Composes `JSON.parse` → `loadRoomSpec` → `validateRoom` → `repairRoom` → re-validate → fallback; **always** returns a zero-fatal room plus safe diagnostics (provenance/stage/codes/counts/booleans). Synchronous, no I/O, never logs ([ADR-0020](./decisions/ADR-0020-room-generation-repair-fallback-v0.md)). |
+| `domain/generatedRoomLayout.ts` | Generated-room layout contract ([ADR-0031](./decisions/ADR-0031-generated-room-layout-contract-v0.md)): `GENERATED_ROOM` constants (default 18, min 14, max 24, max objects 30); four benign normalizers applied as stages 2.5–2.8 in `assembleRoom` — `clampGeneratedShell` (width/depth → `[14..24]`), `repairGeneratedObjects` (X/Z bounds + count cap ≤ 30, drops decorative first), `repairGeneratedSpawn` (clamp + deterministic nudge away from blocking objects), `repairGeneratedExits` (snap to nearest wall face). Pure, no I/O, no logger, no mutation. Never applied to authored/static/fallback rooms. |
+| `domain/assembleRoom.ts` | Pure assembly pipeline: `assembleRoom(rawText, fallbackRoom) → { room, diagnostics }`. Composes `JSON.parse` → `loadRoomSpec` → `clampGeneratedShell` (2.5) → `repairGeneratedObjects` (2.6) → `repairGeneratedSpawn` (2.7) → `repairGeneratedExits` (2.8) → `validateRoom` → `repairRoom` → re-validate → fallback; **always** returns a zero-fatal room plus safe diagnostics (provenance/stage/codes/counts/booleans/normalized flags). Synchronous, no I/O, never logs ([ADR-0020](./decisions/ADR-0020-room-generation-repair-fallback-v0.md), [ADR-0031](./decisions/ADR-0031-generated-room-layout-contract-v0.md)). |
 | `domain/examples/fallbackRoom.ts` | The trusted, data-only fallback room (the `throneRoom` authoring pattern): a small in-bounds stone antechamber, zero fatal/zero warning, no prompt or story text. Injected by the host as `assembleRoom`'s last resort. |
 | `room/GeneratedRoomSource.ts` | A `RoomSource` adapter (composition layer) that runs the generator, then `assembleRoom`. A generator throw/reject → `unavailable`; otherwise **always** `ok:true` with `provenance` (`generated`/`repaired`/`fallback`). Logs one safe line (provenance/stage/codes/counts) — never prompt/raw JSON/story text/object names. |
 | `app/AdjacentRoomPregenerator.ts` | Composition-layer room-acquisition seam ([ADR-0021](./decisions/ADR-0021-adjacent-room-pregeneration-v0.md)). `resolveRoom(id)` is cache-first, in-flight-aware, and total (authored → `RoomRegistry`; non-authored → `GeneratedRoomSource → assembleRoom`, id-normalized; never throws). `warmAdjacent(room)` warms the current room's exits in the background, capped at `maxJobs` (default 3), depth-1. Implements the narrow `RoomResolver` that `NavigationService` depends on. |
@@ -1048,6 +1103,9 @@ Tested with **Vitest**: the PRNG (determinism/divergence/ranges), the fake
 room generator, `WorldBibleSeed` schema/projection, `FakeWorldBibleSeeder`
 (determinism, two-way theme mapping, bounds, data-only/no side effects), the
 non-blocking app helper and its leakage guard, `validateRoom`, repair/fallback,
+the generated-room layout normalizers (`generatedRoomLayout.ts`: shell clamp,
+object bounds + count cap, spawn repair, exit snapping — same-reference optimization,
+no mutation), all `assembleRoom` pipeline paths including the new stages 2.5–2.8,
 and all `GeneratedRoomSource` paths. Log-safety tests cover raw prompts, derived
 seeds, bible/story/opening-arc text, keywords, generated JSON, and error details.
 `buildRestoredPlay` (authored/generated/failed-resolve, purity/no-mutation) and

@@ -200,6 +200,36 @@ carry count/cap/status enum only — never keys, prompts, seeds, provider bodies
 token counts, or PII. The fake provider path is completely inert: no count, no meter, no gate,
 no UI. Adjacent pregeneration is fake-only and uncounted.
 
+## Generated Room Layout Contract v0 — shipped, generated-room assembly pipeline
+
+Four **benign layout normalizers** run in `assembleRoom` (stages 2.5–2.8) before
+semantic validation, correcting the spatial layout problems that real LLMs (e.g.,
+DeepSeek) introduce in otherwise valid `RoomSpec` output. Normalization keeps
+`provenance: generated` — the host shows no notice for a layout-normalized-only room
+([ADR-0031](docs/architecture/decisions/ADR-0031-generated-room-layout-contract-v0.md)).
+
+| Module | Role |
+| --- | --- |
+| `domain/generatedRoomLayout.ts` | Pure constants (`GENERATED_ROOM`: default 18, min 14, max 24, max objects 30) + four normalizers: `clampGeneratedShell` (width/depth → `[14..24]`), `repairGeneratedObjects` (object X/Z clamp + count cap ≤ 30, drops decorative first), `repairGeneratedSpawn` (clamp + deterministic nudge away from blocking objects), `repairGeneratedExits` (snap exit-carrying objects to nearest wall face). No I/O, no logger, no mutation. |
+| `domain/generatedRoomLayout.test.ts` | Pure Vitest: shell clamp (non-finite/negative/in-range/out-of-range), object bounds repair (position clamping, same-reference optimization), object count cap (drop order), spawn repair (out-of-bounds clamp, crowded-spawn nudge), exit snapping (nearest wall, tie-breaking). No DOM dependency. |
+| `domain/assembleRoom.ts` (updated) | Stages 2.5–2.8 inserted before stage 3 (`validateRoom`). New `RoomDiagnostics` fields: `sizeRepaired`, `objectsRepaired`, `spawnRepaired`, `exitsRepaired` (all booleans; always `false` on fallback). |
+| `room/GeneratedRoomSource.ts` (updated) | Logs `sizeRepaired` alongside the existing provenance/codes/counts. No behavior change for the host or renderer. |
+
+**Scope boundary.** Normalizers run **only** in `assembleRoom` for generated rooms.
+`validateRoom`, `repairRoom`, the fallback room, `GeneratedRoomSource`, renderer, and
+all backend/persistence/memory/gameplay systems are **unchanged.** Authored and static
+rooms are never touched. No new ESLint block: `domain/generatedRoomLayout.ts` is
+covered by the existing domain import rules (peer of `domain/repairRoom.ts`).
+
+**Known follow-up.** Stage 2.6 (`repairGeneratedObjects`) clamps exit-carrying objects
+inward before stage 2.8 (`repairGeneratedExits`) snaps them back to a wall. This can
+cause both `objectsRepaired` and `exitsRepaired` to be true when only the wall-snap was
+needed, and a small nearest-wall drift near corners. Both are harmless; a future cleanup
+can make stage 2.6 skip exit-carrying objects.
+
+**Logs.** The four boolean flags are the only new log surface. They never carry raw
+generated JSON, prompt text, provider body, room names, object content, or keys.
+
 ## Current guardrails
 
 Do not add unless explicitly requested by the maintainer or by the approved implementation plan for the current feature:

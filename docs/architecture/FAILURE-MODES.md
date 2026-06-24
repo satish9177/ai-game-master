@@ -221,6 +221,45 @@ repair/fallback pipeline ([ADR-0023](./decisions/ADR-0023-real-room-generator-pr
   is local-dev/BYOK only and a real-key bundle must never be deployed. Hosted
   production moves the provider server-side later.
 
+## 4e. Generated room layout normalization ✅ v0 (benign pre-semantic, always `generated`)
+
+Real LLM providers produce valid `RoomSpec` JSON that still has **spatial layout
+problems**: floor dimensions outside the playable envelope, objects placed beyond
+the wall faces, too many objects, a spawn position crowded by a pillar or NPC, or
+exit arches in the middle of the floor instead of at wall faces. These are not
+playability fatals caught by `validateRoom`, so neither `repairRoom` nor the
+fallback applies — but they do produce an unpleasant or unnavigable room.
+
+The **layout contract** ([ADR-0031](./decisions/ADR-0031-generated-room-layout-contract-v0.md))
+normalizes all five classes as **benign pre-semantic steps** (stages 2.5–2.8 in
+`assembleRoom`) before `validateRoom` runs. Unlike `repairRoom`, these
+normalizations never raise `provenance: repaired` or trigger the dismissable
+notice — they are silently corrective and keep `provenance: generated`.
+
+| Layout problem | Detection | Handling | Logging |
+| --- | --- | --- | --- |
+| Floor too small or too large | `clampGeneratedShell` (stage 2.5): width/depth outside `[14..24]` m | clamp to `[14..24]`; height unchanged | `sizeRepaired: true` bool only |
+| Object outside floor bounds | `repairGeneratedObjects` (stage 2.6): object X/Z beyond playable area | clamp X/Z to walkable floor extent (same margin as `validateRoom`) | `objectsRepaired: true` bool only |
+| Too many objects (> 30) | `repairGeneratedObjects` (stage 2.6): list exceeds `MAX_OBJECTS` cap | drop decorative first, then structural; critical objects are never dropped | `objectsRepaired: true` bool only |
+| Unsafe or crowded spawn | `repairGeneratedSpawn` (stage 2.7): spawn X/Z outside floor or within `SPAWN_CLEARANCE` of a blocking object | clamp to floor, then search deterministic candidate set (origin, ±step cardinal); fall back to clamped position | `spawnRepaired: true` bool only |
+| Exit arch misplaced | `repairGeneratedExits` (stage 2.8): exit-carrying object not on a wall face | snap to nearest wall face (north/south/east/west; ties north > south > east > west) | `exitsRepaired: true` bool only |
+
+- **Provenance** is always `generated` after layout normalization. A separate
+  `repairRoom` pass (stage 4) is the only thing that yields `repaired`, and
+  the pipeline failure path (stages 1–4 exhausted) is the only thing that yields
+  `fallback`. The host shows no notice for a layout-normalized-only room.
+- **Scope.** Normalization runs **only** inside `assembleRoom` for generated rooms.
+  `validateRoom`, `repairRoom`, the fallback room, and the renderer are unchanged.
+  Authored/static/fallback rooms are never touched.
+- **Logging.** The four boolean flags (`sizeRepaired`, `objectsRepaired`,
+  `spawnRepaired`, `exitsRepaired`) are the only new surface. They never carry raw
+  generated JSON, prompt text, provider body, room names, object content, or keys.
+- **Known follow-up.** Stage 2.6 currently clamps exit-carrying objects inward
+  before stage 2.8 snaps them back to a wall face. This can cause both
+  `objectsRepaired` and `exitsRepaired` to be true for an arch that only needed
+  wall-snapping, and a small nearest-wall drift near corners. Both effects are
+  harmless; a future cleanup can make stage 2.6 skip exit-carrying objects.
+
 ## 5. Backend / network failure ✅ API edge v0 · 🔜 browser client
 
 The Node API edge exists, but the browser does not call it yet. v0 therefore
@@ -674,6 +713,7 @@ fake-provider experience is completely unchanged
 | 4b | Valid spec, bad room | `validateRoom` (semantic) + deterministic `repairRoom` / fallback; 🔜 LLM reviewer | fatal → repair → render, else trusted fallback room | ✅ v0 |
 | 4c | World Bible seeding | schema validation + composition catch | raw-prompt generator seed; no stored bible; normal room pipeline | ✅ non-blocking v0 |
 | 4d | Real room provider | completeness check; fixed-code throw on network/timeout/empty/non-JSON | incomplete → fake (`config-disabled`); request failure → `unavailable` retry; malformed text → repaired/fallback | ✅ opt-in v0 (dev-only) |
+| 4e | Generated room layout normalization | shell clamp (2.5); object bounds + count cap (2.6); spawn safe-area repair (2.7); exit wall-snap (2.8) — all pre-semantic | benign normalization keeps `provenance: generated` and shows no notice; authored/fallback rooms untouched | ✅ v0 |
 | 5 | Backend/network | validated API requests + typed results | safe API envelope; browser retry state 🔜 | ✅ API edge v0 |
 | 6 | DB / persistence failure | typed results (rooms, conflicts) + fail-fast throws (open/migration/corrupt session) | safe API error; no browser surface yet | ✅ API-backed v0 |
 | 7 | Pre-gen not ready | one `resolveRoom` seam: cache hit / in-flight join / on-demand resolve (capped, depth-1 warming) | instant cached room, or safe on-demand resolve/generate; never a freeze | ✅ v0 (browser); status lifecycle 🔜 |
