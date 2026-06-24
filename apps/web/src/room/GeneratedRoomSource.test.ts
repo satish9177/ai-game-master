@@ -5,6 +5,7 @@ import type { RoomGenerator } from '../domain/ports/RoomGenerator'
 import { loadRoomSpec } from '../domain/loadRoomSpec'
 import type { LoadedRoom } from '../domain/loadRoomSpec'
 import { fallbackRoom } from '../domain/examples/fallbackRoom'
+import { shouldShowFallbackNotice } from '../app/fallbackNotice'
 import type { Logger, LogContext, LogLevel } from '../platform/logger/Logger'
 
 /* ---------- test doubles ---------- */
@@ -50,11 +51,13 @@ const FALLBACK: LoadedRoom = loadRoomSpec(fallbackRoom)
 const newSource = (gen: RoomGenerator, prompt: string, logger: Logger) =>
   new GeneratedRoomSource(gen, prompt, logger, FALLBACK)
 
+// Dimensions within the generated-room contract [14..24] so tests that expect
+// provenance 'generated' are not affected by dimension repair.
 const base = {
   schemaVersion: 1,
   id: 'stub-room',
   name: 'Stub Room',
-  shell: { dimensions: { width: 10, depth: 12, height: 4 }, exits: [{ side: 'north', width: 3 }] },
+  shell: { dimensions: { width: 18, depth: 18, height: 4 }, exits: [{ side: 'north', width: 3 }] },
   spawn: { position: [0, 1.7, 4] },
 }
 const VALID_SPEC = JSON.stringify({ ...base, objects: [{ type: 'pillar', position: [4, 0, -2] }] })
@@ -71,13 +74,13 @@ const MALFORMED_JSON = '{ not valid json'
 // Schema-valid but NOT playable, and REPAIRABLE: a spawn far outside a normal-size
 // room → fatal `spawn-out-of-bounds`, which repairRoom clamps back into bounds.
 const REPAIRABLE_SPEC = JSON.stringify({ ...base, spawn: { position: [100, 1.7, 0] }, objects: [] })
-// Schema-valid but NOT playable and UNREPAIRABLE: a 2×2 m room is below the
-// minimum walkable size → fatal `room-too-small`; repair never resizes → fallback.
+// height=400 exceeds LIMITS.MAX_ROOM_DIM (300) → fatal `room-too-large`.
+// clampGeneratedShell does not touch height; repairRoom does not resize → fallback.
 const UNREPAIRABLE_SPEC = JSON.stringify({
   schemaVersion: 1,
-  id: 'tiny-room',
-  name: 'Tiny Room',
-  shell: { dimensions: { width: 2, depth: 2, height: 4 }, exits: [{ side: 'north', width: 3 }] },
+  id: 'unrepairable-room',
+  name: 'Unrepairable Room',
+  shell: { dimensions: { width: 18, depth: 18, height: 400 }, exits: [{ side: 'north', width: 3 }] },
   spawn: { position: [0, 1.7, 0] },
   objects: [],
 })
@@ -185,7 +188,7 @@ describe('GeneratedRoomSource', () => {
     expect(entry.context.provenance).toBe('fallback')
     expect(entry.context.failedStage).toBe('semantic')
     expect(entry.context.repairAttempted).toBe(true)
-    expect(entry.context.residualFatalCodes).toEqual(['room-too-small'])
+    expect(entry.context.residualFatalCodes).toEqual(['room-too-large'])
   })
 
   it('never leaks the prompt, raw JSON, story text, or object names on any path', async () => {
@@ -229,9 +232,12 @@ describe('GeneratedRoomSource', () => {
     }
   })
 
-  it('every FakeRoomGenerator output is generated (playable, no repair/fallback)', async () => {
-    // The fake may legitimately raise warnings, but must never produce a room that
-    // needs repair or fallback — guards both the generator and the pipeline.
+  it('every FakeRoomGenerator output is generated and playable (no repair/fallback)', async () => {
+    // FakeRoomGenerator emits width 10–19 m and depth 12–23 m. Outputs below the
+    // generated-room MIN_SIZE (14) are size-clamped UP into the contract — a benign
+    // normalization that keeps provenance 'generated' (no repairRoom, no notice).
+    // Clamping only enlarges the room, so spawn/objects stay in bounds: none ever
+    // needs a real repair or the fallback.
     const prompts = [
       'a calm throne room',
       'haunted hall of echoes',
@@ -248,5 +254,36 @@ describe('GeneratedRoomSource', () => {
       expect(result.ok).toBe(true)
       if (result.ok) expect(result.provenance).toBe('generated')
     }
+  })
+
+  it('size-only clamp stays generated, logs at info, and shows NO fallback notice', async () => {
+    // A schema-valid room below the contract MIN_SIZE: width/depth are clamped UP,
+    // but that is a benign normalization — not a repair. The host must not show the
+    // "couldn't build that exactly" notice for it.
+    const SUB_CONTRACT_SPEC = JSON.stringify({
+      ...base,
+      shell: { dimensions: { width: 10, depth: 12, height: 4 }, exits: [{ side: 'north', width: 3 }] },
+      objects: [],
+    })
+    const { logger, entries } = createSpyLogger()
+    const result = await newSource(generatorReturning(SUB_CONTRACT_SPEC), 'p', logger).getRoom()
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.provenance).toBe('generated')
+      expect(shouldShowFallbackNotice(result.provenance)).toBe(false) // no misleading notice
+      expect(result.room.shell.dimensions.width).toBe(14) // clamped into contract
+      expect(result.room.shell.dimensions.depth).toBe(14)
+    }
+    // Logged as a clean room (info) with the clamp recorded in safe diagnostics.
+    expect(entries).toHaveLength(1)
+    expect(entries[0]!.level).toBe('info')
+    expect(entries[0]!.context.sizeRepaired).toBe(true)
+  })
+
+  it('a real repairRoom repair still surfaces the fallback notice (provenance repaired)', () => {
+    // Regression guard for the notice decision: a genuine repair must still notify.
+    expect(shouldShowFallbackNotice('repaired')).toBe(true)
+    expect(shouldShowFallbackNotice('fallback')).toBe(true)
+    expect(shouldShowFallbackNotice('generated')).toBe(false)
   })
 })

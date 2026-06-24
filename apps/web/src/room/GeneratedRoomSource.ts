@@ -76,6 +76,7 @@ export class GeneratedRoomSource implements RoomSource {
     const context = {
       provenance: diagnostics.provenance,
       failedStage: diagnostics.failedStage,
+      sizeRepaired: diagnostics.sizeRepaired,
       repairAttempted: diagnostics.repairAttempted,
       initialFatalCodes: diagnostics.initialFatalCodes,
       residualFatalCodes: diagnostics.residualFatalCodes,

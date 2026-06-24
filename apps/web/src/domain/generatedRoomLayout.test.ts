@@ -3,6 +3,7 @@ import {
   GENERATED_ROOM,
   defaultGeneratedDimensions,
   clampGeneratedDimension,
+  clampGeneratedShell,
   computePlayableBounds,
   isInsidePlayableBounds,
   isSpawnSafeAreaOverlap,
@@ -232,6 +233,119 @@ describe('classifyObjectImportance', () => {
   it('is deterministic', () => {
     const obj = loadSingleObject({ type: 'pillar', position: [4, 0, -4] })
     expect(classifyObjectImportance(obj)).toBe(classifyObjectImportance(obj))
+  })
+})
+
+describe('clampGeneratedShell', () => {
+  it('returns the same reference when dimensions are already within [14..24]', () => {
+    const room = loadRoomSpec({
+      schemaVersion: 1, id: 'r', name: 'r',
+      shell: { dimensions: { width: 18, depth: 18, height: 4 }, exits: [{ side: 'north', width: 3 }] },
+      spawn: { position: [0, 1.7, 0] }, objects: [],
+    })
+    expect(clampGeneratedShell(room)).toBe(room)
+  })
+
+  it('clamps a tiny room (width=5, depth=5) to MIN_SIZE (14)', () => {
+    const room = loadRoomSpec({
+      schemaVersion: 1, id: 'r', name: 'r',
+      shell: { dimensions: { width: 5, depth: 5, height: 4 }, exits: [{ side: 'north', width: 3 }] },
+      spawn: { position: [0, 1.7, 0] }, objects: [],
+    })
+    const fixed = clampGeneratedShell(room)
+    expect(fixed).not.toBe(room)
+    expect(fixed.shell.dimensions.width).toBe(GENERATED_ROOM.MIN_SIZE)
+    expect(fixed.shell.dimensions.depth).toBe(GENERATED_ROOM.MIN_SIZE)
+  })
+
+  it('clamps a huge room (width=50, depth=60) to MAX_SIZE (24)', () => {
+    const room = loadRoomSpec({
+      schemaVersion: 1, id: 'r', name: 'r',
+      shell: { dimensions: { width: 50, depth: 60, height: 4 }, exits: [{ side: 'north', width: 3 }] },
+      spawn: { position: [0, 1.7, 0] }, objects: [],
+    })
+    const fixed = clampGeneratedShell(room)
+    expect(fixed.shell.dimensions.width).toBe(GENERATED_ROOM.MAX_SIZE)
+    expect(fixed.shell.dimensions.depth).toBe(GENERATED_ROOM.MAX_SIZE)
+  })
+
+  it('clamps each dimension independently (width out-of-contract, depth already valid)', () => {
+    const room = loadRoomSpec({
+      schemaVersion: 1, id: 'r', name: 'r',
+      shell: { dimensions: { width: 5, depth: 18, height: 4 }, exits: [{ side: 'north', width: 3 }] },
+      spawn: { position: [0, 1.7, 0] }, objects: [],
+    })
+    const fixed = clampGeneratedShell(room)
+    expect(fixed).not.toBe(room)
+    expect(fixed.shell.dimensions.width).toBe(GENERATED_ROOM.MIN_SIZE) // 5 → 14
+    expect(fixed.shell.dimensions.depth).toBe(18) // already in [14..24], untouched
+  })
+
+  it('does not clamp height (height is not constrained by the contract)', () => {
+    const room = loadRoomSpec({
+      schemaVersion: 1, id: 'r', name: 'r',
+      shell: { dimensions: { width: 18, depth: 18, height: 10 }, exits: [{ side: 'north', width: 3 }] },
+      spawn: { position: [0, 1.7, 0] }, objects: [],
+    })
+    expect(clampGeneratedShell(room).shell.dimensions.height).toBe(10)
+  })
+
+  it('preserves all other shell fields and objects unchanged', () => {
+    const room = loadRoomSpec({
+      schemaVersion: 1, id: 'preserve', name: 'Preserve',
+      shell: {
+        dimensions: { width: 5, depth: 5, height: 4 },
+        floorColor: '#3c3a33',
+        wallColor: '#5a5347',
+        exits: [{ side: 'north', width: 3 }],
+      },
+      spawn: { position: [0, 1.7, 0] },
+      objects: [{ type: 'pillar', position: [1, 0, -1] }],
+    })
+    const fixed = clampGeneratedShell(room)
+    expect(fixed.shell.floorColor).toBe(room.shell.floorColor)
+    expect(fixed.shell.wallColor).toBe(room.shell.wallColor)
+    expect(fixed.shell.exits).toEqual(room.shell.exits)
+    expect(fixed.objects).toEqual(room.objects)
+    expect(fixed.spawn).toEqual(room.spawn)
+    expect(fixed.id).toBe('preserve')
+  })
+
+  it('does not mutate the input room', () => {
+    const room = loadRoomSpec({
+      schemaVersion: 1, id: 'r', name: 'r',
+      shell: { dimensions: { width: 5, depth: 5, height: 4 }, exits: [{ side: 'north', width: 3 }] },
+      spawn: { position: [0, 1.7, 0] }, objects: [],
+    })
+    const widthBefore = room.shell.dimensions.width
+    clampGeneratedShell(room)
+    expect(room.shell.dimensions.width).toBe(widthBefore)
+  })
+
+  it('handles non-positive dimensions defensively by returning DEFAULT_SIZE (18)', () => {
+    // Construct a room with invalid dimensions bypassing schema validation — tests
+    // the defensive branch in clampGeneratedDimension for robustness.
+    const room = loadRoomSpec({
+      schemaVersion: 1, id: 'r', name: 'r',
+      shell: { dimensions: { width: 18, depth: 18, height: 4 }, exits: [{ side: 'north', width: 3 }] },
+      spawn: { position: [0, 1.7, 0] }, objects: [],
+    })
+    const badRoom = {
+      ...room,
+      shell: { ...room.shell, dimensions: { width: 0, depth: 0, height: 4 } },
+    }
+    const fixed = clampGeneratedShell(badRoom)
+    expect(fixed.shell.dimensions.width).toBe(GENERATED_ROOM.DEFAULT_SIZE)
+    expect(fixed.shell.dimensions.depth).toBe(GENERATED_ROOM.DEFAULT_SIZE)
+  })
+
+  it('is deterministic', () => {
+    const room = loadRoomSpec({
+      schemaVersion: 1, id: 'r', name: 'r',
+      shell: { dimensions: { width: 5, depth: 5, height: 4 }, exits: [{ side: 'north', width: 3 }] },
+      spawn: { position: [0, 1.7, 0] }, objects: [],
+    })
+    expect(clampGeneratedShell(room)).toEqual(clampGeneratedShell(room))
   })
 })
 

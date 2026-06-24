@@ -1,5 +1,6 @@
 import { LIMITS } from './validateRoom'
 import type { RoomObject } from './roomSpec'
+import type { LoadedRoom } from './loadRoomSpec'
 
 /**
  * Generated room layout contract (generated-room-layout-contract v0). Pure
@@ -82,6 +83,31 @@ export function isSpawnSafeAreaOverlap(
   const [x, , z] = position
   const [spawnX, , spawnZ] = spawnPosition
   return Math.hypot(x - spawnX, z - spawnZ) < LIMITS.SPAWN_CLEARANCE
+}
+
+/**
+ * Clamps the floor dimensions (width, depth) of a generated room to the product
+ * contract [MIN_SIZE..MAX_SIZE]. Height is not constrained by the generated-room
+ * contract and is left unchanged.
+ *
+ * Returns the SAME object reference when no dimension needed clamping, so
+ * callers can use a reference equality check (`clamped !== room`) to detect
+ * whether any repair was applied — without adding extra state.
+ *
+ * Never mutates the input room.
+ */
+export function clampGeneratedShell(room: LoadedRoom): LoadedRoom {
+  const { width, depth, height } = room.shell.dimensions
+  const newWidth = clampGeneratedDimension(width)
+  const newDepth = clampGeneratedDimension(depth)
+  if (newWidth === width && newDepth === depth) return room
+  return {
+    ...room,
+    shell: {
+      ...room.shell,
+      dimensions: { width: newWidth, depth: newDepth, height },
+    },
+  }
 }
 
 /**

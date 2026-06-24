@@ -3,6 +3,7 @@ import type { LoadedRoom } from './loadRoomSpec'
 import { repairRoom } from './repairRoom'
 import { validateRoom } from './validateRoom'
 import type { RoomIssueCode, RoomValidationResult } from './validateRoom'
+import { clampGeneratedShell } from './generatedRoomLayout'
 
 /**
  * Room assembly pipeline (room-generation-repair-fallback v0). A pure,
@@ -32,6 +33,17 @@ import type { RoomIssueCode, RoomValidationResult } from './validateRoom'
  *
  * Conventions: Y-up, meters, -Z = north.
  */
+/**
+ * Where the returned room came from — a coarse, host-facing signal that decides
+ * whether to show the safe "couldn't build that exactly" notice:
+ * - `generated` — built from the model output as-is, OR with only a benign
+ *   floor-size clamp into the contract (reported separately via `sizeRepaired`).
+ *   No playability repair was needed, so the host shows NO notice.
+ * - `repaired`  — a deterministic `repairRoom` pass fixed a fatal playability
+ *   issue (spawn clamp, budget truncation). The host shows its safe notice.
+ * - `fallback`  — assembly failed; the trusted fallback room was substituted.
+ *   The host shows its safe notice.
+ */
 export type RoomProvenance = 'generated' | 'repaired' | 'fallback'
 
 /** The pipeline stage whose failure forced the fallback (absent on success). */
@@ -42,6 +54,14 @@ export type RoomDiagnostics = {
   provenance: RoomProvenance
   /** Set only when the room came from the fallback. */
   failedStage?: RoomAssemblyStage
+  /**
+   * Whether the returned generated room's floor dimensions (width/depth) were
+   * clamped into the product contract [14..24 m]. This is a benign normalization,
+   * NOT a playability repair: a size-only clamp keeps provenance `generated` and
+   * must NOT trigger the host's repair/fallback notice. Always false for a
+   * fallback room (the authored fallback is never clamped).
+   */
+  sizeRepaired: boolean
   /** Distinct fatal codes from the FIRST semantic validation (empty if none ran). */
   initialFatalCodes: RoomIssueCode[]
   /** Whether deterministic repair ran (only when an initial fatal was present). */
@@ -80,31 +100,44 @@ export function assembleRoom(
     return toFallback(fallbackRoom, 'schema')
   }
 
-  // Stage 3 — semantic playability. No fatal issue → accept as generated.
-  const initial = validateRoom(loaded)
+  // Stage 2.5 — clamp generated-room floor dimensions to the product contract
+  // [14..24 m]. A same-reference result means no dimension changed. Height is
+  // not constrained by the contract and is left as-is. This step runs on every
+  // generated room regardless of whether semantic validation passes; the global
+  // LIMITS in validateRoom stay loose so authored rooms are unaffected.
+  const clamped = clampGeneratedShell(loaded)
+  const sizeRepaired = clamped !== loaded
+
+  // Stage 3 — semantic playability. No fatal issue → accept as generated. A
+  // size-only clamp is a benign normalization (not a playability repair), so the
+  // room stays `generated` and shows no notice; the clamp is reported via
+  // `sizeRepaired` for logs. Only a `repairRoom` pass (Stage 4) yields `repaired`.
+  const initial = validateRoom(clamped)
   if (initial.ok) {
     return {
-      room: loaded,
+      room: clamped,
       diagnostics: {
         provenance: 'generated',
+        sizeRepaired,
         initialFatalCodes: [],
         repairAttempted: false,
         residualFatalCodes: [],
-        skippedObjectCount: loaded.skipped.length,
+        skippedObjectCount: clamped.skipped.length,
         warningCount: countWarnings(initial),
       },
     }
   }
 
-  // Stage 4 — one deterministic repair pass, then re-validate.
+  // Stage 4 — one deterministic repair pass on the clamped room, then re-validate.
   const initialFatalCodes = distinctFatalCodes(initial)
-  const repaired = repairRoom(loaded)
+  const repaired = repairRoom(clamped)
   const revalidated = validateRoom(repaired)
   if (revalidated.ok) {
     return {
       room: repaired,
       diagnostics: {
         provenance: 'repaired',
+        sizeRepaired,
         initialFatalCodes,
         repairAttempted: true,
         residualFatalCodes: [],
@@ -120,6 +153,8 @@ export function assembleRoom(
     diagnostics: {
       provenance: 'fallback',
       failedStage: 'semantic',
+      // The returned room is the authored fallback, which is never clamped.
+      sizeRepaired: false,
       initialFatalCodes,
       repairAttempted: true,
       residualFatalCodes: distinctFatalCodes(revalidated),
@@ -139,6 +174,7 @@ function toFallback(
     diagnostics: {
       provenance: 'fallback',
       failedStage,
+      sizeRepaired: false,
       initialFatalCodes: [],
       repairAttempted: false,
       residualFatalCodes: [],
