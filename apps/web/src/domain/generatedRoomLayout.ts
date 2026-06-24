@@ -132,6 +132,10 @@ export function classifyObjectImportance(obj: RoomObject): ObjectImportance {
     case 'npc':
     case 'scroll':
       return 'critical'
+    case 'book':
+    case 'paper':
+    case 'map':
+      return obj.interaction != null ? 'critical' : 'decorative'
     case 'arch':
       return obj.interaction != null ? 'critical' : 'structural'
     case 'crate':
@@ -190,6 +194,11 @@ function baseFootprint(obj: RoomObject): number {
       return 1.0 // 2 × 1.6 m base box → 1.0 m half-extent
     case 'scroll':
       return 0.3
+    case 'book':
+      return diagRadius(obj.size[0] * 1.05, obj.size[2] * 1.05)
+    case 'paper':
+    case 'map':
+      return diagRadius(obj.size[0], obj.size[1])
     case 'npc':
       return 0.45
     case 'zombie':
@@ -248,8 +257,9 @@ const PLACEHOLDER_FOOTPRINT = 0.4 + FOOTPRINT_SAFETY
  * mystery-marker anchors into bounds too. Generated rooms only.
  *
  * Bounds are the playable floor (computePlayableBounds) shrunk by each object's
- * own footprint radius, so a crate/barrel/debris/prop/torch/placeholder centered
- * near the wall is moved inward far enough that the rendered mesh stays inside.
+ * own footprint radius, so a document/crate/barrel/debris/prop/torch/placeholder
+ * centered near the wall is moved inward far enough that the rendered mesh stays
+ * inside.
  *
  * Decorative clutter whose footprint cannot fit at all (footprint exceeds the
  * available half-extent) is dropped; critical/structural objects are never

@@ -191,3 +191,44 @@ describe('post-apoc object schema', () => {
     expect(loaded.skipped[0]?.type).toBe('mutant')
   })
 })
+
+describe('document object schema', () => {
+  it.each(['book', 'paper', 'map'] as const)(
+    'parses a minimal %s with defaults and no invented interaction',
+    (type) => {
+      const parsed = RoomObjectSchema.parse({ type, position: [1, 0, 2] })
+      expect(parsed.type).toBe(type)
+      expect(parsed.rotationY).toBe(0)
+      expect(parsed.scale).toBe(1)
+      expect('interaction' in parsed).toBe(false)
+    },
+  )
+
+  it.each(['book', 'paper', 'map'] as const)(
+    'preserves an optional existing interaction on %s',
+    (type) => {
+      const parsed = RoomObjectSchema.parse({
+        type,
+        position: [0, 0, 0],
+        interaction: { key: 'E', prompt: 'Inspect document', body: 'Validated text.' },
+      })
+      expect('interaction' in parsed && parsed.interaction?.key).toBe('E')
+    },
+  )
+
+  it('keeps unknown document-like types skipped', () => {
+    const loaded = loadRoomSpec(minimalRoom([{ type: 'journal', position: [0, 0, 0] }]))
+    expect(loaded.objects).toEqual([])
+    expect(loaded.skipped[0]?.type).toBe('journal')
+  })
+
+  it('keeps malformed document objects skipped', () => {
+    const loaded = loadRoomSpec(minimalRoom([
+      { type: 'book', position: [0, 0, 0], size: [0.7, -0.1, 0.5] },
+      { type: 'paper', position: [0, 0, 0], size: [0.8] },
+      { type: 'map', position: [0, 0, 0], markColor: 'red' },
+    ]))
+    expect(loaded.objects).toEqual([])
+    expect(loaded.skipped.map((item) => item.type)).toEqual(['book', 'paper', 'map'])
+  })
+})

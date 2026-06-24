@@ -90,6 +90,39 @@ const Scroll = z.object({
   ...transform,
 })
 
+// Document vocabulary v0. Unlike scroll, these common generated document forms
+// may be visual-only; when an interaction is present the existing E/F path and
+// renderer affordance apply unchanged.
+const Book = z.object({
+  type: z.literal('book'),
+  size: z.tuple([
+    z.number().positive(),
+    z.number().positive(),
+    z.number().positive(),
+  ]).default([0.7, 0.14, 0.5]),
+  coverColor: Hex.default('#6b3f2a'),
+  pageColor: Hex.default('#e8dcb5'),
+  interaction: Interaction.optional(),
+  ...transform,
+})
+
+const Paper = z.object({
+  type: z.literal('paper'),
+  size: z.tuple([z.number().positive(), z.number().positive()]).default([0.8, 0.6]),
+  color: Hex.default('#e8dcb5'),
+  interaction: Interaction.optional(),
+  ...transform,
+})
+
+const Map = z.object({
+  type: z.literal('map'),
+  size: z.tuple([z.number().positive(), z.number().positive()]).default([1.4, 0.9]),
+  color: Hex.default('#d6c28e'),
+  markColor: Hex.default('#8a3f2f'),
+  interaction: Interaction.optional(),
+  ...transform,
+})
+
 const Npc = z.object({
   type: z.literal('npc'),
   name: z.string().min(1),
@@ -169,6 +202,9 @@ export const RoomObjectSchema = z.discriminatedUnion('type', [
   Torch,
   Arch,
   Scroll,
+  Book,
+  Paper,
+  Map,
   Npc,
   Prop,
   Crate,

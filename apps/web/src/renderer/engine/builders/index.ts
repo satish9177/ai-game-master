@@ -3,6 +3,7 @@ import type { LoadedRoom } from '../../../domain/loadRoomSpec'
 import type { RoomObject } from '../../../domain/roomSpec'
 import type { Logger } from '../../../platform/logger/Logger'
 import { buildGroundRing } from './indicators'
+import { buildBook, buildMap, buildPaper } from './documents'
 import { buildBarrel, buildBarricade, buildCrate, buildDebris } from './postApocProps'
 import { buildHumanoid } from './parts/humanoid'
 
@@ -59,6 +60,9 @@ const registry = {
   torch: buildTorch,
   arch: buildArch,
   scroll: buildScroll,
+  book: buildBook,
+  paper: buildPaper,
+  map: buildMap,
   npc: buildNpc,
   prop: buildProp,
   crate: buildCrate,

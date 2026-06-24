@@ -947,3 +947,41 @@ describe('authored fallback room is unchanged by this slice', () => {
     expect(loaded.objects).toEqual(objectsBefore)
   })
 })
+
+describe('document layout integration', () => {
+  it.each(['book', 'paper', 'map'] as const)(
+    '%s is decorative without interaction and critical with interaction',
+    (type) => {
+      const decorative = loadSingleObject({ type, position: [0, 0, 0] })
+      const interactive = loadSingleObject({
+        type,
+        position: [0, 0, 0],
+        interaction: { key: 'E', prompt: 'Inspect', body: 'Validated body.' },
+      })
+      expect(classifyObjectImportance(decorative)).toBe('decorative')
+      expect(classifyObjectImportance(interactive)).toBe('critical')
+    },
+  )
+
+  it('uses conservative positive footprints and repairs documents fully in bounds', () => {
+    const room = makeRoom([
+      { type: 'book', position: [100, 0, 0] },
+      { type: 'paper', position: [0, 0, -100] },
+      { type: 'map', position: [100, 0, 100] },
+    ])
+    const fixed = repairGeneratedObjects(room)
+    const bounds = computePlayableBounds(fixed.shell.dimensions, fixed.shell.wallThickness)
+    expect(fixed.objects).toHaveLength(3)
+    for (const document of fixed.objects) {
+      const footprint = objectFootprintRadius(document)
+      expect(footprint).toBeGreaterThan(0)
+      expect(Math.abs(document.position[0]) + footprint).toBeLessThanOrEqual(bounds.halfX + 1e-9)
+      expect(Math.abs(document.position[2]) + footprint).toBeLessThanOrEqual(bounds.halfZ + 1e-9)
+    }
+  })
+
+  it.each(['book', 'paper', 'map'] as const)('%s does not crowd or move spawn', (type) => {
+    const room = makeSpawnRoom([0, 1.7, 0], [{ type, position: [0, 0, 0] }])
+    expect(repairGeneratedSpawn(room)).toBe(room)
+  })
+})

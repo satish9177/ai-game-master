@@ -69,6 +69,9 @@ const currentObjects: { [K in RoomObject['type']]: unknown } = {
     position: [0, 0.5, 0],
     interaction: { key: 'E', prompt: 'Read', body: 'A validated document.' },
   },
+  book: { type: 'book', position: [0, 0, 0] },
+  paper: { type: 'paper', position: [0, 0, 0] },
+  map: { type: 'map', position: [0, 0, 0] },
   npc: {
     type: 'npc',
     name: 'Registry NPC',
