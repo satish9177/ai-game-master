@@ -31,6 +31,8 @@ export type LlmConfig = {
   apiKey: string
   maxTokens: number
   timeoutMs: number
+  /** Real-attempt cap per page/App lifetime for the usage guardrail. */
+  sessionCap: number
 }
 
 /** Built-in per-provider base URLs (no base-URL env var in v0). */
@@ -43,6 +45,8 @@ export const REAL_PROVIDER_BASE_URLS: Record<RealLlmProvider, string> = {
 export const DEFAULT_MAX_TOKENS = 2000
 /** Hard request-timeout default when `VITE_AIGM_LLM_TIMEOUT_MS` is unset/invalid. */
 export const DEFAULT_TIMEOUT_MS = 25_000
+/** Default real-attempt cap per page/App lifetime when `VITE_AIGM_LLM_SESSION_CAP` is unset/invalid. */
+export const DEFAULT_SESSION_CAP = 10
 
 /** The subset of env we read. Accepted as a param so config is unit-testable. */
 export type LlmRawEnv = Record<string, string | undefined>
@@ -85,6 +89,7 @@ export function readLlmConfig(env: LlmRawEnv = import.meta.env): LlmConfig {
     apiKey: readApiKey(provider, env),
     maxTokens: parsePositiveInt(env.VITE_AIGM_LLM_MAX_TOKENS, DEFAULT_MAX_TOKENS),
     timeoutMs: parsePositiveInt(env.VITE_AIGM_LLM_TIMEOUT_MS, DEFAULT_TIMEOUT_MS),
+    sessionCap: parsePositiveInt(env.VITE_AIGM_LLM_SESSION_CAP, DEFAULT_SESSION_CAP),
   }
 }
 

@@ -517,3 +517,70 @@ body {
   max-width: 16rem;
   text-align: right;
 }
+
+/* ---------- usage meter overlay (real provider only) ---------- */
+.usage-meter {
+  position: fixed;
+  bottom: 1.2rem;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10;
+  width: min(400px, 70vw);
+  padding: 0.45rem 0.75rem;
+  border-radius: 0.5rem;
+  background: rgba(12, 12, 16, 0.88);
+  border: 1px solid #2c2a36;
+  color: #ece6d6;
+  font-family: system-ui, sans-serif;
+  font-size: 0.82rem;
+}
+
+.usage-meter-count {
+  color: #8b8576;
+}
+
+.usage-meter-warning {
+  margin: 0.3rem 0 0;
+  color: #f3d58a;
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+
+.usage-meter-warning--at-cap {
+  color: #f3a870;
+}
+
+.usage-meter-actions {
+  display: flex;
+  gap: 0.4rem;
+  margin-top: 0.35rem;
+}
+
+.usage-meter-btn {
+  padding: 0.25rem 0.6rem;
+  border: 1px solid #3a3747;
+  border-radius: 0.4rem;
+  background: #1e1c28;
+  color: #cfc7b6;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+.usage-meter-btn:hover:not(:disabled) {
+  background: #2e2b3a;
+}
+
+.usage-meter-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.usage-meter-btn--confirm {
+  border-color: #6a5a32;
+  background: #3a3120;
+  color: #f3d58a;
+}
+
+.usage-meter-btn--confirm:hover {
+  background: #4a3e28;
+}

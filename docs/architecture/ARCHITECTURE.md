@@ -34,7 +34,8 @@ Throughout these docs:
   Inventory & Health UI v0 — browser;
   Session Save/Load v0 — browser;
   Demo Quest Loop v0 — browser;
-  Consequence Journal v0 — browser).
+  Consequence Journal v0 — browser;
+  Cost/Usage Guardrails v0 — browser).
 - 🔜 **Planned** — designed and approved, not yet built (next slices).
 - ❌ **Not built** — future shape only; documented so we don't paint into a corner.
 
@@ -792,6 +793,55 @@ It reads truth and never writes it.
   names/ids, status strings, room display names, and narrative content are never logged — mirrors
   the ADR-0013/0014/0015/0026/0028 content-free log discipline.
 
+## Cost/Usage Guardrails v0
+
+✅ **Implemented, browser.** A local request-count **safety guardrail** wraps the one path that
+can make real LLM calls — the PromptBar prompt-generation path — counting real provider attempts
+in the current page/App lifetime, surfacing that count against a configurable cap, warning as
+the cap nears, and requiring an explicit **confirm-to-continue** at cap
+([ADR-0030](./decisions/ADR-0030-cost-usage-guardrails-v0.md)).
+
+The defining property: **this is a local UI safety counter, not billing truth.** The count is
+in-memory only, never persisted, never authoritative accounting, and never inspects the
+provider's response or token usage. When the **fake** (default, offline, free) provider is
+selected, the entire guard is **inert** — no count, no warning, no block, no UI.
+
+- **Pure guard module.** `domain/usage/usageGuard.ts` holds pure types (`UsageGuardConfig`,
+  `UsageGuardState`, `UsageGuardStatus`) and four pure helpers (`initialUsageState`,
+  `recordAttempt`, `resetUsage`, `evaluate`). Total, deterministic, no I/O, no mutation, no
+  React/logger/provider import. `evaluate(state, config)` returns `'inert'` when disabled,
+  `'ok'` below the threshold, `'approaching'` at `cap − 1`, and `'at-cap'` at `>= cap`.
+  Covered by pure Vitest tests; no DOM dependency added.
+- **Config: `VITE_AIGM_LLM_SESSION_CAP` (optional, default 10).** Read only in
+  `app/llmConfig.ts` alongside the existing `VITE_*` flags, parsed with the existing
+  `parsePositiveInt`. Surfaced as `llmConfig.sessionCap`. No cost-estimate flag in v0.
+- **App-owned state.** `App` holds two parallel storage pairs for closure/render access:
+  `usageCountRef`/`usageCount` and `inFlightRef`/`inFlight`, plus `confirmGrantedRef` and
+  `pendingPromptRef`. `guardEnabled` (real provider selected) and `guardCap` are module-level
+  constants derived once at startup from the selection result and `llmConfig`.
+- **Count increments before `getRoom()` resolves**, so unavailable / repaired / fallback
+  outcomes all count. The existing repair/fallback pipeline is unchanged.
+- **In-flight lock** (`inFlightRef`) is independent of the cap: set when a real generation
+  begins, cleared in `finally`. Passes `disabled={inFlight}` into `PromptBar`.
+- **At-cap gate**: when `status === 'at-cap'` and confirm not yet granted, the prompt is stored
+  in `pendingPromptRef` and the handler returns. `handleGenerateAnyway` grants the confirm and
+  replays the stored prompt — that call still increments the count.
+- **`UsageMeter` overlay** (`renderer/ui/UsageMeter.tsx`): presentational React only; rendered
+  only when `guardEnabled`. Returns `null` when `status === 'inert'`. Shows `Generations: N / cap`
+  always when active; static, prompt-free warning copy for `approaching`/`at-cap`; "Generate
+  anyway" confirm; "Reset usage" affordance. `role="status"` + `aria-live="polite"`.
+- **Fake provider is completely inert:** `guardEnabled === false` → no count, no meter, no gate,
+  no in-flight lock, `PromptBar.disabled` stays `false`. Adjacent pregeneration is fake-only
+  and uncounted by design.
+- **No persistence.** Usage state is in-memory only; resets on page reload. No `localStorage`,
+  `SaveGame`, SQLite, or backend usage state.
+- **Log-safe.** One log line per real attempt: `count`/`cap`/`status` enum (non-sensitive
+  counters/enums). Keys, prompts, seeds, provider bodies, generated JSON, token counts, and PII
+  are never logged.
+- **Not changed:** the room-generation safety pipeline (`GeneratedRoomSource → assembleRoom →
+  repair/fallback`); `OpenAICompatibleRoomGenerator`; adjacent pregeneration;
+  `eslint.config.js`; `package.json`. No new lint block, no new layer.
+
 ## Layered architecture
 
 Dependencies point **inward**, toward the domain. Outer layers may depend on
@@ -882,6 +932,8 @@ App.tsx
   ├─ journal: JournalView | null        ✅ App-owned read-only journal cache; null for prompt-generated sessions
   ├─ <JournalPanel view={journal} />    ✅ App-level overlay; hidden when journal === null; collapsed by default (pointer-events:none for text; aria-live)
   ├─ <SaveLoadBar .../>                 ✅ App-level save/load control (sibling of RoomViewer)
+  ├─ usageCount / usageStatus           ✅ App-owned guardrail state (real provider only; in-memory, never persisted)
+  ├─ <UsageMeter .../>                  ✅ App-level overlay; null for fake provider (role="status"; aria-live)
   └─ RoomViewer.tsx                     (React host — owns the engine lifecycle)
        ├─ loadRoomSpec(throneRoom)       ✅ validation boundary (today: static data)
        ├─ new Engine(container)          ✅ pure Three.js
@@ -954,7 +1006,7 @@ the raw-prompt seed, and only a room-generator throw/reject is `unavailable`.
 | `renderer/engine/builders/` | `buildShell` (floor + walls, with isometric **cutaway curbs** on the camera-facing walls), `buildLighting`, and the object `registry` + `buildObjects` with magenta-placeholder fallback. |
 | `renderer/engine/controls/` | `MovementControls` (screen-relative WASD/arrows driving the **player**, room-clamped); `LookControls` (drag-look) **retained but not instantiated** in isometric mode. |
 | `renderer/engine/disposables.ts` | `Disposables` + `disposeObject` — explicit GPU teardown (Three.js does not GC geometries/materials/textures). |
-| `renderer/ui/` | Presentational React overlays: `Hud` (interaction prompt); `DialoguePanel` (result messages); `StatusHud` (read-only player health/inventory/status HUD; `pointer-events:none`; `aria-live`); `playerHud.ts` (pure `projectPlayerHud(WorldState) → PlayerHudView` projection + `PlayerHudView`/`PlayerHudHealth`/`PlayerHudItem` types); `SaveLoadBar.tsx` (save/load bar; receives `{ canSave, hasSave, busy, error, onSave, onContinue }`; calm `role="alert"` errors; no save content shown); `QuestTracker.tsx` (read-only quest tracker; receives `{ view: QuestView }`; renders title + objective done markers; `pointer-events:none`; `role="status"` + `aria-live="polite"`; no service or engine import); `JournalPanel.tsx` (collapsible read-only journal; receives `{ view: JournalView }`; collapsed by default; empty state "Nothing of consequence yet."; `pointer-events:none` for text; interactive collapse toggle; `role="status"` + `aria-live="polite"`; no service or engine import). |
+| `renderer/ui/` | Presentational React overlays: `Hud` (interaction prompt); `DialoguePanel` (result messages); `StatusHud` (read-only player health/inventory/status HUD; `pointer-events:none`; `aria-live`); `playerHud.ts` (pure `projectPlayerHud(WorldState) → PlayerHudView` projection + `PlayerHudView`/`PlayerHudHealth`/`PlayerHudItem` types); `SaveLoadBar.tsx` (save/load bar; receives `{ canSave, hasSave, busy, error, onSave, onContinue }`; calm `role="alert"` errors; no save content shown); `QuestTracker.tsx` (read-only quest tracker; receives `{ view: QuestView }`; renders title + objective done markers; `pointer-events:none`; `role="status"` + `aria-live="polite"`; no service or engine import); `JournalPanel.tsx` (collapsible read-only journal; receives `{ view: JournalView }`; collapsed by default; empty state "Nothing of consequence yet."; `pointer-events:none` for text; interactive collapse toggle; `role="status"` + `aria-live="polite"`; no service or engine import); `UsageMeter.tsx` (local session-cap guardrail overlay; receives `{ count, cap, status, onGenerateAnyway, onReset }`; rendered only when `guardEnabled`; returns `null` when `status === 'inert'`; `role="status"` + `aria-live="polite"`; no `three`, engine internals, or services). |
 | `renderer/RoomViewer.tsx` | The composition seam: constructs/disposes the engine, bridges engine callbacks to React state. StrictMode-safe (mount → dispose → mount leaks nothing). |
 | `domain/quests/questSpec.ts` | `QuestSpec`/`QuestSpecSchema` — zod-validated authored data descriptor; closed condition vocabulary (`room-flag`, `room-visited`, `has-item`, `has-status`). Imports only `zod`; exports no command/event-producing function. |
 | `domain/quests/evaluateQuest.ts` | Pure `evaluateQuest(spec: QuestSpec, state: WorldState) → QuestView` and the exported pure `evaluateCondition(condition, state): boolean` (shared with the journal projector — previously private, now a one-line export with no behavior change). Total, deterministic, no I/O; reads defensively (optional chaining); missing rooms/flags/visited → `false`, never throws. Covered by co-located `evaluateQuest.test.ts` (pure Vitest, no DOM). |
@@ -962,6 +1014,7 @@ the raw-prompt seed, and only a room-generator throw/reject is `unavailable`.
 | `domain/journal/journalSpec.ts` | `JournalSpec`/`JournalEntrySpec`/`JournalSpecSchema` — zod-validated authored data descriptor; reuses `ObjectiveCondition` from `questSpec.ts`. Imports only `zod` and domain types; exports no command/event-producing function. |
 | `domain/journal/projectJournal.ts` | Pure `projectJournal(spec: JournalSpec, state: WorldState) → JournalView`. Total, deterministic, no I/O; reads defensively via the shared `evaluateCondition` (optional chaining); missing rooms/flags/statuses/items → `false`, never throws; emits only true entries in authored order. Covered by co-located `projectJournal.test.ts` (pure Vitest, no DOM). |
 | `domain/examples/demoJournal.ts` | Hand-authored `demoJournalSpec` literal: six entries wired to existing `WorldState` conditions — `throne-room` interaction/encounter flags, `ruined-safehouse` visited, `infected` status, `encounter:walker-encounter` flag, and `royal-writ` inventory. |
+| `domain/usage/usageGuard.ts` | Pure `UsageGuardConfig` / `UsageGuardState` / `UsageGuardStatus` types and four pure helpers: `initialUsageState`, `recordAttempt`, `resetUsage`, `evaluate(state, config) → UsageGuardStatus`. Total, deterministic, no I/O, no mutation; imports nothing. Covered by co-located `usageGuard.test.ts` (pure Vitest, no DOM). |
 
 ## Generation Foundation v0 — module summary
 
@@ -987,7 +1040,7 @@ the raw-prompt seed, and only a room-generator throw/reject is `unavailable`.
 | `app/PromptBar.tsx` | Presentational prompt input + Generate button — app composition chrome, **not** renderer UI. Trims/validates; emits `onSubmit(prompt)`. |
 | `app/worldBible.ts` | Prompt-path composition helper: seed + project + safe enum/count/length logging; on failure return the raw prompt and no bible. |
 | `app/fallbackNotice.ts` | The static, prompt-free notice copy + the pure `shouldShowFallbackNotice(provenance)` decision (show for `repaired`/`fallback`). |
-| `App.tsx` | Composition root: selects the prompt-path generator once via `selectRoomGenerator(readLlmConfig())` (real provider when configured, else fake) and logs the safe selection summary; keeps a separate `FakeRoomGenerator` for adjacent pre-generation. PromptBar submit seeds/projects a bible, passes the compact seed to the unchanged `GeneratedRoomSource` (using the selected generator), and stores the optional bible on generated `ActivePlay`. Authored bootstrap/pregeneration remain bible-free and fake. Constructs `SaveGameService` + `LocalStorageSaveSlotStore`; owns `handleSave`/`handleLoad` with `requestVersion` guarding and renders `<SaveLoadBar>`. |
+| `App.tsx` | Composition root: selects the prompt-path generator once via `selectRoomGenerator(readLlmConfig())` (real provider when configured, else fake) and logs the safe selection summary; keeps a separate `FakeRoomGenerator` for adjacent pre-generation. PromptBar submit seeds/projects a bible, passes the compact seed to the unchanged `GeneratedRoomSource` (using the selected generator), and stores the optional bible on generated `ActivePlay`. Authored bootstrap/pregeneration remain bible-free and fake. Constructs `SaveGameService` + `LocalStorageSaveSlotStore`; owns `handleSave`/`handleLoad` with `requestVersion` guarding and renders `<SaveLoadBar>`. Derives `guardEnabled` (provider !== `'fake'`) and `guardCap` (`llmConfig.sessionCap`, default 10) once at module level; holds `usageCountRef`/`usageCount` and `inFlightRef`/`inFlight` pairs for guardrail state; count increments before `getRoom()` resolves so failures/fallbacks still count; in-flight lock drives `PromptBar disabled={inFlight}`; at-cap gate stores prompt until `handleGenerateAnyway` grants confirm; renders `<UsageMeter>` only when `guardEnabled`. |
 | `app/saveSlotStore.ts` | `SaveSlotStore` interface + `KeyValueStore` seam + read/write/has/clear slot logic + `LocalStorageSaveSlotStore` browser binding (key `aigm.save.slot`). Reads return parsed `SlotWrapper \| null`; writes JSON-stringify the full wrapper. All `localStorage` access wrapped in try/catch; never throws into the render cycle. Tested over an in-memory `KeyValueStore` fake (key round-trips, absence, throwing fake for unavailable/quota). |
 | `app/buildRestoredPlay.ts` | Pure helper: `buildRestoredPlay(state, resolveResult, fallbackRoom) → { play: ActivePlay; degraded: boolean }`. Wraps the resolved room (or fallback under `currentRoomId`) into `roomSource`; sets `navigation = exampleNavigation`, `initialPlayer = projectPlayerHud(state)`, `degraded = !ok \|\| source !== 'registry'`. Imports no store/service; never mutates inputs. Tested (authored/generated/failed-resolve cases; purity/no-mutation). |
 
