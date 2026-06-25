@@ -823,6 +823,33 @@ never blocks play; it has no write path and cannot corrupt truth
   objective, inventory, loot, combat, memory, backend, API, schema field, or
   generated code was added.
 
+## 24. Generated interaction affordances ✅ v0 (browser)
+
+The HUD and renderer now derive a deterministic action affordance from validated
+interaction structure so weak generated prompts are less ambiguous
+([ADR-0036](./decisions/ADR-0036-generated-room-interaction-affordances-v0.md)).
+
+| Situation | Detection | Handling / result | Logging |
+| --- | --- | --- | --- |
+| Weak or vague generated prompt | `Hud` receives an `Interactable.affordance` derived from structure | HUD shows key + deterministic verb chip + unchanged prompt; prompt still visible | — |
+| Ambiguous/body-only interaction | `affordanceFor` reaches the default branch | defaults to `inspect`; no repair, fallback, notice, or rejection | — |
+| Chest/crate/barrel prompt implies "open" but structure is body-only | classifier ignores prompt/title/body/object name | still `inspect`; no invented loot/open semantics | — |
+| NPC without dialogue block | `object.type === 'npc'` after exit/encounter/dialogue checks | `talk` affordance for presentation only; opening behavior unchanged | — |
+| Encounter plus dialogue/effect | structured precedence in classifier | `approach`; existing opening precedence still resolves exit → encounter → dialogue → effect | — |
+| Missing affordance from an unexpected projection bug | view-model default/fallback path uses `inspect` where needed | HUD/ring clarity may be reduced, but room still renders and no generated-room repair/fallback is triggered | — |
+| Ring color distinction is subtle or inaccessible | visual inspection/user perception, not a data failure | HUD verb chip remains the source of clarity; ring tint is secondary presentation | — |
+| Affordance classification would require prose inference | forbidden by design | do not parse `prompt`, `title`, `body`, object names, skipped objects, or raw generated JSON; add explicit structured data in a future ADR if needed | — |
+
+- **Presentation-only.** Affordance labels and ring colors describe already-existing
+  interaction capability. They do not create quests, inventory, loot, combat,
+  navigation, dialogue, memory, world events, or backend state.
+- **No fallback/repair coupling.** Missing, ambiguous, or weak affordances never
+  trigger generated-room repair, fallback, provenance notices, or validation
+  failures.
+- **RoomSpec unchanged.** `affordance` is a derived `Interactable` view-model
+  field only. It is never stored in `RoomSpec`, save files, world state, memory,
+  SQLite, or API payloads.
+
 ---
 
 ## Summary
@@ -858,6 +885,7 @@ never blocks play; it has no write path and cannot corrupt truth
 | 21 | Consequence journal display | `journal === null` guards render; `projectJournal` is pure/total/silent via shared `evaluateCondition`; anchor-room gate; defensive optional chaining on all condition reads | absent/null → panel hidden; all conditions `false` → empty state "Nothing of consequence yet."; navigation re-projects safehouse entry immediately; all idempotent; no write path | ✅ browser |
 | 22 | Usage guardrail | `guardEnabled` (provider !== `'fake'`); `evaluate(state, config)` derives status per render; `inFlightRef` lock; `confirmGrantedRef` + `pendingPromptRef` for at-cap gate | fake → fully inert; real → count/cap/status drive `UsageMeter`; `at-cap` gates prompt until confirm; in-flight lock prevents double-click; never persisted; reset in-memory only | ✅ browser |
 | 23 | Room intro summary display | `buildRoomSummary` focal selection (anchor → interactable → NPC fallback; returns `null` when none qualify); `text.length === 0` guard in `RoomIntroPanel`; `resetKey` change resets dismiss state | no focal object → no panel; dismissed → panel hidden until next room entry; null summary never blocks play, triggers repair/fallback, or logs; summary text never contains object names, interaction bodies, or raw generated JSON | ✅ browser |
+| 24 | Generated interaction affordances | `affordanceFor` over validated `interaction.exit` / `encounter` / `dialogue` / `effect.kind` and NPC object type; HUD/ring consume derived `Interactable.affordance` | weak prompts mitigated by verb chip; ambiguous defaults to Inspect; ring tint is presentation-only; never repair/fallback/gameplay | ✅ browser |
 
 The through-line: **validate at the boundary, degrade visibly and safely, log
 the detail, show the user calm.**

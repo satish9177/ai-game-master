@@ -40,7 +40,8 @@ Throughout these docs:
   Demo Quest Loop v0 — browser;
   Consequence Journal v0 — browser;
   Cost/Usage Guardrails v0 — browser;
-  Room Inspect Summary v0 — browser).
+  Room Inspect Summary v0 — browser;
+  Generated Room Interaction Affordances v0 — browser).
 - 🔜 **Planned** — designed and approved, not yet built (next slices).
 - ❌ **Not built** — future shape only; documented so we don't paint into a corner.
 
@@ -450,6 +451,36 @@ gameplay semantics
   `eslint.config.js` · `package.json`. No new gameplay, schema, backend, memory,
   or generated code.
 
+## Generated Room Interaction Affordances v0
+
+✅ **Implemented, browser.** Generated Room Interaction Affordances v0 makes the
+existing E/F interaction surface easier to read without adding gameplay systems
+([ADR-0036](./decisions/ADR-0036-generated-room-interaction-affordances-v0.md)).
+
+- **Pure structured classifier.** `affordanceFor(interaction, objectType)` derives
+  one of `inspect` / `talk` / `take` / `use` / `exit` / `approach` from validated
+  interaction structure only: `exit`, `encounter`, `dialogue`, `effect.kind`, and
+  `object.type === 'npc'` for the NPC default. It never parses `prompt`, `title`,
+  `body`, object names, skipped objects, provider output, or raw generated JSON.
+- **View-model only.** The derived `affordance` field lives on the neutral
+  `Interactable` view-model produced from validated `RoomObject` data. It is not
+  a `RoomSpec` field, save field, backend/API field, memory field, or gameplay
+  fact. `schemaVersion` remains `1`.
+- **HUD presentation.** The HUD still shows the existing key and generated prompt,
+  and now adds a deterministic verb chip from `AFFORDANCE_LABEL`. Prompt text is
+  preserved exactly; the chip does not replace or rewrite it.
+- **Renderer presentation.** Existing floor indicators remain exactly one
+  `interactable-indicator` ring per interactable object. The renderer tints that
+  existing ring from a fixed `AFFORDANCE_RING_COLOR` map keyed by the derived
+  affordance. Non-interactable objects still get no ring.
+- **Opening precedence unchanged.** Interaction resolution and opening behavior
+  still live in the composition root and keep the same precedence:
+  `exit → encounter → dialogue → effect`. Affordances describe the already-existing
+  capability; they do not create new semantics.
+- **Safe fallback.** Ambiguous or body-only interactions default to `inspect`.
+  Missing affordance data never triggers repair, fallback, a generated-room notice,
+  or logging.
+
 ## Isometric Camera Foundation
 
 ✅ **Implemented.** The default view is now a **controlled 3D / isometric
@@ -520,6 +551,14 @@ effects/ids, insufficient inventory, conflicts, and partial multi-command
 failure are typed outcomes. The renderer imports neither `world-session` nor
 `interactions` and never mutates `WorldState`. See
 [ADR-0014](./decisions/ADR-0014-object-interactions-v0.md).
+
+The interaction presentation layer also derives a deterministic `Affordance`
+(`inspect` / `talk` / `take` / `use` / `exit` / `approach`) from validated
+interaction structure and object type only. This value lives on the neutral
+`Interactable` view-model, not `RoomSpec`; the HUD displays key + verb + existing
+prompt, while the renderer tints the existing floor ring from a fixed static map.
+Opening and resolution precedence remains `exit → encounter → dialogue → effect`
+([ADR-0036](./decisions/ADR-0036-generated-room-interaction-affordances-v0.md)).
 
 ## Encounter System v0
 
@@ -1227,15 +1266,15 @@ the raw-prompt seed, and only a room-generator throw/reject is `unavailable`.
 | --- | --- |
 | `domain/roomSpec.ts` | `RoomSpecSchema` (envelope) + `RoomObjectSchema` (discriminated union on `type`); inferred `RoomSpec` / `RoomObject` types. Schema/types only, no behavior. |
 | `domain/loadRoomSpec.ts` | `loadRoomSpec` (strict envelope, lenient objects) + the `LoadedRoom` result type. |
-| `domain/ports/interaction.ts` | The neutral interaction view-model shared by the engine and UI, including an optional passive object id for composition lookup. |
+| `domain/ports/interaction.ts` | The neutral interaction view-model shared by the engine and UI, including an optional passive object id for composition lookup and a derived `Affordance` used only for presentation. Also owns pure validated-object projection helpers for `Interactable[]` and affordance lookup. |
 | `domain/examples/throneRoom.ts` | The single hardcoded demo room — pure data literal. |
 | `renderer/engine/Engine.ts` | Owns renderer/scene, the **player object** + a `CameraController` (isometric), render loop, **player-position** proximity, interaction keys, and **total `dispose()`**. No React. |
 | `renderer/engine/camera/` | `CameraController` interface + `IsometricCameraController` (orthographic true-isometric, follows the player) over a pure, WebGL-free `isometric.ts` math module (offset / pose / screen-relative move / clamp / frustum). |
 | `renderer/engine/playerMarker.ts` | `buildPlayerMarker` — the minimal **renderer-internal** player marker (capsule + facing nose). Presentation, **not** RoomSpec data. |
-| `renderer/engine/builders/` | `buildShell` (floor + walls, with isometric **cutaway curbs** on the camera-facing walls), `buildLighting`, and the object `registry` + `buildObjects` with mystery-marker fallback and trusted procedural builders for every current `RoomObject["type"]` ([ADR-0033](./decisions/ADR-0033-generated-room-visual-vocabulary-v0.md)). |
+| `renderer/engine/builders/` | `buildShell` (floor + walls, with isometric **cutaway curbs** on the camera-facing walls), `buildLighting`, and the object `registry` + `buildObjects` with mystery-marker fallback and trusted procedural builders for every current `RoomObject["type"]` ([ADR-0033](./decisions/ADR-0033-generated-room-visual-vocabulary-v0.md)). Interactable objects keep one `interactable-indicator` floor ring; its material color comes from the fixed `AFFORDANCE_RING_COLOR` map ([ADR-0036](./decisions/ADR-0036-generated-room-interaction-affordances-v0.md)). |
 | `renderer/engine/controls/` | `MovementControls` (screen-relative WASD/arrows driving the **player**, room-clamped); `LookControls` (drag-look) **retained but not instantiated** in isometric mode. |
 | `renderer/engine/disposables.ts` | `Disposables` + `disposeObject` — explicit GPU teardown (Three.js does not GC geometries/materials/textures). |
-| `renderer/ui/` | Presentational React overlays: `Hud` (interaction prompt); `DialoguePanel` (result messages); `StatusHud` (read-only player health/inventory/status HUD; `pointer-events:none`; `aria-live`); `playerHud.ts` (pure `projectPlayerHud(WorldState) → PlayerHudView` projection + `PlayerHudView`/`PlayerHudHealth`/`PlayerHudItem` types); `SaveLoadBar.tsx` (save/load bar; receives `{ canSave, hasSave, busy, error, onSave, onContinue }`; calm `role="alert"` errors; no save content shown); `QuestTracker.tsx` (read-only quest tracker; receives `{ view: QuestView }`; renders title + objective done markers; `pointer-events:none`; `role="status"` + `aria-live="polite"`; no service or engine import); `JournalPanel.tsx` (collapsible read-only journal; receives `{ view: JournalView }`; collapsed by default; empty state "Nothing of consequence yet."; `pointer-events:none` for text; interactive collapse toggle; `role="status"` + `aria-live="polite"`; no service or engine import); `UsageMeter.tsx` (local session-cap guardrail overlay; receives `{ count, cap, status, onGenerateAnyway, onReset }`; rendered only when `guardEnabled`; returns `null` when `status === 'inert'`; `role="status"` + `aria-live="polite"`; no `three`, engine internals, or services); `RoomIntroPanel.tsx` (dismissible room intro panel — see module summary row below); `roomIntroPanelState.ts` (pure dismiss-state helpers). |
+| `renderer/ui/` | Presentational React overlays: `Hud` (interaction key + deterministic affordance verb chip + existing prompt); `DialoguePanel` (result messages); `StatusHud` (read-only player health/inventory/status HUD; `pointer-events:none`; `aria-live`); `playerHud.ts` (pure `projectPlayerHud(WorldState) → PlayerHudView` projection + `PlayerHudView`/`PlayerHudHealth`/`PlayerHudItem` types); `SaveLoadBar.tsx` (save/load bar; receives `{ canSave, hasSave, busy, error, onSave, onContinue }`; calm `role="alert"` errors; no save content shown); `QuestTracker.tsx` (read-only quest tracker; receives `{ view: QuestView }`; renders title + objective done markers; `pointer-events:none`; `role="status"` + `aria-live="polite"`; no service or engine import); `JournalPanel.tsx` (collapsible read-only journal; receives `{ view: JournalView }`; collapsed by default; empty state "Nothing of consequence yet."; `pointer-events:none` for text; interactive collapse toggle; `role="status"` + `aria-live="polite"`; no service or engine import); `UsageMeter.tsx` (local session-cap guardrail overlay; receives `{ count, cap, status, onGenerateAnyway, onReset }`; rendered only when `guardEnabled`; returns `null` when `status === 'inert'`; `role="status"` + `aria-live="polite"`; no `three`, engine internals, or services); `RoomIntroPanel.tsx` (dismissible room intro panel — see module summary row below); `roomIntroPanelState.ts` (pure dismiss-state helpers). |
 | `renderer/RoomViewer.tsx` | The composition seam: constructs/disposes the engine, bridges engine callbacks to React state. StrictMode-safe (mount → dispose → mount leaks nothing). |
 | `domain/quests/questSpec.ts` | `QuestSpec`/`QuestSpecSchema` — zod-validated authored data descriptor; closed condition vocabulary (`room-flag`, `room-visited`, `has-item`, `has-status`). Imports only `zod`; exports no command/event-producing function. |
 | `domain/quests/evaluateQuest.ts` | Pure `evaluateQuest(spec: QuestSpec, state: WorldState) → QuestView` and the exported pure `evaluateCondition(condition, state): boolean` (shared with the journal projector — previously private, now a one-line export with no behavior change). Total, deterministic, no I/O; reads defensively (optional chaining); missing rooms/flags/visited → `false`, never throws. Covered by co-located `evaluateQuest.test.ts` (pure Vitest, no DOM). |
