@@ -109,4 +109,5 @@ API key.
 | [ADR-0020](./ADR-0020-room-generation-repair-fallback-v0.md) | Repair/fallback behavior and notice semantics are unchanged |
 | [ADR-0023](./ADR-0023-real-room-generator-provider-v0.md) | Provider output still enters the same assembly boundary; prompts and provider behavior are unchanged |
 | [ADR-0031](./ADR-0031-generated-room-layout-contract-v0.md) | Runs after object legality repair and before spawn/exit finalizers; layout safety remains authoritative |
+| [ADR-0034](./ADR-0034-generated-room-story-anchors-v0.md) | Broadens the focal anchor selector while preserving composition's generated-room-only, data-only scope |
 | [ADR-0003](./ADR-0003-logging-abstraction.md) | Adds only three fixed boolean diagnostics; no generated or user content is logged |

@@ -165,3 +165,4 @@ transform values, or API keys.
 | [ADR-0023](./ADR-0023-real-room-generator-provider-v0.md) | Hardens real-provider prompting while keeping provider output untrusted text |
 | [ADR-0031](./ADR-0031-generated-room-layout-contract-v0.md) | Visual vocabulary sits after the layout safety contract in assembly |
 | [ADR-0032](./ADR-0032-generated-room-composition-v0.md) | Composition arranges the now-readable existing objects |
+| [ADR-0034](./ADR-0034-generated-room-story-anchors-v0.md) | Reuses the expanded safe object vocabulary as derived story-anchor candidates |

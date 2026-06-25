@@ -269,20 +269,25 @@ notice — they are silently corrective and keep `provenance: generated`.
 ## 4f. Generated room composition normalization ✅ v0 (benign, always `generated`)
 
 A generated room can be spatially safe under the layout contract yet still feel
-like a random prop cluster: eligible clutter blocks the central route, a throne
-has no focal placement, NPCs stand in the path, or interactables are hard to read.
+like a random prop cluster or a purposeless set of props: eligible clutter blocks
+the central route, the room lacks one clear narrative focal object, NPCs stand in
+the path, or interactables are hard to read.
 
 The pure composition pass
 ([ADR-0032](./decisions/ADR-0032-generated-room-composition-v0.md)) runs after
-generated object legality repair and before spawn/exit finalization. It arranges
-existing objects only; it does not generate or remove content.
+generated object legality repair and before spawn/exit finalization. Story
+Anchors v0 ([ADR-0034](./decisions/ADR-0034-generated-room-story-anchors-v0.md))
+broadens its focal-anchor selector and adds prompt guidance for one dominant
+story anchor with supportive secondary objects. Both use existing objects only;
+they do not generate or remove content.
 
 | Composition condition | Detection | Handling | Logging |
 | --- | --- | --- | --- |
 | Eligible object in central corridor | `composeGeneratedRoom` role classification + corridor test | relocate the existing object to its deterministic role zone | `composed: true` bool only |
-| Throne present outside anchor zone | first `anchor` role is not north-center | relocate that existing throne to the anchor zone | `composed: true` bool only |
+| Story anchor candidate present outside focal zone | deterministic selector over validated `RoomObject.type` chooses one candidate (`throne` > `altar` > `statue` > `corpse` > `machine`/`artifact` > `chest` > `table`/`map`/`book`/`paper`) | relocate that existing object to the focal zone; extra candidates remain support objects | `composed: true` bool only |
 | NPC or interactable in corridor | `npc` / `interactable` role inside corridor | move off-path to a deterministic flank | `composed: true` bool only |
-| Missing anchor | no `anchor` role | accept room unchanged; never repair or fallback | `lacksAnchor: true` bool only |
+| Missing story anchor | selector returns no candidate | accept room safely; never repair, fallback, or show a notice | `lacksAnchor: true` bool only |
+| Weak narrative focus | prompt/model output has generic name or competing props despite guidance | room still loads; prompt guidance + deterministic focal selection improve the common case but do not guarantee a visible story summary | existing safe diagnostics only |
 | Missing interactable | no `interactable` role | accept room unchanged; never repair or fallback | `lacksInteractable: true` bool only |
 
 - **Provenance.** Composition-only relocation keeps `provenance: generated`, sets
@@ -290,14 +295,20 @@ existing objects only; it does not generate or remove content.
   fallback notice behavior is unchanged.
 - **Content boundary.** Object count and every non-position field are preserved.
   No NPC, anchor, clue, chest, light, resource, interaction, or quest object is
-  invented. Missing roles are diagnostics, not failures.
+  invented. A story anchor does not create quest, inventory, loot, combat,
+  story-state, memory, or NPC dialogue semantics. Missing roles are diagnostics,
+  not failures.
 - **Scope.** Only generated rooms inside `assembleRoom` are composed.
   Authored/static/fallback rooms and the renderer are untouched; there is no
   provider prompt, backend, API, persistence, memory, world-session, or gameplay
   change.
 - **Logging.** `composed`, `lacksAnchor`, and `lacksInteractable` are fixed
-  booleans only. Logs never include raw prompts, provider bodies, generated JSON,
-  room/object text, API keys, or PII.
+  booleans only. No `anchorKind` or anchor text diagnostic is added. Logs never
+  include raw prompts, provider bodies, generated JSON, room/object text, API
+  keys, or PII.
+- **Presentation limit.** This feature does not guarantee a visible narrative
+  summary. Stronger player-facing explanation is deferred to
+  `room-inspect-summary-v0`.
 
 ## 4g. Generated room visual vocabulary normalization ✅ v0 (benign, always `generated`)
 
@@ -787,7 +798,7 @@ fake-provider experience is completely unchanged
 | 4c | World Bible seeding | schema validation + composition catch | raw-prompt generator seed; no stored bible; normal room pipeline | ✅ non-blocking v0 |
 | 4d | Real room provider | completeness check; fixed-code throw on network/timeout/empty/non-JSON | incomplete → fake (`config-disabled`); request failure → `unavailable` retry; malformed text → repaired/fallback | ✅ opt-in v0 (dev-only) |
 | 4e | Generated room layout normalization | shell clamp (2.5); footprint-aware object bounds + count cap + wall-light nudge + mystery-marker anchor clamp (2.6); spawn safe-area repair (2.8); exit wall-snap (2.9) — all pre-semantic | benign normalization keeps `provenance: generated` and shows no notice; authored/fallback rooms untouched | ✅ v0 |
-| 4f | Generated room composition normalization | role classification + deterministic zones (2.7), after object legality and before spawn/exit finalizers | existing objects repositioned only; missing anchor/interactable accepted; `provenance: generated`, no notice; authored/static/fallback untouched | ✅ v0 |
+| 4f | Generated room composition and story-anchor normalization | role classification + deterministic zones (2.7), plus one derived story-anchor selector over validated `RoomObject.type`; after object legality and before spawn/exit finalizers | existing objects repositioned only; missing anchor/interactable accepted; no gameplay semantics; `provenance: generated`, no notice; authored/static/fallback untouched | ✅ v0 |
 | 4g | Generated room visual vocabulary normalization | trusted vocabulary/builders; generated alias repair; optional transform repair; skipped reason buckets | valid safe concepts render as readable objects; unknown/malformed entries remain mystery markers; benign normalization keeps `provenance: generated` | ✅ v0 |
 | 5 | Backend/network | validated API requests + typed results | safe API envelope; browser retry state 🔜 | ✅ API edge v0 |
 | 6 | DB / persistence failure | typed results (rooms, conflicts) + fail-fast throws (open/migration/corrupt session) | safe API error; no browser surface yet | ✅ API-backed v0 |

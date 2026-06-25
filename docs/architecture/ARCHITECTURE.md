@@ -23,7 +23,8 @@ Throughout these docs:
 - ✅ **Implemented** — exists today in `apps/web` (Renderer Foundation v0;
   Generation Foundation v0; Semantic Room Validator v0; Room Generation Repair &
   Fallback v0; Generated Room Layout Contract v0, Generated Room Composition v0,
-  and Generated Room Visual Vocabulary v0 — generated-room assembly pipeline,
+  Generated Room Visual Vocabulary v0, and Generated Room Story Anchors v0 —
+  generated-room assembly pipeline,
   browser; World Bible Seed v0 —
   browser-only; Isometric Camera
   Foundation; World State & Event Log v0; Object
@@ -305,10 +306,13 @@ exit finalization
   `validateRoom`. Composition runs after object legality repair and before the
   spawn/exit finalizers get the final safety say.
 - **Existing objects only:** the pass clears eligible clutter from the central
-  corridor, places the first throne in the north-center anchor zone when present,
-  moves NPCs off-path, makes interactables more readable, and pushes eligible
-  decorative/structural-looking clutter toward side zones. It preserves object
-  count and every non-position field.
+  corridor, places the selected story anchor in the north-center focal zone when
+  present, moves NPCs off-path, makes interactables more readable, and pushes
+  eligible decorative/structural-looking clutter toward side zones. The anchor
+  selector is pure and deterministic, uses validated `RoomObject.type` only, and
+  keeps the original authority/ritual priority (`throne` > `altar` > `statue`)
+  before broader narrative candidates. It preserves object count and every
+  non-position field.
 - **No content invention or quality fallback:** it never creates NPCs, anchors,
   clues, chests, lights, resources, interactions, or quest objects. Missing anchor
   or interactable roles do not trigger repair or fallback.
@@ -366,6 +370,40 @@ spaces
 - **Known limitation:** real providers can still produce a small number of
   skipped objects, especially malformed `interaction` fields. Interaction repair
   is intentionally deferred because it is gameplay/content-bearing.
+
+## Generated Room Story Anchors v0
+
+✅ **Implemented.** Layout, composition, and visual vocabulary made generated
+rooms safe, arranged, and recognizable, but they could still feel purposeless.
+Story Anchors v0 is a foundation feature that nudges generated rooms toward one
+clear narrative focal idea without adding gameplay systems
+([ADR-0034](./decisions/ADR-0034-generated-room-story-anchors-v0.md)).
+
+- **Existing RoomSpec data only:** the feature uses room name, existing objects,
+  and an optional existing `interaction.body` on the selected anchor. There is no
+  `roomIntent`, `storyRole`, `anchorKind`, or other schema field; `schemaVersion`
+  remains **1**.
+- **Prompt guidance:** the real room prompt asks for one dominant story anchor
+  when appropriate, a room name that reflects the anchor/event/purpose, and
+  secondary objects that support the main anchor rather than compete with it. An
+  anchor interaction is optional; if present, `interaction.body` should be short
+  flavor text explaining what happened or why the object matters.
+- **Deterministic selector:** `composeGeneratedRoom` derives the single story
+  anchor from validated `RoomObject.type` only. It never reads object names,
+  prompts, `interaction.body`, raw generated JSON, provider text, or inferred
+  purpose. The priority is `throne` > `altar` > `statue` > `corpse` >
+  `machine`/`artifact` > `chest` > `table`/`map`/`book`/`paper`, with lowest
+  object index as the tie-breaker within a tier.
+- **Composition behavior:** the selected anchor uses the existing north-center
+  focal placement. Extra candidate objects remain secondary support objects and
+  do not become additional focal anchors.
+- **Benign absence:** missing anchors are allowed. They set the existing
+  `lacksAnchor` diagnostic but do not trigger repair, fallback, a user notice, or
+  any new diagnostic.
+- **No gameplay semantics:** anchors do not create quests, objectives, clues,
+  rewards, inventory, loot, combat, story state, living-world simulation, memory,
+  or NPC dialogue context. Visible story presentation is intentionally deferred to
+  a later `room-inspect-summary-v0` feature.
 
 ## Isometric Camera Foundation
 
@@ -1171,15 +1209,15 @@ the raw-prompt seed, and only a room-generator throw/reject is `unavailable`.
 | `generation/prng.ts` | Deterministic seeded PRNG (`xmur3` + `mulberry32`) and a small `Rng` helper. Pure — no I/O, no `Math.random`/`Date.now`. |
 | `generation/FakeRoomGenerator.ts` | A deterministic `RoomGenerator`: prompt → seeded PRNG → RoomSpec **data**, serialized with `JSON.stringify`. Emits only the published vocabulary; same prompt → byte-identical output. No real model. The **default** prompt generator and the always-fake adjacent generator. |
 | `generation/OpenAICompatibleRoomGenerator.ts` | The opt-in **real** `RoomGenerator` ([ADR-0023](./decisions/ADR-0023-real-room-generator-provider-v0.md)): one generic adapter for any OpenAI-compatible endpoint (OpenAI/DeepSeek). One non-streaming `fetch` POST over an injected transport seam, hard `AbortController` timeout, no retry, no SDK; returns `choices[0].message.content` **verbatim**. Imports no logger; throws only fixed safe codes (`llm-request-failed`/`llm-timeout`/`llm-empty-response`). No parse/validate/repair here. |
-| `generation/llmRoomPrompt.ts` | Pure, side-effect-free prompt builder for the real provider: a static system message (published vocabulary, exact `object.type` allowlist, synonym guidance, RoomSpec shape, conventions) + one user message carrying the seed clamped to a hard `MAX_SEED_CHARS`. Data-only; no renderer/builders/assets/code instructions. No I/O, no logger; bounds are unit-tested. |
+| `generation/llmRoomPrompt.ts` | Pure, side-effect-free prompt builder for the real provider: a static system message (published vocabulary, exact `object.type` allowlist, synonym guidance, story-anchor guidance, RoomSpec shape, conventions) + one user message carrying the seed clamped to a hard `MAX_SEED_CHARS`. Data-only; no renderer/builders/assets/code instructions. No I/O, no logger; bounds are unit-tested. |
 | `app/llmConfig.ts` | The **only** browser module that reads `import.meta.env`. Parses a typed `LlmConfig` (provider/model/key/`maxTokens`/`timeoutMs`), holds the provider → built-in base-URL map, and the `isRealProviderComplete` check. `generation/**` never reads env. |
 | `app/selectRoomGenerator.ts` | Composition factory: returns the real `OpenAICompatibleRoomGenerator` only when the config is complete, else `FakeRoomGenerator` with reason `config-disabled`. Pure (no I/O at selection time); also returns a log-safe selection summary (provider/model/numbers or the fixed reason). |
 | `domain/validateRoom.ts` | Pure semantic validator: `validateRoom(room) → RoomValidationResult` of severity-tagged issues. Checks *playability* (dimensions, spawn-in-bounds, object/light budgets, usable interactions) over a loaded room — a domain peer of `loadRoomSpec`. No I/O, no logger, no React/Three ([ADR-0011](./decisions/ADR-0011-semantic-room-validator-v0.md)). |
 | `domain/repairRoom.ts` | Pure deterministic repair: `repairRoom(room) → LoadedRoom`. Non-mutating; only clamps spawn into the walkable AABB and truncates over-hard-budget objects/torches — never resizes rooms or invents content. Code peer of `validateRoom` ([ADR-0020](./decisions/ADR-0020-room-generation-repair-fallback-v0.md)). |
 | `domain/generatedRoomLayout.ts` | Generated-room layout contract ([ADR-0031](./decisions/ADR-0031-generated-room-layout-contract-v0.md)): `GENERATED_ROOM` constants (default 18, min 14, max 24, max objects 30); four benign normalizers in `assembleRoom` — `clampGeneratedShell` (2.5; width/depth → `[14..24]`), `repairGeneratedObjects` (2.6; X/Z bounds + count cap ≤ 30, drops decorative first), `repairGeneratedSpawn` (2.8; clamp + deterministic nudge away from blocking objects), `repairGeneratedExits` (2.9; snap to nearest wall face). Pure, no I/O, no logger, no mutation. Never applied to authored/static/fallback rooms. |
-| `domain/generatedRoomComposition.ts` | Generated-room composition ([ADR-0032](./decisions/ADR-0032-generated-room-composition-v0.md)): pure role classification, zone computation, and `composeGeneratedRoom` stage 2.7. Relocates existing objects only to clear the central corridor and improve anchor/NPC/interactable/clutter placement; preserves count and non-position fields; missing roles are diagnostic-only. Safe booleans: `composed`, `lacksAnchor`, `lacksInteractable`. Never applied to authored/static/fallback rooms. |
+| `domain/generatedRoomComposition.ts` | Generated-room composition and story-anchor selection ([ADR-0032](./decisions/ADR-0032-generated-room-composition-v0.md), [ADR-0034](./decisions/ADR-0034-generated-room-story-anchors-v0.md)): pure role classification, zone computation, `selectGeneratedStoryAnchorIndex`, and `composeGeneratedRoom` stage 2.7. Relocates existing objects only to clear the central corridor and foreground one derived anchor/NPC/interactable/clutter placement; preserves count and non-position fields; missing roles are diagnostic-only. Safe booleans: `composed`, `lacksAnchor`, `lacksInteractable`. Never applied to authored/static/fallback rooms. |
 | `domain/generatedRoomAliases.ts` / `domain/generatedRoomObjectTransforms.ts` | Generated-room visual vocabulary normalizers ([ADR-0033](./decisions/ADR-0033-generated-room-visual-vocabulary-v0.md)): allowlisted type-only alias repair and optional transform repair before `loadRoomSpec`. They never repair required fields, interactions, positions, or arbitrary/fuzzy nouns; direct `loadRoomSpec` behavior stays strict. |
-| `domain/assembleRoom.ts` | Pure assembly pipeline: `assembleRoom(rawText, fallbackRoom) → { room, diagnostics }`. Composes `JSON.parse` → `repairGeneratedAliases` → `repairGeneratedObjectTransforms` → `loadRoomSpec` → `clampGeneratedShell` (2.5) → `repairGeneratedObjects` (2.6) → `composeGeneratedRoom` (2.7) → `repairGeneratedSpawn` (2.8) → `repairGeneratedExits` (2.9) → `validateRoom` → `repairRoom` → re-validate → fallback; **always** returns a zero-fatal room plus safe diagnostics (provenance/stage/codes/counts/booleans/normalization flags). Synchronous, no I/O, never logs ([ADR-0020](./decisions/ADR-0020-room-generation-repair-fallback-v0.md), [ADR-0031](./decisions/ADR-0031-generated-room-layout-contract-v0.md), [ADR-0032](./decisions/ADR-0032-generated-room-composition-v0.md), [ADR-0033](./decisions/ADR-0033-generated-room-visual-vocabulary-v0.md)). |
+| `domain/assembleRoom.ts` | Pure assembly pipeline: `assembleRoom(rawText, fallbackRoom) → { room, diagnostics }`. Composes `JSON.parse` → `repairGeneratedAliases` → `repairGeneratedObjectTransforms` → `loadRoomSpec` → `clampGeneratedShell` (2.5) → `repairGeneratedObjects` (2.6) → `composeGeneratedRoom` (2.7) → `repairGeneratedSpawn` (2.8) → `repairGeneratedExits` (2.9) → `validateRoom` → `repairRoom` → re-validate → fallback; **always** returns a zero-fatal room plus safe diagnostics (provenance/stage/codes/counts/booleans/normalization flags). Synchronous, no I/O, never logs ([ADR-0020](./decisions/ADR-0020-room-generation-repair-fallback-v0.md), [ADR-0031](./decisions/ADR-0031-generated-room-layout-contract-v0.md), [ADR-0032](./decisions/ADR-0032-generated-room-composition-v0.md), [ADR-0033](./decisions/ADR-0033-generated-room-visual-vocabulary-v0.md), [ADR-0034](./decisions/ADR-0034-generated-room-story-anchors-v0.md)). |
 | `domain/examples/fallbackRoom.ts` | The trusted, data-only fallback room (the `throneRoom` authoring pattern): a small in-bounds stone antechamber, zero fatal/zero warning, no prompt or story text. Injected by the host as `assembleRoom`'s last resort. |
 | `room/GeneratedRoomSource.ts` | A `RoomSource` adapter (composition layer) that runs the generator, then `assembleRoom`. A generator throw/reject → `unavailable`; otherwise **always** `ok:true` with `provenance` (`generated`/`repaired`/`fallback`). Logs one safe line (provenance/stage/codes/counts/boolean diagnostics, including count-only vocabulary diagnostics) — never prompt/raw JSON/story text/object names. |
 | `app/AdjacentRoomPregenerator.ts` | Composition-layer room-acquisition seam ([ADR-0021](./decisions/ADR-0021-adjacent-room-pregeneration-v0.md)). `resolveRoom(id)` is cache-first, in-flight-aware, and total (authored → `RoomRegistry`; non-authored → `GeneratedRoomSource → assembleRoom`, id-normalized; never throws). `warmAdjacent(room)` warms the current room's exits in the background, capped at `maxJobs` (default 3), depth-1. Implements the narrow `RoomResolver` that `NavigationService` depends on. |
