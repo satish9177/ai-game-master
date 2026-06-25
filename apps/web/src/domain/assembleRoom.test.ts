@@ -74,6 +74,33 @@ const RAW_HUGE_DIMS = raw(
 const RAW_SHORT_HEIGHT = raw(
   validSpec({ shell: { dimensions: { width: 18, depth: 18, height: 1 }, exits: [{ side: 'north', width: 3 }] } }),
 )
+// Room with two aliased object types: desk→table, skeleton→corpse.
+// Stage 1.5 rewrites them before loadRoomSpec, so both land in room.objects.
+const RAW_WITH_ALIASES = raw(
+  validSpec({
+    shell: { dimensions: { width: 18, depth: 18, height: 4 }, exits: [{ side: 'north', width: 3 }] },
+    objects: [
+      { type: 'desk', position: [2, 0, 2] },
+      { type: 'skeleton', position: [-2, 0, -2] },
+    ],
+  }),
+)
+// Aliased type ("desk"→"table") but remaining fields are malformed (position invalid).
+// Stage 1.5 repairs the type; loadRoomSpec still rejects the object → skipped.
+const RAW_ALIAS_MALFORMED = raw(
+  validSpec({
+    shell: { dimensions: { width: 18, depth: 18, height: 4 }, exits: [{ side: 'north', width: 3 }] },
+    objects: [{ type: 'desk', position: 'not-a-vec' }],
+  }),
+)
+// Unmapped alias ("lamp" is in the deferred list) → loadRoomSpec skips it.
+const RAW_UNMAPPED_ALIAS = raw(
+  validSpec({
+    shell: { dimensions: { width: 18, depth: 18, height: 4 }, exits: [{ side: 'north', width: 3 }] },
+    objects: [{ type: 'lamp', position: [1, 0, 1] }],
+  }),
+)
+
 // Object with X position well outside 18×18 room bounds → position clamped.
 const RAW_OUT_OF_BOUNDS_OBJ = raw(
   validSpec({
@@ -251,6 +278,8 @@ describe('assembleRoom', () => {
       'residualFatalCodes',
       'skippedObjectCount',
       'warningCount',
+      'aliasesRepaired',
+      'skippedObjectReasonCounts',
     ])
 
     for (const input of inputs) {
@@ -275,6 +304,12 @@ describe('assembleRoom', () => {
       expect(typeof diagnostics.exitsRepaired).toBe('boolean')
       expect(typeof diagnostics.skippedObjectCount).toBe('number')
       expect(typeof diagnostics.warningCount).toBe('number')
+      expect(typeof diagnostics.aliasesRepaired).toBe('number')
+      expect(typeof diagnostics.skippedObjectReasonCounts).toBe('object')
+      expect(diagnostics.skippedObjectReasonCounts).not.toBeNull()
+      for (const val of Object.values(diagnostics.skippedObjectReasonCounts)) {
+        expect(typeof val).toBe('number')
+      }
       for (const code of [
         ...diagnostics.initialFatalCodes,
         ...diagnostics.residualFatalCodes,
@@ -773,5 +808,108 @@ describe('assembleRoom', () => {
     expect(result.diagnostics.lacksInteractable).toBe(false)
     expect(result.room.objects.map((object) => object.type)).toEqual(['machine', 'artifact', 'candle'])
     expect(validateRoom(result.room).ok).toBe(true)
+  })
+
+  // --- generated-room alias repair (Slice 7D) ---
+  //
+  // Stage 1.5 rewrites known natural-language noun type strings to canonical
+  // RoomSpec types before loadRoomSpec runs. It is a benign normalization:
+  // provenance stays 'generated', no repair/fallback notice. Only the integer
+  // count is reported; alias strings are never logged.
+
+  it('aliased object types are rewritten and appear in room.objects, provenance "generated"', () => {
+    const { room, diagnostics } = assembleRoom(RAW_WITH_ALIASES, fallback)
+    expect(diagnostics.provenance).toBe('generated')
+    expect(diagnostics.aliasesRepaired).toBe(2)
+    expect(diagnostics.skippedObjectCount).toBe(0)
+    expect(diagnostics.repairAttempted).toBe(false)
+    expect(diagnostics.failedStage).toBeUndefined()
+    const types = room.objects.map((o) => o.type)
+    expect(types).toContain('table')   // "desk" → table
+    expect(types).toContain('corpse')  // "skeleton" → corpse
+    expect(validateRoom(room).ok).toBe(true)
+  })
+
+  it('aliasesRepaired equals the number of rewritten type entries', () => {
+    const { diagnostics } = assembleRoom(RAW_WITH_ALIASES, fallback)
+    expect(diagnostics.aliasesRepaired).toBe(2)
+  })
+
+  it('alias repair is a benign normalization: provenance stays "generated", no repair notice', () => {
+    const { diagnostics } = assembleRoom(RAW_WITH_ALIASES, fallback)
+    expect(diagnostics.provenance).toBe('generated')
+    expect(diagnostics.repairAttempted).toBe(false)
+    expect(diagnostics.failedStage).toBeUndefined()
+  })
+
+  it('malformed aliased object is still skipped by loadRoomSpec after type repair', () => {
+    // "desk" → "table" at Stage 1.5, but position:"not-a-vec" is invalid → skipped.
+    const { room, diagnostics } = assembleRoom(RAW_ALIAS_MALFORMED, fallback)
+    expect(diagnostics.provenance).toBe('generated')
+    expect(diagnostics.aliasesRepaired).toBe(1) // type WAS rewritten
+    expect(diagnostics.skippedObjectCount).toBe(1) // but object still rejected
+    expect(room.objects).toHaveLength(0)
+  })
+
+  it('unmapped alias stays skipped (mystery marker), aliasesRepaired 0', () => {
+    // "lamp" is in the deferred list: not in the alias table → unchanged → skipped.
+    const { room, diagnostics } = assembleRoom(RAW_UNMAPPED_ALIAS, fallback)
+    expect(diagnostics.provenance).toBe('generated')
+    expect(diagnostics.aliasesRepaired).toBe(0)
+    expect(diagnostics.skippedObjectCount).toBe(1)
+    expect(room.objects).toHaveLength(0)
+  })
+
+  it('json parse error path reports aliasesRepaired 0', () => {
+    const { diagnostics } = assembleRoom(RAW_INVALID_JSON, fallback)
+    expect(diagnostics.aliasesRepaired).toBe(0)
+    expect(diagnostics.provenance).toBe('fallback')
+  })
+
+  it('schema fallback path reports aliasesRepaired 0', () => {
+    const { diagnostics } = assembleRoom(RAW_INVALID_SCHEMA, fallback)
+    expect(diagnostics.aliasesRepaired).toBe(0)
+    expect(diagnostics.provenance).toBe('fallback')
+  })
+
+  it('semantic fallback path (unrepairable room) reports aliasesRepaired 0', () => {
+    const { diagnostics } = assembleRoom(RAW_UNREPAIRABLE, fallback)
+    expect(diagnostics.aliasesRepaired).toBe(0)
+    expect(diagnostics.provenance).toBe('fallback')
+  })
+
+  it('aliasesRepaired is 0 for a valid room with only canonical types', () => {
+    const { diagnostics } = assembleRoom(RAW_VALID, fallback)
+    expect(diagnostics.aliasesRepaired).toBe(0)
+  })
+
+  it('loadRoomSpec directly does not repair aliases (authored/static/restored path is untouched)', () => {
+    // Directly calling loadRoomSpec (as authored/static/restored rooms do) must NOT
+    // alias-repair: "desk" is unknown and ends up in skipped, not objects.
+    const loaded = loadRoomSpec({
+      schemaVersion: 1,
+      id: 'authored',
+      name: 'Authored Room',
+      shell: { dimensions: { width: 8, depth: 8, height: 4 } },
+      spawn: { position: [0, 1.7, 0] },
+      objects: [{ type: 'desk', position: [1, 0, 1] }],
+    })
+    expect(loaded.objects).toHaveLength(0)    // not repaired by loadRoomSpec
+    expect(loaded.skipped).toHaveLength(1)    // stays skipped
+    expect(loaded.skipped[0]!.type).toBe('desk')
+  })
+
+  it('alias repair is deterministic', () => {
+    expect(assembleRoom(RAW_WITH_ALIASES, fallback)).toEqual(
+      assembleRoom(RAW_WITH_ALIASES, fallback),
+    )
+  })
+
+  it('aliasesRepaired is false for all fallback paths (authored fallback is untouched)', () => {
+    const paths = [RAW_INVALID_JSON, RAW_INVALID_SCHEMA, RAW_UNREPAIRABLE, RAW_REPAIR_THEN_FAIL]
+    for (const input of paths) {
+      const { diagnostics } = assembleRoom(input, fallback)
+      expect(diagnostics.aliasesRepaired).toBe(0)
+    }
   })
 })

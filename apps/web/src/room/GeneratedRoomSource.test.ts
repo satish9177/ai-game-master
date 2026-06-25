@@ -181,6 +181,8 @@ describe('GeneratedRoomSource', () => {
     expect(entry.context.objectCount).toBe(1)
     expect(entry.context.skippedObjectCount).toBe(0)
     expect(typeof entry.context.warningCount).toBe('number')
+    expect(typeof entry.context.aliasesRepaired).toBe('number')
+    expect(typeof entry.context.skippedObjectReasonCounts).toBe('object')
   })
 
   it('logs a repaired/fallback outcome once at warn with safe diagnostics', async () => {
@@ -257,6 +259,58 @@ describe('GeneratedRoomSource', () => {
       const result = await newSource(new FakeRoomGenerator(), prompt, logger).getRoom()
       expect(result.ok).toBe(true)
       if (result.ok) expect(result.provenance).toBe('generated')
+    }
+  })
+
+  it('logs aliasesRepaired count (integer, not alias strings) when aliases are rewritten', async () => {
+    const WITH_ALIASES = JSON.stringify({
+      ...base,
+      objects: [
+        { type: 'desk', position: [2, 0, 2] },     // → table
+        { type: 'skeleton', position: [-2, 0, -2] }, // → corpse
+      ],
+    })
+    const { logger, entries } = createSpyLogger()
+    await newSource(generatorReturning(WITH_ALIASES), 'p', logger).getRoom()
+    expect(entries).toHaveLength(1)
+    expect(entries[0]!.context.aliasesRepaired).toBe(2)
+    // Raw alias strings must never appear in any log entry
+    const dump = JSON.stringify(entries)
+    expect(dump).not.toContain('"desk"')
+    expect(dump).not.toContain('"skeleton"')
+  })
+
+  it('logs skippedObjectReasonCounts as integer counts with no raw type strings', async () => {
+    // Three objects: one unknown type ("chair"), one missing scroll interaction,
+    // one valid pillar. Expect 2 skipped, counts logged as integers only.
+    const WITH_SKIPS = JSON.stringify({
+      ...base,
+      objects: [
+        { type: 'chair', position: [1, 0, 1] },             // unknownType
+        { type: 'scroll', position: [2, 0, 2] },             // invalidInteraction (missing)
+        { type: 'pillar', position: [3, 0, 3] },             // valid
+      ],
+    })
+    const { logger, entries } = createSpyLogger()
+    await newSource(generatorReturning(WITH_SKIPS), 'p', logger).getRoom()
+    expect(entries).toHaveLength(1)
+    const counts = entries[0]!.context.skippedObjectReasonCounts
+    expect(typeof counts).toBe('object')
+    for (const val of Object.values(counts as Record<string, unknown>)) {
+      expect(typeof val).toBe('number')
+    }
+    // Raw object type strings must never appear in log context (only bucket names + integers)
+    const dump = JSON.stringify(entries)
+    expect(dump).not.toContain('"chair"')
+  })
+
+  it('aliasesRepaired is 0 on fallback paths', async () => {
+    for (const spec of [MALFORMED_JSON, BAD_ENVELOPE, UNREPAIRABLE_SPEC]) {
+      const { logger, entries } = createSpyLogger()
+      await newSource(generatorReturning(spec), 'p', logger).getRoom()
+      const entry = entries.find((e) => e.context.provenance === 'fallback')
+      expect(entry).toBeDefined()
+      expect(entry!.context.aliasesRepaired).toBe(0)
     }
   })
 

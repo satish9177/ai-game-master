@@ -1,10 +1,11 @@
 import { loadRoomSpec } from './loadRoomSpec'
-import type { LoadedRoom } from './loadRoomSpec'
+import type { LoadedRoom, SkippedObjectReasonCounts } from './loadRoomSpec'
 import { repairRoom } from './repairRoom'
 import { validateRoom } from './validateRoom'
 import type { RoomIssueCode, RoomValidationResult } from './validateRoom'
 import { clampGeneratedShell, repairGeneratedObjects, repairGeneratedSpawn, repairGeneratedExits } from './generatedRoomLayout'
 import { composeGeneratedRoom } from './generatedRoomComposition'
+import { repairGeneratedAliases } from './generatedRoomAliases'
 
 /**
  * Room assembly pipeline (room-generation-repair-fallback v0). A pure,
@@ -102,6 +103,20 @@ export type RoomDiagnostics = {
   skippedObjectCount: number
   /** Semantic warning count on the returned room. */
   warningCount: number
+  /**
+   * Number of object entries whose `type` was rewritten from a known
+   * natural-language alias to a canonical RoomSpec type at Stage 1.5
+   * (before loadRoomSpec). Always 0 for all fallback paths; the alias strings
+   * themselves are never logged.
+   */
+  aliasesRepaired: number
+  /**
+   * Aggregate count of skipped object entries by validation failure reason,
+   * as classified by the lenient loader. Count-only: no raw type strings or
+   * field values are stored. For fallback rooms the counts reflect the authored
+   * fallback room's load (always all-zero for a well-authored fallback).
+   */
+  skippedObjectReasonCounts: SkippedObjectReasonCounts
 }
 
 export type AssembledRoom = {
@@ -121,11 +136,18 @@ export function assembleRoom(
     return toFallback(fallbackRoom, 'json')
   }
 
+  // Stage 1.5 — alias repair. Pure, deterministic, allowlist-based rewrite of
+  // known natural-language noun `type` strings (e.g. "desk", "skeleton") to their
+  // canonical RoomSpec type strings before Zod validation runs. Authored/static/
+  // fallback rooms never enter assembleRoom, so this only ever touches generated-
+  // room JSON. Only the count is kept for diagnostics; alias strings are not logged.
+  const { value: repairedParsed, count: aliasesRepaired } = repairGeneratedAliases(parsed)
+
   // Stage 2 — schema boundary. A broken envelope throws; bad objects are skipped
   // leniently (and surface as skippedObjectCount, not a failure).
   let loaded: LoadedRoom
   try {
-    loaded = loadRoomSpec(parsed)
+    loaded = loadRoomSpec(repairedParsed)
   } catch {
     return toFallback(fallbackRoom, 'schema')
   }
@@ -185,6 +207,8 @@ export function assembleRoom(
         residualFatalCodes: [],
         skippedObjectCount: exitsFixed.skipped.length,
         warningCount: countWarnings(initial),
+        aliasesRepaired,
+        skippedObjectReasonCounts: exitsFixed.skippedObjectReasonCounts,
       },
     }
   }
@@ -215,6 +239,8 @@ export function assembleRoom(
         residualFatalCodes: [],
         skippedObjectCount: repaired.skipped.length,
         warningCount: countWarnings(revalidated),
+        aliasesRepaired,
+        skippedObjectReasonCounts: repaired.skippedObjectReasonCounts,
       },
     }
   }
@@ -238,6 +264,8 @@ export function assembleRoom(
       residualFatalCodes: distinctFatalCodes(revalidated),
       skippedObjectCount: fallbackRoom.skipped.length,
       warningCount: countWarnings(validateRoom(fallbackRoom)),
+      aliasesRepaired: 0,
+      skippedObjectReasonCounts: fallbackRoom.skippedObjectReasonCounts,
     },
   }
 }
@@ -264,6 +292,8 @@ function toFallback(
       residualFatalCodes: [],
       skippedObjectCount: fallbackRoom.skipped.length,
       warningCount: countWarnings(validateRoom(fallbackRoom)),
+      aliasesRepaired: 0,
+      skippedObjectReasonCounts: fallbackRoom.skippedObjectReasonCounts,
     },
   }
 }
