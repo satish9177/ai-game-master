@@ -30,7 +30,8 @@ import type { RoomObject } from './roomSpec'
  * Composition role for generated-room layout (finer-grained than ObjectImportance).
  * Classifies what zone an object belongs in for composition purposes.
  *
- * - 'anchor'       — throne: primary story focal point → north-center anchor zone.
+ * - 'anchor'       — authority/ritual focal props → north-center anchor zone when
+ *                    selected as the room's single primary story anchor.
  * - 'npc'          — npc: placed off corridor in a mid-room flank.
  * - 'interactable' - scroll; document/practical/resource objects with non-exit
  *                    interaction: placed in a visible reachable flank.
@@ -52,7 +53,7 @@ export type CompositionRole =
 export type CompositionDiagnostics = {
   /** True when at least one object was relocated. */
   composed: boolean
-  /** True when the room contains no story anchor (no throne). */
+  /** True when the room contains no story anchor candidate. */
   lacksAnchor: boolean
   /** True when the room contains no interactable clue or resource object. */
   lacksInteractable: boolean
@@ -78,13 +79,13 @@ export const COMPOSITION = {
   CORRIDOR_HALF: 2.0,
 
   /**
-   * Anchor zone — throne target z as fraction of halfZ (negative = north).
-   * The throne is placed at z = -(ANCHOR_Z_TARGET_FRAC × halfZ), footprint-clamped.
+   * Anchor zone — story anchor target z as fraction of halfZ (negative = north).
+   * The selected anchor is placed at z = -(ANCHOR_Z_TARGET_FRAC × halfZ), footprint-clamped.
    */
   ANCHOR_Z_TARGET_FRAC: 0.70,
 
   /**
-   * Anchor zone already-placed threshold. A throne is considered composed when
+   * Anchor zone already-placed threshold. An anchor is considered composed when
    * z ≤ -(ANCHOR_Z_THRESHOLD × halfZ). Used to detect same-reference eligibility.
    * Must be < ANCHOR_Z_TARGET_FRAC so a throne at the exact target passes.
    */
@@ -107,6 +108,20 @@ export const COMPOSITION = {
    */
   CLUTTER_X_TARGET_FRAC: 0.72,
 } as const
+
+const STORY_ANCHOR_PRIORITY: Partial<Record<RoomObject['type'], number>> = {
+  throne: 0,
+  altar: 1,
+  statue: 2,
+  corpse: 3,
+  machine: 4,
+  artifact: 4,
+  chest: 5,
+  table: 6,
+  map: 6,
+  book: 6,
+  paper: 6,
+}
 
 // ─── classification ────────────────────────────────────────────────────────────
 
@@ -158,6 +173,27 @@ export function classifyGeneratedCompositionRole(obj: RoomObject): CompositionRo
   }
 }
 
+/**
+ * Selects the single derived story anchor for a generated room.
+ * Uses only validated RoomObject type values; never reads names, prompts, body
+ * text, raw generated JSON, or inferred purpose.
+ */
+export function selectGeneratedStoryAnchorIndex(objects: RoomObject[]): number {
+  let bestIndex = -1
+  let bestPriority = Infinity
+
+  for (let i = 0; i < objects.length; i += 1) {
+    const priority = STORY_ANCHOR_PRIORITY[objects[i]!.type]
+    if (priority == null) continue
+    if (priority < bestPriority) {
+      bestIndex = i
+      bestPriority = priority
+    }
+  }
+
+  return bestIndex
+}
+
 // ─── zone info (informational; actual per-object positions use footprint clamp) ──
 
 /**
@@ -201,7 +237,7 @@ export function computeGeneratedCompositionZones(
  * Deterministic generated-room composition normalizer (stage 2.7 in assembleRoom).
  *
  * Re-arranges existing objects into a readable layout:
- *  1. The first throne (story anchor) is placed in the north-center anchor zone.
+ *  1. The selected story anchor is placed in the north-center anchor zone.
  *  2. NPCs are moved off the central corridor to a mid-room flank.
  *  3. Interactable clues/resources in the corridor are moved to a visible flank.
  *  4. Decorative clutter in the corridor is pushed to the east/west side zones.
@@ -215,7 +251,7 @@ export function composeGeneratedRoom(room: LoadedRoom): ComposedRoom {
   const bounds = computePlayableBounds(room.shell.dimensions, room.shell.wallThickness)
   const roles = room.objects.map(classifyGeneratedCompositionRole)
 
-  const anchorIdx = primaryAnchorIndex(room.objects)
+  const anchorIdx = selectGeneratedStoryAnchorIndex(room.objects)
   const lacksAnchor = anchorIdx === -1
   const lacksInteractable = !room.objects.some((obj, i) =>
     roles[i] === 'interactable' || isInteractiveStoryAnchor(obj))
@@ -225,6 +261,13 @@ export function composeGeneratedRoom(room: LoadedRoom): ComposedRoom {
   const newObjects = room.objects.map((obj, i): RoomObject => {
     const role = roles[i]!
     const [x, y, z] = obj.position
+
+    if (i === anchorIdx && role !== 'exit' && role !== 'structural') {
+      const [tx, tz] = anchorTarget(bounds, objectFootprintRadius(obj))
+      if (x === tx && z === tz) return obj
+      changed = true
+      return { ...obj, position: [tx, y, tz] } as RoomObject
+    }
 
     switch (role) {
       case 'anchor': {
@@ -290,14 +333,6 @@ function isInteractiveStoryAnchor(obj: RoomObject): boolean {
   return (obj.type === 'altar' || obj.type === 'statue') && hasNonExitInteraction(obj)
 }
 
-function primaryAnchorIndex(objects: RoomObject[]): number {
-  const throne = objects.findIndex((obj) => obj.type === 'throne')
-  if (throne !== -1) return throne
-  const altar = objects.findIndex((obj) => obj.type === 'altar')
-  if (altar !== -1) return altar
-  return objects.findIndex((obj) => obj.type === 'statue')
-}
-
 function relocateFlankObject(
   obj: RoomObject,
   role: Extract<CompositionRole, 'npc' | 'interactable' | 'decorative'>,
@@ -318,8 +353,8 @@ function relocateFlankObject(
 }
 
 /**
- * Computes the target [x, z] for the story anchor (throne): north-center of the room,
- * with the throne's footprint clamped inside the playable bounds on both axes.
+ * Computes the target [x, z] for the story anchor: north-center of the room,
+ * with the selected object's footprint clamped inside the playable bounds on both axes.
  */
 function anchorTarget(bounds: PlayableBounds, fp: number): [number, number] {
   const safeZ = Math.max(0, bounds.halfZ - fp)

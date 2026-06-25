@@ -4,6 +4,7 @@ import {
   classifyGeneratedCompositionRole,
   computeGeneratedCompositionZones,
   composeGeneratedRoom,
+  selectGeneratedStoryAnchorIndex,
 } from './generatedRoomComposition'
 import { computePlayableBounds, objectFootprintRadius } from './generatedRoomLayout'
 import { loadRoomSpec } from './loadRoomSpec'
@@ -36,6 +37,141 @@ function loadObj(raw: unknown) {
 }
 
 const STD_BOUNDS = computePlayableBounds(STD_DIMS, 0.3)
+
+function expectFocalAnchor(obj: RoomObject) {
+  expect(obj.position[0]).toBe(0)
+  expect(obj.position[2]).toBeLessThanOrEqual(
+    -(COMPOSITION.ANCHOR_Z_THRESHOLD * STD_BOUNDS.halfZ),
+  )
+}
+
+function selectAnchorIndex(rawObjects: unknown[]) {
+  return selectGeneratedStoryAnchorIndex(makeRoom(rawObjects).objects)
+}
+
+// ─── selectGeneratedStoryAnchorIndex ─────────────────────────────────────────
+
+describe('selectGeneratedStoryAnchorIndex', () => {
+  it('returns -1 for empty and no-candidate rooms', () => {
+    expect(selectGeneratedStoryAnchorIndex([])).toBe(-1)
+    expect(selectAnchorIndex([
+      { type: 'prop', position: [0, 0, 0] },
+      { type: 'pillar', position: [1, 0, 0] },
+      { type: 'torch', position: [2, 3, 0] },
+    ])).toBe(-1)
+  })
+
+  it('keeps throne as the highest priority anchor over all other candidates', () => {
+    expect(selectAnchorIndex([
+      { type: 'altar', position: [0, 0, 0] },
+      { type: 'corpse', position: [1, 0, 0] },
+      { type: 'machine', position: [2, 0, 0] },
+      { type: 'chest', position: [3, 0, 0] },
+      { type: 'table', position: [4, 0, 0] },
+      { type: 'throne', position: [5, 0, 0] },
+    ])).toBe(5)
+  })
+
+  it('prioritizes altar over statue, evidence, devices, cache, and documents', () => {
+    expect(selectAnchorIndex([
+      { type: 'statue', position: [0, 0, 0] },
+      { type: 'corpse', position: [1, 0, 0] },
+      { type: 'machine', position: [2, 0, 0] },
+      { type: 'artifact', position: [3, 0, 0] },
+      { type: 'chest', position: [4, 0, 0] },
+      { type: 'table', position: [5, 0, 0] },
+      { type: 'map', position: [6, 0, 0] },
+      { type: 'book', position: [7, 0, 0] },
+      { type: 'paper', position: [8, 0, 0] },
+      { type: 'altar', position: [9, 0, 0] },
+    ])).toBe(9)
+  })
+
+  it('prioritizes statue over evidence, devices, cache, and documents', () => {
+    expect(selectAnchorIndex([
+      { type: 'corpse', position: [0, 0, 0] },
+      { type: 'machine', position: [1, 0, 0] },
+      { type: 'artifact', position: [2, 0, 0] },
+      { type: 'chest', position: [3, 0, 0] },
+      { type: 'table', position: [4, 0, 0] },
+      { type: 'map', position: [5, 0, 0] },
+      { type: 'book', position: [6, 0, 0] },
+      { type: 'paper', position: [7, 0, 0] },
+      { type: 'statue', position: [8, 0, 0] },
+    ])).toBe(8)
+  })
+
+  it('prioritizes corpse over device, cache, and document candidates', () => {
+    expect(selectAnchorIndex([
+      { type: 'artifact', position: [0, 0, 0] },
+      { type: 'machine', position: [1, 0, 0] },
+      { type: 'chest', position: [2, 0, 0] },
+      { type: 'book', position: [3, 0, 0] },
+      { type: 'corpse', position: [4, 0, 0] },
+    ])).toBe(4)
+  })
+
+  it('prioritizes machine and artifact over cache and document candidates', () => {
+    expect(selectAnchorIndex([
+      { type: 'chest', position: [0, 0, 0] },
+      { type: 'table', position: [1, 0, 0] },
+      { type: 'artifact', position: [2, 0, 0] },
+      { type: 'machine', position: [3, 0, 0] },
+    ])).toBe(2)
+  })
+
+  it('prioritizes chest over workspace and document candidates', () => {
+    expect(selectAnchorIndex([
+      { type: 'map', position: [0, 0, 0] },
+      { type: 'table', position: [1, 0, 0] },
+      { type: 'book', position: [2, 0, 0] },
+      { type: 'paper', position: [3, 0, 0] },
+      { type: 'chest', position: [4, 0, 0] },
+    ])).toBe(4)
+  })
+
+  it('treats table, map, book, and paper as the lowest anchor candidates', () => {
+    expect(selectAnchorIndex([
+      { type: 'prop', position: [0, 0, 0] },
+      { type: 'paper', position: [1, 0, 0] },
+      { type: 'book', position: [2, 0, 0] },
+      { type: 'map', position: [3, 0, 0] },
+      { type: 'table', position: [4, 0, 0] },
+    ])).toBe(1)
+  })
+
+  it('tie-breaks by lowest index within the selected tier', () => {
+    expect(selectAnchorIndex([
+      { type: 'artifact', position: [0, 0, 0] },
+      { type: 'machine', position: [1, 0, 0] },
+      { type: 'artifact', position: [2, 0, 0] },
+    ])).toBe(0)
+    expect(selectAnchorIndex([
+      { type: 'map', position: [0, 0, 0] },
+      { type: 'paper', position: [1, 0, 0] },
+      { type: 'book', position: [2, 0, 0] },
+      { type: 'table', position: [3, 0, 0] },
+    ])).toBe(0)
+  })
+
+  it('ignores names, interaction body, prompt-like text, and stripped raw content', () => {
+    expect(selectAnchorIndex([
+      {
+        type: 'machine',
+        position: [0, 0, 0],
+        name: 'throne altar statue',
+        body: 'corpse chest table map book paper',
+        interaction: {
+          key: 'E',
+          prompt: 'Inspect throne altar statue',
+          body: 'This text says throne, altar, statue, and corpse.',
+        },
+      },
+      { type: 'corpse', position: [1, 0, 0] },
+      { type: 'zombie', name: 'throne', position: [2, 0, 0] },
+    ])).toBe(1)
+  })
+})
 
 // ─── classifyGeneratedCompositionRole ─────────────────────────────────────────
 
@@ -288,7 +424,7 @@ describe('composeGeneratedRoom — anchor (throne)', () => {
     expect(diagnostics.lacksAnchor).toBe(false)
   })
 
-  it('lacksAnchor is true when no throne exists', () => {
+  it('lacksAnchor is true when no anchor candidate exists', () => {
     const room = makeRoom([
       { type: 'prop', position: [4, 0, 0] },
       { type: 'pillar', position: [3, 0, -4] },
@@ -842,17 +978,16 @@ describe('document composition integration', () => {
     },
   )
 
-  it('moves an interactive map to the readable flank and preserves its content', () => {
+  it('moves an interactive map to the focal area when no stronger anchor exists and preserves content', () => {
     const room = makeRoom([{
       type: 'map',
       position: [0, 0, -2],
       interaction: { key: 'E', prompt: 'Study map', body: 'Validated body.' },
     }])
     const { room: composed, diagnostics } = composeGeneratedRoom(room)
+    expect(diagnostics.lacksAnchor).toBe(false)
     expect(diagnostics.lacksInteractable).toBe(false)
-    expect(Math.abs(composed.objects[0]!.position[0])).toBeGreaterThanOrEqual(
-      COMPOSITION.CORRIDOR_HALF,
-    )
+    expectFocalAnchor(composed.objects[0]!)
     const document = composed.objects[0]
     expect(document?.type === 'map' && document.interaction?.prompt).toBe('Study map')
   })
@@ -881,28 +1016,26 @@ describe('practical prop composition integration', () => {
     },
   )
 
-  it('moves an interactive chest to the readable flank and preserves its content', () => {
+  it('moves an interactive chest to the focal area when no stronger anchor exists and preserves content', () => {
     const room = makeRoom([{
       type: 'chest',
       position: [0, 0, -2],
       interaction: { key: 'E', prompt: 'Open chest', body: 'Validated body.' },
     }])
     const { room: composed, diagnostics } = composeGeneratedRoom(room)
+    expect(diagnostics.lacksAnchor).toBe(false)
     expect(diagnostics.lacksInteractable).toBe(false)
-    expect(Math.abs(composed.objects[0]!.position[0])).toBeGreaterThanOrEqual(
-      COMPOSITION.CORRIDOR_HALF,
-    )
+    expectFocalAnchor(composed.objects[0]!)
     const chest = composed.objects[0]
     expect(chest?.type === 'chest' && chest.interaction?.prompt).toBe('Open chest')
   })
 
-  it('moves a visual-only table as decorative side clutter', () => {
+  it('moves a visual-only table to the focal area when no stronger anchor exists', () => {
     const room = makeRoom([{ type: 'table', position: [0, 0, 0] }])
     const { room: composed, diagnostics } = composeGeneratedRoom(room)
+    expect(diagnostics.lacksAnchor).toBe(false)
     expect(diagnostics.lacksInteractable).toBe(true)
-    expect(Math.abs(composed.objects[0]!.position[0])).toBeGreaterThanOrEqual(
-      COMPOSITION.CORRIDOR_HALF,
-    )
+    expectFocalAnchor(composed.objects[0]!)
   })
 
   it.each(['crate', 'barrel', 'debris', 'book', 'paper', 'map'] as const)(
@@ -966,6 +1099,36 @@ describe('story anchor composition integration', () => {
     expect(composed.objects[0]!.position[2]).toBeLessThan(0)
   })
 
+  it('moves a corpse-only room anchor to the north-center focal area', () => {
+    const room = makeRoom([{ type: 'corpse', position: [3, 0, 3] }])
+    const { room: composed, diagnostics } = composeGeneratedRoom(room)
+    expect(diagnostics.lacksAnchor).toBe(false)
+    expect(composed.objects[0]!.type).toBe('corpse')
+    expectFocalAnchor(composed.objects[0]!)
+  })
+
+  it.each(['machine', 'artifact'] as const)(
+    'moves a %s-only room anchor to the north-center focal area',
+    (type) => {
+      const room = makeRoom([{ type, position: [3, 0, 3] }])
+      const { room: composed, diagnostics } = composeGeneratedRoom(room)
+      expect(diagnostics.lacksAnchor).toBe(false)
+      expect(composed.objects[0]!.type).toBe(type)
+      expectFocalAnchor(composed.objects[0]!)
+    },
+  )
+
+  it.each(['chest', 'table', 'map', 'book', 'paper'] as const)(
+    'moves a %s-only room anchor to the focal area when no stronger anchor exists',
+    (type) => {
+      const room = makeRoom([{ type, position: [3, 0, 3] }])
+      const { room: composed, diagnostics } = composeGeneratedRoom(room)
+      expect(diagnostics.lacksAnchor).toBe(false)
+      expect(composed.objects[0]!.type).toBe(type)
+      expectFocalAnchor(composed.objects[0]!)
+    },
+  )
+
   it('does not turn extra altar/statue objects into additional focal anchors', () => {
     const room = makeRoom([
       { type: 'altar', position: [3, 0, 3] },
@@ -979,8 +1142,26 @@ describe('story anchor composition integration', () => {
     expect(Math.abs(composed.objects[2]!.position[0])).toBeGreaterThanOrEqual(COMPOSITION.CORRIDOR_HALF)
   })
 
+  it('keeps extra lower-priority anchor candidates as support objects, not focal anchors', () => {
+    const room = makeRoom([
+      { type: 'corpse', position: [3, 0, 3] },
+      {
+        type: 'machine',
+        position: [0, 0, 0],
+        interaction: { key: 'E', prompt: 'Inspect machine', body: 'Validated body.' },
+      },
+      { type: 'chest', position: [0, 0, 1] },
+      { type: 'map', position: [0, 0, 2] },
+    ])
+    const { room: composed } = composeGeneratedRoom(room)
+    expectFocalAnchor(composed.objects[0]!)
+    expect(Math.abs(composed.objects[1]!.position[0])).toBeGreaterThanOrEqual(COMPOSITION.CORRIDOR_HALF)
+    expect(Math.abs(composed.objects[2]!.position[0])).toBeGreaterThanOrEqual(COMPOSITION.CORRIDOR_HALF)
+    expect(Math.abs(composed.objects[3]!.position[0])).toBeGreaterThanOrEqual(COMPOSITION.CORRIDOR_HALF)
+  })
+
   it.each(['book', 'paper', 'map', 'chest', 'corpse', 'table'] as const)(
-    'keeps existing %s non-interactive composition behavior unchanged',
+    'keeps existing %s non-interactive role classification unchanged',
     (type) => {
       expect(classifyGeneratedCompositionRole(loadObj({ type, position: [0, 0, 0] })))
         .toBe('decorative')
@@ -1009,17 +1190,16 @@ describe('strange/device/light composition integration', () => {
       .toBe('structural')
   })
 
-  it('moves an interactive machine to the readable flank and preserves its content', () => {
+  it('moves an interactive machine to the focal area when no stronger anchor exists and preserves content', () => {
     const room = makeRoom([{
       type: 'machine',
       position: [0, 0, -2],
       interaction: { key: 'E', prompt: 'Inspect machine', body: 'Validated body.' },
     }])
     const { room: composed, diagnostics } = composeGeneratedRoom(room)
+    expect(diagnostics.lacksAnchor).toBe(false)
     expect(diagnostics.lacksInteractable).toBe(false)
-    expect(Math.abs(composed.objects[0]!.position[0])).toBeGreaterThanOrEqual(
-      COMPOSITION.CORRIDOR_HALF,
-    )
+    expectFocalAnchor(composed.objects[0]!)
     const machine = composed.objects[0]
     expect(machine?.type === 'machine' && machine.interaction?.prompt).toBe('Inspect machine')
   })
@@ -1034,7 +1214,7 @@ describe('strange/device/light composition integration', () => {
   })
 
   it.each(['book', 'paper', 'map', 'chest', 'corpse', 'table', 'altar', 'statue'] as const)(
-    'keeps existing %s non-interactive composition behavior unchanged',
+    'keeps existing %s non-interactive role classification unchanged',
     (type) => {
       expect(classifyGeneratedCompositionRole(loadObj({ type, position: [0, 0, 0] })))
         .toBe(type === 'altar' || type === 'statue' ? 'anchor' : 'decorative')
