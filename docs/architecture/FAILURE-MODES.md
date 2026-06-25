@@ -44,15 +44,17 @@ One entry in `objects[]` has an unknown `type` or fails its schema.
 - **Detection** ✅ — `loadRoomSpec` validates each object **independently**
   (`safeParse`). Failures are collected into `skipped[]` and `warnings[]` instead
   of throwing. A valid `type` that simply has no builder yet is also handled.
-- **Handling** ✅ — the object renders as a **magenta placeholder box**
-  (`buildPlaceholder`) so unsupported content is *visible*, never fatal. The rest
-  of the room loads normally.
-- **User-facing** ✅ — a clearly-wrong magenta box at the object's position;
-  everything else works.
-- **Logging** ✅ — the missing-builder case logs `logger.warn(…, { objectType,
-  objectId })` and room load logs `logger.info('room received', …)` through the
-  Logger adapter (no direct `console.*`). 🔜 surfacing `warnings[]` to the UI as
-  structured data (e.g. a dev overlay) remains future.
+- **Handling** ✅ — the skipped entry renders as a bounded, non-interactive
+  **mystery marker** so unsupported content is *visible*, never fatal. The rest
+  of the room loads normally. Skipped raw data is not recovered, promoted, or made
+  interactive.
+- **User-facing** ✅ — an intentional mystery marker appears at the skipped
+  object's safe anchor; it shows no raw skipped type/name/id text, and everything
+  else works.
+- **Logging** ✅ — room-load diagnostics use safe counts/reason buckets only for
+  skipped generated objects. Logs never include raw prompt/provider bodies,
+  generated JSON, raw skipped objects, object text, keys, or PII. 🔜 surfacing
+  `warnings[]` to the UI as structured data (e.g. a dev overlay) remains future.
 
 ## 3. WebGL unavailable or context lost
 
@@ -76,8 +78,9 @@ A generator returns malformed JSON, a schema-invalid spec, a partial spec, or
 (from a future model) hostile content.
 
 - **Detection** ✅ — implemented in `GeneratedRoomSource` + the pure `assembleRoom`
-  pipeline: the generator's raw text flows through `JSON.parse` → the **same**
-  `loadRoomSpec` boundary → `validateRoom`. A `JSON.parse` failure
+  pipeline: the generator's raw text flows through `JSON.parse` → generated alias
+  repair → generated optional transform repair → the **same** `loadRoomSpec`
+  boundary → `validateRoom`. A `JSON.parse` failure
   (`failedStage: json`) and a bad envelope (`failedStage: schema`) are caught as
   pipeline stages; bad *objects* are skipped (case 2); a generator **throw/reject**
   maps to `unavailable`. Hostile content is *still just data* — there is no code
@@ -243,7 +246,7 @@ notice — they are silently corrective and keep `provenance: generated`.
 | Object outside floor bounds | `repairGeneratedObjects` (stage 2.6): object footprint outside playable area | position object so its full footprint (rotation-invariant per-type radius, scaled and padded) stays inside walkable floor; decorative objects whose footprint cannot fit are dropped | `objectsRepaired: true` bool only |
 | Too many objects (> 30) | `repairGeneratedObjects` (stage 2.6): list exceeds `MAX_OBJECTS` cap | drop decorative first, then structural; critical objects are never dropped | `objectsRepaired: true` bool only |
 | Wall-light (e.g. torch) in floor interior | `repairGeneratedObjects` (stage 2.6): wall-light anchor farther than `WALL_LIGHT_BAND` from any wall edge | nudge toward nearest wall/side edge (deterministic); lights already near a wall are left in place | `objectsRepaired: true` bool only |
-| Skipped/malformed placeholder anchor outside floor | `repairGeneratedObjects` (stage 2.6): skipped object anchor beyond playable area (using placeholder cube footprint) | clamp anchor inside playable floor; placeholder still renders as magenta cube, just inside bounds | `objectsRepaired: true` bool only |
+| Skipped/malformed mystery-marker anchor outside floor | `repairGeneratedObjects` (stage 2.6): skipped object anchor beyond playable area (using the bounded marker footprint) | clamp anchor inside playable floor; skipped object still renders as a mystery marker, just inside bounds | `objectsRepaired: true` bool only |
 | Unsafe or crowded spawn | `repairGeneratedSpawn` (stage 2.8): spawn X/Z outside floor or within `SPAWN_CLEARANCE` of a blocking object | clamp to floor, then search deterministic candidate set (origin, ±step cardinal); fall back to clamped position | `spawnRepaired: true` bool only |
 | Exit arch misplaced | `repairGeneratedExits` (stage 2.9): exit-carrying object not on a wall face | snap to nearest wall face (north/south/east/west; ties north > south > east > west) | `exitsRepaired: true` bool only |
 
@@ -295,6 +298,40 @@ existing objects only; it does not generate or remove content.
 - **Logging.** `composed`, `lacksAnchor`, and `lacksInteractable` are fixed
   booleans only. Logs never include raw prompts, provider bodies, generated JSON,
   room/object text, API keys, or PII.
+
+## 4g. Generated room visual vocabulary normalization ✅ v0 (benign, always `generated`)
+
+Layout and composition made generated rooms safe and arranged, but valid-looking
+provider output could still be visually unreadable: common room concepts appeared
+as skipped mystery markers, or repeated tiny/dark props that did not communicate
+book, map, chest, altar, machine, candle, and so on.
+
+Generated Room Visual Vocabulary v0
+([ADR-0033](./decisions/ADR-0033-generated-room-visual-vocabulary-v0.md)) fixes
+that by expanding the allowlisted RoomSpec object vocabulary and trusted renderer
+builders, while keeping normal validation authoritative.
+
+| Visual-vocabulary condition | Detection | Handling | Logging |
+| --- | --- | --- | --- |
+| Common safe object concept | `RoomObjectSchema` accepts first-class types such as `book`, `paper`, `map`, `chest`, `corpse`, `table`, `altar`, `statue`, `machine`, `artifact`, `candle` | render through trusted procedural builders; no external assets or executable model output | ordinary safe room/object counts only |
+| Natural noun drift in generated output | generated-room alias repair before `loadRoomSpec`; allowlisted type-only aliases only | map known nouns such as desk/skeleton/floor plan/generator to safe canonical types; if unsure, leave untouched for validation/skip | `aliasesRepaired` count/boolean surface only |
+| Malformed optional transform | generated-room optional transform repair before `loadRoomSpec` | remove malformed optional `scale`/`rotationY` so schema defaults apply | `objectTransformsRepaired` count/boolean surface only |
+| Unknown or malformed object remains | per-object `loadRoomSpec` validation | keep in `LoadedRoom.skipped`; render bounded non-interactive mystery marker; do not promote or recover raw data | `skippedObjectReasonCounts` buckets only |
+| Malformed required field (`position`, `interaction`, envelope, etc.) | normal schema validation | required field failures still skip object or fail/fallback according to existing pipeline | reason bucket/code only; no raw content |
+
+- **Provenance.** Vocabulary, alias, and optional-transform normalization are
+  benign for generated rooms: successful rooms keep `provenance: generated`, set
+  no repaired/fallback notice, and do not change gameplay semantics.
+- **Scope.** Normalizers run only inside generated-room `assembleRoom`. Authored,
+  static, restored, and fallback rooms are untouched; direct `loadRoomSpec`
+  behavior remains strict.
+- **No interaction repair.** Remaining real-provider skips can still happen,
+  especially `invalidInteraction`. Repairing interactions is deferred because it
+  is gameplay/content-bearing.
+- **Logging.** Diagnostics are count/boolean-only: `aliasesRepaired`,
+  `objectTransformsRepaired`, and `skippedObjectReasonCounts`. Logs never include
+  raw prompts, provider bodies, generated JSON, raw skipped objects, object text,
+  room names, API keys, or PII.
 
 ## 5. Backend / network failure ✅ API edge v0 · 🔜 browser client
 
@@ -743,14 +780,15 @@ fake-provider experience is completely unchanged
 | # | Failure | Detection | Degrades to | Status |
 | --- | --- | --- | --- | --- |
 | 1 | Bad envelope | `parse` throws | safe "couldn't load" screen | 🔜 |
-| 2 | Bad/unknown object | per-object `safeParse` | magenta placeholder | ✅ |
+| 2 | Bad/unknown object | per-object `safeParse`; skipped generated-object reason buckets | bounded non-interactive mystery marker; no raw skipped text | ✅ |
 | 3 | WebGL unavailable/lost | capability check + event | fallback message | 🔜 |
 | 4 | Invalid generated JSON | `assembleRoom`: parse/schema/semantic stages → typed result | repaired or trusted fallback room + static notice; generator-unavailable → retry | ✅ v0 |
 | 4b | Valid spec, bad room | `validateRoom` (semantic) + deterministic `repairRoom` / fallback; 🔜 LLM reviewer | fatal → repair → render, else trusted fallback room | ✅ v0 |
 | 4c | World Bible seeding | schema validation + composition catch | raw-prompt generator seed; no stored bible; normal room pipeline | ✅ non-blocking v0 |
 | 4d | Real room provider | completeness check; fixed-code throw on network/timeout/empty/non-JSON | incomplete → fake (`config-disabled`); request failure → `unavailable` retry; malformed text → repaired/fallback | ✅ opt-in v0 (dev-only) |
-| 4e | Generated room layout normalization | shell clamp (2.5); footprint-aware object bounds + count cap + wall-light nudge + placeholder clamp (2.6); spawn safe-area repair (2.8); exit wall-snap (2.9) — all pre-semantic | benign normalization keeps `provenance: generated` and shows no notice; authored/fallback rooms untouched | ✅ v0 |
+| 4e | Generated room layout normalization | shell clamp (2.5); footprint-aware object bounds + count cap + wall-light nudge + mystery-marker anchor clamp (2.6); spawn safe-area repair (2.8); exit wall-snap (2.9) — all pre-semantic | benign normalization keeps `provenance: generated` and shows no notice; authored/fallback rooms untouched | ✅ v0 |
 | 4f | Generated room composition normalization | role classification + deterministic zones (2.7), after object legality and before spawn/exit finalizers | existing objects repositioned only; missing anchor/interactable accepted; `provenance: generated`, no notice; authored/static/fallback untouched | ✅ v0 |
+| 4g | Generated room visual vocabulary normalization | trusted vocabulary/builders; generated alias repair; optional transform repair; skipped reason buckets | valid safe concepts render as readable objects; unknown/malformed entries remain mystery markers; benign normalization keeps `provenance: generated` | ✅ v0 |
 | 5 | Backend/network | validated API requests + typed results | safe API envelope; browser retry state 🔜 | ✅ API edge v0 |
 | 6 | DB / persistence failure | typed results (rooms, conflicts) + fail-fast throws (open/migration/corrupt session) | safe API error; no browser surface yet | ✅ API-backed v0 |
 | 7 | Pre-gen not ready | one `resolveRoom` seam: cache hit / in-flight join / on-demand resolve (capped, depth-1 warming) | instant cached room, or safe on-demand resolve/generate; never a freeze | ✅ v0 (browser); status lifecycle 🔜 |

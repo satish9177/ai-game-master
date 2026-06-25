@@ -22,8 +22,9 @@ Throughout these docs:
 
 - ✅ **Implemented** — exists today in `apps/web` (Renderer Foundation v0;
   Generation Foundation v0; Semantic Room Validator v0; Room Generation Repair &
-  Fallback v0; Generated Room Layout Contract v0 and Generated Room Composition
-  v0 — generated-room assembly pipeline, browser; World Bible Seed v0 —
+  Fallback v0; Generated Room Layout Contract v0, Generated Room Composition v0,
+  and Generated Room Visual Vocabulary v0 — generated-room assembly pipeline,
+  browser; World Bible Seed v0 —
   browser-only; Isometric Camera
   Foundation; World State & Event Log v0; Object
   Interactions v0; Encounter System v0; Multi-Room Navigation & Cache v0; NPC
@@ -79,7 +80,7 @@ User prompt
   → FakeRoomGenerator      (behind RoomGenerator; seeded by the projection)
   → raw, untrusted JSON text
   → GeneratedRoomSource
-  → assembleRoom           (parse → schema → semantic → repair → fallback)
+  → assembleRoom           (parse → generated normalizers → schema → semantic → repair → fallback)
   → RoomLoadResult         (valid generated/repaired/fallback room or unavailable)
   → existing trusted Three.js renderer
 ```
@@ -97,7 +98,8 @@ What it proves — and what it deliberately is **not**:
 - **The generator returns raw, untrusted JSON *text*** — the exact shape a future
   LLM completion would have. It emits **data, never code** ([ADR-0001](./decisions/ADR-0001-data-only-room-spec-trusted-renderer.md)).
 - **`GeneratedRoomSource` owns safe assembly.** It routes raw text through
-  `assembleRoom` (`JSON.parse` → `loadRoomSpec` → generated-room normalization →
+  `assembleRoom` (`JSON.parse` → generated alias repair → generated optional
+  transform repair → `loadRoomSpec` → generated-room normalization →
   `validateRoom` → deterministic repair → fallback). Bad content still yields a
   valid room; only a generator
   throw/reject is `unavailable`. The renderer executes only trusted, hand-written
@@ -262,7 +264,7 @@ geometric mismatch
     decorative first, then structural; never critical — NPC, scroll, interactive
     arch, interactive crate/barrel/debris/barricade/zombie). Wall-light objects
     such as torches generated in the floor interior are nudged toward a wall/side
-    position. Skipped/malformed placeholder objects are also clamped inside the
+    position. Skipped/malformed mystery-marker anchors are also clamped inside the
     room bounds.
   - **Spawn safe-area repair** (`repairGeneratedSpawn`, stage 2.8): spawn X/Z clamped into
     the playable floor area, then nudged away from any spawn-blocking object via
@@ -319,6 +321,51 @@ exit finalization
 - **Scope boundary:** authored/static/fallback rooms are untouched. There are no
   prompt, provider, renderer, backend, API, persistence, memory, world-session, or
   gameplay changes.
+
+## Generated Room Visual Vocabulary v0
+
+✅ **Implemented.** Layout and composition made generated rooms spatially safe and
+arranged, but many generated objects still looked like placeholders or repeated
+mystery markers. Visual Vocabulary v0 expands the safe RoomSpec vocabulary and
+trusted renderer builders so generated rooms read as intentional, recognizable
+spaces
+([ADR-0033](./decisions/ADR-0033-generated-room-visual-vocabulary-v0.md)).
+
+- **First-class visual vocabulary:** generated rooms can now validate and render
+  `book`, `paper`, `map`, `chest`, `corpse`, `table`, `altar`, `statue`,
+  `machine`, `artifact`, and `candle` in addition to the existing room object
+  types. `schemaVersion` remains **1** because the change is additive to the
+  generated object vocabulary.
+- **Trusted procedural builders only:** every current `RoomObject["type"]` has a
+  registered renderer builder. The new builders are hand-written Three.js
+  primitives/materials; there are no external assets, textures, GLTF imports,
+  shaders, fonts, labels, new dependencies, or LLM-generated renderer code.
+- **Mystery marker fallback:** skipped/unknown/malformed objects still remain in
+  `LoadedRoom.skipped`, are non-interactive, and render as a bounded mystery
+  marker instead of the old neon/magenta placeholder cube. The marker never
+  displays raw skipped type/name/id text and never promotes skipped data into a
+  valid object.
+- **Generated-room-only pre-validation normalizers:** before `loadRoomSpec`,
+  generated rooms get two benign normalizers: allowlisted type-only alias repair
+  (for common natural nouns such as desk/skeleton/floor plan/generator) and
+  optional transform repair (malformed optional `scale`/`rotationY` removed so
+  schema defaults apply). Required fields such as `position` and `interaction`
+  are not repaired; strict `loadRoomSpec` behavior remains authoritative.
+- **Provider and fake coverage:** the fake generator deterministically exercises a
+  small sample of the expanded vocabulary, while the real provider prompt now
+  advertises the full safe allowlist and synonym guidance. The prompt remains
+  data-only JSON and does not expose builder names or renderer instructions.
+- **Provenance and notices:** benign vocabulary, alias, and optional-transform
+  normalization keeps `provenance: generated`, sets no repaired/fallback notice,
+  and does not change gameplay semantics. Only the existing repair/fallback paths
+  produce `repaired` or `fallback`.
+- **Safe diagnostics only:** `aliasesRepaired`, `objectTransformsRepaired`, and
+  `skippedObjectReasonCounts` are count/boolean-only surfaces. Logs never include
+  raw prompts, provider bodies, generated JSON, raw skipped objects, room/object
+  names, API keys, or content-bearing text.
+- **Known limitation:** real providers can still produce a small number of
+  skipped objects, especially malformed `interaction` fields. Interaction repair
+  is intentionally deferred because it is gameplay/content-bearing.
 
 ## Isometric Camera Foundation
 
@@ -997,12 +1044,15 @@ slice can be safe. It is captured formally in
 Two rules make this safe:
 
 1. **A RoomSpec is data, never behavior.** It selects from a *fixed registry of
-   known `type` strings* (`throne`, `pillar`, `rug`, `torch`, `arch`, `scroll`,
-   `npc`, `prop`). It can never introduce new executable behavior. The mapping
-   from `type` → 3D objects is hand-written, reviewed, trusted code.
+   known `type` strings* (including the generated-room visual vocabulary such as
+   `scroll`, `book`, `paper`, `map`, `chest`, `corpse`, `table`, `altar`,
+   `statue`, `machine`, `artifact`, and `candle`). It can never introduce new
+   executable behavior. The mapping from `type` → 3D objects is hand-written,
+   reviewed, trusted code.
 2. **Validation happens at the boundary.** `loadRoomSpec` validates everything
-   crossing into the renderer. Unknown or malformed objects degrade to a visible
-   magenta placeholder; they never crash the renderer and never execute.
+   crossing into the renderer. Unknown or malformed objects degrade to a visible,
+   non-interactive mystery marker; they never crash the renderer and never
+   execute.
 
 Because of this, a *hostile or garbage* generation (later) is just data that
 either validates — and is rendered by trusted code — or fails validation and is
@@ -1026,7 +1076,7 @@ App.tsx
        ├─ new Engine(container)          ✅ pure Three.js
        │    ├─ buildLighting(room)        ambient + optional hemisphere
        │    ├─ buildShell(room)           floor + walls (north exit split; iso cutaway curbs)
-       │    ├─ buildObjects(room)         type→builder registry, placeholder fallback
+       │    ├─ buildObjects(room)         type→builder registry, mystery-marker fallback
        │    ├─ buildPlayerMarker()        renderer-internal player object (not RoomSpec data)
        │    ├─ IsometricCameraController  orthographic iso camera; follows the player
        │    └─ MovementControls           screen-relative WASD/arrows → player (AABB clamp)
@@ -1064,7 +1114,9 @@ PromptBar.onSubmit(prompt)                    (app chrome — not renderer UI)
             ├─ FakeRoomGenerator.generate(generatorSeed) → raw untrusted JSON text
             │     └─ throw/reject → RoomLoadResult unavailable (retry path)
             ├─ assembleRoom(rawText, fallbackRoom) ✅ pure domain pipeline
-            │     JSON.parse → loadRoomSpec
+            │     JSON.parse
+            │     → repairGeneratedAliases → repairGeneratedObjectTransforms
+            │     → loadRoomSpec
             │     → clampGeneratedShell (2.5) → repairGeneratedObjects (2.6)
             │     → composeGeneratedRoom (2.7) → repairGeneratedSpawn (2.8)
             │     → repairGeneratedExits (2.9)
@@ -1094,7 +1146,7 @@ the raw-prompt seed, and only a room-generator throw/reject is `unavailable`.
 | `renderer/engine/Engine.ts` | Owns renderer/scene, the **player object** + a `CameraController` (isometric), render loop, **player-position** proximity, interaction keys, and **total `dispose()`**. No React. |
 | `renderer/engine/camera/` | `CameraController` interface + `IsometricCameraController` (orthographic true-isometric, follows the player) over a pure, WebGL-free `isometric.ts` math module (offset / pose / screen-relative move / clamp / frustum). |
 | `renderer/engine/playerMarker.ts` | `buildPlayerMarker` — the minimal **renderer-internal** player marker (capsule + facing nose). Presentation, **not** RoomSpec data. |
-| `renderer/engine/builders/` | `buildShell` (floor + walls, with isometric **cutaway curbs** on the camera-facing walls), `buildLighting`, and the object `registry` + `buildObjects` with magenta-placeholder fallback. |
+| `renderer/engine/builders/` | `buildShell` (floor + walls, with isometric **cutaway curbs** on the camera-facing walls), `buildLighting`, and the object `registry` + `buildObjects` with mystery-marker fallback and trusted procedural builders for every current `RoomObject["type"]` ([ADR-0033](./decisions/ADR-0033-generated-room-visual-vocabulary-v0.md)). |
 | `renderer/engine/controls/` | `MovementControls` (screen-relative WASD/arrows driving the **player**, room-clamped); `LookControls` (drag-look) **retained but not instantiated** in isometric mode. |
 | `renderer/engine/disposables.ts` | `Disposables` + `disposeObject` — explicit GPU teardown (Three.js does not GC geometries/materials/textures). |
 | `renderer/ui/` | Presentational React overlays: `Hud` (interaction prompt); `DialoguePanel` (result messages); `StatusHud` (read-only player health/inventory/status HUD; `pointer-events:none`; `aria-live`); `playerHud.ts` (pure `projectPlayerHud(WorldState) → PlayerHudView` projection + `PlayerHudView`/`PlayerHudHealth`/`PlayerHudItem` types); `SaveLoadBar.tsx` (save/load bar; receives `{ canSave, hasSave, busy, error, onSave, onContinue }`; calm `role="alert"` errors; no save content shown); `QuestTracker.tsx` (read-only quest tracker; receives `{ view: QuestView }`; renders title + objective done markers; `pointer-events:none`; `role="status"` + `aria-live="polite"`; no service or engine import); `JournalPanel.tsx` (collapsible read-only journal; receives `{ view: JournalView }`; collapsed by default; empty state "Nothing of consequence yet."; `pointer-events:none` for text; interactive collapse toggle; `role="status"` + `aria-live="polite"`; no service or engine import); `UsageMeter.tsx` (local session-cap guardrail overlay; receives `{ count, cap, status, onGenerateAnyway, onReset }`; rendered only when `guardEnabled`; returns `null` when `status === 'inert'`; `role="status"` + `aria-live="polite"`; no `three`, engine internals, or services). |
@@ -1119,16 +1171,17 @@ the raw-prompt seed, and only a room-generator throw/reject is `unavailable`.
 | `generation/prng.ts` | Deterministic seeded PRNG (`xmur3` + `mulberry32`) and a small `Rng` helper. Pure — no I/O, no `Math.random`/`Date.now`. |
 | `generation/FakeRoomGenerator.ts` | A deterministic `RoomGenerator`: prompt → seeded PRNG → RoomSpec **data**, serialized with `JSON.stringify`. Emits only the published vocabulary; same prompt → byte-identical output. No real model. The **default** prompt generator and the always-fake adjacent generator. |
 | `generation/OpenAICompatibleRoomGenerator.ts` | The opt-in **real** `RoomGenerator` ([ADR-0023](./decisions/ADR-0023-real-room-generator-provider-v0.md)): one generic adapter for any OpenAI-compatible endpoint (OpenAI/DeepSeek). One non-streaming `fetch` POST over an injected transport seam, hard `AbortController` timeout, no retry, no SDK; returns `choices[0].message.content` **verbatim**. Imports no logger; throws only fixed safe codes (`llm-request-failed`/`llm-timeout`/`llm-empty-response`). No parse/validate/repair here. |
-| `generation/llmRoomPrompt.ts` | Pure, side-effect-free prompt builder for the real provider: a static system message (published vocabulary, RoomSpec shape, conventions) + one user message carrying the seed clamped to a hard `MAX_SEED_CHARS`. No I/O, no logger; bounds are unit-tested. |
+| `generation/llmRoomPrompt.ts` | Pure, side-effect-free prompt builder for the real provider: a static system message (published vocabulary, exact `object.type` allowlist, synonym guidance, RoomSpec shape, conventions) + one user message carrying the seed clamped to a hard `MAX_SEED_CHARS`. Data-only; no renderer/builders/assets/code instructions. No I/O, no logger; bounds are unit-tested. |
 | `app/llmConfig.ts` | The **only** browser module that reads `import.meta.env`. Parses a typed `LlmConfig` (provider/model/key/`maxTokens`/`timeoutMs`), holds the provider → built-in base-URL map, and the `isRealProviderComplete` check. `generation/**` never reads env. |
 | `app/selectRoomGenerator.ts` | Composition factory: returns the real `OpenAICompatibleRoomGenerator` only when the config is complete, else `FakeRoomGenerator` with reason `config-disabled`. Pure (no I/O at selection time); also returns a log-safe selection summary (provider/model/numbers or the fixed reason). |
 | `domain/validateRoom.ts` | Pure semantic validator: `validateRoom(room) → RoomValidationResult` of severity-tagged issues. Checks *playability* (dimensions, spawn-in-bounds, object/light budgets, usable interactions) over a loaded room — a domain peer of `loadRoomSpec`. No I/O, no logger, no React/Three ([ADR-0011](./decisions/ADR-0011-semantic-room-validator-v0.md)). |
 | `domain/repairRoom.ts` | Pure deterministic repair: `repairRoom(room) → LoadedRoom`. Non-mutating; only clamps spawn into the walkable AABB and truncates over-hard-budget objects/torches — never resizes rooms or invents content. Code peer of `validateRoom` ([ADR-0020](./decisions/ADR-0020-room-generation-repair-fallback-v0.md)). |
 | `domain/generatedRoomLayout.ts` | Generated-room layout contract ([ADR-0031](./decisions/ADR-0031-generated-room-layout-contract-v0.md)): `GENERATED_ROOM` constants (default 18, min 14, max 24, max objects 30); four benign normalizers in `assembleRoom` — `clampGeneratedShell` (2.5; width/depth → `[14..24]`), `repairGeneratedObjects` (2.6; X/Z bounds + count cap ≤ 30, drops decorative first), `repairGeneratedSpawn` (2.8; clamp + deterministic nudge away from blocking objects), `repairGeneratedExits` (2.9; snap to nearest wall face). Pure, no I/O, no logger, no mutation. Never applied to authored/static/fallback rooms. |
 | `domain/generatedRoomComposition.ts` | Generated-room composition ([ADR-0032](./decisions/ADR-0032-generated-room-composition-v0.md)): pure role classification, zone computation, and `composeGeneratedRoom` stage 2.7. Relocates existing objects only to clear the central corridor and improve anchor/NPC/interactable/clutter placement; preserves count and non-position fields; missing roles are diagnostic-only. Safe booleans: `composed`, `lacksAnchor`, `lacksInteractable`. Never applied to authored/static/fallback rooms. |
-| `domain/assembleRoom.ts` | Pure assembly pipeline: `assembleRoom(rawText, fallbackRoom) → { room, diagnostics }`. Composes `JSON.parse` → `loadRoomSpec` → `clampGeneratedShell` (2.5) → `repairGeneratedObjects` (2.6) → `composeGeneratedRoom` (2.7) → `repairGeneratedSpawn` (2.8) → `repairGeneratedExits` (2.9) → `validateRoom` → `repairRoom` → re-validate → fallback; **always** returns a zero-fatal room plus safe diagnostics (provenance/stage/codes/counts/booleans/normalization flags). Synchronous, no I/O, never logs ([ADR-0020](./decisions/ADR-0020-room-generation-repair-fallback-v0.md), [ADR-0031](./decisions/ADR-0031-generated-room-layout-contract-v0.md), [ADR-0032](./decisions/ADR-0032-generated-room-composition-v0.md)). |
+| `domain/generatedRoomAliases.ts` / `domain/generatedRoomObjectTransforms.ts` | Generated-room visual vocabulary normalizers ([ADR-0033](./decisions/ADR-0033-generated-room-visual-vocabulary-v0.md)): allowlisted type-only alias repair and optional transform repair before `loadRoomSpec`. They never repair required fields, interactions, positions, or arbitrary/fuzzy nouns; direct `loadRoomSpec` behavior stays strict. |
+| `domain/assembleRoom.ts` | Pure assembly pipeline: `assembleRoom(rawText, fallbackRoom) → { room, diagnostics }`. Composes `JSON.parse` → `repairGeneratedAliases` → `repairGeneratedObjectTransforms` → `loadRoomSpec` → `clampGeneratedShell` (2.5) → `repairGeneratedObjects` (2.6) → `composeGeneratedRoom` (2.7) → `repairGeneratedSpawn` (2.8) → `repairGeneratedExits` (2.9) → `validateRoom` → `repairRoom` → re-validate → fallback; **always** returns a zero-fatal room plus safe diagnostics (provenance/stage/codes/counts/booleans/normalization flags). Synchronous, no I/O, never logs ([ADR-0020](./decisions/ADR-0020-room-generation-repair-fallback-v0.md), [ADR-0031](./decisions/ADR-0031-generated-room-layout-contract-v0.md), [ADR-0032](./decisions/ADR-0032-generated-room-composition-v0.md), [ADR-0033](./decisions/ADR-0033-generated-room-visual-vocabulary-v0.md)). |
 | `domain/examples/fallbackRoom.ts` | The trusted, data-only fallback room (the `throneRoom` authoring pattern): a small in-bounds stone antechamber, zero fatal/zero warning, no prompt or story text. Injected by the host as `assembleRoom`'s last resort. |
-| `room/GeneratedRoomSource.ts` | A `RoomSource` adapter (composition layer) that runs the generator, then `assembleRoom`. A generator throw/reject → `unavailable`; otherwise **always** `ok:true` with `provenance` (`generated`/`repaired`/`fallback`). Logs one safe line (provenance/stage/codes/counts) — never prompt/raw JSON/story text/object names. |
+| `room/GeneratedRoomSource.ts` | A `RoomSource` adapter (composition layer) that runs the generator, then `assembleRoom`. A generator throw/reject → `unavailable`; otherwise **always** `ok:true` with `provenance` (`generated`/`repaired`/`fallback`). Logs one safe line (provenance/stage/codes/counts/boolean diagnostics, including count-only vocabulary diagnostics) — never prompt/raw JSON/story text/object names. |
 | `app/AdjacentRoomPregenerator.ts` | Composition-layer room-acquisition seam ([ADR-0021](./decisions/ADR-0021-adjacent-room-pregeneration-v0.md)). `resolveRoom(id)` is cache-first, in-flight-aware, and total (authored → `RoomRegistry`; non-authored → `GeneratedRoomSource → assembleRoom`, id-normalized; never throws). `warmAdjacent(room)` warms the current room's exits in the background, capped at `maxJobs` (default 3), depth-1. Implements the narrow `RoomResolver` that `NavigationService` depends on. |
 | `app/PromptBar.tsx` | Presentational prompt input + Generate button — app composition chrome, **not** renderer UI. Trims/validates; emits `onSubmit(prompt)`. |
 | `app/worldBible.ts` | Prompt-path composition helper: seed + project + safe enum/count/length logging; on failure return the raw prompt and no bible. |
@@ -1193,8 +1246,8 @@ object safely — the data-only → trusted-renderer rule of
 [ADR-0001](./decisions/ADR-0001-data-only-room-spec-trusted-renderer.md) applied
 at part granularity. A new entity is usually a new *data combination*;
 occasionally a new *part* is added (and reviewed); almost never a new bespoke
-builder. Unknown parts/presets degrade to a placeholder, like unknown object
-types today (see [FAILURE-MODES](./FAILURE-MODES.md)).
+builder. Unknown parts/presets should degrade to an intentional safe marker,
+like unknown object types today (see [FAILURE-MODES](./FAILURE-MODES.md)).
 
 ## Future plug-in points
 
