@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { RoomViewer } from './renderer/RoomViewer'
 import { StatusHud } from './renderer/ui/StatusHud'
 import { SaveLoadBar } from './renderer/ui/SaveLoadBar'
@@ -6,6 +6,7 @@ import type { SaveLoadStatus } from './renderer/ui/SaveLoadBar'
 import { UsageMeter } from './renderer/ui/UsageMeter'
 import { QuestTracker } from './renderer/ui/QuestTracker'
 import { JournalPanel } from './renderer/ui/JournalPanel'
+import { RoomIntroPanel } from './renderer/ui/RoomIntroPanel'
 import { projectPlayerHud } from './renderer/ui/playerHud'
 import type { PlayerHudView } from './renderer/ui/playerHud'
 import { evaluateQuest } from './domain/quests/evaluateQuest'
@@ -46,6 +47,7 @@ import { EncounterService } from './encounters/EncounterService'
 import { loadRoomSpec, type LoadedRoom } from './domain/loadRoomSpec'
 import { fallbackRoom as fallbackRoomSpec } from './domain/examples/fallbackRoom'
 import { FALLBACK_NOTICE, shouldShowFallbackNotice } from './app/fallbackNotice'
+import { buildRoomIntroView } from './app/roomIntro'
 import { FakeNPCDialogueProvider } from './dialogue/FakeNPCDialogueProvider'
 import type { WorldBibleSeed } from './domain/worldBible/worldBibleSeed'
 import { prepareGeneratedRoomSeed } from './app/worldBible'
@@ -105,6 +107,7 @@ const STARTING_ROOM_ID = 'throne-room'
 const ROOM_UNAVAILABLE = 'This room could not be loaded.'
 
 type ActivePlay = {
+  room: LoadedRoom
   roomSource: RoomSource
   sessionId: string
   roomCache: SessionRoomCache
@@ -113,6 +116,55 @@ type ActivePlay = {
   initialPlayer: PlayerHudView
   questSpec?: QuestSpec
   journalSpec?: JournalSpec
+}
+
+type AppRoomIntroProps = {
+  room: LoadedRoom
+  sessionId: string
+  entrySeq: number
+}
+
+export function AppRoomIntro({ room, sessionId, entrySeq }: AppRoomIntroProps) {
+  const intro = useMemo(
+    () => buildRoomIntroView(room, sessionId, entrySeq),
+    [entrySeq, room, sessionId],
+  )
+  return <RoomIntroPanel summary={intro.summary} roomKey={intro.roomKey} />
+}
+
+type AppRoomEntryOverlayProps = {
+  room: LoadedRoom | null
+  sessionId: string
+  entrySeq: number
+  notice: string | null
+  onDismissNotice: () => void
+}
+
+export function AppRoomEntryOverlay({
+  room,
+  sessionId,
+  entrySeq,
+  notice,
+  onDismissNotice,
+}: AppRoomEntryOverlayProps) {
+  return (
+    <>
+      {room && <AppRoomIntro room={room} sessionId={sessionId} entrySeq={entrySeq} />}
+      {notice && (
+        <div className="room-notice" role="status">
+          <span className="room-notice-text">{notice}</span>
+          <button
+            type="button"
+            className="room-notice-close"
+            onClick={onDismissNotice}
+            aria-label="Dismiss notice"
+          >
+            ×
+          </button>
+        </div>
+      )}
+    </>
+  )
 }
 
 function preloadedRoomSource(room: LoadedRoom): RoomSource {
@@ -153,6 +205,7 @@ function bootstrapExamplePlay(): Promise<ExampleBootstrapResult | null> {
     // instant (or safely generated on demand if warming hasn't finished).
     adjacentPregenerator.warmAdjacent(resolved.room)
     return {
+      room: resolved.room,
       roomSource: preloadedRoomSource(resolved.room),
       sessionId: started.state.sessionId,
       roomCache: exampleRoomCache,
@@ -169,6 +222,7 @@ function bootstrapExamplePlay(): Promise<ExampleBootstrapResult | null> {
 
 function App() {
   const [activePlay, setActivePlay] = useState<ActivePlay | null>(null)
+  const [roomEntrySeq, setRoomEntrySeq] = useState(0)
   const [playerHud, setPlayerHud] = useState<PlayerHudView | null>(null)
   const [quest, setQuest] = useState<QuestView | null>(null)
   const [journal, setJournal] = useState<JournalView | null>(null)
@@ -196,6 +250,11 @@ function App() {
     const jSpec = journalSpecRef.current
     setJournal(jSpec ? projectJournal(jSpec, state) : null)
   }
+
+  const enterActivePlay = useCallback((play: ActivePlay) => {
+    setActivePlay(play)
+    setRoomEntrySeq((seq) => seq + 1)
+  }, [])
   const [saveLoadStatus, setSaveLoadStatus] = useState<SaveLoadStatus>('idle')
   const [saveLoadError, setSaveLoadError] = useState<string | null>(null)
   const [hasSave, setHasSave] = useState(() => saveSlotStore.has())
@@ -207,7 +266,7 @@ function App() {
       if (result) {
         questSpecRef.current = result.questSpec ?? null
         journalSpecRef.current = result.journalSpec ?? null
-        setActivePlay(result)
+        enterActivePlay(result)
         setPlayerHud(result.initialPlayer)
         setQuest(result.initialQuest)
         setJournal(result.initialJournal)
@@ -216,7 +275,7 @@ function App() {
     return () => {
       requestVersion.current += 1
     }
-  }, [])
+  }, [enterActivePlay])
 
   const handlePrompt = useCallback((prompt: string) => {
     // In-flight lock: prevent a second call while one is pending.
@@ -278,7 +337,8 @@ function App() {
         const generatedCache = new SessionRoomCache()
         generatedCache.set(result.room.id, result.room)
         const initialPlayer = projectPlayerHud(started.state)
-        setActivePlay({
+        enterActivePlay({
+          room: result.room,
           roomSource: preloadedRoomSource(result.room),
           sessionId: started.state.sessionId,
           roomCache: generatedCache,
@@ -300,7 +360,7 @@ function App() {
       logger.error('generated room source threw', { code: 'room-source-failed' })
       setFatalMessage(ROOM_UNAVAILABLE)
     })
-  }, [])
+  }, [enterActivePlay])
 
   const handleGenerateAnyway = useCallback(() => {
     confirmGrantedRef.current = true
@@ -389,7 +449,7 @@ function App() {
       questSpecRef.current = restoredQuestSpec ?? null
       journalSpecRef.current = restoredJournalSpec ?? null
 
-      setActivePlay({
+      enterActivePlay({
         ...play,
         navigation: exampleNavigation,
         questSpec: restoredQuestSpec,
@@ -410,7 +470,7 @@ function App() {
       setSaveLoadStatus('error')
       setSaveLoadError('This save could not be loaded.')
     })
-  }, [])
+  }, [enterActivePlay])
 
   const handleNavigate = useCallback(async (toRoomId: string): Promise<NavigationResult> => {
     if (!activePlay?.navigation) return { status: 'rejected', reason: 'missing-exit' }
@@ -421,6 +481,7 @@ function App() {
     if (result.status === 'navigated') {
       setActivePlay((current) => current?.sessionId === activePlay.sessionId
         ? {
+            room: result.room,
             roomSource: preloadedRoomSource(result.room),
             sessionId: activePlay.sessionId,
             roomCache: activePlay.roomCache,
@@ -430,6 +491,7 @@ function App() {
             journalSpec: activePlay.journalSpec,
           }
         : current)
+      setRoomEntrySeq((seq) => seq + 1)
       // Warm the next frontier from the room we just entered.
       adjacentPregenerator.warmAdjacent(result.room)
       // Re-project derived views from the post-move WorldState so objective 3
@@ -463,19 +525,13 @@ function App() {
       {playerHud && <StatusHud view={playerHud} />}
       {quest && <QuestTracker view={quest} />}
       {journal && <JournalPanel view={journal} />}
-      {notice && (
-        <div className="room-notice" role="status">
-          <span className="room-notice-text">{notice}</span>
-          <button
-            type="button"
-            className="room-notice-close"
-            onClick={() => setNotice(null)}
-            aria-label="Dismiss notice"
-          >
-            ×
-          </button>
-        </div>
-      )}
+      <AppRoomEntryOverlay
+        room={activePlay?.room ?? null}
+        sessionId={activePlay?.sessionId ?? ''}
+        entrySeq={roomEntrySeq}
+        notice={notice}
+        onDismissNotice={() => setNotice(null)}
+      />
       <PromptBar onSubmit={handlePrompt} disabled={inFlight} />
       {guardEnabled && (
         <UsageMeter

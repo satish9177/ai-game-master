@@ -8,6 +8,7 @@ import type { ResolveRoomResult } from './AdjacentRoomPregenerator'
 import { withRoomId } from './AdjacentRoomPregenerator'
 
 export type RestoredPlay = {
+  room: LoadedRoom
   roomSource: RoomSource
   sessionId: string
   roomCache: SessionRoomCache
@@ -47,6 +48,7 @@ export function buildRestoredPlay(
 
   return {
     play: {
+      room: resolvedRoom,
       roomSource: preloadedRoomSource(resolvedRoom),
       sessionId: state.sessionId,
       roomCache,

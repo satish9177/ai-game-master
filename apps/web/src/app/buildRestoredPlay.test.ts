@@ -55,6 +55,11 @@ describe('buildRestoredPlay — authored room (source: registry)', () => {
     expect(play.sessionId).toBe(SESSION_ID)
   })
 
+  it('room is set to the resolved authored room', () => {
+    const { play } = buildRestoredPlay(baseState, resolveResult, fallbackRoom)
+    expect(play.room).toBe(authoredRoom)
+  })
+
   it('initialPlayer matches projectPlayerHud(state)', () => {
     const { play } = buildRestoredPlay(baseState, resolveResult, fallbackRoom)
     expect(play.initialPlayer).toEqual(projectPlayerHud(baseState))
@@ -107,6 +112,7 @@ describe('buildRestoredPlay — failed resolve', () => {
     if (result.ok) {
       expect(result.room.id).toBe(CURRENT_ROOM_ID)
       expect(result.room.name).toBe(fallbackRoom.name)
+      expect(play.room).toBe(result.room)
     }
   })
 
