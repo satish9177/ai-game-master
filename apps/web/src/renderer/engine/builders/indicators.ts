@@ -17,8 +17,20 @@ export function buildGroundRing(options: {
   color: string
   emissiveIntensity?: number
   opacity?: number
+  floorY?: number
+  renderOrder?: number
+  toneMapped?: boolean
 }): THREE.Mesh {
-  const { innerRadius, outerRadius, color, emissiveIntensity = 0.6, opacity = 0.9 } = options
+  const {
+    innerRadius,
+    outerRadius,
+    color,
+    emissiveIntensity = 0.6,
+    opacity = 0.9,
+    floorY = 0.02,
+    renderOrder = 0,
+    toneMapped = true,
+  } = options
 
   const geometry = new THREE.RingGeometry(innerRadius, outerRadius, 48)
   geometry.rotateX(-Math.PI / 2) // RingGeometry faces +Z by default; lay it flat facing +Y
@@ -33,9 +45,11 @@ export function buildGroundRing(options: {
       opacity,
       side: THREE.DoubleSide,
       depthWrite: false, // a thin floor decal; don't occlude via the depth buffer
+      toneMapped,
     }),
   )
-  ring.position.y = 0.02
+  ring.position.y = floorY
+  ring.renderOrder = renderOrder
   ring.name = 'ground-ring'
   return ring
 }

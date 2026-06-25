@@ -381,11 +381,14 @@ export const AFFORDANCE_RING_COLOR: Record<Affordance, string> = {
  */
 function buildInteractableIndicator(position: Vec3, affordance: Affordance): THREE.Object3D {
   const ring = buildGroundRing({
-    innerRadius: 0.55,
-    outerRadius: 0.78,
+    innerRadius: 0.68,
+    outerRadius: 1.08,
     color: AFFORDANCE_RING_COLOR[affordance] ?? AFFORDANCE_RING_COLOR.inspect,
-    emissiveIntensity: 0.75,
-    opacity: 0.9,
+    emissiveIntensity: 1.25,
+    opacity: 1,
+    floorY: 0.06,
+    renderOrder: 8,
+    toneMapped: false,
   })
   ring.name = 'interactable-indicator'
   ring.position.set(position[0], ring.position.y, position[2])

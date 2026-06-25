@@ -48,8 +48,14 @@ function indicators(group: THREE.Group): THREE.Object3D[] {
   return group.children.filter((c) => c.name === 'interactable-indicator')
 }
 
-function indicatorColor(group: THREE.Group): string {
+function indicatorMesh(group: THREE.Group): THREE.Mesh {
   const ring = indicators(group)[0] as THREE.Mesh | undefined
+  if (!ring) throw new Error('missing interactable indicator')
+  return ring
+}
+
+function indicatorColor(group: THREE.Group): string {
+  const ring = indicatorMesh(group)
   const material = ring?.material as THREE.MeshStandardMaterial | undefined
   return `#${material?.color.getHexString()}`
 }
@@ -74,7 +80,25 @@ describe('buildObjects interactable indicators', () => {
     const ring = found[0]!
     expect(ring.position.x).toBeCloseTo(2)
     expect(ring.position.z).toBeCloseTo(3)
-    expect(ring.position.y).toBeLessThan(0.1) // on the floor, not at the object's y=0.5
+    expect(ring.position.y).toBeGreaterThan(0.04) // raised slightly above the floor
+    expect(ring.position.y).toBeLessThan(0.1) // still on the floor, not at the object's y=0.5
+  })
+
+  it('keeps one stable lightweight indicator mesh with stronger visibility settings', () => {
+    const g = buildObjects(roomWith([scroll]), noopLogger)
+    const ring = indicatorMesh(g)
+    const geometry = ring.geometry as THREE.RingGeometry
+    const material = ring.material as THREE.MeshStandardMaterial
+
+    expect(indicators(g)).toHaveLength(1)
+    expect(ring.name).toBe('interactable-indicator')
+    expect(geometry.parameters.innerRadius).toBeCloseTo(0.68)
+    expect(geometry.parameters.outerRadius).toBeCloseTo(1.08)
+    expect(material.emissiveIntensity).toBeCloseTo(1.25)
+    expect(material.opacity).toBe(1)
+    expect(material.depthWrite).toBe(false)
+    expect(material.toneMapped).toBe(false)
+    expect(ring.renderOrder).toBe(8)
   })
 
   it('adds no indicator for non-interactable objects', () => {
