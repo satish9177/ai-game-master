@@ -41,7 +41,8 @@ Throughout these docs:
   Consequence Journal v0 — browser;
   Cost/Usage Guardrails v0 — browser;
   Room Inspect Summary v0 — browser;
-  Generated Room Interaction Affordances v0 — browser).
+  Generated Room Interaction Affordances v0 — browser;
+  Generated Room Object Purpose v0 — generated assembly/domain).
 - 🔜 **Planned** — designed and approved, not yet built (next slices).
 - ❌ **Not built** — future shape only; documented so we don't paint into a corner.
 
@@ -480,6 +481,42 @@ existing E/F interaction surface easier to read without adding gameplay systems
 - **Safe fallback.** Ambiguous or body-only interactions default to `inspect`.
   Missing affordance data never triggers repair, fallback, a generated-room notice,
   or logging.
+
+## Generated Room Object Purpose v0
+
+✅ **Implemented, generated assembly/domain.** Generated Room Object Purpose v0
+adds a deterministic generated-room-only enrichment stage so safe generated props
+can receive existing interaction rings and HUD prompts without adding gameplay
+semantics
+([ADR-0037](./decisions/ADR-0037-generated-room-object-purpose-v0.md)).
+
+- **Pipeline position:** `assembleRoom` runs `assignGeneratedObjectPurpose` after
+  generated-room composition, spawn repair, and exit repair, and before final
+  `validateRoom`. Authored/static/default/restored rooms use `loadRoomSpec`
+  directly and are unchanged; the trusted fallback room is never enriched.
+- **Validated data only:** the stage receives `LoadedRoom` data and reads only
+  validated `RoomObject.type` plus whether an interaction already exists. It does
+  not read object names, prompts, bodies, provider output, skipped objects, raw
+  generated JSON, or user prompt text.
+- **Presentation-only synthesis:** it adds `{ key: 'E', prompt }` only for
+  allowlisted objects that currently lack interaction: `book`/`paper`/`map` use
+  `Read`; `chest`/`crate`/`barrel`/`corpse`/`table`/`machine` use `Inspect`;
+  `altar`/`statue`/`artifact` use `Examine`. Existing interactions are preserved.
+- **No schema or gameplay change:** `RoomSpec.schemaVersion` remains `1`; no
+  purpose/affordance field is stored. The synthesized interaction has no effect,
+  encounter, dialogue, exit, item, inventory, quest, combat, event write, memory,
+  backend, or world-state mutation.
+- **Best-effort diagnostics:** unsupported or excluded object types are left
+  unchanged. Missing purpose never causes repair, fallback, a generated-room
+  notice, or validation failure. `purposesAssigned` is count-only; all fallback,
+  JSON/schema, and unavailable paths report `0`.
+- **Downstream consumers stay downstream:** affordance classification, renderer
+  rings, and HUD chips consume the final validated interactions. They still do
+  not invent interactions themselves.
+- **Diagnostic timing note:** `composeGeneratedRoom` computes `lacksAnchor` and
+  `lacksInteractable` before purpose assignment. `lacksInteractable` describes
+  the raw generated/composed output, not necessarily the final `LoadedRoom` after
+  safe synthesized interactions.
 
 ## Isometric Camera Foundation
 

@@ -850,6 +850,41 @@ interaction structure so weak generated prompts are less ambiguous
   field only. It is never stored in `RoomSpec`, save files, world state, memory,
   SQLite, or API payloads.
 
+## 25. Generated room object purpose assignment ✅ v0 (generated assembly/domain)
+
+Generated Room Object Purpose v0 is a deterministic, generated-room-only
+enrichment stage inside `assembleRoom`. It adds safe presentation interactions to
+a small allowlist of validated object types so downstream rings/HUD affordances
+can appear when generated output omitted an interaction
+([ADR-0037](./decisions/ADR-0037-generated-room-object-purpose-v0.md)).
+
+| Situation | Detection | Handling / result | Logging |
+| --- | --- | --- | --- |
+| Allowlisted generated object lacks interaction | `assignGeneratedObjectPurpose` sees validated `RoomObject.type` and no `interaction` | add `{ key: 'E', prompt: 'Read' \| 'Inspect' \| 'Examine' }`; room remains `generated` unless another existing fatal already applies | `purposesAssigned` integer only |
+| Existing generated interaction present | object already has `interaction` | preserve it exactly; never overwrite prompt/body/effect/encounter/dialogue/exit | count unchanged |
+| Unsupported or excluded object type | type absent from the purpose allowlist | leave object unchanged; no repair, fallback, notice, or validation failure | count unchanged |
+| Authored/static/default/restored room | room enters through `loadRoomSpec`, not generated `assembleRoom` | no purpose assignment; existing authored behavior unchanged | — |
+| Fallback/json/schema/semantic fallback path | assembly returns trusted fallback or fails before purpose stage | returned fallback room is untouched; `purposesAssigned: 0` | count `0` |
+| Generator unavailable/throws | `GeneratedRoomSource` catches generator failure before `assembleRoom` | normal `unavailable` retry path; no room enrichment attempted | `purposesAssigned: 0` with fixed safe error summary |
+
+- **Best effort and non-fatal.** Missing or unsupported purpose never causes
+  fallback, repair, generated-room notices, or user-facing errors. Purpose
+  assignment can only add a presentation-only interaction; it cannot make a room
+  authoritative, quest-bearing, loot-bearing, combat-bearing, or state-mutating.
+- **Safe diagnostics only.** `purposesAssigned` is count-only. Logs must not carry
+  object names, object ids, generated prompts, provider text, raw generated JSON,
+  generated text, or free-form schema/parse detail.
+- **Validated data only.** The stage reads only `LoadedRoom.objects`, validated
+  object types, and interaction presence. It never reads skipped raw objects,
+  object names, `interaction.title/body/prompt`, provider output, or user prompt
+  text.
+- **Composition diagnostic timing.** `composeGeneratedRoom` computes
+  `lacksAnchor` and `lacksInteractable` before object-purpose assignment.
+  Therefore `lacksInteractable` describes the raw generated/composed model output,
+  not necessarily the final room after safe synthesized purpose interactions.
+  Future host/UI code must not treat `lacksInteractable` as "final room has no
+  interactable" without considering `purposesAssigned` or the final `LoadedRoom`.
+
 ---
 
 ## Summary
@@ -886,6 +921,7 @@ interaction structure so weak generated prompts are less ambiguous
 | 22 | Usage guardrail | `guardEnabled` (provider !== `'fake'`); `evaluate(state, config)` derives status per render; `inFlightRef` lock; `confirmGrantedRef` + `pendingPromptRef` for at-cap gate | fake → fully inert; real → count/cap/status drive `UsageMeter`; `at-cap` gates prompt until confirm; in-flight lock prevents double-click; never persisted; reset in-memory only | ✅ browser |
 | 23 | Room intro summary display | `buildRoomSummary` focal selection (anchor → interactable → NPC fallback; returns `null` when none qualify); `text.length === 0` guard in `RoomIntroPanel`; `resetKey` change resets dismiss state | no focal object → no panel; dismissed → panel hidden until next room entry; null summary never blocks play, triggers repair/fallback, or logs; summary text never contains object names, interaction bodies, or raw generated JSON | ✅ browser |
 | 24 | Generated interaction affordances | `affordanceFor` over validated `interaction.exit` / `encounter` / `dialogue` / `effect.kind` and NPC object type; HUD/ring consume derived `Interactable.affordance` | weak prompts mitigated by verb chip; ambiguous defaults to Inspect; ring tint is presentation-only; never repair/fallback/gameplay | ✅ browser |
+| 25 | Generated room object purpose assignment | `assignGeneratedObjectPurpose` runs only in generated `assembleRoom` after composition/spawn/exit repair and before final validation; reads validated object type + interaction presence only | allowlisted bare objects get presentation-only `Read`/`Inspect`/`Examine`; unsupported types unchanged; existing interactions preserved; all fallback/unavailable paths report `purposesAssigned: 0`; no gameplay/schema/backend/state change | ✅ generated assembly |
 
 The through-line: **validate at the boundary, degrade visibly and safely, log
 the detail, show the user calm.**
