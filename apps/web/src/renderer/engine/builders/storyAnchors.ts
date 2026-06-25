@@ -7,7 +7,10 @@ type ObjectOf<K extends RoomObject['type']> = Extract<RoomObject, { type: K }>
 
 /** Tiered floor altar: broad base, raised slab, accent inlay, and side blocks. */
 export function buildAltar(obj: ObjectOf<'altar'>): THREE.Object3D {
-  const [width, height, depth] = obj.size
+  const [rawWidth, rawHeight, rawDepth] = obj.size
+  const width = Math.max(rawWidth, 2.0)
+  const height = Math.max(rawHeight, 1.25)
+  const depth = Math.max(rawDepth, 1.25)
   const group = new THREE.Group()
   const baseH = height * 0.28
   const midH = height * 0.34
@@ -23,16 +26,22 @@ export function buildAltar(obj: ObjectOf<'altar'>): THREE.Object3D {
   for (const x of [-1, 1]) {
     group.add(box(sideW, height * 0.42, depth * 0.72, x * width * 0.36, baseH + height * 0.21, 0, shade(obj.color, 0.85)))
   }
+  const rearStone = box(width * 0.34, height * 0.36, depth * 0.1, 0, height * 0.78, depth * 0.35, shade(obj.color, 0.62))
+  rearStone.rotation.x = -0.08
+  group.add(rearStone)
+  group.add(box(width * 0.18, accentH * 1.35, depth * 0.46, 0, height + accentH * 0.2, 0, obj.accentColor))
   return group
 }
 
 /** Pedestal and simplified obelisk/figure silhouette, static and floor-anchored. */
 export function buildStatue(obj: ObjectOf<'statue'>): THREE.Object3D {
   const group = new THREE.Group()
-  const pedestalH = Math.min(0.45, obj.height * 0.22)
-  const figureH = Math.max(0.2, obj.height - pedestalH)
-  const pedestalR = obj.radius * 1.15
-  const figureR = obj.radius * 0.62
+  const radius = Math.max(obj.radius, 0.5)
+  const height = Math.max(obj.height, 2.45)
+  const pedestalH = Math.min(0.52, height * 0.22)
+  const figureH = Math.max(0.2, height - pedestalH)
+  const pedestalR = radius * 1.18
+  const figureR = radius * 0.62
 
   group.add(cylinder(pedestalR, pedestalR * 1.08, pedestalH, 0, pedestalH / 2, 0, obj.pedestalColor))
   group.add(cylinder(figureR * 0.9, figureR, figureH * 0.72, 0, pedestalH + figureH * 0.36, 0, obj.color))
@@ -51,7 +60,9 @@ export function buildStatue(obj: ObjectOf<'statue'>): THREE.Object3D {
   crest.position.set(0, pedestalH + figureH * 0.99, 0)
   group.add(crest)
 
-  group.add(box(obj.radius * 1.35, figureH * 0.08, obj.radius * 0.18, 0, pedestalH + figureH * 0.53, figureR * 0.82, shade(obj.color, 0.82)))
+  group.add(box(radius * 1.35, figureH * 0.08, radius * 0.18, 0, pedestalH + figureH * 0.53, figureR * 0.82, shade(obj.color, 0.82)))
+  group.add(box(radius * 0.18, figureH * 0.42, radius * 0.16, -figureR * 0.82, pedestalH + figureH * 0.48, 0, shade(obj.color, 0.88)))
+  group.add(box(radius * 0.18, figureH * 0.42, radius * 0.16, figureR * 0.82, pedestalH + figureH * 0.48, 0, shade(obj.color, 0.88)))
   return group
 }
 

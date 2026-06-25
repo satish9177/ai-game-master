@@ -255,45 +255,69 @@ function buildProp(obj: ObjectOf<'prop'>): THREE.Object3D {
 }
 
 /**
- * Neutral fallback for skipped content: a dark plinth, warm faceted core, and
- * bronze orbit. Its XZ diameter stays below the prior 0.8 m placeholder cube.
- * It carries no raw type/name/id, light, text, or interaction affordance.
+ * Neutral fallback for skipped content: a low cool-toned void seal with crossed
+ * slabs. It intentionally avoids the warm candle/chest palette and the
+ * plinth+crystal silhouette used by valid artifacts. Its XZ diameter stays
+ * below the prior 0.8 m placeholder cube. It carries no raw type/name/id, light,
+ * text, or interaction affordance.
  */
 function buildMysteryMarker(): THREE.Object3D {
   const g = new THREE.Group()
   g.name = 'mystery-marker'
 
-  const plinth = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.34, 0.38, 0.12, 10),
-    new THREE.MeshStandardMaterial({ color: '#35343a', roughness: 0.9 }),
-  )
-  plinth.position.y = 0.06
-  g.add(plinth)
-
-  const core = new THREE.Mesh(
-    new THREE.OctahedronGeometry(0.26, 0),
+  const seal = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.36, 0.38, 0.08, 12),
     new THREE.MeshStandardMaterial({
-      color: '#c58a52',
-      emissive: '#6b3f24',
-      emissiveIntensity: 0.65,
-      roughness: 0.55,
+      color: '#202238',
+      emissive: '#101426',
+      emissiveIntensity: 0.18,
+      roughness: 0.95,
     }),
   )
-  core.position.y = 0.45
-  core.rotation.y = Math.PI / 4
-  g.add(core)
+  seal.position.y = 0.04
+  g.add(seal)
 
-  const orbit = new THREE.Mesh(
-    new THREE.TorusGeometry(0.31, 0.025, 6, 20),
+  const rim = new THREE.Mesh(
+    new THREE.TorusGeometry(0.34, 0.022, 6, 24),
     new THREE.MeshStandardMaterial({
-      color: '#806449',
-      metalness: 0.45,
-      roughness: 0.55,
+      color: '#6b79d6',
+      emissive: '#29356f',
+      emissiveIntensity: 0.45,
+      metalness: 0.1,
+      roughness: 0.6,
     }),
   )
-  orbit.position.y = 0.45
-  orbit.rotation.x = Math.PI / 2
-  g.add(orbit)
+  rim.position.y = 0.105
+  rim.rotation.x = Math.PI / 2
+  g.add(rim)
+
+  for (const angle of [0, Math.PI / 2, Math.PI / 4]) {
+    const bar = new THREE.Mesh(
+      new THREE.BoxGeometry(0.52, 0.055, 0.07),
+      new THREE.MeshStandardMaterial({
+        color: angle === Math.PI / 4 ? '#8d7aff' : '#4952a3',
+        emissive: '#202761',
+        emissiveIntensity: 0.35,
+        roughness: 0.7,
+      }),
+    )
+    bar.position.y = 0.15
+    bar.rotation.y = angle
+    g.add(bar)
+  }
+
+  const chip = new THREE.Mesh(
+    new THREE.TetrahedronGeometry(0.13, 0),
+    new THREE.MeshStandardMaterial({
+      color: '#c8c2ff',
+      emissive: '#4c43a0',
+      emissiveIntensity: 0.5,
+      roughness: 0.65,
+    }),
+  )
+  chip.position.y = 0.29
+  chip.rotation.set(0.4, 0.7, 0.2)
+  g.add(chip)
 
   return g
 }

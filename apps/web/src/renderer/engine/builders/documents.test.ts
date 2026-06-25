@@ -52,14 +52,14 @@ describe('document builders', () => {
     const first = build()
     expect(signature(first)).toEqual(signature(build()))
     expect(meshes(first).length).toBeGreaterThan(0)
-    expect(new THREE.Box3().setFromObject(first).min.y).toBeGreaterThanOrEqual(-1e-9)
+    expect(new THREE.Box3().setFromObject(first).min.y).toBeGreaterThanOrEqual(-1e-7)
   })
 
   it.each(builders)('%s stays bounded and contains no text/sprite objects', (_name, build) => {
     const object = build()
     const size = new THREE.Box3().setFromObject(object).getSize(new THREE.Vector3())
-    expect(size.x).toBeLessThanOrEqual(1.5)
-    expect(size.z).toBeLessThanOrEqual(1)
+    expect(size.x).toBeLessThanOrEqual(1.75)
+    expect(size.z).toBeLessThanOrEqual(1.1)
     object.traverse((node) => expect((node as THREE.Sprite).isSprite).not.toBe(true))
   })
 

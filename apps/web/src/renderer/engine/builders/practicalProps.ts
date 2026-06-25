@@ -7,7 +7,10 @@ type ObjectOf<K extends RoomObject['type']> = Extract<RoomObject, { type: K }>
 
 /** Distinct container: box body, raised lid, trim bands, and front latch. */
 export function buildChest(obj: ObjectOf<'chest'>): THREE.Object3D {
-  const [width, height, depth] = obj.size
+  const [rawWidth, rawHeight, rawDepth] = obj.size
+  const width = Math.max(rawWidth, 1.35)
+  const height = Math.max(rawHeight, 0.9)
+  const depth = Math.max(rawDepth, 0.9)
   const group = new THREE.Group()
   const bodyHeight = height * 0.68
   const lidHeight = height * 0.24
@@ -20,16 +23,24 @@ export function buildChest(obj: ObjectOf<'chest'>): THREE.Object3D {
   group.add(box(width * 1.08, trim, depth * 1.08, 0, topY - trim / 2, 0, obj.trimColor))
   group.add(box(width * 1.04, trim, depth * 1.04, 0, bodyHeight * 0.52, 0, obj.trimColor))
   group.add(box(width * 0.16, height * 0.18, trim * 0.65, 0, bodyHeight * 0.58, depth / 2 + trim * 0.35, obj.latchColor))
+  group.add(box(width * 0.12, height * 0.08, trim * 0.7, 0, bodyHeight * 0.42, depth / 2 + trim * 0.38, shade(obj.latchColor, 1.35)))
 
   for (const x of [-1, 1]) {
     group.add(box(trim, height * 0.88, trim, x * (width / 2 - trim / 2), height * 0.44, depth / 2 - trim / 2, obj.trimColor))
+    group.add(box(trim, height * 0.88, trim, x * (width / 2 - trim / 2), height * 0.44, -depth / 2 + trim / 2, obj.trimColor))
+  }
+  for (const z of [-1, 1]) {
+    group.add(box(width * 0.86, trim * 0.8, trim, 0, height * 0.18, z * (depth / 2 - trim / 2), obj.trimColor))
   }
   return group
 }
 
 /** Low static body marker: horizontal silhouette, not an NPC or animated actor. */
 export function buildCorpse(obj: ObjectOf<'corpse'>): THREE.Object3D {
-  const [width, height, length] = obj.size
+  const [rawWidth, rawHeight, rawLength] = obj.size
+  const width = Math.max(rawWidth, 0.9)
+  const height = Math.max(rawHeight, 0.28)
+  const length = Math.max(rawLength, 1.9)
   const group = new THREE.Group()
   const bodyWidth = width * 0.62
   const headRadius = Math.min(width * 0.18, length * 0.09)
@@ -49,12 +60,16 @@ export function buildCorpse(obj: ObjectOf<'corpse'>): THREE.Object3D {
   group.add(box(limbWidth, height * 0.45, length * 0.34, width * 0.28, height * 0.28, length * 0.2, obj.color))
   group.add(box(limbWidth, height * 0.4, length * 0.36, -width * 0.22, height * 0.24, -length * 0.13, shade(obj.color, 0.85)))
   group.add(box(limbWidth, height * 0.4, length * 0.36, width * 0.22, height * 0.24, -length * 0.13, shade(obj.color, 0.85)))
+  group.add(box(bodyWidth * 1.1, height * 0.28, length * 0.16, 0, height * 0.55, length * 0.07, shade(obj.clothColor, 1.22)))
   return group
 }
 
 /** Simple table: top slab, four legs, and a small apron under the edge. */
 export function buildTable(obj: ObjectOf<'table'>): THREE.Object3D {
-  const [width, height, depth] = obj.size
+  const [rawWidth, rawHeight, rawDepth] = obj.size
+  const width = Math.max(rawWidth, 2.0)
+  const height = Math.max(rawHeight, 0.95)
+  const depth = Math.max(rawDepth, 1.25)
   const group = new THREE.Group()
   const topHeight = Math.min(0.16, height * 0.18)
   const leg = Math.min(0.16, Math.min(width, depth) * 0.14)
@@ -65,8 +80,12 @@ export function buildTable(obj: ObjectOf<'table'>): THREE.Object3D {
   const legColor = shade(obj.color, 0.72)
 
   group.add(box(width, topHeight, depth, 0, topY, 0, obj.color))
+  group.add(box(width * 0.92, 0.035, depth * 0.18, 0, topY + topHeight / 2 + 0.018, -depth * 0.18, shade(obj.color, 1.28)))
+  group.add(box(width * 0.3, 0.035, depth * 0.62, width * 0.2, topY + topHeight / 2 + 0.02, depth * 0.05, shade(obj.color, 0.85)))
   group.add(box(width * 0.92, topHeight * 0.8, leg, 0, legHeight - topHeight * 0.1, -legZ, legColor))
   group.add(box(width * 0.92, topHeight * 0.8, leg, 0, legHeight - topHeight * 0.1, legZ, legColor))
+  group.add(box(leg, topHeight * 0.8, depth * 0.82, -legX, legHeight - topHeight * 0.1, 0, legColor))
+  group.add(box(leg, topHeight * 0.8, depth * 0.82, legX, legHeight - topHeight * 0.1, 0, legColor))
 
   for (const x of [-legX, legX]) {
     for (const z of [-legZ, legZ]) {

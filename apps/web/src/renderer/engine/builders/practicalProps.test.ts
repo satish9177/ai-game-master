@@ -58,8 +58,8 @@ describe('practical prop builders', () => {
   it.each(builders)('%s stays bounded and contains no text/sprite objects', (_name, build) => {
     const object = build()
     const size = new THREE.Box3().setFromObject(object).getSize(new THREE.Vector3())
-    expect(size.x).toBeLessThanOrEqual(1.9)
-    expect(size.z).toBeLessThanOrEqual(1.8)
+    expect(size.x).toBeLessThanOrEqual(2.05)
+    expect(size.z).toBeLessThanOrEqual(1.95)
     object.traverse((node) => expect((node as THREE.Sprite).isSprite).not.toBe(true))
   })
 

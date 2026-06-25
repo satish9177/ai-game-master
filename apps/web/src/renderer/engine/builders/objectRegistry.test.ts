@@ -56,6 +56,17 @@ function materialColors(root: THREE.Object3D): string[] {
   })
 }
 
+function visualSignature(root: THREE.Object3D): unknown {
+  const bounds = new THREE.Box3().setFromObject(root)
+  const size = bounds.getSize(new THREE.Vector3())
+  return {
+    meshCount: meshes(root).length,
+    geometryTypes: meshes(root).map((mesh) => mesh.geometry.type),
+    colors: materialColors(root),
+    size: [size.x, size.y, size.z].map((n) => Number(n.toFixed(3))),
+  }
+}
+
 // The mapped type is intentional: a new RoomObject type requires both a fixture
 // here and a builder in the exhaustive renderer registry before TypeScript passes.
 const currentObjects: { [K in RoomObject['type']]: unknown } = {
@@ -94,6 +105,20 @@ const currentObjects: { [K in RoomObject['type']]: unknown } = {
   zombie: { type: 'zombie', position: [0, 0, 0] },
 }
 
+const visualVocabularyTypes = [
+  'book',
+  'paper',
+  'map',
+  'chest',
+  'corpse',
+  'table',
+  'altar',
+  'statue',
+  'machine',
+  'artifact',
+  'candle',
+] satisfies RoomObject['type'][]
+
 describe('trusted object builder registry', () => {
   it.each(Object.entries(currentObjects))('%s has a registered trusted builder', (_type, raw) => {
     const room = loadRoomSpec(roomEnvelope([raw]))
@@ -104,6 +129,21 @@ describe('trusted object builder registry', () => {
     expect(meshes(built).length).toBeGreaterThan(0)
     expect(mysteryMarkers(built)).toHaveLength(0)
     expect(entries).toEqual([])
+  })
+
+  it.each(visualVocabularyTypes)('%s renders differently from the skipped mystery marker', (type) => {
+    const room = loadRoomSpec(roomEnvelope([currentObjects[type]]))
+    const markerRoom = loadRoomSpec(roomEnvelope([{ type: 'SECRET-UNKNOWN-TYPE', position: [0, 0, 0] }]))
+
+    const { logger } = recordingLogger()
+    const built = buildObjects(room, logger)
+    const markerBuilt = buildObjects(markerRoom, logger)
+
+    expect(room.skipped).toEqual([])
+    expect(mysteryMarkers(built)).toHaveLength(0)
+    expect(visualSignature(built.children[0]!)).not.toEqual(
+      visualSignature(mysteryMarkers(markerBuilt)[0]!),
+    )
   })
 })
 
@@ -125,6 +165,7 @@ describe('skipped-object mystery marker', () => {
     expect(marker.position.toArray()).toEqual([2, 0, -3])
     expect(indicators(built)).toHaveLength(0)
     expect(materialColors(marker)).not.toContain('ff00ff')
+    expect(materialColors(marker)).not.toContain('c58a52')
 
     const bounds = new THREE.Box3().setFromObject(marker)
     expect(bounds.max.x - bounds.min.x).toBeLessThanOrEqual(0.8)

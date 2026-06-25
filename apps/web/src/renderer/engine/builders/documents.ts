@@ -7,7 +7,10 @@ type ObjectOf<K extends RoomObject['type']> = Extract<RoomObject, { type: K }>
 
 /** Closed book: cover slabs, inset page block, and a darker spine. */
 export function buildBook(obj: ObjectOf<'book'>): THREE.Object3D {
-  const [width, height, depth] = obj.size
+  const [rawWidth, rawHeight, rawDepth] = obj.size
+  const width = Math.max(rawWidth, 0.95)
+  const height = Math.max(rawHeight, 0.18)
+  const depth = Math.max(rawDepth, 0.68)
   const cover = Math.min(0.035, height * 0.2)
   const pagesHeight = Math.max(0.01, height - cover * 2)
   const group = new THREE.Group()
@@ -32,12 +35,32 @@ export function buildBook(obj: ObjectOf<'book'>): THREE.Object3D {
     0,
     shade(obj.coverColor, 0.65),
   ))
+  group.add(box(
+    width * 0.76,
+    0.018,
+    Math.min(0.04, depth * 0.08),
+    width * 0.06,
+    height + 0.012,
+    -depth * 0.24,
+    shade(obj.pageColor, 0.78),
+  ))
+  group.add(box(
+    width * 0.5,
+    0.018,
+    Math.min(0.04, depth * 0.08),
+    width * 0.16,
+    height + 0.014,
+    depth * 0.18,
+    shade(obj.pageColor, 0.7),
+  ))
   return group
 }
 
 /** Flat parchment sheet with a small raised folded corner. */
 export function buildPaper(obj: ObjectOf<'paper'>): THREE.Object3D {
-  const [width, depth] = obj.size
+  const [rawWidth, rawDepth] = obj.size
+  const width = Math.max(rawWidth, 1.05)
+  const depth = Math.max(rawDepth, 0.78)
   const group = new THREE.Group()
   group.add(box(width, 0.025, depth, 0, 0.0125, 0, obj.color))
 
@@ -54,14 +77,22 @@ export function buildPaper(obj: ObjectOf<'paper'>): THREE.Object3D {
   )
   fold.rotation.x = -0.18
   group.add(fold)
+  group.add(box(width * 0.82, 0.014, 0.026, 0, 0.04, -depth * 0.18, shade(obj.color, 0.72)))
+  group.add(box(width * 0.52, 0.014, 0.026, -width * 0.12, 0.042, depth * 0.12, shade(obj.color, 0.78)))
   return group
 }
 
 /** Larger parchment with fixed geometric route marks; never renders text. */
 export function buildMap(obj: ObjectOf<'map'>): THREE.Object3D {
-  const [width, depth] = obj.size
+  const [rawWidth, rawDepth] = obj.size
+  const width = Math.max(rawWidth, 1.7)
+  const depth = Math.max(rawDepth, 1.05)
   const group = new THREE.Group()
   group.add(box(width, 0.03, depth, 0, 0.015, 0, obj.color))
+  group.add(box(width * 0.96, 0.018, 0.035, 0, 0.043, -depth * 0.46, shade(obj.color, 0.82)))
+  group.add(box(width * 0.96, 0.018, 0.035, 0, 0.043, depth * 0.46, shade(obj.color, 0.82)))
+  group.add(box(0.035, 0.018, depth * 0.9, -width * 0.46, 0.043, 0, shade(obj.color, 0.82)))
+  group.add(box(0.035, 0.018, depth * 0.9, width * 0.46, 0.043, 0, shade(obj.color, 0.82)))
 
   const routeA = box(width * 0.42, 0.018, 0.035, -width * 0.17, 0.04, depth * 0.08, obj.markColor)
   routeA.rotation.y = 0.28
@@ -79,6 +110,13 @@ export function buildMap(obj: ObjectOf<'map'>): THREE.Object3D {
     mark.position.set(x * width, 0.045, z * depth)
     group.add(mark)
   }
+  const northMark = new THREE.Mesh(
+    new THREE.ConeGeometry(0.08, 0.16, 3),
+    new THREE.MeshStandardMaterial({ color: obj.markColor }),
+  )
+  northMark.rotation.x = Math.PI / 2
+  northMark.position.set(width * 0.33, 0.1, depth * 0.28)
+  group.add(northMark)
   return group
 }
 

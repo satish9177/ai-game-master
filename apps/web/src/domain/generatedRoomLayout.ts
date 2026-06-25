@@ -202,22 +202,27 @@ function baseFootprint(obj: RoomObject): number {
     case 'scroll':
       return 0.3
     case 'book':
-      return diagRadius(obj.size[0] * 1.05, obj.size[2] * 1.05)
+      return diagRadius(Math.max(obj.size[0], 0.95), Math.max(obj.size[2], 0.68))
     case 'paper':
+      return diagRadius(Math.max(obj.size[0], 1.05), Math.max(obj.size[1], 0.78))
     case 'map':
-      return diagRadius(obj.size[0], obj.size[1])
+      return diagRadius(Math.max(obj.size[0], 1.7), Math.max(obj.size[1], 1.05))
     case 'chest':
+      return diagRadius(Math.max(obj.size[0], 1.35) * 1.08, Math.max(obj.size[2], 0.9) * 1.08)
     case 'corpse':
+      return diagRadius(Math.max(obj.size[0], 0.9), Math.max(obj.size[2], 1.9))
     case 'table':
+      return diagRadius(Math.max(obj.size[0], 2.0), Math.max(obj.size[2], 1.25))
     case 'altar':
+      return diagRadius(Math.max(obj.size[0], 2.0), Math.max(obj.size[2], 1.25))
     case 'machine':
-      return diagRadius(obj.size[0], obj.size[2])
+      return diagRadius(Math.max(obj.size[0], 1.85), Math.max(obj.size[2], 1.15))
     case 'statue':
-      return obj.radius * 1.15
+      return Math.max(obj.radius, 0.5) * 1.18
     case 'artifact':
-      return obj.radius
+      return Math.max(obj.radius, 0.42)
     case 'candle':
-      return obj.radius * 3
+      return Math.max(obj.radius, 0.12) * 3
     case 'npc':
       return 0.45
     case 'zombie':
