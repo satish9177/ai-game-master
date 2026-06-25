@@ -913,3 +913,77 @@ describe('practical prop composition integration', () => {
     },
   )
 })
+
+describe('story anchor composition integration', () => {
+  it.each(['altar', 'statue'] as const)(
+    '%s is an anchor candidate and interactive instances satisfy lacksInteractable',
+    (type) => {
+      expect(classifyGeneratedCompositionRole(loadObj({ type, position: [0, 0, 0] })))
+        .toBe('anchor')
+      const room = makeRoom([{
+        type,
+        position: [3, 0, 0],
+        interaction: { key: 'E', prompt: 'Inspect', body: 'Validated body.' },
+      }])
+      expect(composeGeneratedRoom(room).diagnostics.lacksInteractable).toBe(false)
+    },
+  )
+
+  it('keeps throne as the highest priority anchor over altar and statue', () => {
+    const room = makeRoom([
+      { type: 'altar', position: [0, 0, 0] },
+      { type: 'statue', position: [0.5, 0, 0] },
+      { type: 'throne', position: [3, 0, 3] },
+    ])
+    const { room: composed } = composeGeneratedRoom(room)
+    const throne = composed.objects[2]!
+    expect(throne.type).toBe('throne')
+    expect(throne.position[0]).toBe(0)
+    expect(throne.position[2]).toBeLessThan(0)
+    expect(Math.abs(composed.objects[0]!.position[0])).toBeGreaterThanOrEqual(COMPOSITION.CORRIDOR_HALF)
+    expect(Math.abs(composed.objects[1]!.position[0])).toBeGreaterThanOrEqual(COMPOSITION.CORRIDOR_HALF)
+  })
+
+  it('uses altar as the primary anchor when no throne exists', () => {
+    const room = makeRoom([
+      { type: 'statue', position: [0, 0, 0] },
+      { type: 'altar', position: [3, 0, 3] },
+    ])
+    const { room: composed } = composeGeneratedRoom(room)
+    const altar = composed.objects[1]!
+    expect(altar.type).toBe('altar')
+    expect(altar.position[0]).toBe(0)
+    expect(altar.position[2]).toBeLessThan(0)
+    expect(Math.abs(composed.objects[0]!.position[0])).toBeGreaterThanOrEqual(COMPOSITION.CORRIDOR_HALF)
+  })
+
+  it('uses statue as the primary anchor only when no throne or altar exists', () => {
+    const room = makeRoom([{ type: 'statue', position: [3, 0, 3] }])
+    const { room: composed, diagnostics } = composeGeneratedRoom(room)
+    expect(diagnostics.lacksAnchor).toBe(false)
+    expect(composed.objects[0]!.type).toBe('statue')
+    expect(composed.objects[0]!.position[0]).toBe(0)
+    expect(composed.objects[0]!.position[2]).toBeLessThan(0)
+  })
+
+  it('does not turn extra altar/statue objects into additional focal anchors', () => {
+    const room = makeRoom([
+      { type: 'altar', position: [3, 0, 3] },
+      { type: 'altar', position: [0, 0, -1] },
+      { type: 'statue', position: [0, 0, 1] },
+    ])
+    const { room: composed } = composeGeneratedRoom(room)
+    expect(composed.objects[0]!.position[0]).toBe(0)
+    expect(composed.objects[0]!.position[2]).toBeLessThan(0)
+    expect(Math.abs(composed.objects[1]!.position[0])).toBeGreaterThanOrEqual(COMPOSITION.CORRIDOR_HALF)
+    expect(Math.abs(composed.objects[2]!.position[0])).toBeGreaterThanOrEqual(COMPOSITION.CORRIDOR_HALF)
+  })
+
+  it.each(['book', 'paper', 'map', 'chest', 'corpse', 'table'] as const)(
+    'keeps existing %s non-interactive composition behavior unchanged',
+    (type) => {
+      expect(classifyGeneratedCompositionRole(loadObj({ type, position: [0, 0, 0] })))
+        .toBe('decorative')
+    },
+  )
+})

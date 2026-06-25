@@ -6,6 +6,7 @@ import { buildGroundRing } from './indicators'
 import { buildBook, buildMap, buildPaper } from './documents'
 import { buildBarrel, buildBarricade, buildCrate, buildDebris } from './postApocProps'
 import { buildChest, buildCorpse, buildTable } from './practicalProps'
+import { buildAltar, buildStatue } from './storyAnchors'
 import { buildHumanoid } from './parts/humanoid'
 
 /**
@@ -67,6 +68,8 @@ const registry = {
   chest: buildChest,
   corpse: buildCorpse,
   table: buildTable,
+  altar: buildAltar,
+  statue: buildStatue,
   npc: buildNpc,
   prop: buildProp,
   crate: buildCrate,

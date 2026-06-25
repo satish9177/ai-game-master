@@ -273,3 +273,43 @@ describe('practical prop object schema', () => {
     expect(loaded.skipped.map((item) => item.type)).toEqual(['chest', 'corpse', 'table'])
   })
 })
+
+describe('story anchor object schema', () => {
+  it.each(['altar', 'statue'] as const)(
+    'parses a minimal %s with defaults and no invented interaction',
+    (type) => {
+      const parsed = RoomObjectSchema.parse({ type, position: [1, 0, 2] })
+      expect(parsed.type).toBe(type)
+      expect(parsed.rotationY).toBe(0)
+      expect(parsed.scale).toBe(1)
+      expect('interaction' in parsed).toBe(false)
+    },
+  )
+
+  it.each(['altar', 'statue'] as const)(
+    'preserves an optional existing interaction on %s',
+    (type) => {
+      const parsed = RoomObjectSchema.parse({
+        type,
+        position: [0, 0, 0],
+        interaction: { key: 'E', prompt: 'Inspect anchor', body: 'Validated text.' },
+      })
+      expect('interaction' in parsed && parsed.interaction?.key).toBe('E')
+    },
+  )
+
+  it('keeps unknown anchor-like types skipped', () => {
+    const loaded = loadRoomSpec(minimalRoom([{ type: 'shrine', position: [0, 0, 0] }]))
+    expect(loaded.objects).toEqual([])
+    expect(loaded.skipped[0]?.type).toBe('shrine')
+  })
+
+  it('keeps malformed story anchor objects skipped', () => {
+    const loaded = loadRoomSpec(minimalRoom([
+      { type: 'altar', position: [0, 0, 0], size: [1.8, -1, 1.1] },
+      { type: 'statue', position: [0, 0, 0], radius: 0 },
+    ]))
+    expect(loaded.objects).toEqual([])
+    expect(loaded.skipped.map((item) => item.type)).toEqual(['altar', 'statue'])
+  })
+})

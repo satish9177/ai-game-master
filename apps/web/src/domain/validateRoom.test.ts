@@ -165,7 +165,7 @@ describe('validateRoom', () => {
     )
   })
 
-  it.each(['crate', 'barrel', 'chest', 'corpse', 'table', 'barricade', 'debris', 'zombie'] as const)(
+  it.each(['crate', 'barrel', 'chest', 'corpse', 'table', 'altar', 'statue', 'barricade', 'debris', 'zombie'] as const)(
     'treats a %s at the spawn as a solid obstruction',
     (type) => {
       const room = validRoom()

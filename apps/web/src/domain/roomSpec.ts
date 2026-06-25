@@ -165,6 +165,31 @@ const Table = z.object({
   ...transform,
 })
 
+// Story-anchor visual vocabulary v0. These are inert focal props unless an
+// existing optional interaction is supplied; no quest, shrine, or puzzle logic.
+const Altar = z.object({
+  type: z.literal('altar'),
+  size: z.tuple([
+    z.number().positive(),
+    z.number().positive(),
+    z.number().positive(),
+  ]).default([1.8, 1.0, 1.1]),
+  color: Hex.default('#8a8172'),
+  accentColor: Hex.default('#c4a15a'),
+  interaction: Interaction.optional(),
+  ...transform,
+})
+
+const Statue = z.object({
+  type: z.literal('statue'),
+  radius: z.number().positive().default(0.45),
+  height: z.number().positive().default(2.2),
+  color: Hex.default('#b8b0a2'),
+  pedestalColor: Hex.default('#777066'),
+  interaction: Interaction.optional(),
+  ...transform,
+})
+
 const Npc = z.object({
   type: z.literal('npc'),
   name: z.string().min(1),
@@ -250,6 +275,8 @@ export const RoomObjectSchema = z.discriminatedUnion('type', [
   Chest,
   Corpse,
   Table,
+  Altar,
+  Statue,
   Npc,
   Prop,
   Crate,

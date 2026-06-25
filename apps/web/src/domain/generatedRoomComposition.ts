@@ -121,6 +121,8 @@ export function classifyGeneratedCompositionRole(obj: RoomObject): CompositionRo
 
   switch (obj.type) {
     case 'throne':
+    case 'altar':
+    case 'statue':
       return 'anchor'
     case 'npc':
       return 'npc'
@@ -209,9 +211,10 @@ export function composeGeneratedRoom(room: LoadedRoom): ComposedRoom {
   const bounds = computePlayableBounds(room.shell.dimensions, room.shell.wallThickness)
   const roles = room.objects.map(classifyGeneratedCompositionRole)
 
-  const anchorIdx = roles.findIndex((r) => r === 'anchor')
+  const anchorIdx = primaryAnchorIndex(room.objects)
   const lacksAnchor = anchorIdx === -1
-  const lacksInteractable = !roles.some((r) => r === 'interactable')
+  const lacksInteractable = !room.objects.some((obj, i) =>
+    roles[i] === 'interactable' || isInteractiveStoryAnchor(obj))
 
   let changed = false
 
@@ -221,8 +224,17 @@ export function composeGeneratedRoom(room: LoadedRoom): ComposedRoom {
 
     switch (role) {
       case 'anchor': {
-        // Only relocate the primary anchor; extra thrones stay in place.
-        if (i !== anchorIdx) return obj
+        // Extra thrones preserve existing behavior; extra altar/statue candidates
+        // behave like ordinary generated props after the primary anchor is chosen.
+        if (i !== anchorIdx) {
+          if (obj.type === 'throne') return obj
+          return relocateFlankObject(
+            obj,
+            hasNonExitInteraction(obj) ? 'interactable' : 'decorative',
+            bounds,
+            () => { changed = true },
+          )
+        }
         const [tx, tz] = anchorTarget(bounds, objectFootprintRadius(obj))
         if (x === tx && z === tz) return obj
         changed = true
@@ -230,27 +242,15 @@ export function composeGeneratedRoom(room: LoadedRoom): ComposedRoom {
       }
 
       case 'npc': {
-        if (Math.abs(x) >= COMPOSITION.CORRIDOR_HALF) return obj
-        const tx = flanktargetX(x, COMPOSITION.NPC_X_TARGET_FRAC, bounds.halfX, objectFootprintRadius(obj))
-        if (tx === x) return obj
-        changed = true
-        return { ...obj, position: [tx, y, z] } as RoomObject
+        return relocateFlankObject(obj, role, bounds, () => { changed = true })
       }
 
       case 'interactable': {
-        if (Math.abs(x) >= COMPOSITION.CORRIDOR_HALF) return obj
-        const tx = flanktargetX(x, COMPOSITION.INTERACTABLE_X_TARGET_FRAC, bounds.halfX, objectFootprintRadius(obj))
-        if (tx === x) return obj
-        changed = true
-        return { ...obj, position: [tx, y, z] } as RoomObject
+        return relocateFlankObject(obj, role, bounds, () => { changed = true })
       }
 
       case 'decorative': {
-        if (Math.abs(x) >= COMPOSITION.CORRIDOR_HALF) return obj
-        const tx = flanktargetX(x, COMPOSITION.CLUTTER_X_TARGET_FRAC, bounds.halfX, objectFootprintRadius(obj))
-        if (tx === x) return obj
-        changed = true
-        return { ...obj, position: [tx, y, z] } as RoomObject
+        return relocateFlankObject(obj, role, bounds, () => { changed = true })
       }
 
       // 'exit' | 'structural' — leave in place
@@ -280,6 +280,37 @@ function hasExitInteraction(obj: RoomObject): boolean {
 
 function hasNonExitInteraction(obj: RoomObject): boolean {
   return 'interaction' in obj && obj.interaction != null && obj.interaction.exit == null
+}
+
+function isInteractiveStoryAnchor(obj: RoomObject): boolean {
+  return (obj.type === 'altar' || obj.type === 'statue') && hasNonExitInteraction(obj)
+}
+
+function primaryAnchorIndex(objects: RoomObject[]): number {
+  const throne = objects.findIndex((obj) => obj.type === 'throne')
+  if (throne !== -1) return throne
+  const altar = objects.findIndex((obj) => obj.type === 'altar')
+  if (altar !== -1) return altar
+  return objects.findIndex((obj) => obj.type === 'statue')
+}
+
+function relocateFlankObject(
+  obj: RoomObject,
+  role: Extract<CompositionRole, 'npc' | 'interactable' | 'decorative'>,
+  bounds: PlayableBounds,
+  markChanged: () => void,
+): RoomObject {
+  const [x, y, z] = obj.position
+  if (Math.abs(x) >= COMPOSITION.CORRIDOR_HALF) return obj
+  const frac = role === 'npc'
+    ? COMPOSITION.NPC_X_TARGET_FRAC
+    : role === 'interactable'
+      ? COMPOSITION.INTERACTABLE_X_TARGET_FRAC
+      : COMPOSITION.CLUTTER_X_TARGET_FRAC
+  const tx = flanktargetX(x, frac, bounds.halfX, objectFootprintRadius(obj))
+  if (tx === x) return obj
+  markChanged()
+  return { ...obj, position: [tx, y, z] } as RoomObject
 }
 
 /**

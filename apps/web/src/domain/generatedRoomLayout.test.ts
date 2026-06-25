@@ -1031,3 +1031,51 @@ describe('practical prop layout integration', () => {
     expect(repairGeneratedSpawn(room)).not.toBe(room)
   })
 })
+
+describe('story anchor layout integration', () => {
+  it.each(['altar', 'statue'] as const)(
+    '%s is decorative without interaction and critical with interaction',
+    (type) => {
+      const decorative = loadSingleObject({ type, position: [0, 0, 0] })
+      const interactive = loadSingleObject({
+        type,
+        position: [0, 0, 0],
+        interaction: { key: 'E', prompt: 'Inspect', body: 'Validated body.' },
+      })
+      expect(classifyObjectImportance(decorative)).toBe('decorative')
+      expect(classifyObjectImportance(interactive)).toBe('critical')
+    },
+  )
+
+  it('uses conservative positive footprints and repairs story anchors fully in bounds', () => {
+    const room = makeRoom([
+      { type: 'altar', position: [100, 0, 0] },
+      { type: 'statue', position: [0, 0, -100] },
+    ])
+    const fixed = repairGeneratedObjects(room)
+    const bounds = computePlayableBounds(fixed.shell.dimensions, fixed.shell.wallThickness)
+    expect(fixed.objects).toHaveLength(2)
+    for (const anchor of fixed.objects) {
+      const footprint = objectFootprintRadius(anchor)
+      expect(footprint).toBeGreaterThan(0)
+      expect(Math.abs(anchor.position[0]) + footprint).toBeLessThanOrEqual(bounds.halfX + 1e-9)
+      expect(Math.abs(anchor.position[2]) + footprint).toBeLessThanOrEqual(bounds.halfZ + 1e-9)
+    }
+  })
+
+  it.each(['altar', 'statue'] as const)('%s blocks and moves a crowded spawn', (type) => {
+    const room = makeSpawnRoom([0, 1.7, 0], [{ type, position: [0, 0, 0] }])
+    const fixed = repairGeneratedSpawn(room)
+    expect(fixed).not.toBe(room)
+    expect(Math.hypot(fixed.spawn.position[0], fixed.spawn.position[2]))
+      .toBeGreaterThanOrEqual(LIMITS.SPAWN_CLEARANCE)
+  })
+
+  it.each(['book', 'paper', 'map', 'chest', 'corpse', 'table'] as const)(
+    'keeps existing %s layout importance behavior unchanged',
+    (type) => {
+      expect(classifyObjectImportance(loadSingleObject({ type, position: [0, 0, 0] })))
+        .toBe('decorative')
+    },
+  )
+})

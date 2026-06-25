@@ -59,6 +59,8 @@ const SPAWN_BLOCKING_TYPES = new Set<RoomObject['type']>([
   'chest',
   'corpse',
   'table',
+  'altar',
+  'statue',
   'barricade',
   'debris',
   'zombie',
