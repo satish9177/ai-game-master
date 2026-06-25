@@ -134,7 +134,11 @@ export function classifyGeneratedCompositionRole(obj: RoomObject): CompositionRo
     case 'chest':
     case 'corpse':
     case 'table':
+    case 'machine':
+    case 'artifact':
       return hasNonExitInteraction(obj) ? 'interactable' : 'decorative'
+    case 'candle':
+      return 'decorative'
     case 'crate':
     case 'barrel':
     case 'debris':

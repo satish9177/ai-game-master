@@ -313,3 +313,54 @@ describe('story anchor object schema', () => {
     expect(loaded.skipped.map((item) => item.type)).toEqual(['altar', 'statue'])
   })
 })
+
+describe('strange/device/light object schema', () => {
+  it.each(['machine', 'artifact', 'candle'] as const)(
+    'parses a minimal %s with defaults and no invented interaction',
+    (type) => {
+      const parsed = RoomObjectSchema.parse({ type, position: [1, 0, 2] })
+      expect(parsed.type).toBe(type)
+      expect(parsed.rotationY).toBe(0)
+      expect(parsed.scale).toBe(1)
+      expect('interaction' in parsed).toBe(false)
+    },
+  )
+
+  it.each(['machine', 'artifact'] as const)(
+    'preserves an optional existing interaction on %s',
+    (type) => {
+      const parsed = RoomObjectSchema.parse({
+        type,
+        position: [0, 0, 0],
+        interaction: { key: 'E', prompt: 'Inspect strange object', body: 'Validated text.' },
+      })
+      expect('interaction' in parsed && parsed.interaction?.key).toBe('E')
+    },
+  )
+
+  it('keeps candle visual-only even if raw data includes an interaction-like field', () => {
+    const parsed = RoomObjectSchema.parse({
+      type: 'candle',
+      position: [0, 0, 0],
+      interaction: { key: 'E', prompt: 'Light candle' },
+    })
+    expect(parsed.type).toBe('candle')
+    expect('interaction' in parsed).toBe(false)
+  })
+
+  it('keeps unknown strange-device-like types skipped', () => {
+    const loaded = loadRoomSpec(minimalRoom([{ type: 'reactor', position: [0, 0, 0] }]))
+    expect(loaded.objects).toEqual([])
+    expect(loaded.skipped[0]?.type).toBe('reactor')
+  })
+
+  it('keeps malformed strange/device/light objects skipped', () => {
+    const loaded = loadRoomSpec(minimalRoom([
+      { type: 'machine', position: [0, 0, 0], size: [1.6, -1.2, 1] },
+      { type: 'artifact', position: [0, 0, 0], crystalColor: 'cyan' },
+      { type: 'candle', position: [0, 0, 0], radius: 0 },
+    ]))
+    expect(loaded.objects).toEqual([])
+    expect(loaded.skipped.map((item) => item.type)).toEqual(['machine', 'artifact', 'candle'])
+  })
+})

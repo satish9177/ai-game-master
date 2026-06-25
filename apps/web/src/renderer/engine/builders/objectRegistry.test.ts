@@ -77,6 +77,9 @@ const currentObjects: { [K in RoomObject['type']]: unknown } = {
   table: { type: 'table', position: [0, 0, 0] },
   altar: { type: 'altar', position: [0, 0, 0] },
   statue: { type: 'statue', position: [0, 0, 0] },
+  machine: { type: 'machine', position: [0, 0, 0] },
+  artifact: { type: 'artifact', position: [0, 0, 0] },
+  candle: { type: 'candle', position: [0, 0, 0] },
   npc: {
     type: 'npc',
     name: 'Registry NPC',
@@ -165,10 +168,10 @@ describe('skipped-object mystery marker', () => {
   it('keeps the current schema vocabulary closed', () => {
     const room = loadRoomSpec(roomEnvelope([
       { type: 'coffer', position: [0, 0, 0] },
-      { type: 'artifact', position: [1, 0, 0] },
+      { type: 'reactor', position: [1, 0, 0] },
       { type: 'shrine', position: [2, 0, 0] },
     ]))
     expect(room.objects).toEqual([])
-    expect(room.skipped.map((item) => item.type)).toEqual(['coffer', 'artifact', 'shrine'])
+    expect(room.skipped.map((item) => item.type)).toEqual(['coffer', 'reactor', 'shrine'])
   })
 })

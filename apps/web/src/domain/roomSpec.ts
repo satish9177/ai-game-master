@@ -190,6 +190,41 @@ const Statue = z.object({
   ...transform,
 })
 
+// Strange/device/light visual vocabulary v0. These are visual props only:
+// machine/artifact may expose existing interactions, candle is presentation-only.
+const Machine = z.object({
+  type: z.literal('machine'),
+  size: z.tuple([
+    z.number().positive(),
+    z.number().positive(),
+    z.number().positive(),
+  ]).default([1.6, 1.2, 1.0]),
+  color: Hex.default('#4f5558'),
+  panelColor: Hex.default('#2f3638'),
+  pipeColor: Hex.default('#6f665c'),
+  interaction: Interaction.optional(),
+  ...transform,
+})
+
+const Artifact = z.object({
+  type: z.literal('artifact'),
+  radius: z.number().positive().default(0.35),
+  height: z.number().positive().default(0.9),
+  baseColor: Hex.default('#4b4540'),
+  crystalColor: Hex.default('#78d6c6'),
+  interaction: Interaction.optional(),
+  ...transform,
+})
+
+const Candle = z.object({
+  type: z.literal('candle'),
+  radius: z.number().positive().default(0.09),
+  height: z.number().positive().default(0.22),
+  waxColor: Hex.default('#f1e3c0'),
+  flameColor: Hex.default('#ffb347'),
+  ...transform,
+})
+
 const Npc = z.object({
   type: z.literal('npc'),
   name: z.string().min(1),
@@ -277,6 +312,9 @@ export const RoomObjectSchema = z.discriminatedUnion('type', [
   Table,
   Altar,
   Statue,
+  Machine,
+  Artifact,
+  Candle,
   Npc,
   Prop,
   Crate,

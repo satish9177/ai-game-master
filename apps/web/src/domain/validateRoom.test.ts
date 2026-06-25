@@ -165,7 +165,7 @@ describe('validateRoom', () => {
     )
   })
 
-  it.each(['crate', 'barrel', 'chest', 'corpse', 'table', 'altar', 'statue', 'barricade', 'debris', 'zombie'] as const)(
+  it.each(['crate', 'barrel', 'chest', 'corpse', 'table', 'altar', 'statue', 'machine', 'artifact', 'barricade', 'debris', 'zombie'] as const)(
     'treats a %s at the spawn as a solid obstruction',
     (type) => {
       const room = validRoom()
@@ -191,6 +191,29 @@ describe('validateRoom', () => {
       )
     },
   )
+
+  it('does not treat a candle at spawn as a solid obstruction', () => {
+    const room = validRoom()
+    const at = room.spawn.position
+    room.objects = [
+      ...room.objects,
+      ...loadRoomSpec({
+        ...structuredClone(throneRoom),
+        objects: [{ type: 'candle', position: [at[0], 0, at[2]] }],
+      }).objects,
+    ]
+    const index = room.objects.length - 1
+
+    expect(validateRoom(room).issues).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: 'object-crowds-spawn',
+          objectIndex: index,
+          objectType: 'candle',
+        }),
+      ]),
+    )
+  })
 
   it('accepts spawn exactly on the walkable boundary', () => {
     const room = validRoom()

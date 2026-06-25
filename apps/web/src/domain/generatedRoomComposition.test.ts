@@ -987,3 +987,57 @@ describe('story anchor composition integration', () => {
     },
   )
 })
+
+describe('strange/device/light composition integration', () => {
+  it.each(['machine', 'artifact'] as const)(
+    '%s is decorative without interaction and interactable with interaction',
+    (type) => {
+      expect(classifyGeneratedCompositionRole(loadObj({ type, position: [0, 0, 0] })))
+        .toBe('decorative')
+      expect(classifyGeneratedCompositionRole(loadObj({
+        type,
+        position: [0, 0, 0],
+        interaction: { key: 'E', prompt: 'Inspect', body: 'Validated body.' },
+      }))).toBe('interactable')
+    },
+  )
+
+  it('treats candle as decorative and not a structural wall light', () => {
+    expect(classifyGeneratedCompositionRole(loadObj({ type: 'candle', position: [0, 0, 0] })))
+      .toBe('decorative')
+    expect(classifyGeneratedCompositionRole(loadObj({ type: 'torch', position: [0, 3, 0] })))
+      .toBe('structural')
+  })
+
+  it('moves an interactive machine to the readable flank and preserves its content', () => {
+    const room = makeRoom([{
+      type: 'machine',
+      position: [0, 0, -2],
+      interaction: { key: 'E', prompt: 'Inspect machine', body: 'Validated body.' },
+    }])
+    const { room: composed, diagnostics } = composeGeneratedRoom(room)
+    expect(diagnostics.lacksInteractable).toBe(false)
+    expect(Math.abs(composed.objects[0]!.position[0])).toBeGreaterThanOrEqual(
+      COMPOSITION.CORRIDOR_HALF,
+    )
+    const machine = composed.objects[0]
+    expect(machine?.type === 'machine' && machine.interaction?.prompt).toBe('Inspect machine')
+  })
+
+  it('moves a visual-only candle as decorative side clutter', () => {
+    const room = makeRoom([{ type: 'candle', position: [0, 0, 0] }])
+    const { room: composed, diagnostics } = composeGeneratedRoom(room)
+    expect(diagnostics.lacksInteractable).toBe(true)
+    expect(Math.abs(composed.objects[0]!.position[0])).toBeGreaterThanOrEqual(
+      COMPOSITION.CORRIDOR_HALF,
+    )
+  })
+
+  it.each(['book', 'paper', 'map', 'chest', 'corpse', 'table', 'altar', 'statue'] as const)(
+    'keeps existing %s non-interactive composition behavior unchanged',
+    (type) => {
+      expect(classifyGeneratedCompositionRole(loadObj({ type, position: [0, 0, 0] })))
+        .toBe(type === 'altar' || type === 'statue' ? 'anchor' : 'decorative')
+    },
+  )
+})

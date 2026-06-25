@@ -752,4 +752,26 @@ describe('assembleRoom', () => {
     expect(result.room.objects.map((object) => object.type)).toEqual(['altar', 'statue'])
     expect(validateRoom(result.room).ok).toBe(true)
   })
+
+  it('assembles machine, artifact, and candle as generated objects without fallback', () => {
+    const result = assembleRoom(raw(validSpec({
+      shell: { dimensions: { width: 18, depth: 18, height: 4 }, exits: [{ side: 'north', width: 3 }] },
+      spawn: { position: [0, 1.7, 5] },
+      objects: [
+        {
+          type: 'machine',
+          position: [0, 0, -2],
+          interaction: { key: 'E', prompt: 'Inspect machine', body: 'Validated body.' },
+        },
+        { type: 'artifact', position: [-3, 0, -1] },
+        { type: 'candle', position: [3, 0, 0] },
+      ],
+    })), fallback)
+    expect(result.diagnostics.provenance).toBe('generated')
+    expect(result.diagnostics.failedStage).toBeUndefined()
+    expect(result.diagnostics.repairAttempted).toBe(false)
+    expect(result.diagnostics.lacksInteractable).toBe(false)
+    expect(result.room.objects.map((object) => object.type)).toEqual(['machine', 'artifact', 'candle'])
+    expect(validateRoom(result.room).ok).toBe(true)
+  })
 })

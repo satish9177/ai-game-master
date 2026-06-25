@@ -7,6 +7,7 @@ import { buildBook, buildMap, buildPaper } from './documents'
 import { buildBarrel, buildBarricade, buildCrate, buildDebris } from './postApocProps'
 import { buildChest, buildCorpse, buildTable } from './practicalProps'
 import { buildAltar, buildStatue } from './storyAnchors'
+import { buildArtifact, buildCandle, buildMachine } from './strangeDevices'
 import { buildHumanoid } from './parts/humanoid'
 
 /**
@@ -70,6 +71,9 @@ const registry = {
   table: buildTable,
   altar: buildAltar,
   statue: buildStatue,
+  machine: buildMachine,
+  artifact: buildArtifact,
+  candle: buildCandle,
   npc: buildNpc,
   prop: buildProp,
   crate: buildCrate,

@@ -1079,3 +1079,66 @@ describe('story anchor layout integration', () => {
     },
   )
 })
+
+describe('strange/device/light layout integration', () => {
+  it.each(['machine', 'artifact'] as const)(
+    '%s is decorative without interaction and critical with interaction',
+    (type) => {
+      const decorative = loadSingleObject({ type, position: [0, 0, 0] })
+      const interactive = loadSingleObject({
+        type,
+        position: [0, 0, 0],
+        interaction: { key: 'E', prompt: 'Inspect', body: 'Validated body.' },
+      })
+      expect(classifyObjectImportance(decorative)).toBe('decorative')
+      expect(classifyObjectImportance(interactive)).toBe('critical')
+    },
+  )
+
+  it('treats candle as decorative visual light', () => {
+    expect(classifyObjectImportance(loadSingleObject({ type: 'candle', position: [0, 0, 0] })))
+      .toBe('decorative')
+  })
+
+  it('uses conservative positive footprints and repairs strange/device/light objects fully in bounds', () => {
+    const room = makeRoom([
+      { type: 'machine', position: [100, 0, 0] },
+      { type: 'artifact', position: [0, 0, -100] },
+      { type: 'candle', position: [100, 0, 100] },
+    ])
+    const fixed = repairGeneratedObjects(room)
+    const bounds = computePlayableBounds(fixed.shell.dimensions, fixed.shell.wallThickness)
+    expect(fixed.objects).toHaveLength(3)
+    for (const object of fixed.objects) {
+      const footprint = objectFootprintRadius(object)
+      expect(footprint).toBeGreaterThan(0)
+      expect(Math.abs(object.position[0]) + footprint).toBeLessThanOrEqual(bounds.halfX + 1e-9)
+      expect(Math.abs(object.position[2]) + footprint).toBeLessThanOrEqual(bounds.halfZ + 1e-9)
+    }
+  })
+
+  it.each(['machine', 'artifact'] as const)('%s blocks and moves a crowded spawn', (type) => {
+    const room = makeSpawnRoom([0, 1.7, 0], [{ type, position: [0, 0, 0] }])
+    const fixed = repairGeneratedSpawn(room)
+    expect(fixed).not.toBe(room)
+    expect(Math.hypot(fixed.spawn.position[0], fixed.spawn.position[2]))
+      .toBeGreaterThanOrEqual(LIMITS.SPAWN_CLEARANCE)
+  })
+
+  it('candle does not block or move spawn', () => {
+    const room = makeSpawnRoom([0, 1.7, 0], [{ type: 'candle', position: [0, 0, 0] }])
+    expect(repairGeneratedSpawn(room)).toBe(room)
+  })
+
+  it.each(['torch', 'book', 'paper', 'map', 'chest', 'corpse', 'table', 'altar', 'statue'] as const)(
+    'keeps existing %s layout importance behavior unchanged',
+    (type) => {
+      const raw = type === 'torch'
+        ? { type, position: [0, 3, 0] }
+        : { type, position: [0, 0, 0] }
+      expect(classifyObjectImportance(loadSingleObject(raw))).toBe(
+        type === 'torch' ? 'structural' : 'decorative',
+      )
+    },
+  )
+})
