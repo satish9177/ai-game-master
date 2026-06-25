@@ -39,7 +39,8 @@ Throughout these docs:
   Session Save/Load v0 — browser;
   Demo Quest Loop v0 — browser;
   Consequence Journal v0 — browser;
-  Cost/Usage Guardrails v0 — browser).
+  Cost/Usage Guardrails v0 — browser;
+  Room Inspect Summary v0 — browser).
 - 🔜 **Planned** — designed and approved, not yet built (next slices).
 - ❌ **Not built** — future shape only; documented so we don't paint into a corner.
 
@@ -404,6 +405,50 @@ clear narrative focal idea without adding gameplay systems
   rewards, inventory, loot, combat, story state, living-world simulation, memory,
   or NPC dialogue context. Visible story presentation is intentionally deferred to
   a later `room-inspect-summary-v0` feature.
+
+## Room Inspect Summary v0
+
+✅ **Implemented, browser.** Story Anchors v0 made generated rooms more often
+center on one focal object, but that foundation was invisible to the player.
+Room Inspect Summary v0 surfaces a brief deterministic observational summary at
+every room entry as a dismissible intro panel — no LLM, no schema fields, no
+gameplay semantics
+([ADR-0035](./decisions/ADR-0035-room-inspect-summary-v0.md)).
+
+- **Pure domain summary builder.** `buildRoomSummary(room: LoadedRoom) →
+  RoomSummary | null` is total, deterministic, and side-effect-free. It selects a
+  focal object (reusing `selectGeneratedStoryAnchorIndex`; fallback: first
+  non-exit interactable or NPC) and up to two supporting objects from
+  `room.objects`. Summary text uses the room `name`, a closed hand-written
+  `NOUNS` table keyed on `RoomObject['type']`, and inferred cardinal directions
+  from each object's `position`. Returns `null` when no qualifying focal object
+  exists; null is safe and non-fatal.
+- **No LLM-generated text; no raw generated text.** The noun table, verbs, and
+  direction phrases are hand-written and finite. The function never reads
+  `object.name`, `interaction.title`, `interaction.body`, `interaction.prompt`,
+  skipped objects, or raw generated JSON — only validated `LoadedRoom` data.
+- **No schema fields or storage.** `RoomSummary` is a transient computation
+  result. `schemaVersion` remains `1`. No new backend, API, or memory field.
+- **Presentational `RoomIntroPanel`.** Receives `{ summary: RoomSummary | null,
+  roomKey?: string }`. Renders nothing when `summary` is absent or text is
+  empty. Shows the summary text with a dismiss button (`role="status"` +
+  `aria-live="polite"`). Dismissal is tracked in component-local
+  `RoomIntroPanelState` keyed by `resetKey`; it is never persisted.
+- **Dismissal resets on room entry.** `buildRoomIntroView(room, sessionId,
+  entrySeq) → RoomIntroView` derives a `roomKey` of `sessionId:room.id:entrySeq`.
+  A key change (new room or new session) resets the dismissed state — the panel
+  re-appears for each new room, even if previously dismissed.
+- **Path-agnostic App wiring.** `AppRoomIntro` is rendered for every active room
+  via `AppRoomEntryOverlay`, covering bootstrap/authored, prompt-generated,
+  navigated, and restore/load paths. The existing fallback/repaired notice and the
+  intro panel coexist independently inside `AppRoomEntryOverlay`; neither
+  suppresses the other.
+- **Not changed:** `domain/roomSpec.ts` · `domain/assembleRoom.ts` ·
+  `domain/validateRoom.ts` · `domain/repairRoom.ts` · `domain/generatedRoomComposition.ts`
+  · `world-session/**` · `interactions/**` · `encounters/**` · `dialogue/**` ·
+  `memory/**` · `persistence/**` · `server/**` · `renderer/engine/**` ·
+  `eslint.config.js` · `package.json`. No new gameplay, schema, backend, memory,
+  or generated code.
 
 ## Isometric Camera Foundation
 
@@ -1109,6 +1154,9 @@ App.tsx
   ├─ <SaveLoadBar .../>                 ✅ App-level save/load control (sibling of RoomViewer)
   ├─ usageCount / usageStatus           ✅ App-owned guardrail state (real provider only; in-memory, never persisted)
   ├─ <UsageMeter .../>                  ✅ App-level overlay; null for fake provider (role="status"; aria-live)
+  ├─ <AppRoomEntryOverlay room sessionId entrySeq notice onDismissNotice />  ✅ per-room-entry overlays
+  │    ├─ <RoomIntroPanel summary roomKey />  ✅ dismissible intro; null when no text or dismissed; resetKey resets on new room entry
+  │    └─ repaired/fallback notice (static, dismissible; shown for provenance repaired | fallback)
   └─ RoomViewer.tsx                     (React host — owns the engine lifecycle)
        ├─ loadRoomSpec(throneRoom)       ✅ validation boundary (today: static data)
        ├─ new Engine(container)          ✅ pure Three.js
@@ -1187,7 +1235,7 @@ the raw-prompt seed, and only a room-generator throw/reject is `unavailable`.
 | `renderer/engine/builders/` | `buildShell` (floor + walls, with isometric **cutaway curbs** on the camera-facing walls), `buildLighting`, and the object `registry` + `buildObjects` with mystery-marker fallback and trusted procedural builders for every current `RoomObject["type"]` ([ADR-0033](./decisions/ADR-0033-generated-room-visual-vocabulary-v0.md)). |
 | `renderer/engine/controls/` | `MovementControls` (screen-relative WASD/arrows driving the **player**, room-clamped); `LookControls` (drag-look) **retained but not instantiated** in isometric mode. |
 | `renderer/engine/disposables.ts` | `Disposables` + `disposeObject` — explicit GPU teardown (Three.js does not GC geometries/materials/textures). |
-| `renderer/ui/` | Presentational React overlays: `Hud` (interaction prompt); `DialoguePanel` (result messages); `StatusHud` (read-only player health/inventory/status HUD; `pointer-events:none`; `aria-live`); `playerHud.ts` (pure `projectPlayerHud(WorldState) → PlayerHudView` projection + `PlayerHudView`/`PlayerHudHealth`/`PlayerHudItem` types); `SaveLoadBar.tsx` (save/load bar; receives `{ canSave, hasSave, busy, error, onSave, onContinue }`; calm `role="alert"` errors; no save content shown); `QuestTracker.tsx` (read-only quest tracker; receives `{ view: QuestView }`; renders title + objective done markers; `pointer-events:none`; `role="status"` + `aria-live="polite"`; no service or engine import); `JournalPanel.tsx` (collapsible read-only journal; receives `{ view: JournalView }`; collapsed by default; empty state "Nothing of consequence yet."; `pointer-events:none` for text; interactive collapse toggle; `role="status"` + `aria-live="polite"`; no service or engine import); `UsageMeter.tsx` (local session-cap guardrail overlay; receives `{ count, cap, status, onGenerateAnyway, onReset }`; rendered only when `guardEnabled`; returns `null` when `status === 'inert'`; `role="status"` + `aria-live="polite"`; no `three`, engine internals, or services). |
+| `renderer/ui/` | Presentational React overlays: `Hud` (interaction prompt); `DialoguePanel` (result messages); `StatusHud` (read-only player health/inventory/status HUD; `pointer-events:none`; `aria-live`); `playerHud.ts` (pure `projectPlayerHud(WorldState) → PlayerHudView` projection + `PlayerHudView`/`PlayerHudHealth`/`PlayerHudItem` types); `SaveLoadBar.tsx` (save/load bar; receives `{ canSave, hasSave, busy, error, onSave, onContinue }`; calm `role="alert"` errors; no save content shown); `QuestTracker.tsx` (read-only quest tracker; receives `{ view: QuestView }`; renders title + objective done markers; `pointer-events:none`; `role="status"` + `aria-live="polite"`; no service or engine import); `JournalPanel.tsx` (collapsible read-only journal; receives `{ view: JournalView }`; collapsed by default; empty state "Nothing of consequence yet."; `pointer-events:none` for text; interactive collapse toggle; `role="status"` + `aria-live="polite"`; no service or engine import); `UsageMeter.tsx` (local session-cap guardrail overlay; receives `{ count, cap, status, onGenerateAnyway, onReset }`; rendered only when `guardEnabled`; returns `null` when `status === 'inert'`; `role="status"` + `aria-live="polite"`; no `three`, engine internals, or services); `RoomIntroPanel.tsx` (dismissible room intro panel — see module summary row below); `roomIntroPanelState.ts` (pure dismiss-state helpers). |
 | `renderer/RoomViewer.tsx` | The composition seam: constructs/disposes the engine, bridges engine callbacks to React state. StrictMode-safe (mount → dispose → mount leaks nothing). |
 | `domain/quests/questSpec.ts` | `QuestSpec`/`QuestSpecSchema` — zod-validated authored data descriptor; closed condition vocabulary (`room-flag`, `room-visited`, `has-item`, `has-status`). Imports only `zod`; exports no command/event-producing function. |
 | `domain/quests/evaluateQuest.ts` | Pure `evaluateQuest(spec: QuestSpec, state: WorldState) → QuestView` and the exported pure `evaluateCondition(condition, state): boolean` (shared with the journal projector — previously private, now a one-line export with no behavior change). Total, deterministic, no I/O; reads defensively (optional chaining); missing rooms/flags/visited → `false`, never throws. Covered by co-located `evaluateQuest.test.ts` (pure Vitest, no DOM). |
@@ -1196,6 +1244,10 @@ the raw-prompt seed, and only a room-generator throw/reject is `unavailable`.
 | `domain/journal/projectJournal.ts` | Pure `projectJournal(spec: JournalSpec, state: WorldState) → JournalView`. Total, deterministic, no I/O; reads defensively via the shared `evaluateCondition` (optional chaining); missing rooms/flags/statuses/items → `false`, never throws; emits only true entries in authored order. Covered by co-located `projectJournal.test.ts` (pure Vitest, no DOM). |
 | `domain/examples/demoJournal.ts` | Hand-authored `demoJournalSpec` literal: six entries wired to existing `WorldState` conditions — `throne-room` interaction/encounter flags, `ruined-safehouse` visited, `infected` status, `encounter:walker-encounter` flag, and `royal-writ` inventory. |
 | `domain/usage/usageGuard.ts` | Pure `UsageGuardConfig` / `UsageGuardState` / `UsageGuardStatus` types and four pure helpers: `initialUsageState`, `recordAttempt`, `resetUsage`, `evaluate(state, config) → UsageGuardStatus`. Total, deterministic, no I/O, no mutation; imports nothing. Covered by co-located `usageGuard.test.ts` (pure Vitest, no DOM). |
+| `domain/roomSummary.ts` | Pure `buildRoomSummary(room: LoadedRoom) → RoomSummary \| null` + `RoomSummary`/`RoomSummaryDirection`/`RoomSummaryMention` types. Selects a focal object (reusing `selectGeneratedStoryAnchorIndex`; fallback to first non-exit interactable or NPC), up to two support objects, and composes summary text from a closed hand-written `NOUNS` table + inferred cardinal directions. Never reads `object.name`, `interaction.title/body/prompt`, skipped objects, or raw generated JSON. Returns `null` when no focal object qualifies. Covered by co-located `roomSummary.test.ts` (pure Vitest, no DOM). ([ADR-0035](./decisions/ADR-0035-room-inspect-summary-v0.md)) |
+| `renderer/ui/roomIntroPanelState.ts` | Pure state helpers for panel dismiss tracking: `RoomIntroPanelState` type, `dismissRoomIntroPanel(resetKey) → RoomIntroPanelState`, `isRoomIntroPanelDismissed(state, resetKey) → boolean`. No I/O, no React, no domain import. |
+| `renderer/ui/RoomIntroPanel.tsx` | Presentational dismissible room intro panel. Receives `{ summary: RoomSummary \| null, roomKey?: string }`. Returns `null` when text is empty or the panel is dismissed for the current `resetKey`. Renders summary text and a dismiss button; `role="status"` + `aria-live="polite"`. Imports no engine internals or services. Covered by co-located `RoomIntroPanel.test.tsx` (Vitest + `@testing-library/react`). |
+| `app/roomIntro.ts` | Pure helper: `buildRoomIntroView(room: LoadedRoom, sessionId: string, entrySeq: number) → RoomIntroView`. Derives `summary` via `buildRoomSummary` and `roomKey` as `sessionId:room.id:entrySeq`. Imports no store/service/React. |
 
 ## Generation Foundation v0 — module summary
 
@@ -1242,6 +1294,11 @@ seeds, bible/story/opening-arc text, keywords, generated JSON, and error details
 `buildRestoredPlay` (authored/generated/failed-resolve, purity/no-mutation) and
 `saveSlotStore` (write→read round-trips, absence, throwing-fake for unavailable/quota)
 are covered by pure Vitest tests over in-memory fakes; no DOM/`jsdom` dependency was added.
+`buildRoomSummary` (focal selection, support selection, direction inference, null for
+empty rooms, nouns/text templates, purity/no raw-text reads) is covered by
+`roomSummary.test.ts` (pure Vitest, no DOM). `RoomIntroPanel` (renders summary text,
+hides on dismiss, resets on key change, null for empty/absent summary) is covered by
+`RoomIntroPanel.test.tsx` (Vitest + `@testing-library/react`).
 
 ## Object & entity system (compositional builders)
 

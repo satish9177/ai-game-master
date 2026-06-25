@@ -784,6 +784,45 @@ fake-provider experience is completely unchanged
 - **Known limitations.** No cross-session quota; no hosted enforcement; resets on reload; no
   token-accurate cost; no estimated cost display; fake provider shows no meter.
 
+## 23. Room intro summary display ✅ v0 (browser)
+
+The read-only `RoomIntroPanel` shows a deterministic observational summary of the
+active room at entry and hides on dismiss. Its absence, missing text, or dismissal
+never blocks play; it has no write path and cannot corrupt truth
+([ADR-0035](./decisions/ADR-0035-room-inspect-summary-v0.md)).
+
+| Situation | Detection | Handling / result | Logging |
+| --- | --- | --- | --- |
+| Room has no qualifying focal object (no anchor, no non-exit interactable, no NPC) | `buildRoomSummary` returns `null` (focal index = −1) | `RoomIntroPanel` returns `null`; no panel; play continues normally | — |
+| `summary.text` is empty after trim | `text.length === 0` guard in `RoomIntroPanel` | panel not rendered; no crash | — |
+| Player dismisses the panel | dismiss button → `dismissRoomIntroPanel(resetKey)` sets `dismissed: true` | panel hidden; state is component-local, never persisted | — |
+| Player enters a new room | `resetKey` changes (`sessionId:roomId:entrySeq`) | panel re-appears for the new room even if it was dismissed in a prior room | — |
+| Session save/load | `RoomIntroPanelState` is component-local only | panel starts un-dismissed on load; any prior dismiss is lost (expected — not a save field) | — |
+| Summary would expose object names / interaction bodies | `buildRoomSummary` never reads `object.name`, `interaction.title`, `interaction.body`, `interaction.prompt`, skipped objects, or raw generated JSON | summary text uses only type-derived nouns from a closed hand-written table and spatial direction — no generated or authored free text | — |
+
+- **Summary is deterministic and frontend-local.** `buildRoomSummary` is a pure
+  function of the validated `LoadedRoom`; it does not call the LLM, read
+  `WorldState`, append events, or contact the backend.
+- **Missing summary is safe and non-fatal.** A `null` return renders nothing and
+  never causes repair, fallback, a repaired/fallback notice, or logging.
+- **Weak summary text is possible.** v0 uses simple templates; a room with only
+  non-anchor objects produces a generic description. This is an accepted v0
+  limitation, not a failure to handle.
+- **The fallback/repaired notice remains independent.** The existing provenance
+  notice and the intro panel coexist in `AppRoomEntryOverlay`; one does not
+  suppress or replace the other.
+- **Log-safe.** `buildRoomSummary` is pure and silent; `RoomIntroPanel` is
+  presentational. No new log lines were added to `App`/`RoomViewer`. Room names,
+  object types used for nouns, summary text, `sessionId`, and `entrySeq` are never
+  logged — mirrors the ADR-0003 content-free log discipline.
+- **Not changed:** `domain/roomSpec.ts` · `domain/assembleRoom.ts` ·
+  `domain/validateRoom.ts` · `domain/repairRoom.ts` · `domain/generatedRoomComposition.ts`
+  · `world-session/**` · `interactions/**` · `encounters/**` · `dialogue/**` ·
+  `memory/**` · `persistence/**` · `server/**` · `renderer/engine/**` ·
+  `eslint.config.js` · `package.json`. No new gameplay semantics, quest,
+  objective, inventory, loot, combat, memory, backend, API, schema field, or
+  generated code was added.
+
 ---
 
 ## Summary
@@ -818,6 +857,7 @@ fake-provider experience is completely unchanged
 | 20 | Quest tracker display | `quest === null` guards render; `evaluateQuest` is pure/total/silent; anchor-room gate; defensive optional chaining on all condition reads | absent/null → tracker hidden; missing room/flag/visited → objective `false`; navigation immediately re-projects Obj 3; all idempotent; no write path | ✅ browser |
 | 21 | Consequence journal display | `journal === null` guards render; `projectJournal` is pure/total/silent via shared `evaluateCondition`; anchor-room gate; defensive optional chaining on all condition reads | absent/null → panel hidden; all conditions `false` → empty state "Nothing of consequence yet."; navigation re-projects safehouse entry immediately; all idempotent; no write path | ✅ browser |
 | 22 | Usage guardrail | `guardEnabled` (provider !== `'fake'`); `evaluate(state, config)` derives status per render; `inFlightRef` lock; `confirmGrantedRef` + `pendingPromptRef` for at-cap gate | fake → fully inert; real → count/cap/status drive `UsageMeter`; `at-cap` gates prompt until confirm; in-flight lock prevents double-click; never persisted; reset in-memory only | ✅ browser |
+| 23 | Room intro summary display | `buildRoomSummary` focal selection (anchor → interactable → NPC fallback; returns `null` when none qualify); `text.length === 0` guard in `RoomIntroPanel`; `resetKey` change resets dismiss state | no focal object → no panel; dismissed → panel hidden until next room entry; null summary never blocks play, triggers repair/fallback, or logs; summary text never contains object names, interaction bodies, or raw generated JSON | ✅ browser |
 
 The through-line: **validate at the boundary, degrade visibly and safely, log
 the detail, show the user calm.**
