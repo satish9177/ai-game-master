@@ -32,13 +32,13 @@ import type { RoomObject } from './roomSpec'
  *
  * - 'anchor'       — throne: primary story focal point → north-center anchor zone.
  * - 'npc'          — npc: placed off corridor in a mid-room flank.
- * - 'interactable' — scroll; book/paper/map and resource objects with non-exit
+ * - 'interactable' - scroll; document/practical/resource objects with non-exit
  *                    interaction: placed in a visible reachable flank.
  * - 'exit'         — any object carrying interaction.exit: left for stage 2.8.
  * - 'structural'   — torch only: composition leaves wall-lights in place.
- * - 'decorative'   — pillar, arch (no exit), prop, rug, visual-only documents,
- *                    and resource objects without interaction: relocated to side
- *                    zones when in the corridor.
+ * - 'decorative'   - pillar, arch (no exit), prop, rug, visual-only documents,
+ *                    practical props, and resource objects without interaction:
+ *                    relocated to side zones when in the corridor.
  */
 export type CompositionRole =
   | 'anchor'
@@ -129,6 +129,9 @@ export function classifyGeneratedCompositionRole(obj: RoomObject): CompositionRo
     case 'book':
     case 'paper':
     case 'map':
+    case 'chest':
+    case 'corpse':
+    case 'table':
       return hasNonExitInteraction(obj) ? 'interactable' : 'decorative'
     case 'crate':
     case 'barrel':

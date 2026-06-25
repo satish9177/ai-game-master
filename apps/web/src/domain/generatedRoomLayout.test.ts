@@ -985,3 +985,49 @@ describe('document layout integration', () => {
     expect(repairGeneratedSpawn(room)).toBe(room)
   })
 })
+
+describe('practical prop layout integration', () => {
+  it.each(['chest', 'corpse', 'table'] as const)(
+    '%s is decorative without interaction and critical with interaction',
+    (type) => {
+      const decorative = loadSingleObject({ type, position: [0, 0, 0] })
+      const interactive = loadSingleObject({
+        type,
+        position: [0, 0, 0],
+        interaction: { key: 'E', prompt: 'Inspect', body: 'Validated body.' },
+      })
+      expect(classifyObjectImportance(decorative)).toBe('decorative')
+      expect(classifyObjectImportance(interactive)).toBe('critical')
+    },
+  )
+
+  it('uses conservative positive footprints and repairs practical props fully in bounds', () => {
+    const room = makeRoom([
+      { type: 'chest', position: [100, 0, 0] },
+      { type: 'corpse', position: [0, 0, -100] },
+      { type: 'table', position: [100, 0, 100] },
+    ])
+    const fixed = repairGeneratedObjects(room)
+    const bounds = computePlayableBounds(fixed.shell.dimensions, fixed.shell.wallThickness)
+    expect(fixed.objects).toHaveLength(3)
+    for (const prop of fixed.objects) {
+      const footprint = objectFootprintRadius(prop)
+      expect(footprint).toBeGreaterThan(0)
+      expect(Math.abs(prop.position[0]) + footprint).toBeLessThanOrEqual(bounds.halfX + 1e-9)
+      expect(Math.abs(prop.position[2]) + footprint).toBeLessThanOrEqual(bounds.halfZ + 1e-9)
+    }
+  })
+
+  it.each(['chest', 'corpse', 'table'] as const)('%s blocks and moves a crowded spawn', (type) => {
+    const room = makeSpawnRoom([0, 1.7, 0], [{ type, position: [0, 0, 0] }])
+    const fixed = repairGeneratedSpawn(room)
+    expect(fixed).not.toBe(room)
+    expect(Math.hypot(fixed.spawn.position[0], fixed.spawn.position[2]))
+      .toBeGreaterThanOrEqual(LIMITS.SPAWN_CLEARANCE)
+  })
+
+  it.each(['crate', 'barrel', 'debris'] as const)('keeps existing %s spawn-blocking behavior unchanged', (type) => {
+    const room = makeSpawnRoom([0, 1.7, 0], [{ type, position: [0, 0, 0] }])
+    expect(repairGeneratedSpawn(room)).not.toBe(room)
+  })
+})

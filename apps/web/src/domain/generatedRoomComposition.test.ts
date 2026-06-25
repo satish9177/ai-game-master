@@ -866,3 +866,50 @@ describe('document composition integration', () => {
     expect(classifyGeneratedCompositionRole(scroll)).toBe('interactable')
   })
 })
+
+describe('practical prop composition integration', () => {
+  it.each(['chest', 'corpse', 'table'] as const)(
+    '%s is decorative without interaction and interactable with interaction',
+    (type) => {
+      expect(classifyGeneratedCompositionRole(loadObj({ type, position: [0, 0, 0] })))
+        .toBe('decorative')
+      expect(classifyGeneratedCompositionRole(loadObj({
+        type,
+        position: [0, 0, 0],
+        interaction: { key: 'E', prompt: 'Inspect', body: 'Validated body.' },
+      }))).toBe('interactable')
+    },
+  )
+
+  it('moves an interactive chest to the readable flank and preserves its content', () => {
+    const room = makeRoom([{
+      type: 'chest',
+      position: [0, 0, -2],
+      interaction: { key: 'E', prompt: 'Open chest', body: 'Validated body.' },
+    }])
+    const { room: composed, diagnostics } = composeGeneratedRoom(room)
+    expect(diagnostics.lacksInteractable).toBe(false)
+    expect(Math.abs(composed.objects[0]!.position[0])).toBeGreaterThanOrEqual(
+      COMPOSITION.CORRIDOR_HALF,
+    )
+    const chest = composed.objects[0]
+    expect(chest?.type === 'chest' && chest.interaction?.prompt).toBe('Open chest')
+  })
+
+  it('moves a visual-only table as decorative side clutter', () => {
+    const room = makeRoom([{ type: 'table', position: [0, 0, 0] }])
+    const { room: composed, diagnostics } = composeGeneratedRoom(room)
+    expect(diagnostics.lacksInteractable).toBe(true)
+    expect(Math.abs(composed.objects[0]!.position[0])).toBeGreaterThanOrEqual(
+      COMPOSITION.CORRIDOR_HALF,
+    )
+  })
+
+  it.each(['crate', 'barrel', 'debris', 'book', 'paper', 'map'] as const)(
+    'keeps existing %s non-interactive role unchanged',
+    (type) => {
+      expect(classifyGeneratedCompositionRole(loadObj({ type, position: [0, 0, 0] })))
+        .toBe('decorative')
+    },
+  )
+})

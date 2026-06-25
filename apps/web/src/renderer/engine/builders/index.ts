@@ -5,6 +5,7 @@ import type { Logger } from '../../../platform/logger/Logger'
 import { buildGroundRing } from './indicators'
 import { buildBook, buildMap, buildPaper } from './documents'
 import { buildBarrel, buildBarricade, buildCrate, buildDebris } from './postApocProps'
+import { buildChest, buildCorpse, buildTable } from './practicalProps'
 import { buildHumanoid } from './parts/humanoid'
 
 /**
@@ -63,6 +64,9 @@ const registry = {
   book: buildBook,
   paper: buildPaper,
   map: buildMap,
+  chest: buildChest,
+  corpse: buildCorpse,
+  table: buildTable,
   npc: buildNpc,
   prop: buildProp,
   crate: buildCrate,

@@ -123,6 +123,48 @@ const Map = z.object({
   ...transform,
 })
 
+// Practical prop vocabulary v0. These are inert visual room objects unless the
+// generator provides an existing optional interaction; no inventory, combat, or
+// story behavior is implied by the type alone.
+const Chest = z.object({
+  type: z.literal('chest'),
+  size: z.tuple([
+    z.number().positive(),
+    z.number().positive(),
+    z.number().positive(),
+  ]).default([1.2, 0.8, 0.75]),
+  color: Hex.default('#6b4a2e'),
+  trimColor: Hex.default('#3a2518'),
+  latchColor: Hex.default('#b88a3c'),
+  interaction: Interaction.optional(),
+  ...transform,
+})
+
+const Corpse = z.object({
+  type: z.literal('corpse'),
+  size: z.tuple([
+    z.number().positive(),
+    z.number().positive(),
+    z.number().positive(),
+  ]).default([0.75, 0.24, 1.75]),
+  color: Hex.default('#5a5148'),
+  clothColor: Hex.default('#4f5f4a'),
+  interaction: Interaction.optional(),
+  ...transform,
+})
+
+const Table = z.object({
+  type: z.literal('table'),
+  size: z.tuple([
+    z.number().positive(),
+    z.number().positive(),
+    z.number().positive(),
+  ]).default([1.8, 0.9, 1.1]),
+  color: Hex.default('#6b4a2e'),
+  interaction: Interaction.optional(),
+  ...transform,
+})
+
 const Npc = z.object({
   type: z.literal('npc'),
   name: z.string().min(1),
@@ -205,6 +247,9 @@ export const RoomObjectSchema = z.discriminatedUnion('type', [
   Book,
   Paper,
   Map,
+  Chest,
+  Corpse,
+  Table,
   Npc,
   Prop,
   Crate,

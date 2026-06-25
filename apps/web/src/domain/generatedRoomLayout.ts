@@ -135,6 +135,9 @@ export function classifyObjectImportance(obj: RoomObject): ObjectImportance {
     case 'book':
     case 'paper':
     case 'map':
+    case 'chest':
+    case 'corpse':
+    case 'table':
       return obj.interaction != null ? 'critical' : 'decorative'
     case 'arch':
       return obj.interaction != null ? 'critical' : 'structural'
@@ -199,6 +202,10 @@ function baseFootprint(obj: RoomObject): number {
     case 'paper':
     case 'map':
       return diagRadius(obj.size[0], obj.size[1])
+    case 'chest':
+    case 'corpse':
+    case 'table':
+      return diagRadius(obj.size[0], obj.size[2])
     case 'npc':
       return 0.45
     case 'zombie':
@@ -438,6 +445,9 @@ const GENERATED_SPAWN_BLOCKING_TYPES = new Set<RoomObject['type']>([
   'prop',
   'crate',
   'barrel',
+  'chest',
+  'corpse',
+  'table',
   'barricade',
   'debris',
   'zombie',

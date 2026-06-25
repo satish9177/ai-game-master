@@ -232,3 +232,44 @@ describe('document object schema', () => {
     expect(loaded.skipped.map((item) => item.type)).toEqual(['book', 'paper', 'map'])
   })
 })
+
+describe('practical prop object schema', () => {
+  it.each(['chest', 'corpse', 'table'] as const)(
+    'parses a minimal %s with defaults and no invented interaction',
+    (type) => {
+      const parsed = RoomObjectSchema.parse({ type, position: [1, 0, 2] })
+      expect(parsed.type).toBe(type)
+      expect(parsed.rotationY).toBe(0)
+      expect(parsed.scale).toBe(1)
+      expect('interaction' in parsed).toBe(false)
+    },
+  )
+
+  it.each(['chest', 'corpse', 'table'] as const)(
+    'preserves an optional existing interaction on %s',
+    (type) => {
+      const parsed = RoomObjectSchema.parse({
+        type,
+        position: [0, 0, 0],
+        interaction: { key: 'E', prompt: 'Inspect prop', body: 'Validated text.' },
+      })
+      expect('interaction' in parsed && parsed.interaction?.key).toBe('E')
+    },
+  )
+
+  it('keeps unknown practical-prop-like types skipped', () => {
+    const loaded = loadRoomSpec(minimalRoom([{ type: 'coffer', position: [0, 0, 0] }]))
+    expect(loaded.objects).toEqual([])
+    expect(loaded.skipped[0]?.type).toBe('coffer')
+  })
+
+  it('keeps malformed practical prop objects skipped', () => {
+    const loaded = loadRoomSpec(minimalRoom([
+      { type: 'chest', position: [0, 0, 0], size: [1.2, -0.8, 0.75] },
+      { type: 'corpse', position: [0, 0, 0], clothColor: 'green' },
+      { type: 'table', position: [0, 0, 0], size: [1.8, 0.9] },
+    ]))
+    expect(loaded.objects).toEqual([])
+    expect(loaded.skipped.map((item) => item.type)).toEqual(['chest', 'corpse', 'table'])
+  })
+})
