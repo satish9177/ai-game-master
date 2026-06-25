@@ -153,6 +153,19 @@ body {
   font-weight: 700;
 }
 
+.hud-affordance {
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.35rem;
+  padding: 0 0.45rem;
+  border: 1px solid rgba(243, 234, 210, 0.36);
+  border-radius: 999px;
+  color: #f3ead2;
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
 /* ---------- dialogue / interact panel ---------- */
 .panel-backdrop {
   position: absolute;

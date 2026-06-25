@@ -1,3 +1,6 @@
+import { affordanceFor, type Affordance } from '../interactions/affordance'
+import type { LoadedRoom } from '../loadRoomSpec'
+
 /**
  * Interaction view-model (ADR-0002, BOUNDARIES.md).
  *
@@ -13,10 +16,35 @@ export type Interactable = {
   id?: string
   type: string
   label: string
+  affordance: Affordance
   key: 'E' | 'F'
   prompt: string
   title?: string
   body?: string
   /** World position on the floor plane; used by the engine for proximity. */
   position: { x: number; y: number; z: number }
+}
+
+export function buildInteractables(room: LoadedRoom): Interactable[] {
+  const interactables: Interactable[] = []
+
+  // `interaction` is required on scroll/npc and optional on other supported
+  // objects, so read it as a value rather than trusting the key's presence.
+  for (const o of room.objects) {
+    const interaction = 'interaction' in o ? o.interaction : undefined
+    if (!interaction) continue
+    interactables.push({
+      id: 'id' in o ? o.id : undefined,
+      type: o.type,
+      label: 'name' in o && o.name ? o.name : o.type,
+      affordance: affordanceFor(interaction, o.type),
+      key: interaction.key,
+      prompt: interaction.prompt,
+      title: interaction.title,
+      body: interaction.body,
+      position: { x: o.position[0], y: o.position[1], z: o.position[2] },
+    })
+  }
+
+  return interactables
 }

@@ -12,7 +12,7 @@ import type { CameraController } from './camera/CameraController'
 import { isometricOffsetDirection } from './camera/isometric'
 import { buildPlayerMarker } from './playerMarker'
 import type { Logger } from '../../platform/logger/Logger'
-import type { Interactable } from '../../domain/ports/interaction'
+import { buildInteractables, type Interactable } from '../../domain/ports/interaction'
 
 /**
  * Owns the Three.js renderer, scene, camera, and render loop. Pure Three.js
@@ -103,23 +103,7 @@ export class Engine {
     }
     this.movement = new MovementControls()
 
-    // Collect interactables (objects carrying an `interaction`) for proximity.
-    // `interaction` is required on scroll/npc and optional on other supported
-    // objects, so read it as a value rather than trusting the key's presence.
-    for (const o of room.objects) {
-      const interaction = 'interaction' in o ? o.interaction : undefined
-      if (!interaction) continue
-      this.interactables.push({
-        id: 'id' in o ? o.id : undefined,
-        type: o.type,
-        label: 'name' in o && o.name ? o.name : o.type,
-        key: interaction.key,
-        prompt: interaction.prompt,
-        title: interaction.title,
-        body: interaction.body,
-        position: { x: o.position[0], y: o.position[1], z: o.position[2] },
-      })
-    }
+    this.interactables.push(...buildInteractables(room))
     window.addEventListener('keydown', this.onInteractKey)
 
     this.logger.info('room received', {
