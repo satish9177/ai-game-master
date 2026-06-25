@@ -3,6 +3,7 @@ import { assembleRoom } from './assembleRoom'
 import type { RoomDiagnostics } from './assembleRoom'
 import { loadRoomSpec } from './loadRoomSpec'
 import type { LoadedRoom } from './loadRoomSpec'
+import { buildInteractables } from './ports/interaction'
 import { validateRoom } from './validateRoom'
 import { fallbackRoom } from './examples/fallbackRoom'
 
@@ -296,6 +297,7 @@ describe('assembleRoom', () => {
       'warningCount',
       'aliasesRepaired',
       'objectTransformsRepaired',
+      'purposesAssigned',
       'skippedObjectReasonCounts',
     ])
 
@@ -323,6 +325,7 @@ describe('assembleRoom', () => {
       expect(typeof diagnostics.warningCount).toBe('number')
       expect(typeof diagnostics.aliasesRepaired).toBe('number')
       expect(typeof diagnostics.objectTransformsRepaired).toBe('number')
+      expect(typeof diagnostics.purposesAssigned).toBe('number')
       expect(typeof diagnostics.skippedObjectReasonCounts).toBe('object')
       expect(diagnostics.skippedObjectReasonCounts).not.toBeNull()
       for (const val of Object.values(diagnostics.skippedObjectReasonCounts)) {
@@ -826,6 +829,217 @@ describe('assembleRoom', () => {
     expect(result.diagnostics.lacksInteractable).toBe(false)
     expect(result.room.objects.map((object) => object.type)).toEqual(['machine', 'artifact', 'candle'])
     expect(validateRoom(result.room).ok).toBe(true)
+  })
+
+  // --- generated-room object purpose assignment (generated-room-object-purpose-v0 Slice 2) ---
+  //
+  // Stage 2.10 assigns safe, presentation-only interactions to allowlisted
+  // generated objects after geometry/composition/spawn/exit repair and before
+  // final validation. It never runs on direct loadRoomSpec authored/static/
+  // restored paths, and fallback diagnostics report zero assignments.
+
+  it('assigns synthesized interactions to bare generated allowlisted objects after assembleRoom', () => {
+    const result = assembleRoom(raw(validSpec({
+      shell: { dimensions: { width: 18, depth: 18, height: 4 }, exits: [{ side: 'north', width: 3 }] },
+      spawn: { position: [0, 1.7, 5] },
+      objects: [
+        { type: 'book', position: [-6, 0, -1] },
+        { type: 'map', position: [-4, 0, -1] },
+        { type: 'chest', position: [-2, 0, -1] },
+        { type: 'crate', position: [0, 0, -1] },
+        { type: 'barrel', position: [2, 0, -1] },
+        { type: 'corpse', position: [4, 0, -1] },
+        { type: 'table', position: [6, 0, -1] },
+        { type: 'machine', position: [-4, 0, 1] },
+        { type: 'altar', position: [-2, 0, 1] },
+        { type: 'statue', position: [0, 0, 1] },
+        { type: 'artifact', position: [2, 0, 1] },
+      ],
+    })), fallback)
+
+    const prompts = new Map(result.room.objects.map((object) => [
+      object.type,
+      'interaction' in object ? object.interaction?.prompt : undefined,
+    ]))
+
+    expect(result.diagnostics.provenance).toBe('generated')
+    expect(result.diagnostics.failedStage).toBeUndefined()
+    expect(result.diagnostics.repairAttempted).toBe(false)
+    expect(result.diagnostics.purposesAssigned).toBe(11)
+    expect(prompts.get('book')).toBe('Read')
+    expect(prompts.get('map')).toBe('Read')
+    expect(prompts.get('chest')).toBe('Inspect')
+    expect(prompts.get('crate')).toBe('Inspect')
+    expect(prompts.get('barrel')).toBe('Inspect')
+    expect(prompts.get('corpse')).toBe('Inspect')
+    expect(prompts.get('table')).toBe('Inspect')
+    expect(prompts.get('machine')).toBe('Inspect')
+    expect(prompts.get('altar')).toBe('Examine')
+    expect(prompts.get('statue')).toBe('Examine')
+    expect(prompts.get('artifact')).toBe('Examine')
+    expect(validateRoom(result.room).ok).toBe(true)
+  })
+
+  it('counts only newly synthesized purposes and keeps provenance generated', () => {
+    const result = assembleRoom(raw(validSpec({
+      shell: { dimensions: { width: 18, depth: 18, height: 4 }, exits: [{ side: 'north', width: 3 }] },
+      spawn: { position: [0, 1.7, 5] },
+      objects: [
+        { type: 'book', position: [-2, 0, 0] },
+        {
+          type: 'chest',
+          position: [0, 0, 0],
+          interaction: { key: 'E', prompt: 'Open', body: 'Existing generated interaction.' },
+        },
+        { type: 'statue', position: [2, 0, 0] },
+        { type: 'torch', position: [7, 2.2, 7] },
+      ],
+    })), fallback)
+
+    expect(result.diagnostics.provenance).toBe('generated')
+    expect(result.diagnostics.failedStage).toBeUndefined()
+    expect(result.diagnostics.repairAttempted).toBe(false)
+    expect(result.diagnostics.purposesAssigned).toBe(2)
+  })
+
+  it('preserves existing generated interactions and does not overwrite them', () => {
+    const result = assembleRoom(raw(validSpec({
+      shell: { dimensions: { width: 18, depth: 18, height: 4 }, exits: [{ side: 'north', width: 3 }] },
+      spawn: { position: [0, 1.7, 5] },
+      objects: [
+        {
+          type: 'chest',
+          position: [0, 0, 0],
+          interaction: {
+            key: 'E',
+            prompt: 'Search cache',
+            body: 'Existing safe body.',
+            effect: { kind: 'inspect', flag: 'cache-seen' },
+          },
+        },
+      ],
+    })), fallback)
+
+    const chest = result.room.objects[0]!
+    const interaction = 'interaction' in chest ? chest.interaction : undefined
+
+    expect(result.diagnostics.purposesAssigned).toBe(0)
+    expect(interaction).toEqual({
+      key: 'E',
+      prompt: 'Search cache',
+      body: 'Existing safe body.',
+      effect: { kind: 'inspect', flag: 'cache-seen' },
+    })
+  })
+
+  it('leaves unsupported and excluded generated object types unchanged', () => {
+    const result = assembleRoom(raw(validSpec({
+      shell: { dimensions: { width: 18, depth: 18, height: 4 }, exits: [{ side: 'north', width: 3 }] },
+      spawn: { position: [0, 1.7, 5] },
+      objects: [
+        { type: 'throne', position: [0, 0, -6] },
+        { type: 'arch', position: [0, 0, -8] },
+        { type: 'pillar', position: [-4, 0, -4] },
+        { type: 'rug', position: [0, 0.01, 0] },
+        { type: 'torch', position: [7, 2.2, -7] },
+        { type: 'candle', position: [2, 0.8, 2] },
+        { type: 'prop', position: [3, 0, 3] },
+        { type: 'debris', position: [-3, 0, 3] },
+        { type: 'barricade', position: [4, 0, 0] },
+        { type: 'zombie', name: 'Shambler', position: [-4, 0, 0] },
+        {
+          type: 'scroll',
+          position: [4, 0, 2],
+          interaction: { key: 'E', prompt: 'Read scroll', body: 'Existing scroll body.' },
+        },
+        {
+          type: 'npc',
+          name: 'Mira',
+          position: [-4, 0, 2],
+          interaction: { key: 'F', prompt: 'Talk', body: 'Existing NPC body.' },
+        },
+      ],
+    })), fallback)
+
+    expect(result.diagnostics.purposesAssigned).toBe(0)
+    for (const object of result.room.objects) {
+      if (object.type === 'scroll' || object.type === 'npc') {
+        expect('interaction' in object ? object.interaction : undefined).toBeDefined()
+      } else {
+        expect(object).not.toHaveProperty('interaction')
+      }
+    }
+  })
+
+  it('does not run purpose assignment on direct loadRoomSpec authored/static/restored paths', () => {
+    const loaded = loadRoomSpec({
+      schemaVersion: 1,
+      id: 'authored',
+      name: 'Authored Room',
+      shell: { dimensions: { width: 8, depth: 8, height: 4 } },
+      spawn: { position: [0, 1.7, 0] },
+      objects: [
+        { type: 'book', position: [0, 0, 0] },
+        { type: 'chest', position: [2, 0, 0] },
+      ],
+    })
+
+    expect(loaded.objects).toHaveLength(2)
+    expect(loaded.objects[0]).not.toHaveProperty('interaction')
+    expect(loaded.objects[1]).not.toHaveProperty('interaction')
+    expect(buildInteractables(loaded)).toEqual([])
+  })
+
+  it('fallback branches report purposesAssigned 0 and do not mutate the authored fallback room', () => {
+    const fallbackBefore = JSON.parse(JSON.stringify(fallback))
+    const semanticWithAssignableObject = raw(validSpec({
+      shell: { dimensions: { width: 18, depth: 18, height: 400 }, exits: [{ side: 'north', width: 3 }] },
+      objects: [{ type: 'book', position: [0, 0, 0] }],
+    }))
+
+    for (const input of [
+      RAW_INVALID_JSON,
+      RAW_INVALID_SCHEMA,
+      RAW_UNREPAIRABLE,
+      RAW_REPAIR_THEN_FAIL,
+      semanticWithAssignableObject,
+    ]) {
+      const { room, diagnostics } = assembleRoom(input, fallback)
+      expect(room).toBe(fallback)
+      expect(diagnostics.provenance).toBe('fallback')
+      expect(diagnostics.purposesAssigned).toBe(0)
+    }
+    expect(fallback).toEqual(fallbackBefore)
+  })
+
+  it('synthesized interactions become buildInteractables/HUD eligible with inspect affordance', () => {
+    const result = assembleRoom(raw(validSpec({
+      shell: { dimensions: { width: 18, depth: 18, height: 4 }, exits: [{ side: 'north', width: 3 }] },
+      spawn: { position: [0, 1.7, 5] },
+      objects: [
+        { id: 'generated-book', type: 'book', position: [-2, 0, 0] },
+        { id: 'generated-chest', type: 'chest', position: [2, 0, 0] },
+      ],
+    })), fallback)
+
+    const byId = new Map(buildInteractables(result.room).map((interactable) => [
+      interactable.id,
+      interactable,
+    ]))
+
+    expect(result.diagnostics.purposesAssigned).toBe(2)
+    expect(byId.get('generated-book')).toMatchObject({
+      type: 'book',
+      affordance: 'inspect',
+      key: 'E',
+      prompt: 'Read',
+    })
+    expect(byId.get('generated-chest')).toMatchObject({
+      type: 'chest',
+      affordance: 'inspect',
+      key: 'E',
+      prompt: 'Inspect',
+    })
   })
 
   // --- generated-room optional transform repair (Slice 7F) ---

@@ -57,7 +57,10 @@ export class GeneratedRoomSource implements RoomSource {
     try {
       raw = await this.generator.generate(this.prompt)
     } catch (err) {
-      this.log.error('room generation failed', { error: describeError(err) })
+      this.log.error('room generation failed', {
+        error: describeError(err),
+        purposesAssigned: 0,
+      })
       return fail('unavailable', GENERATION_UNAVAILABLE_MESSAGE)
     }
 
@@ -88,6 +91,7 @@ export class GeneratedRoomSource implements RoomSource {
       warningCount: diagnostics.warningCount,
       aliasesRepaired: diagnostics.aliasesRepaired,
       objectTransformsRepaired: diagnostics.objectTransformsRepaired,
+      purposesAssigned: diagnostics.purposesAssigned,
       skippedObjectReasonCounts: diagnostics.skippedObjectReasonCounts,
     }
     // A clean generated room is the happy path (info); a repair or fallback is a

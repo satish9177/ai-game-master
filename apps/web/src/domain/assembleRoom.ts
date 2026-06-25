@@ -7,6 +7,7 @@ import { clampGeneratedShell, repairGeneratedObjects, repairGeneratedSpawn, repa
 import { composeGeneratedRoom } from './generatedRoomComposition'
 import { repairGeneratedAliases } from './generatedRoomAliases'
 import { repairGeneratedObjectTransforms } from './generatedRoomObjectTransforms'
+import { assignGeneratedObjectPurpose } from './generatedRoomObjectPurpose'
 
 /**
  * Room assembly pipeline (room-generation-repair-fallback v0). A pure,
@@ -119,6 +120,12 @@ export type RoomDiagnostics = {
    */
   objectTransformsRepaired: number
   /**
+   * Number of generated room objects that received a safe, presentation-only
+   * interaction purpose. Count-only: never object names, ids, prompts, raw JSON,
+   * or generated text. Always 0 for all fallback paths.
+   */
+  purposesAssigned: number
+  /**
    * Aggregate count of skipped object entries by validation failure reason,
    * as classified by the lenient loader. Count-only: no raw type strings or
    * field values are stored. For fallback rooms the counts reflect the authored
@@ -200,15 +207,24 @@ export function assembleRoom(
   const exitsFixed = repairGeneratedExits(spawnFixed)
   const exitsRepaired = exitsFixed !== spawnFixed
 
+  // Stage 2.10 — assign presentation-only purposes to safe generated objects
+  // that currently lack an interaction. This is generated-room-only because
+  // authored/static/fallback/restored rooms never enter assembleRoom. It does
+  // not affect geometry, exits, effects, encounters, quests, inventory, or world
+  // state, and it returns only a count for diagnostics.
+  const purposeResult = assignGeneratedObjectPurpose(exitsFixed)
+  const purposeFixed = purposeResult.room
+  const { purposesAssigned } = purposeResult
+
   // Stage 3 — semantic playability. No fatal issue → accept as generated. Benign
   // normalizations (Stages 2.5–2.9) keep provenance `generated` and show no notice;
   // they are reported via `sizeRepaired`/`objectsRepaired`/`spawnRepaired`/
   // `exitsRepaired` for logs only. A `repairRoom` pass (Stage 4) is the only
   // thing that yields `repaired`.
-  const initial = validateRoom(exitsFixed)
+  const initial = validateRoom(purposeFixed)
   if (initial.ok) {
     return {
-      room: exitsFixed,
+      room: purposeFixed,
       diagnostics: {
         provenance: 'generated',
         sizeRepaired,
@@ -225,7 +241,8 @@ export function assembleRoom(
         warningCount: countWarnings(initial),
         aliasesRepaired,
         objectTransformsRepaired,
-        skippedObjectReasonCounts: exitsFixed.skippedObjectReasonCounts,
+        purposesAssigned,
+        skippedObjectReasonCounts: purposeFixed.skippedObjectReasonCounts,
       },
     }
   }
@@ -237,7 +254,7 @@ export function assembleRoom(
   // repairable fatals that are not covered by generated-room normalizers.
   // repairRoom itself remains unit-tested directly.
   const initialFatalCodes = distinctFatalCodes(initial)
-  const repaired = repairRoom(exitsFixed)
+  const repaired = repairRoom(purposeFixed)
   const revalidated = validateRoom(repaired)
   if (revalidated.ok) {
     return {
@@ -258,6 +275,7 @@ export function assembleRoom(
         warningCount: countWarnings(revalidated),
         aliasesRepaired,
         objectTransformsRepaired,
+        purposesAssigned,
         skippedObjectReasonCounts: repaired.skippedObjectReasonCounts,
       },
     }
@@ -284,6 +302,7 @@ export function assembleRoom(
       warningCount: countWarnings(validateRoom(fallbackRoom)),
       aliasesRepaired: 0,
       objectTransformsRepaired: 0,
+      purposesAssigned: 0,
       skippedObjectReasonCounts: fallbackRoom.skippedObjectReasonCounts,
     },
   }
@@ -313,6 +332,7 @@ function toFallback(
       warningCount: countWarnings(validateRoom(fallbackRoom)),
       aliasesRepaired: 0,
       objectTransformsRepaired: 0,
+      purposesAssigned: 0,
       skippedObjectReasonCounts: fallbackRoom.skippedObjectReasonCounts,
     },
   }

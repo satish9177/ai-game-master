@@ -2,6 +2,14 @@ import type { LoadedRoom } from './loadRoomSpec'
 import type { RoomObject } from './roomSpec'
 
 type PurposePrompt = 'Read' | 'Inspect' | 'Examine'
+type InteractionCapableObject = RoomObject extends infer ObjectVariant
+  ? ObjectVariant extends RoomObject
+    ? 'interaction' extends keyof ObjectVariant
+      ? ObjectVariant
+      : never
+    : never
+  : never
+type PurposeAssignableType = InteractionCapableObject['type']
 
 const PURPOSE_PROMPTS = {
   book: 'Read',
@@ -16,7 +24,7 @@ const PURPOSE_PROMPTS = {
   altar: 'Examine',
   statue: 'Examine',
   artifact: 'Examine',
-} as const satisfies Partial<Record<RoomObject['type'], PurposePrompt>>
+} as const satisfies Partial<Record<PurposeAssignableType, PurposePrompt>>
 
 export type GeneratedObjectPurposeResult = {
   room: LoadedRoom

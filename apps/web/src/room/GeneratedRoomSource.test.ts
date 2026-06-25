@@ -147,7 +147,7 @@ describe('GeneratedRoomSource', () => {
   })
 
   it('generator rejects → ok:false, code unavailable (the retry path)', async () => {
-    const { logger } = createSpyLogger()
+    const { logger, entries } = createSpyLogger()
     const result = await newSource(
       generatorRejecting(new Error('network down')),
       'p',
@@ -158,6 +158,8 @@ describe('GeneratedRoomSource', () => {
       expect(result.error.code).toBe('unavailable')
       expect(result.error.message).toBe('Could not generate a room. Please try again.')
     }
+    expect(entries).toHaveLength(1)
+    expect(entries[0]!.context.purposesAssigned).toBe(0)
   })
 
   it('lenient bad object → ok:true generated, warnings/skipped preserved', async () => {
@@ -189,6 +191,7 @@ describe('GeneratedRoomSource', () => {
     expect(typeof entry.context.warningCount).toBe('number')
     expect(typeof entry.context.aliasesRepaired).toBe('number')
     expect(typeof entry.context.objectTransformsRepaired).toBe('number')
+    expect(typeof entry.context.purposesAssigned).toBe('number')
     expect(typeof entry.context.skippedObjectReasonCounts).toBe('object')
   })
 
@@ -336,6 +339,7 @@ describe('GeneratedRoomSource', () => {
       expect(entry).toBeDefined()
       expect(entry!.context.aliasesRepaired).toBe(0)
       expect(entry!.context.objectTransformsRepaired).toBe(0)
+      expect(entry!.context.purposesAssigned).toBe(0)
     }
   })
 
