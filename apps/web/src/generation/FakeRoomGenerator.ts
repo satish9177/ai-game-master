@@ -35,6 +35,10 @@ const WALL_COLORS = ['#6b6355', '#5a5347', '#6a5f52', '#585a52', '#625a4e'] as c
 const PROP_COLORS = ['#8a7d5a', '#6f7a8a', '#8a5a5a', '#5a8a6f', '#7a6f8a', '#888888'] as const
 const PROP_SHAPES = ['box', 'cylinder', 'cone', 'sphere'] as const
 const NPC_NAMES = ['Malik', 'Bram', 'Sera', 'Torval', 'Lyra', 'Garrick', 'Edda', 'Roan'] as const
+const ANCHOR_TYPES = ['throne', 'altar', 'statue'] as const
+const DOCUMENT_TYPES = ['scroll', 'book', 'paper', 'map'] as const
+const PRACTICAL_TYPES = ['chest', 'corpse', 'table'] as const
+const STRANGE_TYPES = ['machine', 'artifact', 'candle'] as const
 
 /** Snap to a 0.5 m grid so coordinates stay tidy and round-trip cleanly. */
 const snap = (v: number): number => Math.round(v * 2) / 2
@@ -45,6 +49,50 @@ const round1 = (v: number): number => Math.round(v * 10) / 10
 const clampPrompt = (prompt: string, max: number): string => {
   const normalized = prompt.trim().replace(/\s+/g, ' ')
   return normalized.length > max ? normalized.slice(0, max) : normalized
+}
+
+/** Stable prompt-salted choice that does not perturb the room-shape PRNG stream. */
+function pickForPrompt<const T extends readonly string[]>(prompt: string, salt: string, choices: T): T[number] {
+  return choices[xmur3(`${salt}:${prompt}`)() % choices.length]!
+}
+
+function buildAnchor(type: (typeof ANCHOR_TYPES)[number], z: number): unknown {
+  switch (type) {
+    case 'altar':
+    case 'statue':
+      return { type, position: [0, 0, z], rotationY: 180 }
+    default:
+      return { type: 'throne', position: [0, 0, z], rotationY: 180 }
+  }
+}
+
+function buildDocument(
+  type: (typeof DOCUMENT_TYPES)[number],
+  position: [number, number, number],
+  label: string,
+): unknown {
+  if (type === 'scroll') {
+    return {
+      type,
+      position: [position[0], 0.5, position[2]],
+      interaction: {
+        key: 'E',
+        prompt: 'Press E to read the scroll',
+        body: label ? `The scroll reads: "${label}"` : 'The scroll is blank.',
+      },
+    }
+  }
+  if (type === 'map') return { type, position, rotationY: 12 }
+  if (type === 'book') return { type, position, rotationY: -18 }
+  return { type, position, rotationY: 8 }
+}
+
+function buildPracticalProp(type: (typeof PRACTICAL_TYPES)[number], position: [number, number, number]): unknown {
+  return { type, position, rotationY: type === 'corpse' ? -22 : 14 }
+}
+
+function buildStrangeProp(type: (typeof STRANGE_TYPES)[number], position: [number, number, number]): unknown {
+  return { type, position, rotationY: type === 'candle' ? 0 : -12 }
 }
 
 /** Build the room as a plain JSON-shaped value (data only, never typed code). */
@@ -81,8 +129,8 @@ function buildRoom(prompt: string): unknown {
 
   const objects: unknown[] = []
 
-  // Throne at the north end, facing the room (yaw 180 → -Z north).
-  objects.push({ type: 'throne', position: [0, 0, snap(-halfD + 2)], rotationY: 180 })
+  // Focal anchor at the north end, facing the room (yaw 180 → -Z north).
+  objects.push(buildAnchor(pickForPrompt(prompt, 'anchor', ANCHOR_TYPES), snap(-halfD + 2)))
 
   // Central rug, lifted a hair off the floor to avoid z-fighting.
   objects.push({ type: 'rug', position: [0, 0.01, 0], size: [4, snap(halfD)] })
@@ -101,18 +149,22 @@ function buildRoom(prompt: string): unknown {
     }
   }
 
-  // Sometimes a readable scroll; the prompt appears only as inert body text.
-  if (rng.bool(0.6)) {
-    objects.push({
-      type: 'scroll',
-      position: [snap(rng.range(-halfW + 2, halfW - 2)), 0.5, snap(rng.range(-2, 2))],
-      interaction: {
-        key: 'E',
-        prompt: 'Press E to read the scroll',
-        body: label ? `The scroll reads: "${label}"` : 'The scroll is blank.',
-      },
-    })
+  // Deterministic vocabulary sample for browser QA; all still pure RoomSpec data.
+  const primaryDocument = pickForPrompt(prompt, 'document-a', DOCUMENT_TYPES)
+  const secondaryDocument = pickForPrompt(prompt, 'document-b', DOCUMENT_TYPES)
+  objects.push(buildDocument(primaryDocument, [snap(-halfW + 2.2), 0, snap(-1.5)], label))
+  if (secondaryDocument !== primaryDocument && rng.bool(0.55)) {
+    objects.push(buildDocument(secondaryDocument, [snap(halfW - 2.2), 0, snap(1.2)], label))
   }
+
+  objects.push(buildPracticalProp(
+    pickForPrompt(prompt, 'practical', PRACTICAL_TYPES),
+    [snap(-halfW + 2.3), 0, snap(halfD * 0.2)],
+  ))
+  objects.push(buildStrangeProp(
+    pickForPrompt(prompt, 'strange', STRANGE_TYPES),
+    [snap(halfW - 2.3), 0, snap(-halfD * 0.2)],
+  ))
 
   // Often an NPC with a name and a talk interaction.
   if (rng.bool(0.75)) {
