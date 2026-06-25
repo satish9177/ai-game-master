@@ -87,6 +87,7 @@ export class GeneratedRoomSource implements RoomSource {
       skippedObjectCount: diagnostics.skippedObjectCount,
       warningCount: diagnostics.warningCount,
       aliasesRepaired: diagnostics.aliasesRepaired,
+      objectTransformsRepaired: diagnostics.objectTransformsRepaired,
       skippedObjectReasonCounts: diagnostics.skippedObjectReasonCounts,
     }
     // A clean generated room is the happy path (info); a repair or fallback is a

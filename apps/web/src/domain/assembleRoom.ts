@@ -6,6 +6,7 @@ import type { RoomIssueCode, RoomValidationResult } from './validateRoom'
 import { clampGeneratedShell, repairGeneratedObjects, repairGeneratedSpawn, repairGeneratedExits } from './generatedRoomLayout'
 import { composeGeneratedRoom } from './generatedRoomComposition'
 import { repairGeneratedAliases } from './generatedRoomAliases'
+import { repairGeneratedObjectTransforms } from './generatedRoomObjectTransforms'
 
 /**
  * Room assembly pipeline (room-generation-repair-fallback v0). A pure,
@@ -111,6 +112,13 @@ export type RoomDiagnostics = {
    */
   aliasesRepaired: number
   /**
+   * Number of object entries whose malformed optional transform fields
+   * (`rotationY` / `scale`) were removed before loadRoomSpec so schema defaults
+   * could apply. Count-only: raw values are never stored or logged. Always 0 for
+   * all fallback paths.
+   */
+  objectTransformsRepaired: number
+  /**
    * Aggregate count of skipped object entries by validation failure reason,
    * as classified by the lenient loader. Count-only: no raw type strings or
    * field values are stored. For fallback rooms the counts reflect the authored
@@ -141,7 +149,15 @@ export function assembleRoom(
   // canonical RoomSpec type strings before Zod validation runs. Authored/static/
   // fallback rooms never enter assembleRoom, so this only ever touches generated-
   // room JSON. Only the count is kept for diagnostics; alias strings are not logged.
-  const { value: repairedParsed, count: aliasesRepaired } = repairGeneratedAliases(parsed)
+  const { value: aliasesRepairedParsed, count: aliasesRepaired } = repairGeneratedAliases(parsed)
+
+  // Stage 1.6 — optional transform repair. Remove malformed generated-object
+  // `rotationY`/`scale` fields before loadRoomSpec so schema defaults apply.
+  // This is generated-room-only, benign, count-only, and never coerces values.
+  const {
+    value: repairedParsed,
+    count: objectTransformsRepaired,
+  } = repairGeneratedObjectTransforms(aliasesRepairedParsed)
 
   // Stage 2 — schema boundary. A broken envelope throws; bad objects are skipped
   // leniently (and surface as skippedObjectCount, not a failure).
@@ -208,6 +224,7 @@ export function assembleRoom(
         skippedObjectCount: exitsFixed.skipped.length,
         warningCount: countWarnings(initial),
         aliasesRepaired,
+        objectTransformsRepaired,
         skippedObjectReasonCounts: exitsFixed.skippedObjectReasonCounts,
       },
     }
@@ -240,6 +257,7 @@ export function assembleRoom(
         skippedObjectCount: repaired.skipped.length,
         warningCount: countWarnings(revalidated),
         aliasesRepaired,
+        objectTransformsRepaired,
         skippedObjectReasonCounts: repaired.skippedObjectReasonCounts,
       },
     }
@@ -265,6 +283,7 @@ export function assembleRoom(
       skippedObjectCount: fallbackRoom.skipped.length,
       warningCount: countWarnings(validateRoom(fallbackRoom)),
       aliasesRepaired: 0,
+      objectTransformsRepaired: 0,
       skippedObjectReasonCounts: fallbackRoom.skippedObjectReasonCounts,
     },
   }
@@ -293,6 +312,7 @@ function toFallback(
       skippedObjectCount: fallbackRoom.skipped.length,
       warningCount: countWarnings(validateRoom(fallbackRoom)),
       aliasesRepaired: 0,
+      objectTransformsRepaired: 0,
       skippedObjectReasonCounts: fallbackRoom.skippedObjectReasonCounts,
     },
   }

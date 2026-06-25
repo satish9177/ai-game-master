@@ -68,6 +68,12 @@ const SPEC_WITH_BAD_OBJECT = JSON.stringify({
     { type: 'pillar', position: 'not-a-vec' }, // invalid → skipped leniently
   ],
 })
+const SPEC_WITH_BAD_TRANSFORMS = JSON.stringify({
+  ...base,
+  objects: [
+    { type: 'book', position: [1, 0, 1], rotationY: 'SECRET-ROTATION', scale: 'SECRET-SCALE' },
+  ],
+})
 const BAD_ENVELOPE = JSON.stringify({ schemaVersion: 1, id: 'x' }) // missing name/shell/spawn/objects
 const MALFORMED_JSON = '{ not valid json'
 
@@ -182,6 +188,7 @@ describe('GeneratedRoomSource', () => {
     expect(entry.context.skippedObjectCount).toBe(0)
     expect(typeof entry.context.warningCount).toBe('number')
     expect(typeof entry.context.aliasesRepaired).toBe('number')
+    expect(typeof entry.context.objectTransformsRepaired).toBe('number')
     expect(typeof entry.context.skippedObjectReasonCounts).toBe('object')
   })
 
@@ -280,6 +287,23 @@ describe('GeneratedRoomSource', () => {
     expect(dump).not.toContain('"skeleton"')
   })
 
+  it('logs objectTransformsRepaired count only and does not log raw transform values', async () => {
+    const { logger, entries } = createSpyLogger()
+    const result = await newSource(generatorReturning(SPEC_WITH_BAD_TRANSFORMS), 'p', logger).getRoom()
+
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.provenance).toBe('generated')
+      expect(result.room.objects).toHaveLength(1)
+      expect(result.room.skipped).toHaveLength(0)
+    }
+    expect(entries).toHaveLength(1)
+    expect(entries[0]!.context.objectTransformsRepaired).toBe(1)
+    const dump = JSON.stringify(entries)
+    expect(dump).not.toContain('SECRET-ROTATION')
+    expect(dump).not.toContain('SECRET-SCALE')
+  })
+
   it('logs skippedObjectReasonCounts as integer counts with no raw type strings', async () => {
     // Three objects: one unknown type ("chair"), one missing scroll interaction,
     // one valid pillar. Expect 2 skipped, counts logged as integers only.
@@ -311,6 +335,7 @@ describe('GeneratedRoomSource', () => {
       const entry = entries.find((e) => e.context.provenance === 'fallback')
       expect(entry).toBeDefined()
       expect(entry!.context.aliasesRepaired).toBe(0)
+      expect(entry!.context.objectTransformsRepaired).toBe(0)
     }
   })
 

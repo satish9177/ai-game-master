@@ -100,6 +100,22 @@ const RAW_UNMAPPED_ALIAS = raw(
     objects: [{ type: 'lamp', position: [1, 0, 1] }],
   }),
 )
+const RAW_MALFORMED_TRANSFORMS = raw(
+  validSpec({
+    shell: { dimensions: { width: 18, depth: 18, height: 4 }, exits: [{ side: 'north', width: 3 }] },
+    objects: [
+      { type: 'book', position: [-2, 0, 0], rotationY: '45deg' },
+      { type: 'chest', position: [2, 0, 0], scale: 'large' },
+      { type: 'map', position: [0, 0, -2], rotationY: null, scale: 0 },
+    ],
+  }),
+)
+const RAW_ALIAS_AND_TRANSFORM = raw(
+  validSpec({
+    shell: { dimensions: { width: 18, depth: 18, height: 4 }, exits: [{ side: 'north', width: 3 }] },
+    objects: [{ type: 'desk', position: [2, 0, 2], rotationY: 'bad', scale: 'large' }],
+  }),
+)
 
 // Object with X position well outside 18×18 room bounds → position clamped.
 const RAW_OUT_OF_BOUNDS_OBJ = raw(
@@ -279,6 +295,7 @@ describe('assembleRoom', () => {
       'skippedObjectCount',
       'warningCount',
       'aliasesRepaired',
+      'objectTransformsRepaired',
       'skippedObjectReasonCounts',
     ])
 
@@ -305,6 +322,7 @@ describe('assembleRoom', () => {
       expect(typeof diagnostics.skippedObjectCount).toBe('number')
       expect(typeof diagnostics.warningCount).toBe('number')
       expect(typeof diagnostics.aliasesRepaired).toBe('number')
+      expect(typeof diagnostics.objectTransformsRepaired).toBe('number')
       expect(typeof diagnostics.skippedObjectReasonCounts).toBe('object')
       expect(diagnostics.skippedObjectReasonCounts).not.toBeNull()
       for (const val of Object.values(diagnostics.skippedObjectReasonCounts)) {
@@ -808,6 +826,112 @@ describe('assembleRoom', () => {
     expect(result.diagnostics.lacksInteractable).toBe(false)
     expect(result.room.objects.map((object) => object.type)).toEqual(['machine', 'artifact', 'candle'])
     expect(validateRoom(result.room).ok).toBe(true)
+  })
+
+  // --- generated-room optional transform repair (Slice 7F) ---
+  //
+  // Stage 1.6 removes malformed optional `rotationY` / `scale` fields before
+  // loadRoomSpec so otherwise-valid generated objects can receive schema
+  // defaults. It is a benign normalization: provenance stays 'generated', no
+  // repair/fallback notice. Only the integer count is reported.
+
+  it('repairs malformed optional transform fields before validation and keeps objects', () => {
+    const { room, diagnostics } = assembleRoom(RAW_MALFORMED_TRANSFORMS, fallback)
+
+    expect(diagnostics.provenance).toBe('generated')
+    expect(diagnostics.objectTransformsRepaired).toBe(3)
+    expect(diagnostics.skippedObjectCount).toBe(0)
+    expect(diagnostics.skippedObjectReasonCounts.invalidTransform).toBe(0)
+    expect(diagnostics.repairAttempted).toBe(false)
+    expect(diagnostics.failedStage).toBeUndefined()
+    expect(room.objects.map((object) => object.type)).toEqual(['book', 'chest', 'map'])
+    expect(room.objects.map((object) => object.rotationY)).toEqual([0, 0, 0])
+    expect(room.objects.map((object) => object.scale)).toEqual([1, 1, 1])
+    expect(validateRoom(room).ok).toBe(true)
+  })
+
+  it('clean generated room has objectTransformsRepaired 0', () => {
+    const { diagnostics } = assembleRoom(RAW_VALID, fallback)
+    expect(diagnostics.objectTransformsRepaired).toBe(0)
+  })
+
+  it('malformed position still skips after transform repair', () => {
+    const result = assembleRoom(raw(validSpec({
+      shell: { dimensions: { width: 18, depth: 18, height: 4 }, exits: [{ side: 'north', width: 3 }] },
+      objects: [{ type: 'book', position: 'not-a-vec', rotationY: 'bad' }],
+    })), fallback)
+
+    expect(result.diagnostics.provenance).toBe('generated')
+    expect(result.diagnostics.objectTransformsRepaired).toBe(1)
+    expect(result.diagnostics.skippedObjectCount).toBe(1)
+    expect(result.diagnostics.skippedObjectReasonCounts.invalidPosition).toBe(1)
+    expect(result.room.objects).toHaveLength(0)
+  })
+
+  it('malformed interaction still skips after transform repair', () => {
+    const result = assembleRoom(raw(validSpec({
+      shell: { dimensions: { width: 18, depth: 18, height: 4 }, exits: [{ side: 'north', width: 3 }] },
+      objects: [{ type: 'scroll', position: [0, 0, 0], rotationY: 'bad' }],
+    })), fallback)
+
+    expect(result.diagnostics.provenance).toBe('generated')
+    expect(result.diagnostics.objectTransformsRepaired).toBe(1)
+    expect(result.diagnostics.skippedObjectCount).toBe(1)
+    expect(result.diagnostics.skippedObjectReasonCounts.invalidInteraction).toBe(1)
+    expect(result.room.objects).toHaveLength(0)
+  })
+
+  it('unknown type still skips after transform repair', () => {
+    const result = assembleRoom(raw(validSpec({
+      shell: { dimensions: { width: 18, depth: 18, height: 4 }, exits: [{ side: 'north', width: 3 }] },
+      objects: [{ type: 'gargoyle', position: [0, 0, 0], scale: 'bad' }],
+    })), fallback)
+
+    expect(result.diagnostics.provenance).toBe('generated')
+    expect(result.diagnostics.objectTransformsRepaired).toBe(1)
+    expect(result.diagnostics.skippedObjectCount).toBe(1)
+    expect(result.diagnostics.skippedObjectReasonCounts.unknownType).toBe(1)
+    expect(result.room.objects).toHaveLength(0)
+  })
+
+  it('alias and transform repairs compose before loadRoomSpec', () => {
+    const { room, diagnostics } = assembleRoom(RAW_ALIAS_AND_TRANSFORM, fallback)
+
+    expect(diagnostics.provenance).toBe('generated')
+    expect(diagnostics.aliasesRepaired).toBe(1)
+    expect(diagnostics.objectTransformsRepaired).toBe(1)
+    expect(diagnostics.skippedObjectCount).toBe(0)
+    expect(room.objects).toHaveLength(1)
+    expect(room.objects[0]!.type).toBe('table')
+    expect(room.objects[0]!.rotationY).toBe(0)
+    expect(room.objects[0]!.scale).toBe(1)
+  })
+
+  it('fallback paths report objectTransformsRepaired 0', () => {
+    const semanticWithBadTransform = raw(validSpec({
+      shell: { dimensions: { width: 18, depth: 18, height: 400 }, exits: [{ side: 'north', width: 3 }] },
+      objects: [{ type: 'book', position: [0, 0, 0], rotationY: 'bad' }],
+    }))
+    for (const input of [RAW_INVALID_JSON, RAW_INVALID_SCHEMA, RAW_UNREPAIRABLE, semanticWithBadTransform]) {
+      const { diagnostics } = assembleRoom(input, fallback)
+      expect(diagnostics.provenance).toBe('fallback')
+      expect(diagnostics.objectTransformsRepaired).toBe(0)
+    }
+  })
+
+  it('loadRoomSpec directly still rejects malformed transforms', () => {
+    const loaded = loadRoomSpec({
+      schemaVersion: 1,
+      id: 'authored',
+      name: 'Authored Room',
+      shell: { dimensions: { width: 8, depth: 8, height: 4 } },
+      spawn: { position: [0, 1.7, 0] },
+      objects: [{ type: 'book', position: [0, 0, 0], rotationY: 'bad', scale: 0 }],
+    })
+
+    expect(loaded.objects).toHaveLength(0)
+    expect(loaded.skipped).toHaveLength(1)
+    expect(loaded.skippedObjectReasonCounts.invalidTransform).toBe(1)
   })
 
   // --- generated-room alias repair (Slice 7D) ---
