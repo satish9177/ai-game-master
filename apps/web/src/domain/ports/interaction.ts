@@ -1,5 +1,8 @@
 import { affordanceFor, type Affordance } from '../interactions/affordance'
 import type { LoadedRoom } from '../loadRoomSpec'
+import type { RoomObject } from '../roomSpec'
+
+export type { Affordance } from '../interactions/affordance'
 
 /**
  * Interaction view-model (ADR-0002, BOUNDARIES.md).
@@ -25,6 +28,11 @@ export type Interactable = {
   position: { x: number; y: number; z: number }
 }
 
+export function affordanceForInteractableObject(object: RoomObject): Affordance | undefined {
+  const interaction = 'interaction' in object ? object.interaction : undefined
+  return interaction ? affordanceFor(interaction, object.type) : undefined
+}
+
 export function buildInteractables(room: LoadedRoom): Interactable[] {
   const interactables: Interactable[] = []
 
@@ -33,11 +41,12 @@ export function buildInteractables(room: LoadedRoom): Interactable[] {
   for (const o of room.objects) {
     const interaction = 'interaction' in o ? o.interaction : undefined
     if (!interaction) continue
+    const affordance = affordanceForInteractableObject(o)
     interactables.push({
       id: 'id' in o ? o.id : undefined,
       type: o.type,
       label: 'name' in o && o.name ? o.name : o.type,
-      affordance: affordanceFor(interaction, o.type),
+      affordance: affordance ?? 'inspect',
       key: interaction.key,
       prompt: interaction.prompt,
       title: interaction.title,

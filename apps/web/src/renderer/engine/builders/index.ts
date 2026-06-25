@@ -1,6 +1,10 @@
 import * as THREE from 'three'
 import type { LoadedRoom } from '../../../domain/loadRoomSpec'
 import type { RoomObject } from '../../../domain/roomSpec'
+import {
+  affordanceForInteractableObject,
+  type Affordance,
+} from '../../../domain/ports/interaction'
 import type { Logger } from '../../../platform/logger/Logger'
 import { buildGroundRing } from './indicators'
 import { buildBook, buildMap, buildPaper } from './documents'
@@ -34,8 +38,9 @@ export function buildObjects(room: LoadedRoom, logger: Logger): THREE.Group {
     // Objects carrying an interaction get a static floor indicator so they're
     // discoverable from the isometric view. Driven purely by existing RoomSpec
     // interaction data; the engine's proximity/open logic is unchanged.
-    if ('interaction' in obj) {
-      group.add(buildInteractableIndicator(obj.position))
+    const affordance = affordanceForInteractableObject(obj)
+    if (affordance) {
+      group.add(buildInteractableIndicator(obj.position, affordance))
     }
   }
 
@@ -360,19 +365,25 @@ function readPosition(raw: unknown): Vec3 {
   return [0, 0, 0]
 }
 
-/** Warm accent that reads as "you can interact here" from the isometric angle. */
-const INTERACTABLE_COLOR = '#ffcf6b'
+export const AFFORDANCE_RING_COLOR: Record<Affordance, string> = {
+  inspect: '#ffcf6b',
+  talk: '#6fe39a',
+  exit: '#6bbcff',
+  approach: '#ff7048',
+  take: '#ffd84d',
+  use: '#9b7cff',
+}
 
 /**
  * A static floor ring placed under an interactable object at its XZ (on the
  * floor, not at the object's own height). Renderer-internal discoverability cue;
  * disposed with the scene like every other mesh.
  */
-function buildInteractableIndicator(position: Vec3): THREE.Object3D {
+function buildInteractableIndicator(position: Vec3, affordance: Affordance): THREE.Object3D {
   const ring = buildGroundRing({
     innerRadius: 0.55,
     outerRadius: 0.78,
-    color: INTERACTABLE_COLOR,
+    color: AFFORDANCE_RING_COLOR[affordance] ?? AFFORDANCE_RING_COLOR.inspect,
     emissiveIntensity: 0.75,
     opacity: 0.9,
   })
