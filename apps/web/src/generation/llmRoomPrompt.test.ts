@@ -60,6 +60,20 @@ const SYNONYM_MAPPINGS = [
   'trash/rubble/broken parts -> debris',
 ] as const
 
+const SAFE_STORY_ANCHOR_TYPES = [
+  'throne',
+  'altar',
+  'statue',
+  'corpse',
+  'machine',
+  'artifact',
+  'chest',
+  'table',
+  'map',
+  'book',
+  'paper',
+] as const
+
 describe('buildRoomPromptMessages', () => {
   it('returns a system message then a user message', () => {
     const messages = buildRoomPromptMessages('a quiet chapel')
@@ -166,6 +180,65 @@ describe('ROOM_SYSTEM_PROMPT', () => {
     expect(lower).toContain('they do not all need interactions')
     expect(lower).not.toContain('all clues must be interactive')
     expect(lower).not.toContain('all documents must be interactive')
+  })
+
+  it('asks for one dominant story anchor when appropriate', () => {
+    const lower = ROOM_SYSTEM_PROMPT.toLowerCase()
+    expect(lower).toContain('story anchor guidance')
+    expect(lower).toContain('when appropriate')
+    expect(lower).toContain('exactly one dominant story anchor')
+    expect(lower).toContain('single object the player should notice first')
+    expect(lower).toContain('understand what happened here')
+    expect(lower).toContain('missing anchors are allowed')
+  })
+
+  it('asks the room name to reflect the story anchor, event, or purpose', () => {
+    const lower = ROOM_SYSTEM_PROMPT.toLowerCase()
+    expect(lower).toContain('room name should reflect the story anchor, event, or purpose')
+    expect(lower).toContain('avoid generic names')
+  })
+
+  it('lists safe existing story anchor candidate types', () => {
+    const lower = ROOM_SYSTEM_PROMPT.toLowerCase()
+    expect(lower).toContain('safe existing vocabulary')
+    for (const type of SAFE_STORY_ANCHOR_TYPES) {
+      expect(lower).toContain(type)
+    }
+  })
+
+  it('says secondary objects should support the anchor rather than compete', () => {
+    const lower = ROOM_SYSTEM_PROMPT.toLowerCase()
+    expect(lower).toContain('secondary objects should support the main anchor')
+    expect(lower).toContain('not compete with it')
+  })
+
+  it('treats anchor interaction.body as optional short flavor text', () => {
+    const lower = ROOM_SYSTEM_PROMPT.toLowerCase()
+    expect(lower).toContain('if the anchor has an interaction')
+    expect(lower).toContain('existing interaction.body')
+    expect(lower).toContain('short flavor text')
+    expect(lower).toContain('what happened or why the object matters')
+    expect(lower).toContain('do not require every anchor to be interactive')
+    expect(lower).not.toContain('every anchor must be interactive')
+    expect(lower).not.toContain('all anchors must be interactive')
+  })
+
+  it('does not require clues, rewards, or objectives', () => {
+    const lower = ROOM_SYSTEM_PROMPT.toLowerCase()
+    expect(lower).toContain('do not require clues or rewards')
+    expect(lower).toContain('do not create quest objectives')
+    expect(lower).not.toContain('must include clues')
+    expect(lower).not.toContain('must include rewards')
+    expect(lower).not.toContain('must create quest objectives')
+  })
+
+  it('forbids quest, inventory, loot, combat, and story-state semantics', () => {
+    const lower = ROOM_SYSTEM_PROMPT.toLowerCase()
+    expect(lower).toContain('do not create inventory, loot, combat, quest, or story-state semantics')
+    expect(lower).not.toContain('inventory mechanics')
+    expect(lower).not.toContain('loot mechanics')
+    expect(lower).not.toContain('combat mechanics')
+    expect(lower).not.toContain('story-state mechanics')
   })
 
   it('treats torch as wall lighting and candle as visual-only', () => {
