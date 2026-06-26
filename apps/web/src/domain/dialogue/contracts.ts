@@ -1,4 +1,6 @@
 import { z } from 'zod'
+import type { Affordance } from '../interactions/affordance'
+import type { RoomObject } from '../roomSpec'
 
 export const NPCDialoguePromptSchema = z
   .object({
@@ -44,4 +46,18 @@ export type NPCDialogueRequest = {
 
 export type NPCDialogueResponse = {
   text: string
+}
+
+export type RoomFeatureDirection = 'north' | 'south' | 'east' | 'west' | 'center'
+
+export type RoomDialogueFeature = {
+  type: RoomObject['type']
+  direction: RoomFeatureDirection
+}
+
+export type RoomDialogueContext = {
+  focus?: RoomDialogueFeature
+  features: RoomDialogueFeature[]
+  affordances: Affordance[]
+  npcCount: number
 }
