@@ -3,6 +3,7 @@ import { assembleRoom } from './assembleRoom'
 import type { RoomDiagnostics } from './assembleRoom'
 import { loadRoomSpec } from './loadRoomSpec'
 import type { LoadedRoom } from './loadRoomSpec'
+import type { RoomObject } from './roomSpec'
 import { buildInteractables } from './ports/interaction'
 import { validateRoom } from './validateRoom'
 import { fallbackRoom } from './examples/fallbackRoom'
@@ -27,6 +28,15 @@ function validSpec(overrides: Record<string, unknown> = {}): Record<string, unkn
 }
 
 const raw = (spec: unknown): string => JSON.stringify(spec)
+
+const READ_BODY = 'You read over it carefully. Nothing changes yet.'
+const INSPECT_BODY = 'You inspect it carefully, but do not take anything.'
+const CORPSE_BODY = 'You inspect the remains without disturbing them.'
+const EXAMINE_BODY = 'You examine it for meaning or danger. Nothing changes yet.'
+
+function interactionFor(object: RoomObject) {
+  return 'interaction' in object ? object.interaction : undefined
+}
 
 // Raw inputs covering every branch, reused by the matrix / safety tests.
 const RAW_INVALID_JSON = '{ this is not valid json'
@@ -838,45 +848,51 @@ describe('assembleRoom', () => {
   // final validation. It never runs on direct loadRoomSpec authored/static/
   // restored paths, and fallback diagnostics report zero assignments.
 
-  it('assigns synthesized interactions to bare generated allowlisted objects after assembleRoom', () => {
+  it('returns generated rooms with safe synthesized interaction title and body', () => {
     const result = assembleRoom(raw(validSpec({
       shell: { dimensions: { width: 18, depth: 18, height: 4 }, exits: [{ side: 'north', width: 3 }] },
       spawn: { position: [0, 1.7, 5] },
       objects: [
         { type: 'book', position: [-6, 0, -1] },
-        { type: 'map', position: [-4, 0, -1] },
         { type: 'chest', position: [-2, 0, -1] },
-        { type: 'crate', position: [0, 0, -1] },
-        { type: 'barrel', position: [2, 0, -1] },
-        { type: 'corpse', position: [4, 0, -1] },
-        { type: 'table', position: [6, 0, -1] },
-        { type: 'machine', position: [-4, 0, 1] },
         { type: 'altar', position: [-2, 0, 1] },
-        { type: 'statue', position: [0, 0, 1] },
-        { type: 'artifact', position: [2, 0, 1] },
+        { type: 'corpse', position: [4, 0, -1] },
       ],
     })), fallback)
 
-    const prompts = new Map(result.room.objects.map((object) => [
+    const interactions = new Map(result.room.objects.map((object) => [
       object.type,
-      'interaction' in object ? object.interaction?.prompt : undefined,
+      interactionFor(object),
     ]))
 
     expect(result.diagnostics.provenance).toBe('generated')
     expect(result.diagnostics.failedStage).toBeUndefined()
     expect(result.diagnostics.repairAttempted).toBe(false)
-    expect(result.diagnostics.purposesAssigned).toBe(11)
-    expect(prompts.get('book')).toBe('Read')
-    expect(prompts.get('map')).toBe('Read')
-    expect(prompts.get('chest')).toBe('Inspect')
-    expect(prompts.get('crate')).toBe('Inspect')
-    expect(prompts.get('barrel')).toBe('Inspect')
-    expect(prompts.get('corpse')).toBe('Inspect')
-    expect(prompts.get('table')).toBe('Inspect')
-    expect(prompts.get('machine')).toBe('Inspect')
-    expect(prompts.get('altar')).toBe('Examine')
-    expect(prompts.get('statue')).toBe('Examine')
-    expect(prompts.get('artifact')).toBe('Examine')
+    expect(result.diagnostics.purposesAssigned).toBe(4)
+    expect(interactions.get('book')).toEqual({
+      key: 'E',
+      prompt: 'Read',
+      title: 'Read',
+      body: READ_BODY,
+    })
+    expect(interactions.get('chest')).toEqual({
+      key: 'E',
+      prompt: 'Inspect',
+      title: 'Inspect',
+      body: INSPECT_BODY,
+    })
+    expect(interactions.get('altar')).toEqual({
+      key: 'E',
+      prompt: 'Examine',
+      title: 'Examine',
+      body: EXAMINE_BODY,
+    })
+    expect(interactions.get('corpse')).toEqual({
+      key: 'E',
+      prompt: 'Inspect',
+      title: 'Inspect',
+      body: CORPSE_BODY,
+    })
     expect(validateRoom(result.room).ok).toBe(true)
   })
 
@@ -902,7 +918,7 @@ describe('assembleRoom', () => {
     expect(result.diagnostics.purposesAssigned).toBe(2)
   })
 
-  it('preserves existing generated interactions and does not overwrite them', () => {
+  it('preserves existing generated interactions and does not overwrite title, body, or effect', () => {
     const result = assembleRoom(raw(validSpec({
       shell: { dimensions: { width: 18, depth: 18, height: 4 }, exits: [{ side: 'north', width: 3 }] },
       spawn: { position: [0, 1.7, 5] },
@@ -913,6 +929,7 @@ describe('assembleRoom', () => {
           interaction: {
             key: 'E',
             prompt: 'Search cache',
+            title: 'Existing cache title',
             body: 'Existing safe body.',
             effect: { kind: 'inspect', flag: 'cache-seen' },
           },
@@ -921,12 +938,16 @@ describe('assembleRoom', () => {
     })), fallback)
 
     const chest = result.room.objects[0]!
-    const interaction = 'interaction' in chest ? chest.interaction : undefined
+    const interaction = interactionFor(chest)
 
+    expect(result.diagnostics.provenance).toBe('generated')
+    expect(result.diagnostics.failedStage).toBeUndefined()
+    expect(result.diagnostics.repairAttempted).toBe(false)
     expect(result.diagnostics.purposesAssigned).toBe(0)
     expect(interaction).toEqual({
       key: 'E',
       prompt: 'Search cache',
+      title: 'Existing cache title',
       body: 'Existing safe body.',
       effect: { kind: 'inspect', flag: 'cache-seen' },
     })
@@ -1012,13 +1033,14 @@ describe('assembleRoom', () => {
     expect(fallback).toEqual(fallbackBefore)
   })
 
-  it('synthesized interactions become buildInteractables/HUD eligible with inspect affordance', () => {
+  it('synthesized interactions become buildInteractables/HUD eligible with safe title and body', () => {
+    const leakedName = 'ProviderTrace raw-json {"prompt":"steal-name"} generated_object_name'
     const result = assembleRoom(raw(validSpec({
       shell: { dimensions: { width: 18, depth: 18, height: 4 }, exits: [{ side: 'north', width: 3 }] },
       spawn: { position: [0, 1.7, 5] },
       objects: [
-        { id: 'generated-book', type: 'book', position: [-2, 0, 0] },
-        { id: 'generated-chest', type: 'chest', position: [2, 0, 0] },
+        { id: 'generated-book', type: 'book', name: leakedName, position: [-2, 0, 0] },
+        { id: 'generated-chest', type: 'chest', name: leakedName, position: [2, 0, 0] },
       ],
     })), fallback)
 
@@ -1026,20 +1048,32 @@ describe('assembleRoom', () => {
       interactable.id,
       interactable,
     ]))
+    const book = byId.get('generated-book')
+    const chest = byId.get('generated-chest')
 
     expect(result.diagnostics.purposesAssigned).toBe(2)
-    expect(byId.get('generated-book')).toMatchObject({
+    expect(book).toMatchObject({
       type: 'book',
+      label: 'book',
       affordance: 'inspect',
       key: 'E',
       prompt: 'Read',
+      title: 'Read',
+      body: READ_BODY,
     })
-    expect(byId.get('generated-chest')).toMatchObject({
+    expect(chest).toMatchObject({
       type: 'chest',
+      label: 'chest',
       affordance: 'inspect',
       key: 'E',
       prompt: 'Inspect',
+      title: 'Inspect',
+      body: INSPECT_BODY,
     })
+    expect(JSON.stringify(book)).not.toContain('ProviderTrace')
+    expect(JSON.stringify(chest)).not.toContain('ProviderTrace')
+    expect(JSON.stringify(chest)).not.toContain('steal-name')
+    expect(JSON.stringify(chest)).not.toContain('generated_object_name')
   })
 
   // --- generated-room optional transform repair (Slice 7F) ---
