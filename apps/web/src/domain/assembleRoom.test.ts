@@ -308,6 +308,7 @@ describe('assembleRoom', () => {
       'aliasesRepaired',
       'objectTransformsRepaired',
       'purposesAssigned',
+      'npcInserted',
       'skippedObjectReasonCounts',
     ])
 
@@ -336,6 +337,7 @@ describe('assembleRoom', () => {
       expect(typeof diagnostics.aliasesRepaired).toBe('number')
       expect(typeof diagnostics.objectTransformsRepaired).toBe('number')
       expect(typeof diagnostics.purposesAssigned).toBe('number')
+      expect(typeof diagnostics.npcInserted).toBe('boolean')
       expect(typeof diagnostics.skippedObjectReasonCounts).toBe('object')
       expect(diagnostics.skippedObjectReasonCounts).not.toBeNull()
       for (const val of Object.values(diagnostics.skippedObjectReasonCounts)) {
@@ -847,6 +849,128 @@ describe('assembleRoom', () => {
   // generated objects after geometry/composition/spawn/exit repair and before
   // final validation. It never runs on direct loadRoomSpec authored/static/
   // restored paths, and fallback diagnostics report zero assignments.
+
+  // --- generated-room NPC presence enrichment (generated-room-npc-presence-v0 Slice 3) ---
+  //
+  // Stage 2.11 may insert one safe generated NPC when the app supplies a
+  // boolean-only request signal. The raw prompt never enters assembleRoom.
+
+  it('requestsNpc true inserts one NPC when the generated room has none', () => {
+    const result = assembleRoom(RAW_VALID, fallback, { requestsNpc: true })
+
+    expect(result.diagnostics.provenance).toBe('generated')
+    expect(result.diagnostics.npcInserted).toBe(true)
+    expect(result.room.objects.filter((object) => object.type === 'npc')).toHaveLength(1)
+    expect(validateRoom(result.room).ok).toBe(true)
+  })
+
+  it('requestsNpc false preserves current behavior and does not insert an NPC', () => {
+    const result = assembleRoom(RAW_VALID, fallback, { requestsNpc: false })
+
+    expect(result.diagnostics.provenance).toBe('generated')
+    expect(result.diagnostics.npcInserted).toBe(false)
+    expect(result.room.objects.some((object) => object.type === 'npc')).toBe(false)
+  })
+
+  it('preserves an existing NPC and does not insert a second NPC', () => {
+    const result = assembleRoom(raw(validSpec({
+      shell: { dimensions: { width: 18, depth: 18, height: 4 }, exits: [{ side: 'north', width: 3 }] },
+      spawn: { position: [0, 1.7, 5] },
+      objects: [{
+        type: 'npc',
+        id: 'existing-npc',
+        name: 'Existing Guide',
+        position: [-4, 0, 0],
+        interaction: {
+          key: 'F',
+          prompt: 'Talk',
+          body: 'Existing safe body.',
+          dialogue: { greeting: 'Hello.' },
+        },
+      }],
+    })), fallback, { requestsNpc: true })
+
+    expect(result.diagnostics.npcInserted).toBe(false)
+    expect(result.room.objects.filter((object) => object.type === 'npc')).toHaveLength(1)
+    expect(result.room.objects.find((object) => object.type === 'npc')?.id).toBe('existing-npc')
+  })
+
+  it('no safe NPC tile still succeeds and reports npcInserted false', () => {
+    const blockerPositions = [
+      [4.050000000000001, 0],
+      [4.050000000000001, 0],
+      [-4.050000000000001, 0],
+      [4.050000000000001, -2.835],
+      [-4.050000000000001, -2.835],
+      [4.050000000000001, 2.835],
+      [-4.050000000000001, 2.835],
+      [0, -3.6450000000000005],
+      [0, 3.6450000000000005],
+    ]
+    const blockers = blockerPositions.map(([x, z], index) => ({
+      type: 'throne',
+      id: `blocker-${index}`,
+      position: [x, 0, z],
+    }))
+    const result = assembleRoom(raw(validSpec({
+      shell: { dimensions: { width: 18, depth: 18, height: 4 }, exits: [{ side: 'north', width: 3 }] },
+      spawn: { position: [0, 1.7, 5] },
+      objects: blockers,
+    })), fallback, { requestsNpc: true })
+
+    expect(result.diagnostics.provenance).toBe('generated')
+    expect(result.diagnostics.npcInserted).toBe(false)
+    expect(result.room.objects.some((object) => object.type === 'npc')).toBe(false)
+    expect(validateRoom(result.room).ok).toBe(true)
+  })
+
+  it('inserted NPC is final-validated and has id plus interaction dialogue', () => {
+    const result = assembleRoom(RAW_VALID, fallback, { requestsNpc: true })
+    const npc = result.room.objects.find((object) => object.type === 'npc')
+
+    expect(npc).toMatchObject({
+      type: 'npc',
+      id: 'generated-npc',
+      interaction: {
+        key: 'F',
+        dialogue: {
+          persona: 'generated-room-guide',
+        },
+      },
+    })
+    expect(npc && 'interaction' in npc ? npc.interaction.dialogue : undefined).toBeDefined()
+    expect(validateRoom(result.room).ok).toBe(true)
+  })
+
+  it('NPC diagnostics are boolean-only and do not include prompt or generated text', () => {
+    const promptText = 'SECRET_RAW_PROMPT'
+    const result = assembleRoom(raw(validSpec({
+      name: 'SECRET_ROOM_NAME',
+      shell: { dimensions: { width: 18, depth: 18, height: 4 }, exits: [{ side: 'north', width: 3 }] },
+      objects: [{
+        type: 'book',
+        id: 'SECRET_OBJECT_ID',
+        position: [0, 0, -2],
+        interaction: {
+          key: 'E',
+          prompt: 'SECRET_INTERACTION_PROMPT',
+          body: 'SECRET_GENERATED_BODY',
+        },
+      }],
+    })), fallback, { requestsNpc: true })
+
+    const diagnosticsJson = JSON.stringify(result.diagnostics)
+    expect(typeof result.diagnostics.npcInserted).toBe('boolean')
+    for (const forbidden of [
+      promptText,
+      'SECRET_ROOM_NAME',
+      'SECRET_OBJECT_ID',
+      'SECRET_INTERACTION_PROMPT',
+      'SECRET_GENERATED_BODY',
+    ]) {
+      expect(diagnosticsJson).not.toContain(forbidden)
+    }
+  })
 
   it('returns generated rooms with safe synthesized interaction title and body', () => {
     const result = assembleRoom(raw(validSpec({

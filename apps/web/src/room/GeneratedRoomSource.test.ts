@@ -5,6 +5,7 @@ import type { RoomGenerator } from '../domain/ports/RoomGenerator'
 import { loadRoomSpec } from '../domain/loadRoomSpec'
 import type { LoadedRoom } from '../domain/loadRoomSpec'
 import { fallbackRoom } from '../domain/examples/fallbackRoom'
+import type { AssembleRoomOptions } from '../domain/assembleRoom'
 import { shouldShowFallbackNotice } from '../app/fallbackNotice'
 import type { Logger, LogContext, LogLevel } from '../platform/logger/Logger'
 
@@ -48,8 +49,12 @@ const generatorRejecting = (err: unknown): RoomGenerator => ({
 /** The trusted fallback, validated once (as the App injects it). */
 const FALLBACK: LoadedRoom = loadRoomSpec(fallbackRoom)
 
-const newSource = (gen: RoomGenerator, prompt: string, logger: Logger) =>
-  new GeneratedRoomSource(gen, prompt, logger, FALLBACK)
+const newSource = (
+  gen: RoomGenerator,
+  prompt: string,
+  logger: Logger,
+  options: AssembleRoomOptions = {},
+) => new GeneratedRoomSource(gen, prompt, logger, FALLBACK, options)
 
 // Dimensions within the generated-room contract [14..24] so tests that expect
 // provenance 'generated' are not affected by dimension repair.
@@ -104,6 +109,35 @@ describe('GeneratedRoomSource', () => {
       expect(result.room.id).toBe('stub-room')
       expect(result.room.objects).toHaveLength(1)
     }
+  })
+
+  it('passes requestsNpc boolean into assembleRoom when configured', async () => {
+    const { logger, entries } = createSpyLogger()
+    const result = await newSource(
+      generatorReturning(VALID_SPEC),
+      'seed without npc words',
+      logger,
+      { requestsNpc: true },
+    ).getRoom()
+
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      const npc = result.room.objects.find((object) => object.type === 'npc')
+      expect(npc?.type).toBe('npc')
+      expect(npc && 'interaction' in npc ? npc.interaction.dialogue : undefined).toBeDefined()
+    }
+    expect(entries[0]!.context.npcInserted).toBe(true)
+  })
+
+  it('defaults requestsNpc to false and does not insert an NPC', async () => {
+    const { logger, entries } = createSpyLogger()
+    const result = await newSource(generatorReturning(VALID_SPEC), 'someone to talk to', logger).getRoom()
+
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.room.objects.some((object) => object.type === 'npc')).toBe(false)
+    }
+    expect(entries[0]!.context.npcInserted).toBe(false)
   })
 
   it('malformed JSON → ok:true with the fallback room (provenance fallback)', async () => {
@@ -192,6 +226,7 @@ describe('GeneratedRoomSource', () => {
     expect(typeof entry.context.aliasesRepaired).toBe('number')
     expect(typeof entry.context.objectTransformsRepaired).toBe('number')
     expect(typeof entry.context.purposesAssigned).toBe('number')
+    expect(typeof entry.context.npcInserted).toBe('boolean')
     expect(typeof entry.context.skippedObjectReasonCounts).toBe('object')
   })
 

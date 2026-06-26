@@ -2,7 +2,7 @@ import type { RoomSource, RoomLoadResult } from '../domain/ports/RoomSource'
 import type { RoomGenerator } from '../domain/ports/RoomGenerator'
 import type { LoadedRoom } from '../domain/loadRoomSpec'
 import { assembleRoom } from '../domain/assembleRoom'
-import type { RoomDiagnostics } from '../domain/assembleRoom'
+import type { AssembleRoomOptions, RoomDiagnostics } from '../domain/assembleRoom'
 import type { Logger } from '../platform/logger/Logger'
 
 /**
@@ -35,6 +35,7 @@ export class GeneratedRoomSource implements RoomSource {
   private readonly generator: RoomGenerator
   private readonly prompt: string
   private readonly fallbackRoom: LoadedRoom
+  private readonly assembleOptions: AssembleRoomOptions
   private readonly log: Logger
 
   constructor(
@@ -42,10 +43,12 @@ export class GeneratedRoomSource implements RoomSource {
     prompt: string,
     logger: Logger,
     fallbackRoom: LoadedRoom,
+    assembleOptions: AssembleRoomOptions = {},
   ) {
     this.generator = generator
     this.prompt = prompt
     this.fallbackRoom = fallbackRoom
+    this.assembleOptions = assembleOptions
     // Bind promptLength once so every line carries it. The prompt TEXT is never
     // logged (it is user content; ADR-0003, FAILURE-MODES case 4) — only its length.
     this.log = logger.child({ promptLength: prompt.length })
@@ -69,7 +72,7 @@ export class GeneratedRoomSource implements RoomSource {
     //    schema error detail — it is model-derived and could echo prompt content.
     //    The diagnostics are safe by construction (provenance, stage, fixed issue
     //    codes, counts, booleans — never messages/names/raw text).
-    const { room, diagnostics } = assembleRoom(raw, this.fallbackRoom)
+    const { room, diagnostics } = assembleRoom(raw, this.fallbackRoom, this.assembleOptions)
     this.logAssembly(room, diagnostics)
     return { ok: true, room, provenance: diagnostics.provenance }
   }
@@ -92,6 +95,7 @@ export class GeneratedRoomSource implements RoomSource {
       aliasesRepaired: diagnostics.aliasesRepaired,
       objectTransformsRepaired: diagnostics.objectTransformsRepaired,
       purposesAssigned: diagnostics.purposesAssigned,
+      npcInserted: diagnostics.npcInserted,
       skippedObjectReasonCounts: diagnostics.skippedObjectReasonCounts,
     }
     // A clean generated room is the happy path (info); a repair or fallback is a

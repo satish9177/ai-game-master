@@ -8,6 +8,7 @@ import { composeGeneratedRoom } from './generatedRoomComposition'
 import { repairGeneratedAliases } from './generatedRoomAliases'
 import { repairGeneratedObjectTransforms } from './generatedRoomObjectTransforms'
 import { assignGeneratedObjectPurpose } from './generatedRoomObjectPurpose'
+import { ensureGeneratedNpcPresence } from './ensureGeneratedNpcPresence'
 
 /**
  * Room assembly pipeline (room-generation-repair-fallback v0). A pure,
@@ -125,6 +126,8 @@ export type RoomDiagnostics = {
    * or generated text. Always 0 for all fallback paths.
    */
   purposesAssigned: number
+  /** Whether one safe generated NPC was inserted from an explicit boolean request. */
+  npcInserted: boolean
   /**
    * Aggregate count of skipped object entries by validation failure reason,
    * as classified by the lenient loader. Count-only: no raw type strings or
@@ -139,9 +142,14 @@ export type AssembledRoom = {
   diagnostics: RoomDiagnostics
 }
 
+export type AssembleRoomOptions = {
+  requestsNpc?: boolean
+}
+
 export function assembleRoom(
   rawText: string,
   fallbackRoom: LoadedRoom,
+  options: AssembleRoomOptions = {},
 ): AssembledRoom {
   // Stage 1 — JSON.parse. Never eval; malformed text is just a failed parse.
   let parsed: unknown
@@ -216,15 +224,23 @@ export function assembleRoom(
   const purposeFixed = purposeResult.room
   const { purposesAssigned } = purposeResult
 
+  // Stage 2.11 — optionally insert one safe generated NPC from a boolean-only
+  // prompt classifier signal. No prompt text enters this domain function.
+  const npcPresenceResult = ensureGeneratedNpcPresence(purposeFixed, {
+    requested: options.requestsNpc ?? false,
+  })
+  const npcPresenceFixed = npcPresenceResult.room
+  const { npcInserted } = npcPresenceResult
+
   // Stage 3 — semantic playability. No fatal issue → accept as generated. Benign
   // normalizations (Stages 2.5–2.9) keep provenance `generated` and show no notice;
   // they are reported via `sizeRepaired`/`objectsRepaired`/`spawnRepaired`/
   // `exitsRepaired` for logs only. A `repairRoom` pass (Stage 4) is the only
   // thing that yields `repaired`.
-  const initial = validateRoom(purposeFixed)
+  const initial = validateRoom(npcPresenceFixed)
   if (initial.ok) {
     return {
-      room: purposeFixed,
+      room: npcPresenceFixed,
       diagnostics: {
         provenance: 'generated',
         sizeRepaired,
@@ -242,7 +258,8 @@ export function assembleRoom(
         aliasesRepaired,
         objectTransformsRepaired,
         purposesAssigned,
-        skippedObjectReasonCounts: purposeFixed.skippedObjectReasonCounts,
+        npcInserted,
+        skippedObjectReasonCounts: npcPresenceFixed.skippedObjectReasonCounts,
       },
     }
   }
@@ -254,7 +271,7 @@ export function assembleRoom(
   // repairable fatals that are not covered by generated-room normalizers.
   // repairRoom itself remains unit-tested directly.
   const initialFatalCodes = distinctFatalCodes(initial)
-  const repaired = repairRoom(purposeFixed)
+  const repaired = repairRoom(npcPresenceFixed)
   const revalidated = validateRoom(repaired)
   if (revalidated.ok) {
     return {
@@ -276,6 +293,7 @@ export function assembleRoom(
         aliasesRepaired,
         objectTransformsRepaired,
         purposesAssigned,
+        npcInserted,
         skippedObjectReasonCounts: repaired.skippedObjectReasonCounts,
       },
     }
@@ -303,6 +321,7 @@ export function assembleRoom(
       aliasesRepaired: 0,
       objectTransformsRepaired: 0,
       purposesAssigned: 0,
+      npcInserted: false,
       skippedObjectReasonCounts: fallbackRoom.skippedObjectReasonCounts,
     },
   }
@@ -333,6 +352,7 @@ function toFallback(
       aliasesRepaired: 0,
       objectTransformsRepaired: 0,
       purposesAssigned: 0,
+      npcInserted: false,
       skippedObjectReasonCounts: fallbackRoom.skippedObjectReasonCounts,
     },
   }

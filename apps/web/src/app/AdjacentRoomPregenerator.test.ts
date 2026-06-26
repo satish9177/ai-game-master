@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { loadRoomSpec } from '../domain/loadRoomSpec'
 import type { LoadedRoom } from '../domain/loadRoomSpec'
 import { validateRoom } from '../domain/validateRoom'
+import type { RoomGenerator } from '../domain/ports/RoomGenerator'
 import type { RoomLoadResult, RoomSource } from '../domain/ports/RoomSource'
 import type { RoomRegistryResult } from '../room/RoomRegistry'
 import { RoomRegistry } from '../room/RoomRegistry'
@@ -256,6 +257,29 @@ describe('AdjacentRoomPregenerator.resolveRoom', () => {
     expect(ra.ok && ra.room.id).toBe('crypt-1')
     expect(rb.ok && rb.room.id).toBe('crypt-1')
     expect(JSON.stringify(ra.ok && ra.room)).toBe(JSON.stringify(rb.ok && rb.room))
+  })
+
+  it('keeps adjacent GeneratedRoomSource default requestsNpc false', async () => {
+    const { logger } = createLogger()
+    const rawRoom = JSON.stringify({
+      schemaVersion: 1,
+      id: 'generated-adjacent',
+      name: 'Generated Adjacent',
+      shell: { dimensions: { width: 18, depth: 18, height: 4 }, exits: [{ side: 'north', width: 3 }] },
+      spawn: { position: [0, 1.7, 5] },
+      objects: [{ type: 'pillar', position: [4, 0, -2] }],
+    })
+    const generator: RoomGenerator = { generate: () => Promise.resolve(rawRoom) }
+    const factory: RoomSourceFactory = (id) =>
+      new GeneratedRoomSource(generator, `adjacent:${id}`, logger, fallbackRoom)
+    const pregen = new AdjacentRoomPregenerator(new SessionRoomCache(), emptyRegistry, factory, fallbackRoom, logger)
+
+    const result = await pregen.resolveRoom('someone-to-talk-to')
+
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.room.objects.some((object) => object.type === 'npc')).toBe(false)
+    }
   })
 
   it('keeps logs free of room names, object names, and seed text', async () => {

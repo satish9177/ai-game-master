@@ -51,6 +51,7 @@ import { buildRoomIntroView } from './app/roomIntro'
 import { FakeNPCDialogueProvider } from './dialogue/FakeNPCDialogueProvider'
 import type { WorldBibleSeed } from './domain/worldBible/worldBibleSeed'
 import { prepareGeneratedRoomSeed } from './app/worldBible'
+import { buildPromptGeneratedRoomSource } from './app/buildPromptGeneratedRoomSource'
 
 import { NPCDialogueService } from './dialogue/NPCDialogueService'
 
@@ -314,12 +315,13 @@ function App() {
       try {
         const prepared = await prepareGeneratedRoomSeed(prompt, worldBibleSeeder, logger)
         if (version !== requestVersion.current) return
-        const source = new GeneratedRoomSource(
-          promptGenerator,
-          prepared.generatorSeed,
+        const source = buildPromptGeneratedRoomSource({
+          generator: promptGenerator,
+          rawUserPrompt: prompt,
+          generatorSeed: prepared.generatorSeed,
           logger,
           fallbackRoom,
-        )
+        })
         const result = await source.getRoom()
         if (version !== requestVersion.current) return
         if (!result.ok) {
