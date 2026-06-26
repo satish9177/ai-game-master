@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { Clock } from '../domain/ports/Clock'
 import type { IdGenerator } from '../domain/ports/IdGenerator'
 import type { NPCDialogueProvider } from '../domain/ports/NPCDialogueProvider'
-import type { NPCDialogueRequest } from '../domain/dialogue/contracts'
+import type { NPCDialogueRequest, RoomDialogueContext } from '../domain/dialogue/contracts'
 import type { Logger, LogContext, LogLevel } from '../platform/logger/Logger'
 import { InMemoryWorldStore } from '../world-session/InMemoryWorldStore'
 import { WorldSession } from '../world-session/WorldSession'
@@ -25,6 +25,15 @@ const dialogue = {
   persona: 'SECRET PERSONA',
   greeting: 'SECRET GREETING',
   prompts: [{ id: 'ask', label: 'SECRET PROMPT LABEL' }],
+}
+const roomContext: RoomDialogueContext = {
+  focus: { type: 'altar', direction: 'north' },
+  features: [
+    { type: 'altar', direction: 'north' },
+    { type: 'corpse', direction: 'south' },
+  ],
+  affordances: ['inspect', 'talk'],
+  npcCount: 2,
 }
 
 function createHarness(provider?: NPCDialogueProvider) {
@@ -99,6 +108,40 @@ describe('NPCDialogueService', () => {
         history,
       },
     })
+    expect(requests[0]?.context.room).toBeUndefined()
+  })
+
+  it('passes optional roomContext through to provider context', async () => {
+    const requests: NPCDialogueRequest[] = []
+    const harness = createHarness({
+      reply: async (request) => {
+        requests.push(request)
+        return { text: 'A room-aware answer.' }
+      },
+    })
+    const state = await start(harness)
+    const roomContextBefore = structuredClone(roomContext)
+
+    const result = await harness.service.reply({
+      sessionId: state.sessionId,
+      npcId: 'friendly-aide',
+      npcName: 'Asha',
+      dialogue: { persona: 'friendly-aide' },
+      history: [],
+      roomContext,
+    })
+
+    expect(result).toEqual({
+      status: 'replied',
+      turn: { speaker: 'npc', text: 'A room-aware answer.' },
+    })
+    expect(requests).toHaveLength(1)
+    expect(requests[0]?.context.room).toEqual(roomContext)
+    expect(requests[0]?.context.room).not.toBe(roomContext)
+    expect(requests[0]?.context.room?.focus).not.toBe(roomContext.focus)
+    expect(requests[0]?.context.room?.features).not.toBe(roomContext.features)
+    expect(requests[0]?.context.room?.affordances).not.toBe(roomContext.affordances)
+    expect(roomContext).toEqual(roomContextBefore)
   })
 
   it('rejects missing dialogue before reading the session or provider', async () => {
@@ -176,6 +219,15 @@ describe('NPCDialogueService', () => {
       npcName: 'SECRET NPC NAME',
       dialogue,
       persona: 'SECRET INPUT PERSONA',
+      roomContext: {
+        focus: { type: 'altar', direction: 'north' },
+        features: [
+          { type: 'altar', direction: 'north' },
+          { type: 'corpse', direction: 'south' },
+        ],
+        affordances: ['inspect', 'talk'],
+        npcCount: 2,
+      },
       history: [{ speaker: 'player', text: 'SECRET HISTORY TEXT' }],
       playerLine: 'SECRET PLAYER LINE',
     })
@@ -187,6 +239,15 @@ describe('NPCDialogueService', () => {
     expect(serialized).toContain('throne-room')
     expect(serialized).toContain('replied')
     expect(serialized).toContain('turnCount')
+    expect(serialized).not.toContain('roomContext')
+    expect(serialized).not.toContain('focus')
+    expect(serialized).not.toContain('features')
+    expect(serialized).not.toContain('affordances')
+    expect(serialized).not.toContain('npcCount')
+    expect(serialized).not.toContain('altar')
+    expect(serialized).not.toContain('corpse')
+    expect(serialized).not.toContain('inspect')
+    expect(serialized).not.toContain('talk')
   })
 })
 
