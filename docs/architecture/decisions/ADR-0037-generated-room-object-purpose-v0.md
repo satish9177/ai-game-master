@@ -54,17 +54,21 @@ The allowlist is:
 | `chest`, `crate`, `barrel`, `corpse`, `table`, `machine` | `Inspect` |
 | `altar`, `statue`, `artifact` | `Examine` |
 
-The synthesized interaction is exactly:
+The synthesized interaction originally shipped as:
 
 ```ts
 { key: 'E', prompt: 'Read' | 'Inspect' | 'Examine' }
 ```
 
+ADR-0038 extends that synthesized shape with safe deterministic display text:
+`{ key, prompt, title, body }`, where `title` equals the same safe verb and `body`
+comes from a fixed hand-written table. The allowlist, generated-room-only stage,
+non-overwrite rule, and count-only diagnostic remain the same.
+
 It contains no `effect`, `encounter`, `dialogue`, `exit`, item, inventory, quest,
 combat, or event-writing data. It creates no authoritative world-state behavior.
 
 Explicit exclusions:
-
 - `throne`
 - `arch`
 - `pillar`
@@ -168,3 +172,4 @@ interactable" without also considering `purposesAssigned` and/or the final
 | [ADR-0032](./ADR-0032-generated-room-composition-v0.md) | Runs after composition; composition diagnostics still describe pre-purpose output |
 | [ADR-0033](./ADR-0033-generated-room-visual-vocabulary-v0.md) | Uses the expanded validated visual object vocabulary |
 | [ADR-0036](./ADR-0036-generated-room-interaction-affordances-v0.md) | Provides safe interactions that downstream affordance/ring/HUD systems can consume |
+| [ADR-0038](./ADR-0038-generated-room-explore-loop-v0.md) | Extends synthesized interactions with safe deterministic `title` and `body` for the existing E -> panel path |
