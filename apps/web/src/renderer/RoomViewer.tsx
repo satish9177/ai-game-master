@@ -7,13 +7,15 @@ import { DialoguePanel } from './ui/DialoguePanel'
 import { NPCDialoguePanel } from './ui/NPCDialoguePanel'
 import { createConsoleLogger } from '../platform/logger/consoleLogger'
 import { isWebGL2Available } from '../platform/browser/webglSupport'
+import { buildRoomDialogueContext } from '../domain/dialogue/buildRoomDialogueContext'
 import type { EncounterSpec } from '../domain/encounters/encounterSpec'
-import type { NPCDialogueTurn } from '../domain/dialogue/contracts'
+import type { NPCDialogueTurn, RoomDialogueContext } from '../domain/dialogue/contracts'
 import type { InteractionService } from '../interactions/InteractionService'
 import type { EncounterService } from '../encounters/EncounterService'
 import type { NPCDialogueService } from '../dialogue/NPCDialogueService'
 import type { NavigationResult } from '../app/NavigationService'
 import type { WorldState } from '../domain/world/worldState'
+import { buildNPCDialogueReplyInput } from '../app/npcDialogueReplyInput'
 import {
   buildInteractionEffectLookup,
   interactionResultMessage,
@@ -59,6 +61,7 @@ export function RoomViewer({
   const encounterLookupRef = useRef<EncounterLookup>(new Map())
   const exitLookupRef = useRef<ExitLookup>(new Map())
   const npcDialogueLookupRef = useRef<NPCDialogueLookup>(new Map())
+  const roomDialogueContextRef = useRef<RoomDialogueContext | undefined>(undefined)
   const activeEncounterRef = useRef<{ encounter: EncounterSpec; ref: string | undefined } | null>(
     null,
   )
@@ -180,15 +183,13 @@ export function RoomViewer({
         setNPCDialoguePending(true)
         const requestId = npcDialogueRequestRef.current
 
-        void npcDialogueService.reply({
+        void npcDialogueService.reply(buildNPCDialogueReplyInput({
           sessionId,
-          npcId: dialogueTarget.npcId,
-          npcName: dialogueTarget.npcName,
-          dialogue: dialogueTarget.dialogue,
-          persona: dialogueTarget.persona,
+          target: dialogueTarget,
           history: [],
           playerLine: undefined,
-        }).then((result) => {
+          roomContext: roomDialogueContextRef.current,
+        })).then((result) => {
           if (cancelled || npcDialogueRequestRef.current !== requestId) return
           npcDialoguePendingRef.current = false
           setNPCDialoguePending(false)
@@ -243,6 +244,7 @@ export function RoomViewer({
       exitLookupRef.current = buildExitLookup(result.room)
       encounterLookupRef.current = buildEncounterLookup(result.room)
       npcDialogueLookupRef.current = buildDialogueLookup(result.room)
+      roomDialogueContextRef.current = buildRoomDialogueContext(result.room)
       effectLookupRef.current = buildInteractionEffectLookup(result.room)
       try {
         engine.setRoom(result.room)
@@ -266,6 +268,7 @@ export function RoomViewer({
       encounterLookupRef.current = new Map()
       exitLookupRef.current = new Map()
       npcDialogueLookupRef.current = new Map()
+      roomDialogueContextRef.current = undefined
       activeEncounterRef.current = null
       activeNPCDialogueRef.current = null
       npcDialogueRequestRef.current += 1
@@ -313,15 +316,13 @@ export function RoomViewer({
       setNPCDialoguePending(true)
       const requestId = npcDialogueRequestRef.current
 
-      void npcDialogueService.reply({
+      void npcDialogueService.reply(buildNPCDialogueReplyInput({
         sessionId,
-        npcId: target.npcId,
-        npcName: target.npcName,
-        dialogue: target.dialogue,
-        persona: target.persona,
+        target,
         history,
         playerLine: prompt?.id,
-      }).then((result) => {
+        roomContext: roomDialogueContextRef.current,
+      })).then((result) => {
         if (
           activeNPCDialogueRef.current !== target
           || npcDialogueRequestRef.current !== requestId
