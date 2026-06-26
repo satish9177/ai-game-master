@@ -1,10 +1,11 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { NPCDialogueTarget } from '../app/dialogue'
 import { buildNPCDialogueReplyInput } from '../app/npcDialogueReplyInput'
 import { buildRoomDialogueContext } from '../domain/dialogue/buildRoomDialogueContext'
 import type { NPCDialogueTurn } from '../domain/dialogue/contracts'
 import { loadRoomSpec } from '../domain/loadRoomSpec'
 import type { Interactable } from '../domain/ports/interaction'
+import { RoomViewer } from './RoomViewer'
 
 const mockState = vi.hoisted(() => ({
   refIndex: 0,
@@ -104,6 +105,12 @@ describe('RoomViewer NPC dialogue room context wiring', () => {
     mockState.engineInstances.length = 0
   })
 
+  afterEach(() => {
+    vi.clearAllMocks()
+    mockState.refIndex = 0
+    mockState.engineInstances.length = 0
+  })
+
   it('passes roomContext built from the current LoadedRoom into dialogue reply input', () => {
     const roomContext = buildRoomDialogueContext(loadedRoom())
 
@@ -164,7 +171,6 @@ describe('RoomViewer NPC dialogue room context wiring', () => {
   })
 
   it('passes loaded roomContext into NPCDialogueService.reply when opening NPC dialogue', async () => {
-    const { RoomViewer } = await import('./RoomViewer')
     const replies: unknown[] = []
     const room = loadedRoom()
 
