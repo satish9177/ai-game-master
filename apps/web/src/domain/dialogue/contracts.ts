@@ -30,6 +30,7 @@ export type NPCDialogueContext = {
   npcId: string
   npcName: string
   persona?: string
+  room?: RoomDialogueContext
   player: {
     health: { current: number; max: number }
     status: string[]

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { WorldState } from '../world/worldState'
-import type { NPCDialogueTurn } from './contracts'
+import type { NPCDialogueTurn, RoomDialogueContext } from './contracts'
 import { buildDialogueContext } from './buildDialogueContext'
 
 const state: WorldState = {
@@ -24,6 +24,15 @@ const history: NPCDialogueTurn[] = [
   { speaker: 'player', text: 'Hello.' },
   { speaker: 'npc', text: 'Welcome.' },
 ]
+const roomContext: RoomDialogueContext = {
+  focus: { type: 'altar', direction: 'north' },
+  features: [
+    { type: 'altar', direction: 'north' },
+    { type: 'corpse', direction: 'south' },
+  ],
+  affordances: ['inspect', 'talk'],
+  npcCount: 2,
+}
 
 describe('buildDialogueContext', () => {
   it('maps authoritative facts to the provider context without item names', () => {
@@ -50,20 +59,84 @@ describe('buildDialogueContext', () => {
     expect(JSON.stringify(context)).not.toContain('Royal Writ')
   })
 
+  it('attaches provided room dialogue context', () => {
+    const context = buildDialogueContext(
+      state,
+      { npcId: 'aide', npcName: 'Asha', persona: 'friendly-aide' },
+      history,
+      roomContext,
+    )
+
+    expect(context.room).toEqual(roomContext)
+    expect(context.room).not.toBe(roomContext)
+    expect(context.room?.focus).not.toBe(roomContext.focus)
+    expect(context.room?.features).not.toBe(roomContext.features)
+    expect(context.room?.features[0]).not.toBe(roomContext.features[0])
+    expect(context.room?.affordances).not.toBe(roomContext.affordances)
+  })
+
+  it('omits room dialogue context when none is provided', () => {
+    const context = buildDialogueContext(
+      state,
+      { npcId: 'aide', npcName: 'Asha', persona: 'friendly-aide' },
+      history,
+    )
+
+    expect(context.room).toBeUndefined()
+    expect(context).not.toHaveProperty('room')
+  })
+
+  it('keeps existing context fields unchanged when room dialogue context is provided', () => {
+    const withoutRoom = buildDialogueContext(
+      state,
+      { npcId: 'aide', npcName: 'Asha', persona: 'friendly-aide' },
+      history,
+    )
+    const withRoom = buildDialogueContext(
+      state,
+      { npcId: 'aide', npcName: 'Asha', persona: 'friendly-aide' },
+      history,
+      roomContext,
+    )
+
+    expect(withRoom).toEqual({ ...withoutRoom, room: roomContext })
+  })
+
   it('is deterministic and does not mutate or alias mutable inputs', () => {
     const stateBefore = structuredClone(state)
     const historyBefore = structuredClone(history)
+    const roomContextBefore = structuredClone(roomContext)
     const npc = { npcId: 'aide', npcName: 'Asha' }
 
-    const first = buildDialogueContext(state, npc, history)
-    const second = buildDialogueContext(state, npc, history)
+    const first = buildDialogueContext(state, npc, history, roomContext)
+    const second = buildDialogueContext(state, npc, history, roomContext)
 
     expect(first).toEqual(second)
     expect(state).toEqual(stateBefore)
     expect(history).toEqual(historyBefore)
+    expect(roomContext).toEqual(roomContextBefore)
     expect(first.player.health).not.toBe(state.player.health)
     expect(first.player.status).not.toBe(state.player.status)
     expect(first.history).not.toBe(history)
     expect(first.history[0]).not.toBe(history[0])
+  })
+
+  it('does not introduce free-text leakage beyond existing dialogue context fields', () => {
+    const context = buildDialogueContext(
+      state,
+      { npcId: 'aide', npcName: 'Asha', persona: 'friendly-aide' },
+      history,
+      roomContext,
+    )
+    const roomOnly = JSON.stringify(context.room)
+
+    expect(roomOnly).toContain('altar')
+    expect(roomOnly).toContain('inspect')
+    expect(roomOnly).not.toContain('Gold Coin')
+    expect(roomOnly).not.toContain('Royal Writ')
+    expect(roomOnly).not.toContain('Asha')
+    expect(roomOnly).not.toContain('friendly-aide')
+    expect(roomOnly).not.toContain('Hello.')
+    expect(roomOnly).not.toContain('Welcome.')
   })
 })
