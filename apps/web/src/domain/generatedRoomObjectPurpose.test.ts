@@ -2,6 +2,12 @@ import { describe, expect, it } from 'vitest'
 import { assignGeneratedObjectPurpose } from './generatedRoomObjectPurpose'
 import { loadRoomSpec } from './loadRoomSpec'
 import type { LoadedRoom } from './loadRoomSpec'
+import type { RoomObject } from './roomSpec'
+
+const READ_BODY = 'You read over it carefully. Nothing changes yet.'
+const INSPECT_BODY = 'You inspect it carefully, but do not take anything.'
+const CORPSE_BODY = 'You inspect the remains without disturbing them.'
+const EXAMINE_BODY = 'You examine it for meaning or danger. Nothing changes yet.'
 
 function makeRoom(objects: unknown[]): LoadedRoom {
   return loadRoomSpec({
@@ -21,8 +27,13 @@ function cloneRoom(room: LoadedRoom): LoadedRoom {
   return JSON.parse(JSON.stringify(room)) as LoadedRoom
 }
 
+function interactionAt(room: LoadedRoom, index: number): NonNullable<Extract<RoomObject, { interaction?: unknown }>['interaction']> | undefined {
+  const object = room.objects[index]!
+  return 'interaction' in object ? object.interaction : undefined
+}
+
 describe('assignGeneratedObjectPurpose', () => {
-  it('assigns the correct verb per allowlisted object type', () => {
+  it('allowlisted types synthesize key, prompt, title, and body', () => {
     const room = makeRoom([
       { type: 'book', position: [-5, 0.3, 0] },
       { type: 'paper', position: [-4, 0.3, 0] },
@@ -41,32 +52,94 @@ describe('assignGeneratedObjectPurpose', () => {
     const result = assignGeneratedObjectPurpose(room)
 
     expect(result.purposesAssigned).toBe(12)
-    expect(result.room.objects.map((object) =>
-      'interaction' in object ? object.interaction?.prompt : undefined,
-    )).toEqual([
-      'Read',
-      'Read',
-      'Read',
-      'Inspect',
-      'Inspect',
-      'Inspect',
-      'Inspect',
-      'Inspect',
-      'Inspect',
-      'Examine',
-      'Examine',
-      'Examine',
+    expect(result.room.objects.map((_, index) => interactionAt(result.room, index))).toEqual([
+      { key: 'E', prompt: 'Read', title: 'Read', body: READ_BODY },
+      { key: 'E', prompt: 'Read', title: 'Read', body: READ_BODY },
+      { key: 'E', prompt: 'Read', title: 'Read', body: READ_BODY },
+      { key: 'E', prompt: 'Inspect', title: 'Inspect', body: INSPECT_BODY },
+      { key: 'E', prompt: 'Inspect', title: 'Inspect', body: INSPECT_BODY },
+      { key: 'E', prompt: 'Inspect', title: 'Inspect', body: INSPECT_BODY },
+      { key: 'E', prompt: 'Inspect', title: 'Inspect', body: CORPSE_BODY },
+      { key: 'E', prompt: 'Inspect', title: 'Inspect', body: INSPECT_BODY },
+      { key: 'E', prompt: 'Inspect', title: 'Inspect', body: INSPECT_BODY },
+      { key: 'E', prompt: 'Examine', title: 'Examine', body: EXAMINE_BODY },
+      { key: 'E', prompt: 'Examine', title: 'Examine', body: EXAMINE_BODY },
+      { key: 'E', prompt: 'Examine', title: 'Examine', body: EXAMINE_BODY },
     ])
+  })
+
+  it('sets the synthesized title equal to the prompt', () => {
+    const room = makeRoom([
+      { type: 'book', position: [-2, 0.3, 0] },
+      { type: 'machine', position: [0, 0, 0] },
+      { type: 'artifact', position: [2, 0, 0] },
+    ])
+
+    const result = assignGeneratedObjectPurpose(room)
+
+    for (let index = 0; index < result.room.objects.length; index += 1) {
+      const interaction = interactionAt(result.room, index)!
+      expect(interaction.title).toBe(interaction.prompt)
+    }
+  })
+
+  it('uses the correct fixed body per object type group', () => {
+    const room = makeRoom([
+      { type: 'book', position: [-5, 0.3, 0] },
+      { type: 'paper', position: [-4, 0.3, 0] },
+      { type: 'map', position: [-3, 0.3, 0] },
+      { type: 'chest', position: [-2, 0, 0] },
+      { type: 'crate', position: [-1, 0, 0] },
+      { type: 'barrel', position: [0, 0, 0] },
+      { type: 'table', position: [1, 0, 0] },
+      { type: 'machine', position: [2, 0, 0] },
+      { type: 'altar', position: [3, 0, 0] },
+      { type: 'statue', position: [4, 0, 0] },
+      { type: 'artifact', position: [5, 0, 0] },
+    ])
+
+    const result = assignGeneratedObjectPurpose(room)
+
+    expect(result.room.objects.map((_, index) => interactionAt(result.room, index)?.body)).toEqual([
+      READ_BODY,
+      READ_BODY,
+      READ_BODY,
+      INSPECT_BODY,
+      INSPECT_BODY,
+      INSPECT_BODY,
+      INSPECT_BODY,
+      INSPECT_BODY,
+      EXAMINE_BODY,
+      EXAMINE_BODY,
+      EXAMINE_BODY,
+    ])
+  })
+
+  it('uses the special remains line for corpse', () => {
+    const room = makeRoom([{ type: 'corpse', position: [1, 0, 0] }])
+
+    const result = assignGeneratedObjectPurpose(room)
+
+    expect(interactionAt(result.room, 0)).toEqual({
+      key: 'E',
+      prompt: 'Inspect',
+      title: 'Inspect',
+      body: CORPSE_BODY,
+    })
   })
 
   it('synthesizes interactions with only safe presentation fields', () => {
     const room = makeRoom([{ type: 'machine', position: [2, 0, 0] }])
 
     const result = assignGeneratedObjectPurpose(room)
-    const object = result.room.objects[0]!
-    const interaction = 'interaction' in object ? object.interaction : undefined
+    const interaction = interactionAt(result.room, 0)
 
-    expect(interaction).toStrictEqual({ key: 'E', prompt: 'Inspect' })
+    expect(interaction).toStrictEqual({
+      key: 'E',
+      prompt: 'Inspect',
+      title: 'Inspect',
+      body: INSPECT_BODY,
+    })
     expect(interaction).not.toHaveProperty('effect')
     expect(interaction).not.toHaveProperty('encounter')
     expect(interaction).not.toHaveProperty('dialogue')
@@ -75,9 +148,11 @@ describe('assignGeneratedObjectPurpose', () => {
     expect(interaction).not.toHaveProperty('inventory')
     expect(interaction).not.toHaveProperty('quest')
     expect(interaction).not.toHaveProperty('combat')
+    expect(interaction).not.toHaveProperty('state')
+    expect(interaction).not.toHaveProperty('stateMutation')
   })
 
-  it('never overwrites existing interactions and preserves that object reference', () => {
+  it('never overwrites existing interactions, including existing title and body', () => {
     const room = makeRoom([
       {
         type: 'chest',
@@ -85,6 +160,7 @@ describe('assignGeneratedObjectPurpose', () => {
         interaction: {
           key: 'E',
           prompt: 'Open',
+          title: 'Existing title',
           body: 'The latch is already marked by authored content.',
           effect: { kind: 'inspect', flag: 'chest-seen' },
         },
@@ -92,14 +168,19 @@ describe('assignGeneratedObjectPurpose', () => {
       { type: 'book', position: [-2, 0.3, 0] },
     ])
     const existingObject = room.objects[0]!
+    const existingInteraction = interactionAt(room, 0)
 
     const result = assignGeneratedObjectPurpose(room)
 
     expect(result.room.objects[0]).toBe(existingObject)
-    expect(result.room.objects[0]).toEqual(existingObject)
-    expect(
-      'interaction' in result.room.objects[0]! ? result.room.objects[0].interaction?.prompt : undefined,
-    ).toBe('Open')
+    expect(interactionAt(result.room, 0)).toBe(existingInteraction)
+    expect(interactionAt(result.room, 0)).toEqual({
+      key: 'E',
+      prompt: 'Open',
+      title: 'Existing title',
+      body: 'The latch is already marked by authored content.',
+      effect: { kind: 'inspect', flag: 'chest-seen' },
+    })
     expect(result.purposesAssigned).toBe(1)
   })
 
@@ -131,13 +212,13 @@ describe('assignGeneratedObjectPurpose', () => {
       {
         type: 'scroll',
         position: [1, 0.5, 0],
-        interaction: { key: 'E', prompt: 'Read scroll', body: 'Existing scroll text.' },
+        interaction: { key: 'E', prompt: 'Read scroll', title: 'Scroll', body: 'Existing scroll text.' },
       },
       {
         type: 'npc',
         name: 'Mira',
         position: [-1, 0, 0],
-        interaction: { key: 'F', prompt: 'Talk', body: 'Mira waits.' },
+        interaction: { key: 'F', prompt: 'Talk', title: 'Mira', body: 'Mira waits.' },
       },
     ])
     const scroll = room.objects[0]!
@@ -160,7 +241,7 @@ describe('assignGeneratedObjectPurpose', () => {
     expect(result.purposesAssigned).toBe(0)
   })
 
-  it('reports the number of purposes assigned', () => {
+  it('reports the number of purposes assigned unchanged', () => {
     const room = makeRoom([
       { type: 'book', position: [-3, 0.3, 0] },
       { type: 'chest', position: [-1, 0, 0] },
@@ -209,21 +290,29 @@ describe('assignGeneratedObjectPurpose', () => {
     expect(third.purposesAssigned).toBe(0)
   })
 
-  it('does not leak generated-looking object names into synthesized prompts', () => {
+  it('does not leak generated-looking object names into synthesized interaction text', () => {
+    const leakedText = 'ProviderTrace raw-json {"prompt":"steal-name"} generated_object_name'
     const room = makeRoom([
       {
         type: 'chest',
-        name: 'Vault of Nyx-779 with ProviderTrace alpha-beta',
+        name: leakedText,
         position: [2, 0, 0],
       },
     ])
 
     const result = assignGeneratedObjectPurpose(room)
-    const object = result.room.objects[0]!
-    const interaction = 'interaction' in object ? object.interaction : undefined
+    const interaction = interactionAt(result.room, 0)
+    const serializedInteraction = JSON.stringify(interaction)
 
-    expect(interaction).toStrictEqual({ key: 'E', prompt: 'Inspect' })
-    expect(JSON.stringify(interaction)).not.toContain('Vault of Nyx-779')
-    expect(JSON.stringify(interaction)).not.toContain('ProviderTrace')
+    expect(interaction).toStrictEqual({
+      key: 'E',
+      prompt: 'Inspect',
+      title: 'Inspect',
+      body: INSPECT_BODY,
+    })
+    expect(serializedInteraction).not.toContain('ProviderTrace')
+    expect(serializedInteraction).not.toContain('raw-json')
+    expect(serializedInteraction).not.toContain('steal-name')
+    expect(serializedInteraction).not.toContain('generated_object_name')
   })
 })
