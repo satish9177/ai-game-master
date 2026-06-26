@@ -1,5 +1,6 @@
 import type { NPCDialogueProvider } from '../domain/ports/NPCDialogueProvider'
 import type { NPCDialogueRequest, NPCDialogueResponse } from '../domain/dialogue/contracts'
+import type { RoomObject } from '../domain/roomSpec'
 
 const PERSONA_LINES: Readonly<Record<string, readonly string[]>> = {
   'friendly-aide': [
@@ -27,6 +28,24 @@ const FALLBACK_LINES = [
   'Some answers are safer shared face to face.',
 ] as const
 
+const ROOM_FOCUS_LINES: Partial<Record<RoomObject['type'], string>> = {
+  corpse: 'A body lies here. Watch your step.',
+  altar: 'That altar makes this place feel important.',
+  statue: 'That statue is hard to ignore.',
+  throne: 'The throne says plenty about who once ruled here.',
+  chest: 'That chest may matter, but do not rush.',
+  map: 'That map could be useful if you study the room.',
+  book: 'Books like that often outlast their owners.',
+  paper: 'Loose papers can reveal more than they seem.',
+  scroll: 'A scroll in a place like this is rarely accidental.',
+  machine: 'That machine looks worth noticing.',
+  artifact: 'That artifact draws attention for a reason.',
+  table: 'Even an ordinary table can hold clues.',
+  barricade: 'A barricade usually means someone expected trouble.',
+  debris: 'The debris says this place has seen damage.',
+  zombie: 'That thing makes this room dangerous.',
+}
+
 /** Deterministic, in-process provider. It performs no logging or network I/O. */
 export class FakeNPCDialogueProvider implements NPCDialogueProvider {
   async reply(request: NPCDialogueRequest): Promise<NPCDialogueResponse> {
@@ -36,12 +55,27 @@ export class FakeNPCDialogueProvider implements NPCDialogueProvider {
       : undefined
     if (prompted) return { text: prompted }
 
-    const lines = PERSONA_LINES[key] ?? FALLBACK_LINES
+    const personaLines = PERSONA_LINES[key]
+    if (personaLines) {
+      const promptOffset = request.playerLine ? stableIndex(request.playerLine, personaLines.length) : 0
+      const index = (request.context.history.length + promptOffset) % personaLines.length
+      return { text: personaLines[index] ?? FALLBACK_LINES[0] }
+    }
+
+    const roomGrounded = roomGroundedFallback(request)
+    if (roomGrounded) return { text: roomGrounded }
+
+    const lines = FALLBACK_LINES
     const promptOffset = request.playerLine ? stableIndex(request.playerLine, lines.length) : 0
-    const identityOffset = PERSONA_LINES[key] ? 0 : stableIndex(key, lines.length)
+    const identityOffset = stableIndex(key, lines.length)
     const index = (request.context.history.length + promptOffset + identityOffset) % lines.length
     return { text: lines[index] ?? FALLBACK_LINES[0] }
   }
+}
+
+function roomGroundedFallback(request: NPCDialogueRequest): string | undefined {
+  const focusType = request.context.room?.focus?.type
+  return focusType ? ROOM_FOCUS_LINES[focusType] : undefined
 }
 
 function stableIndex(value: string, length: number): number {
