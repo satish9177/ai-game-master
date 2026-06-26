@@ -930,6 +930,38 @@ current room without exposing generated/free text
   existing ids/status/reason/turn-count fields only and must not log context,
   focus, feature lists, affordances, npc counts, object types, or generated text.
 
+## 27. Generated room NPC presence ✅ v0 (generated assembly/domain)
+
+Generated Room NPC Presence v0 inserts at most one safe generic NPC into a
+PromptBar-generated room when the raw prompt clearly asks for a living or
+interactable person to talk to
+([ADR-0040](./decisions/ADR-0040-generated-room-npc-presence-v0.md)).
+
+| Situation | Detection | Handling / result | Logging |
+| --- | --- | --- | --- |
+| Prompt asks for an NPC, but no safe tile exists | `ensureGeneratedNpcPresence` exhausts its deterministic candidate list | no NPC inserted; room still continues through final validation and loads normally | `npcInserted: false` only |
+| Classifier false negative | `detectsNpcRequest(prompt)` returns false | no NPC inserted; generated-room behavior remains unchanged and safe | no classifier details logged |
+| Classifier false positive | boolean `requestsNpc` is true for a prompt that did not really need a person | at most one harmless generic NPC may be inserted if placement is safe | `npcInserted: true` only |
+| Generated room already has an NPC | validated object list already contains `type: 'npc'` | preserve existing NPC; insert no duplicate | `npcInserted: false` only |
+| Inserted NPC would be invalid | final `validateRoom` still runs after insertion | existing final validation/repair/fallback behavior applies; no invalid room reaches renderer | existing safe diagnostics only |
+| Adjacent pregeneration lacks raw prompt intent | `GeneratedRoomSource` options default `requestsNpc` to false | no forced NPCs in adjacent rooms from structural ids such as `adjacent:...` | existing adjacent logs only |
+
+- **Boolean-only prompt boundary.** The raw prompt is classified in `App`; only
+  `requestsNpc` enters `GeneratedRoomSource`/`assembleRoom`. Prompt text, matched
+  keyword, generated JSON, provider output, room names, object names, generated
+  descriptions, and interaction prompt/title/body text are not copied into NPC
+  strings or diagnostics.
+- **Fixed authored NPC text.** Inserted NPC name, prompt/body, persona, greeting,
+  and canned prompts come from fixed authored strings using the existing NPC
+  interaction/dialogue shape. No RoomSpec schema field is added.
+- **No repair/fallback coupling for placement failure.** Failure to find a safe
+  NPC tile is a normal no-op, not a generator failure, room repair trigger, or
+  user-facing error.
+- **No gameplay mutation.** The NPC is an interactable presentation/dialogue
+  object only. The feature adds no world-state mutation, event write, quest,
+  inventory, loot, combat, encounter, memory, backend, API, pathfinding, walking,
+  or simulation behavior.
+
 ---
 
 ## Summary
@@ -968,6 +1000,7 @@ current room without exposing generated/free text
 | 24 | Generated interaction affordances | `affordanceFor` over validated `interaction.exit` / `encounter` / `dialogue` / `effect.kind` and NPC object type; HUD/ring consume derived `Interactable.affordance` | weak prompts mitigated by verb chip; ambiguous defaults to Inspect; ring tint is presentation-only; never repair/fallback/gameplay | ✅ browser |
 | 25 | Generated room object purpose and explore loop | `assignGeneratedObjectPurpose` runs only in generated `assembleRoom` after composition/spawn/exit repair and before final validation; reads validated object type + interaction presence only | allowlisted bare objects get presentation-only `{ key, prompt, title, body }`; pressing E opens the existing panel with safe fixed text; unsupported/existing/fallback paths unchanged; no gameplay/schema/backend/state change | ✅ generated assembly + browser UI |
 | 26 | NPC dialogue room context | `buildRoomDialogueContext` over validated `LoadedRoom`; optional service/provider packet; fake provider room-focus table after prompt/persona precedence | missing/no-focus/unsupported focus → existing generic fallback; prompt/persona lines unchanged; no repair/fallback/load failure or state mutation | ✅ browser/domain/dialogue |
+| 27 | Generated room NPC presence | raw prompt -> boolean `requestsNpc`; `ensureGeneratedNpcPresence` runs in generated `assembleRoom` after object-purpose enrichment and before final validation | requested+absent+safe tile -> one fixed generic TALK NPC; existing NPC preserved; no safe tile/false negative -> no-op; false positive -> harmless generic NPC | implemented generated assembly/domain |
 
 The through-line: **validate at the boundary, degrade visibly and safely, log
 the detail, show the user calm.**

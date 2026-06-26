@@ -44,6 +44,7 @@ Throughout these docs:
   Generated Room Interaction Affordances v0 — browser;
   Generated Room Object Purpose v0 — generated assembly/domain;
   Generated Room Explore Loop v0 — generated assembly/domain + existing browser UI;
+  Generated Room NPC Presence v0 — generated assembly/domain;
   NPC Dialogue Room Context v0 — browser/domain/dialogue).
 - 🔜 **Planned** — designed and approved, not yet built (next slices).
 - ❌ **Not built** — future shape only; documented so we don't paint into a corner.
@@ -551,6 +552,42 @@ loop ([ADR-0038](./decisions/ADR-0038-generated-room-explore-loop-v0.md)).
 - **Unchanged paths:** authored/default/restored rooms still bypass generated
   purpose assignment; fallback rooms are not enriched; existing generated
   interactions are preserved exactly.
+
+## Generated Room NPC Presence v0
+
+✅ **Implemented, generated assembly/domain.** Generated Room NPC Presence v0
+lets PromptBar-generated rooms include a real TALK NPC when the raw user prompt
+clearly asks for a living/interactable person, without passing prompt text into
+the generated-room domain pipeline
+([ADR-0040](./decisions/ADR-0040-generated-room-npc-presence-v0.md)).
+
+- **Boolean-only prompt boundary:** `App` classifies the raw prompt with
+  `detectsNpcRequest(prompt)` before world-bible seed/projection can lose NPC
+  intent. Only the boolean `requestsNpc` crosses into `GeneratedRoomSource` and
+  `assembleRoom`; matched keywords and prompt text do not.
+- **Pipeline position:** `assembleRoom` runs `ensureGeneratedNpcPresence` after
+  generated-object purpose enrichment and before final `validateRoom`. The
+  inserted NPC is therefore checked by the existing final validation step.
+- **Trusted enrichment:** when `requestsNpc` is true and no NPC already exists,
+  the pure deterministic enrichment inserts at most one safe NPC if a valid tile
+  exists. Existing generated NPCs are preserved and no duplicate is inserted.
+  If no safe tile exists, no NPC is inserted and the room still loads normally.
+- **Existing NPC shape:** the inserted NPC uses the same authored working pattern
+  as existing NPCs: `type: 'npc'`, key `F`, fixed authored name/color, fixed
+  interaction prompt/body, and `interaction.dialogue` with fixed persona,
+  greeting, and canned prompts. No RoomSpec schema change is required.
+- **No text leakage:** inserted NPC strings come only from fixed authored text.
+  The enrichment does not read or copy room names, object names, generated
+  descriptions, existing interaction prompt/title/body text, raw JSON, provider
+  output, matched terms, or user prompt text.
+- **Safe diagnostics:** `npcInserted` is boolean-only. Logs and diagnostics must
+  not contain prompt text, matched keywords, generated text, object names,
+  provider JSON, or feature details.
+- **Adjacent rooms default false:** adjacent pregeneration keeps `requestsNpc`
+  false because it has structural room ids, not deliberate raw prompt intent.
+- **Soft cap note:** the inserted NPC is added after the soft generated object cap
+  but before hard final validation. This is intentional so an explicitly
+  requested NPC is not dropped by soft composition trimming.
 
 ## Isometric Camera Foundation
 
