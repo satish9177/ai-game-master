@@ -43,7 +43,8 @@ Throughout these docs:
   Room Inspect Summary v0 — browser;
   Generated Room Interaction Affordances v0 — browser;
   Generated Room Object Purpose v0 — generated assembly/domain;
-  Generated Room Explore Loop v0 — generated assembly/domain + existing browser UI).
+  Generated Room Explore Loop v0 — generated assembly/domain + existing browser UI;
+  NPC Dialogue Room Context v0 — browser/domain/dialogue).
 - 🔜 **Planned** — designed and approved, not yet built (next slices).
 - ❌ **Not built** — future shape only; documented so we don't paint into a corner.
 
@@ -683,6 +684,16 @@ current room/player facts without inventory names; `NPCDialogueService` reads
 through `WorldSession.getWorldState` and delegates to the domain
 `NPCDialogueProvider` port. Its deterministic fake provider performs no network
 I/O and returns display text data only.
+
+NPC dialogue can now receive an optional safe room-context packet
+([ADR-0039](./decisions/ADR-0039-npc-dialogue-room-context-v0.md)). The packet is
+derived only from the current validated `LoadedRoom` and contains closed enums
+and small counts only: an optional focus `{ type, direction }`, notable feature
+`{ type, direction }` entries, closed affordance enum values, and a capped
+`npcCount`. It never includes room names, object names, generated descriptions,
+interaction prompt/title/body text, raw JSON, provider output, or user prompt
+text. The context is presentation/dialogue grounding only, not authoritative
+memory or room truth.
 
 The composition root resolves the renderer's neutral object id with precedence
 **exit → encounter → dialogue → effect**. Dialogue-bearing NPCs open the
@@ -1592,8 +1603,13 @@ is to keep each replacement local to its port.
 
 - ✅ `NPCDialogueSpec` is validated display/seed data on the shared Interaction;
   `buildDialogueContext` is a pure projection of current authoritative facts.
+- ✅ `RoomDialogueContext` is an optional compact packet derived from validated
+  `LoadedRoom` data only. It carries closed focus/feature/direction/affordance
+  enums and capped `npcCount`, never names, prompts, generated descriptions, raw
+  JSON, provider output, or user prompt text.
 - ✅ `NPCDialogueProvider` is the external-provider seam. The v0 fake is
-  deterministic, static, and performs no network I/O.
+  deterministic, static, performs no network I/O, and uses room focus only as a
+  generic fallback after prompt/persona lines.
 - ✅ `NPCDialogueService` injects only the `getWorldState` read path and returns
   typed replies/failures. Repeated turns leave the event log unchanged.
 - ✅ `NPCDialoguePanel` is presentational; canned prompts/Continue and conversation

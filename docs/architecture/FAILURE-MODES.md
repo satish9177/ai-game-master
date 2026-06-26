@@ -899,6 +899,37 @@ carry safe deterministic `title` and `body`, completing the local ring -> HUD ->
   Future host/UI code must not treat `lacksInteractable` as "final room has no
   interactable" without considering `purposesAssigned` or the final `LoadedRoom`.
 
+## 26. NPC dialogue room context grounding ✅ v0 (browser/domain/dialogue)
+
+NPC dialogue receives an optional compact `RoomDialogueContext` derived from the
+current validated `LoadedRoom` so generic fallback lines can be grounded in the
+current room without exposing generated/free text
+([ADR-0039](./decisions/ADR-0039-npc-dialogue-room-context-v0.md)).
+
+| Situation | Detection | Handling / result | Logging |
+| --- | --- | --- | --- |
+| Room context missing | `NPCDialogueContext.room === undefined` | existing NPC dialogue behavior; prompt/persona/generic fallback precedence remains valid | no room context logged |
+| Room context has no focus | `context.room.focus === undefined` | fake provider skips room-grounded fallback and uses existing generic fallback when no prompt/persona line applies | no focus/features logged |
+| Focus type unsupported by fake fallback table | table lookup misses | existing generic fallback when no prompt/persona line applies | no object type logged |
+| Prompt-specific or persona line exists | provider precedence checks prompt/persona before room fallback | existing authored/persona/prompt-specific text remains byte-identical | unchanged safe dialogue-service logs |
+| Room context projection absent due to room not loaded | `RoomViewer` has no room-context ref yet | service call omits `roomContext`; dialogue continues or fails exactly as before | no context details logged |
+| Context would require prose/free-text inference | forbidden by construction | builder reads only validated object type/position and structured interaction presence/type; no prompt/title/body/name/raw JSON is passed | — |
+
+- **No repair/fallback coupling.** Missing, empty, or unsupported room context
+  never causes generated-room repair, fallback, a repaired/fallback notice, room
+  invalidation, or room load failure.
+- **Safe packet only.** The packet contains optional focus type/direction,
+  notable feature type/direction entries, closed affordance enums, and capped
+  `npcCount`. It never contains room names, object names, generated descriptions,
+  interaction prompt/title/body text, raw JSON, provider output, or user prompt
+  text.
+- **Read-only and non-authoritative.** Room dialogue context is supporting
+  presentation context only. It is not NPC memory, room memory, world state, an
+  event, a save field, a backend/API payload, or a source of truth.
+- **Log-safe.** `buildRoomDialogueContext` is pure and silent. The service logs
+  existing ids/status/reason/turn-count fields only and must not log context,
+  focus, feature lists, affordances, npc counts, object types, or generated text.
+
 ---
 
 ## Summary
@@ -936,6 +967,7 @@ carry safe deterministic `title` and `body`, completing the local ring -> HUD ->
 | 23 | Room intro summary display | `buildRoomSummary` focal selection (anchor → interactable → NPC fallback; returns `null` when none qualify); `text.length === 0` guard in `RoomIntroPanel`; `resetKey` change resets dismiss state | no focal object → no panel; dismissed → panel hidden until next room entry; null summary never blocks play, triggers repair/fallback, or logs; summary text never contains object names, interaction bodies, or raw generated JSON | ✅ browser |
 | 24 | Generated interaction affordances | `affordanceFor` over validated `interaction.exit` / `encounter` / `dialogue` / `effect.kind` and NPC object type; HUD/ring consume derived `Interactable.affordance` | weak prompts mitigated by verb chip; ambiguous defaults to Inspect; ring tint is presentation-only; never repair/fallback/gameplay | ✅ browser |
 | 25 | Generated room object purpose and explore loop | `assignGeneratedObjectPurpose` runs only in generated `assembleRoom` after composition/spawn/exit repair and before final validation; reads validated object type + interaction presence only | allowlisted bare objects get presentation-only `{ key, prompt, title, body }`; pressing E opens the existing panel with safe fixed text; unsupported/existing/fallback paths unchanged; no gameplay/schema/backend/state change | ✅ generated assembly + browser UI |
+| 26 | NPC dialogue room context | `buildRoomDialogueContext` over validated `LoadedRoom`; optional service/provider packet; fake provider room-focus table after prompt/persona precedence | missing/no-focus/unsupported focus → existing generic fallback; prompt/persona lines unchanged; no repair/fallback/load failure or state mutation | ✅ browser/domain/dialogue |
 
 The through-line: **validate at the boundary, degrade visibly and safely, log
 the detail, show the user calm.**
