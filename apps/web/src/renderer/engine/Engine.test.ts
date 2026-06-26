@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import { loadRoomSpec } from '../../domain/loadRoomSpec'
 import { buildInteractables } from '../../domain/ports/interaction'
+import { assembleRoom } from '../../domain/assembleRoom'
+import { fallbackRoom } from '../../domain/examples/fallbackRoom'
+
+const fallback = loadRoomSpec(fallbackRoom)
+const INSPECT_BODY = 'You inspect it carefully, but do not take anything.'
 
 const encounter = {
   id: 'threat',
@@ -107,6 +112,42 @@ describe('buildInteractables', () => {
     expect(byId.get('use')?.affordance).toBe('use')
     expect(byId.get('body-only')?.affordance).toBe('inspect')
     expect(byId.has('visual-only')).toBe(false)
+  })
+
+
+  it('carries synthesized generated-room title and body without using generated object names as titles', () => {
+    const leakedName = 'ProviderTrace raw-json {"prompt":"steal-name"} generated_object_name'
+    const result = assembleRoom(JSON.stringify({
+      schemaVersion: 1,
+      id: 'generated-port-room',
+      name: 'Generated Port Room',
+      shell: {
+        dimensions: { width: 18, depth: 18, height: 4 },
+        exits: [{ side: 'north', width: 3 }],
+      },
+      spawn: { position: [0, 1.7, 5] },
+      objects: [{ id: 'generated-chest', type: 'chest', name: leakedName, position: [2, 0, 0] }],
+    }), fallback)
+
+    const interactable = buildInteractables(result.room).find((candidate) => candidate.id === 'generated-chest')
+
+    expect(result.diagnostics.provenance).toBe('generated')
+    expect(result.diagnostics.purposesAssigned).toBe(1)
+    expect(interactable).toMatchObject({
+      id: 'generated-chest',
+      type: 'chest',
+      label: 'chest',
+      affordance: 'inspect',
+      key: 'E',
+      prompt: 'Inspect',
+      title: 'Inspect',
+      body: INSPECT_BODY,
+    })
+    expect(interactable?.title).not.toBe(interactable?.label)
+    expect(JSON.stringify(interactable)).not.toContain('ProviderTrace')
+    expect(JSON.stringify(interactable)).not.toContain('raw-json')
+    expect(JSON.stringify(interactable)).not.toContain('steal-name')
+    expect(JSON.stringify(interactable)).not.toContain('generated_object_name')
   })
 
   it('preserves existing interaction view-model fields and precedence data', () => {

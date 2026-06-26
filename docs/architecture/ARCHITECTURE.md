@@ -42,7 +42,8 @@ Throughout these docs:
   Cost/Usage Guardrails v0 — browser;
   Room Inspect Summary v0 — browser;
   Generated Room Interaction Affordances v0 — browser;
-  Generated Room Object Purpose v0 — generated assembly/domain).
+  Generated Room Object Purpose v0 — generated assembly/domain;
+  Generated Room Explore Loop v0 — generated assembly/domain + existing browser UI).
 - 🔜 **Planned** — designed and approved, not yet built (next slices).
 - ❌ **Not built** — future shape only; documented so we don't paint into a corner.
 
@@ -496,20 +497,22 @@ semantics
   directly and are unchanged; the trusted fallback room is never enriched.
 - **Validated data only:** the stage receives `LoadedRoom` data and reads only
   validated `RoomObject.type` plus whether an interaction already exists. It does
-  not read object names, prompts, bodies, provider output, skipped objects, raw
-  generated JSON, or user prompt text.
-- **Presentation-only synthesis:** it adds `{ key: 'E', prompt }` only for
-  allowlisted objects that currently lack interaction: `book`/`paper`/`map` use
-  `Read`; `chest`/`crate`/`barrel`/`corpse`/`table`/`machine` use `Inspect`;
-  `altar`/`statue`/`artifact` use `Examine`. Existing interactions are preserved.
-- **No schema or gameplay change:** `RoomSpec.schemaVersion` remains `1`; no
-  purpose/affordance field is stored. The synthesized interaction has no effect,
-  encounter, dialogue, exit, item, inventory, quest, combat, event write, memory,
-  backend, or world-state mutation.
+  not read object names, generated descriptions, provider output, skipped objects,
+  raw generated JSON, or user prompt text.
+- **Presentation-only synthesis:** it adds `{ key: 'E', prompt, title, body }`
+  only for allowlisted objects that currently lack interaction. `book`/`paper`/
+  `map` use `Read`; `chest`/`crate`/`barrel`/`corpse`/`table`/`machine` use
+  `Inspect`; `altar`/`statue`/`artifact` use `Examine`. `title` equals the safe
+  verb and `body` comes from a fixed hand-written table. Existing interactions,
+  including existing generated `title`/`body`/`effect`, are preserved.
+- **No schema or gameplay change:** `RoomSpec.schemaVersion` remains `1`; `title`
+  and `body` already exist on the shared `Interaction` schema. The synthesized
+  interaction has no effect, encounter, dialogue, exit, item, inventory, quest,
+  combat, event write, memory, backend, or world-state mutation.
 - **Best-effort diagnostics:** unsupported or excluded object types are left
   unchanged. Missing purpose never causes repair, fallback, a generated-room
   notice, or validation failure. `purposesAssigned` is count-only; all fallback,
-  JSON/schema, and unavailable paths report `0`.
+  JSON/schema, semantic fallback, and unavailable paths report `0`.
 - **Downstream consumers stay downstream:** affordance classification, renderer
   rings, and HUD chips consume the final validated interactions. They still do
   not invent interactions themselves.
@@ -517,6 +520,36 @@ semantics
   `lacksInteractable` before purpose assignment. `lacksInteractable` describes
   the raw generated/composed output, not necessarily the final `LoadedRoom` after
   safe synthesized interactions.
+
+## Generated Room Explore Loop v0
+
+✅ **Implemented, generated assembly/domain + existing browser UI.** Generated
+Room Explore Loop v0 extends ADR-0037 so synthesized generated-object purpose
+interactions now carry the safe panel text needed for a complete local explore
+loop ([ADR-0038](./decisions/ADR-0038-generated-room-explore-loop-v0.md)).
+
+- **Safe title/body close the loop:** generated synthesized interactions are now
+  `{ key: 'E', prompt, title, body }`, where `title` equals the safe verb
+  (`Read` / `Inspect` / `Examine`) and `body` comes only from the fixed
+  hand-written table. Pressing E therefore opens an existing panel with safe text
+  instead of relying on generic fallback body copy or an object label/name title.
+- **Existing open-interaction path:** `buildInteractables` projects validated
+  interactions into the neutral `Interactable` view-model; the renderer surfaces
+  the ring/HUD and emits intent; `RoomViewer` opens the existing `DialoguePanel`.
+  No new resolver, LLM call, backend/API call, memory lookup, or stateful system
+  was added.
+- **Presentation-only:** the synthesized interactions carry no `effect`,
+  `encounter`, `dialogue`, `exit`, inventory, loot, quest, combat, event, memory,
+  backend, API, or world-state mutation data. They are deterministic local display
+  data only.
+- **No generated text leakage:** the enrichment does not read object names,
+  generated descriptions, generated prompt/title/body text, provider output, raw
+  generated JSON, or user prompt text for synthesized display text. It closes the
+  generated-object-name panel-title leak for synthesized object-purpose
+  interactions.
+- **Unchanged paths:** authored/default/restored rooms still bypass generated
+  purpose assignment; fallback rooms are not enriched; existing generated
+  interactions are preserved exactly.
 
 ## Isometric Camera Foundation
 
