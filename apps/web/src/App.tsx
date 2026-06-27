@@ -50,6 +50,8 @@ import { FALLBACK_NOTICE, shouldShowFallbackNotice } from './app/fallbackNotice'
 import { buildRoomIntroView } from './app/roomIntro'
 import { FakeNPCDialogueProvider } from './dialogue/FakeNPCDialogueProvider'
 import type { WorldBibleSeed } from './domain/worldBible/worldBibleSeed'
+import { worldBibleToAdjacentThemeSeed } from './domain/worldBible/worldBibleToSeed'
+import { buildAdjacentRoomSeed } from './app/buildAdjacentRoomSeed'
 import { prepareGeneratedRoomSeed } from './app/worldBible'
 import { buildPromptGeneratedRoomSource } from './app/buildPromptGeneratedRoomSource'
 
@@ -340,11 +342,19 @@ function App() {
         }
         const generatedCache = new SessionRoomCache()
         generatedCache.set(result.room.id, result.room)
+        const adjacentThemeSeed = prepared.worldBible
+          ? worldBibleToAdjacentThemeSeed(prepared.worldBible)
+          : undefined
         const generatedPregenerator = new AdjacentRoomPregenerator(
           generatedCache,
           roomRegistry,
           (roomId) =>
-            new GeneratedRoomSource(adjacentGenerator, `adjacent:${roomId}`, logger, fallbackRoom),
+            new GeneratedRoomSource(
+              adjacentGenerator,
+              buildAdjacentRoomSeed(roomId, adjacentThemeSeed),
+              logger,
+              fallbackRoom,
+            ),
           fallbackRoom,
           logger,
         )
