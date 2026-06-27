@@ -9,11 +9,9 @@ import { JournalPanel } from './renderer/ui/JournalPanel'
 import { RoomIntroPanel } from './renderer/ui/RoomIntroPanel'
 import { projectPlayerHud } from './renderer/ui/playerHud'
 import type { PlayerHudView } from './renderer/ui/playerHud'
-import { evaluateQuest } from './domain/quests/evaluateQuest'
 import type { QuestView } from './domain/quests/evaluateQuest'
 import type { QuestSpec } from './domain/quests/questSpec'
 import { demoQuestSpec } from './domain/examples/demoQuest'
-import { projectJournal } from './domain/journal/projectJournal'
 import type { JournalView } from './domain/journal/projectJournal'
 import type { JournalSpec } from './domain/journal/journalSpec'
 import { demoJournalSpec } from './domain/examples/demoJournal'
@@ -34,6 +32,7 @@ import { NavigationService } from './app/NavigationService'
 import type { NavigationResult } from './app/NavigationService'
 import { PromptBar } from './app/PromptBar'
 import { buildRestoredPlay } from './app/buildRestoredPlay'
+import { computeDerivedViews } from './app/derivedViews'
 import { LocalStorageSaveSlotStore } from './app/saveSlotStore'
 import { createConsoleLogger } from './platform/logger/consoleLogger'
 import { SystemClock } from './platform/system/clock'
@@ -190,7 +189,7 @@ function startRoomSession(room: LoadedRoom): Promise<WorldStateResult> {
   })
 }
 
-type ExampleBootstrapResult = ActivePlay & { initialQuest: QuestView; initialJournal: JournalView }
+type ExampleBootstrapResult = ActivePlay & { initialState: WorldState }
 
 let exampleBootstrap: Promise<ExampleBootstrapResult | null> | undefined
 
@@ -219,8 +218,7 @@ function bootstrapExamplePlay(): Promise<ExampleBootstrapResult | null> {
       initialPlayer: projectPlayerHud(started.state),
       questSpec: demoQuestSpec,
       journalSpec: demoJournalSpec,
-      initialQuest: evaluateQuest(demoQuestSpec, started.state),
-      initialJournal: projectJournal(demoJournalSpec, started.state),
+      initialState: started.state,
     }
   })()
   return exampleBootstrap
@@ -249,14 +247,6 @@ function App() {
   const guardConfig: UsageGuardConfig = { cap: guardCap, enabled: guardEnabled }
   const usageStatus = evaluate({ count: usageCount }, guardConfig)
 
-  function refreshDerivedViews(state: WorldState) {
-    setPlayerHud(projectPlayerHud(state))
-    const qSpec = questSpecRef.current
-    if (qSpec) setQuest(evaluateQuest(qSpec, state))
-    const jSpec = journalSpecRef.current
-    setJournal(jSpec ? projectJournal(jSpec, state) : null)
-  }
-
   const enterActivePlay = useCallback((play: ActivePlay) => {
     setActivePlay(play)
     setRoomEntrySeq((seq) => seq + 1)
@@ -265,23 +255,34 @@ function App() {
   const [saveLoadError, setSaveLoadError] = useState<string | null>(null)
   const [hasSave, setHasSave] = useState(() => saveSlotStore.has())
 
+  // The single derived-view refresh seam: re-project the read-only player HUD,
+  // quest tracker, and journal from a fresh authoritative WorldState. Called
+  // everywhere the App obtains new state (bootstrap, load, navigation,
+  // interaction/encounter resolve) so the projection logic can never drift
+  // between sites. Stable (no deps).
+  const refreshDerivedViews = useCallback((state: WorldState) => {
+    const views = computeDerivedViews(state, questSpecRef.current, journalSpecRef.current)
+    setPlayerHud(views.playerHud)
+    setQuest(views.quest)
+    setJournal(views.journal)
+  }, [])
+
   useEffect(() => {
     const version = ++requestVersion.current
     void bootstrapExamplePlay().then((result) => {
       if (version !== requestVersion.current) return
       if (result) {
+        const { initialState, ...play } = result
         questSpecRef.current = result.questSpec ?? null
         journalSpecRef.current = result.journalSpec ?? null
-        enterActivePlay(result)
-        setPlayerHud(result.initialPlayer)
-        setQuest(result.initialQuest)
-        setJournal(result.initialJournal)
+        enterActivePlay(play)
+        refreshDerivedViews(initialState)
       } else setFatalMessage(ROOM_UNAVAILABLE)
     })
     return () => {
       requestVersion.current += 1
     }
-  }, [enterActivePlay])
+  }, [enterActivePlay, refreshDerivedViews])
 
   const handlePrompt = useCallback((prompt: string) => {
     // In-flight lock: prevent a second call while one is pending.
@@ -490,9 +491,7 @@ function App() {
         questSpec: restoredQuestSpec,
         journalSpec: restoredJournalSpec,
       })
-      setPlayerHud(play.initialPlayer)
-      setQuest(restoredQuestSpec ? evaluateQuest(restoredQuestSpec, stateResult.state) : null)
-      setJournal(restoredJournalSpec ? projectJournal(restoredJournalSpec, stateResult.state) : null)
+      refreshDerivedViews(stateResult.state)
       setFatalMessage(null)
       setNotice(degraded ? FALLBACK_NOTICE : null)
       setSaveLoadStatus('idle')
@@ -505,7 +504,7 @@ function App() {
       setSaveLoadStatus('error')
       setSaveLoadError('This save could not be loaded.')
     })
-  }, [enterActivePlay])
+  }, [enterActivePlay, refreshDerivedViews])
 
   const handleNavigate = useCallback(async (toRoomId: string): Promise<NavigationResult> => {
     if (!activePlay?.navigation) return { status: 'rejected', reason: 'missing-exit' }
@@ -536,11 +535,7 @@ function App() {
       refreshDerivedViews(result.state)
     }
     return result
-  }, [activePlay])
-
-  const handleWorldStateChange = useCallback((state: WorldState) => {
-    refreshDerivedViews(state)
-  }, [])
+  }, [activePlay, refreshDerivedViews])
 
   return (
     <ErrorBoundary logger={logger}>
@@ -552,7 +547,7 @@ function App() {
           encounterService={encounterService}
           npcDialogueService={npcDialogueService}
           onNavigate={handleNavigate}
-          onWorldStateChange={handleWorldStateChange}
+          onWorldStateChange={refreshDerivedViews}
         />
       ) : (
         <div className="room-viewer-root">
