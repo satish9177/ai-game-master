@@ -4,6 +4,7 @@ import { FakeRoomGenerator } from '../generation/FakeRoomGenerator'
 import type { RoomGenerator } from '../domain/ports/RoomGenerator'
 import { loadRoomSpec } from '../domain/loadRoomSpec'
 import type { LoadedRoom } from '../domain/loadRoomSpec'
+import type { RoomObject } from '../domain/roomSpec'
 import { fallbackRoom } from '../domain/examples/fallbackRoom'
 import type { AssembleRoomOptions } from '../domain/assembleRoom'
 import { shouldShowFallbackNotice } from '../app/fallbackNotice'
@@ -12,6 +13,13 @@ import type { Logger, LogContext, LogLevel } from '../platform/logger/Logger'
 /* ---------- test doubles ---------- */
 
 type Entry = { level: LogLevel; message: string; context: LogContext }
+
+function nonExitObjects(room: LoadedRoom): RoomObject[] {
+  return room.objects.filter((object) => {
+    const interaction = 'interaction' in object ? object.interaction : undefined
+    return interaction?.exit == null
+  })
+}
 
 /**
  * A recording Logger. `child` merges bindings and writes to the SAME entries
@@ -107,7 +115,7 @@ describe('GeneratedRoomSource', () => {
     if (result.ok) {
       expect(result.provenance).toBe('generated')
       expect(result.room.id).toBe('stub-room')
-      expect(result.room.objects).toHaveLength(1)
+      expect(nonExitObjects(result.room)).toHaveLength(1)
     }
   })
 
@@ -202,7 +210,7 @@ describe('GeneratedRoomSource', () => {
     expect(result.ok).toBe(true)
     if (result.ok) {
       expect(result.provenance).toBe('generated')
-      expect(result.room.objects).toHaveLength(1)
+      expect(nonExitObjects(result.room)).toHaveLength(1)
       expect(result.room.skipped).toHaveLength(1)
       expect(result.room.warnings).toHaveLength(1)
     }
@@ -220,12 +228,13 @@ describe('GeneratedRoomSource', () => {
     expect(typeof entry.context.composed).toBe('boolean')
     expect(typeof entry.context.lacksAnchor).toBe('boolean')
     expect(typeof entry.context.lacksInteractable).toBe('boolean')
-    expect(entry.context.objectCount).toBe(1)
+    expect(entry.context.objectCount).toBe(2)
     expect(entry.context.skippedObjectCount).toBe(0)
     expect(typeof entry.context.warningCount).toBe('number')
     expect(typeof entry.context.aliasesRepaired).toBe('number')
     expect(typeof entry.context.objectTransformsRepaired).toBe('number')
     expect(typeof entry.context.purposesAssigned).toBe('number')
+    expect(typeof entry.context.exitNavigationEnsured).toBe('boolean')
     expect(typeof entry.context.npcInserted).toBe('boolean')
     expect(typeof entry.context.skippedObjectReasonCounts).toBe('object')
   })
@@ -332,7 +341,7 @@ describe('GeneratedRoomSource', () => {
     expect(result.ok).toBe(true)
     if (result.ok) {
       expect(result.provenance).toBe('generated')
-      expect(result.room.objects).toHaveLength(1)
+      expect(nonExitObjects(result.room)).toHaveLength(1)
       expect(result.room.skipped).toHaveLength(0)
     }
     expect(entries).toHaveLength(1)

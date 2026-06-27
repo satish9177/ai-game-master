@@ -113,6 +113,7 @@ type ActivePlay = {
   sessionId: string
   roomCache: SessionRoomCache
   navigation?: NavigationService
+  adjacentPregenerator?: AdjacentRoomPregenerator
   worldBible?: WorldBibleSeed
   initialPlayer: PlayerHudView
   questSpec?: QuestSpec
@@ -211,6 +212,7 @@ function bootstrapExamplePlay(): Promise<ExampleBootstrapResult | null> {
       sessionId: started.state.sessionId,
       roomCache: exampleRoomCache,
       navigation: exampleNavigation,
+      adjacentPregenerator,
       initialPlayer: projectPlayerHud(started.state),
       questSpec: demoQuestSpec,
       journalSpec: demoJournalSpec,
@@ -338,12 +340,24 @@ function App() {
         }
         const generatedCache = new SessionRoomCache()
         generatedCache.set(result.room.id, result.room)
+        const generatedPregenerator = new AdjacentRoomPregenerator(
+          generatedCache,
+          roomRegistry,
+          (roomId) =>
+            new GeneratedRoomSource(adjacentGenerator, `adjacent:${roomId}`, logger, fallbackRoom),
+          fallbackRoom,
+          logger,
+        )
+        const generatedNavigation = new NavigationService(worldSession, generatedPregenerator, logger)
+        generatedPregenerator.warmAdjacent(result.room)
         const initialPlayer = projectPlayerHud(started.state)
         enterActivePlay({
           room: result.room,
           roomSource: preloadedRoomSource(result.room),
           sessionId: started.state.sessionId,
           roomCache: generatedCache,
+          navigation: generatedNavigation,
+          adjacentPregenerator: generatedPregenerator,
           ...(prepared.worldBible ? { worldBible: prepared.worldBible } : {}),
           initialPlayer,
         })
@@ -454,6 +468,7 @@ function App() {
       enterActivePlay({
         ...play,
         navigation: exampleNavigation,
+        adjacentPregenerator,
         questSpec: restoredQuestSpec,
         journalSpec: restoredJournalSpec,
       })
@@ -488,6 +503,8 @@ function App() {
             sessionId: activePlay.sessionId,
             roomCache: activePlay.roomCache,
             navigation: activePlay.navigation,
+            adjacentPregenerator: activePlay.adjacentPregenerator,
+            worldBible: activePlay.worldBible,
             initialPlayer: activePlay.initialPlayer,
             questSpec: activePlay.questSpec,
             journalSpec: activePlay.journalSpec,
@@ -495,7 +512,7 @@ function App() {
         : current)
       setRoomEntrySeq((seq) => seq + 1)
       // Warm the next frontier from the room we just entered.
-      adjacentPregenerator.warmAdjacent(result.room)
+      activePlay.adjacentPregenerator?.warmAdjacent(result.room)
       // Re-project derived views from the post-move WorldState so objective 3
       // (ruined-safehouse visited) flips done immediately on entering the room.
       refreshDerivedViews(result.state)

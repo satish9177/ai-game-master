@@ -9,6 +9,7 @@ import { repairGeneratedAliases } from './generatedRoomAliases'
 import { repairGeneratedObjectTransforms } from './generatedRoomObjectTransforms'
 import { assignGeneratedObjectPurpose } from './generatedRoomObjectPurpose'
 import { ensureGeneratedNpcPresence } from './ensureGeneratedNpcPresence'
+import { ensureGeneratedExitNavigation } from './ensureGeneratedExitNavigation'
 
 /**
  * Room assembly pipeline (room-generation-repair-fallback v0). A pure,
@@ -96,6 +97,8 @@ export type RoomDiagnostics = {
    * notice. Always false for a fallback room.
    */
   exitsRepaired: boolean
+  /** Whether the returned generated room has at least one stable usable exit. */
+  exitNavigationEnsured: boolean
   /** Distinct fatal codes from the FIRST semantic validation (empty if none ran). */
   initialFatalCodes: RoomIssueCode[]
   /** Whether deterministic repair ran (only when an initial fatal was present). */
@@ -208,14 +211,21 @@ export function assembleRoom(
   const spawnFixed = repairGeneratedSpawn(composition.room)
   const spawnRepaired = spawnFixed !== composition.room
 
-  // Stage 2.9 — snap each exit-carrying object to the nearest wall face
+  // Stage 2.9 — ensure at least one stable, usable generated exit exists before
+  // wall snapping. Existing usable exits are preserved; otherwise the first arch
+  // is upgraded, or a safe wall arch is inserted.
+  const exitNavigationResult = ensureGeneratedExitNavigation(spawnFixed)
+  const exitNavigationFixed = exitNavigationResult.room
+  const { exitNavigationEnsured } = exitNavigationResult
+
+  // Stage 2.10 — snap each exit-carrying object to the nearest wall face
   // (±halfW or ±halfD). Runs after Stage 2.6 so that objects already clamped
   // to the playable interior are moved back to wall positions. Keeps provenance
   // `generated`; reported via `exitsRepaired`.
-  const exitsFixed = repairGeneratedExits(spawnFixed)
-  const exitsRepaired = exitsFixed !== spawnFixed
+  const exitsFixed = repairGeneratedExits(exitNavigationFixed)
+  const exitsRepaired = exitsFixed !== exitNavigationFixed
 
-  // Stage 2.10 — assign presentation-only purposes to safe generated objects
+  // Stage 2.11 — assign presentation-only purposes to safe generated objects
   // that currently lack an interaction. This is generated-room-only because
   // authored/static/fallback/restored rooms never enter assembleRoom. It does
   // not affect geometry, exits, effects, encounters, quests, inventory, or world
@@ -224,7 +234,7 @@ export function assembleRoom(
   const purposeFixed = purposeResult.room
   const { purposesAssigned } = purposeResult
 
-  // Stage 2.11 — optionally insert one safe generated NPC from a boolean-only
+  // Stage 2.12 — optionally insert one safe generated NPC from a boolean-only
   // prompt classifier signal. No prompt text enters this domain function.
   const npcPresenceResult = ensureGeneratedNpcPresence(purposeFixed, {
     requested: options.requestsNpc ?? false,
@@ -250,6 +260,7 @@ export function assembleRoom(
         lacksInteractable,
         spawnRepaired,
         exitsRepaired,
+        exitNavigationEnsured,
         initialFatalCodes: [],
         repairAttempted: false,
         residualFatalCodes: [],
@@ -285,6 +296,7 @@ export function assembleRoom(
         lacksInteractable,
         spawnRepaired,
         exitsRepaired,
+        exitNavigationEnsured,
         initialFatalCodes,
         repairAttempted: true,
         residualFatalCodes: [],
@@ -313,6 +325,7 @@ export function assembleRoom(
       lacksInteractable: false,
       spawnRepaired: false,
       exitsRepaired: false,
+      exitNavigationEnsured: false,
       initialFatalCodes,
       repairAttempted: true,
       residualFatalCodes: distinctFatalCodes(revalidated),
@@ -344,6 +357,7 @@ function toFallback(
       lacksInteractable: false,
       spawnRepaired: false,
       exitsRepaired: false,
+      exitNavigationEnsured: false,
       initialFatalCodes: [],
       repairAttempted: false,
       residualFatalCodes: [],

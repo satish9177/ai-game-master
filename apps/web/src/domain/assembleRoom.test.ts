@@ -5,6 +5,7 @@ import { loadRoomSpec } from './loadRoomSpec'
 import type { LoadedRoom } from './loadRoomSpec'
 import type { RoomObject } from './roomSpec'
 import { buildInteractables } from './ports/interaction'
+import { buildExitLookup } from '../app/exits'
 import { validateRoom } from './validateRoom'
 import { fallbackRoom } from './examples/fallbackRoom'
 
@@ -36,6 +37,13 @@ const EXAMINE_BODY = 'You examine it for meaning or danger. Nothing changes yet.
 
 function interactionFor(object: RoomObject) {
   return 'interaction' in object ? object.interaction : undefined
+}
+
+function nonExitObjects(room: LoadedRoom): RoomObject[] {
+  return room.objects.filter((object) => {
+    const interaction = 'interaction' in object ? object.interaction : undefined
+    return interaction?.exit == null
+  })
 }
 
 // Raw inputs covering every branch, reused by the matrix / safety tests.
@@ -192,6 +200,8 @@ describe('assembleRoom', () => {
     const { room, diagnostics } = assembleRoom(RAW_VALID, fallback)
     expect(room.id).toBe('gen-room')
     expect(diagnostics.provenance).toBe('generated')
+    expect(diagnostics.exitNavigationEnsured).toBe(true)
+    expect(buildExitLookup(room).size).toBeGreaterThanOrEqual(1)
     expect(diagnostics.failedStage).toBeUndefined()
     expect(diagnostics.repairAttempted).toBe(false)
     expect(diagnostics.initialFatalCodes).toEqual([])
@@ -300,6 +310,7 @@ describe('assembleRoom', () => {
       'lacksInteractable',
       'spawnRepaired',
       'exitsRepaired',
+      'exitNavigationEnsured',
       'initialFatalCodes',
       'repairAttempted',
       'residualFatalCodes',
@@ -332,6 +343,7 @@ describe('assembleRoom', () => {
       expect(typeof diagnostics.lacksInteractable).toBe('boolean')
       expect(typeof diagnostics.spawnRepaired).toBe('boolean')
       expect(typeof diagnostics.exitsRepaired).toBe('boolean')
+      expect(typeof diagnostics.exitNavigationEnsured).toBe('boolean')
       expect(typeof diagnostics.skippedObjectCount).toBe('number')
       expect(typeof diagnostics.warningCount).toBe('number')
       expect(typeof diagnostics.aliasesRepaired).toBe('number')
@@ -449,9 +461,9 @@ describe('assembleRoom', () => {
     expect(diagnostics.objectsRepaired).toBe(true)
     expect(diagnostics.repairAttempted).toBe(false)
     expect(diagnostics.failedStage).toBeUndefined()
-    expect(room.objects).toHaveLength(1)
+    expect(nonExitObjects(room)).toHaveLength(1)
     // pillar was at x=100; must be clamped inside the 18×18 playable area
-    const [x] = room.objects[0]!.position
+    const [x] = nonExitObjects(room)[0]!.position
     expect(Math.abs(x)).toBeLessThan(9) // strictly inside the room half-extent (9 m)
     expect(validateRoom(room).ok).toBe(true)
   })
@@ -462,7 +474,8 @@ describe('assembleRoom', () => {
     expect(diagnostics.objectsRepaired).toBe(true)
     expect(diagnostics.repairAttempted).toBe(false)
     expect(diagnostics.failedStage).toBeUndefined()
-    expect(room.objects).toHaveLength(30) // capped from 35 to MAX_OBJECTS
+    expect(nonExitObjects(room)).toHaveLength(30) // capped from 35 to MAX_OBJECTS
+    expect(buildExitLookup(room).size).toBe(1)
     expect(validateRoom(room).ok).toBe(true)
   })
 
@@ -653,9 +666,11 @@ describe('assembleRoom', () => {
     expect(arch.position[2]).toBeCloseTo(9)  // south wall restored
   })
 
-  it('room with no exit-carrying objects: exitsRepaired false', () => {
-    const { diagnostics } = assembleRoom(RAW_VALID, fallback)
+  it('room with no exit-carrying objects gets a usable exit without exit movement', () => {
+    const { room, diagnostics } = assembleRoom(RAW_VALID, fallback)
+    expect(diagnostics.exitNavigationEnsured).toBe(true)
     expect(diagnostics.exitsRepaired).toBe(false)
+    expect(buildExitLookup(room).size).toBe(1)
   })
 
   it('exit-only repair does not show fallback notice (provenance stays "generated")', () => {
@@ -669,6 +684,7 @@ describe('assembleRoom', () => {
     for (const input of paths) {
       const { diagnostics } = assembleRoom(input, fallback)
       expect(diagnostics.exitsRepaired).toBe(false)
+      expect(diagnostics.exitNavigationEnsured).toBe(false)
     }
   })
 
@@ -741,8 +757,8 @@ describe('assembleRoom', () => {
       ],
     })), fallback)
     expect(result.diagnostics.composed).toBe(true)
-    expect(result.diagnostics.exitsRepaired).toBe(true)
-    expect(result.room.objects[1]!.position[2]).toBeCloseTo(9)
+    expect(result.diagnostics.exitNavigationEnsured).toBe(true)
+    expect(result.room.objects[1]!.position[2]).toBeCloseTo(-9)
   })
 
   it('keeps composition diagnostics false and authored fallback untouched on fallback paths', () => {
@@ -774,7 +790,7 @@ describe('assembleRoom', () => {
     expect(result.diagnostics.provenance).toBe('generated')
     expect(result.diagnostics.failedStage).toBeUndefined()
     expect(result.diagnostics.repairAttempted).toBe(false)
-    expect(result.room.objects.map((object) => object.type)).toEqual(['book', 'paper', 'map'])
+    expect(nonExitObjects(result.room).map((object) => object.type)).toEqual(['book', 'paper', 'map'])
     expect(validateRoom(result.room).ok).toBe(true)
   })
 
@@ -795,7 +811,7 @@ describe('assembleRoom', () => {
     expect(result.diagnostics.provenance).toBe('generated')
     expect(result.diagnostics.failedStage).toBeUndefined()
     expect(result.diagnostics.repairAttempted).toBe(false)
-    expect(result.room.objects.map((object) => object.type)).toEqual(['chest', 'corpse', 'table'])
+    expect(nonExitObjects(result.room).map((object) => object.type)).toEqual(['chest', 'corpse', 'table'])
     expect(validateRoom(result.room).ok).toBe(true)
   })
 
@@ -817,7 +833,7 @@ describe('assembleRoom', () => {
     expect(result.diagnostics.repairAttempted).toBe(false)
     expect(result.diagnostics.lacksAnchor).toBe(false)
     expect(result.diagnostics.lacksInteractable).toBe(false)
-    expect(result.room.objects.map((object) => object.type)).toEqual(['altar', 'statue'])
+    expect(nonExitObjects(result.room).map((object) => object.type)).toEqual(['altar', 'statue'])
     expect(validateRoom(result.room).ok).toBe(true)
   })
 
@@ -839,7 +855,7 @@ describe('assembleRoom', () => {
     expect(result.diagnostics.failedStage).toBeUndefined()
     expect(result.diagnostics.repairAttempted).toBe(false)
     expect(result.diagnostics.lacksInteractable).toBe(false)
-    expect(result.room.objects.map((object) => object.type)).toEqual(['machine', 'artifact', 'candle'])
+    expect(nonExitObjects(result.room).map((object) => object.type)).toEqual(['machine', 'artifact', 'candle'])
     expect(validateRoom(result.room).ok).toBe(true)
   })
 
@@ -1107,7 +1123,7 @@ describe('assembleRoom', () => {
     })), fallback)
 
     expect(result.diagnostics.purposesAssigned).toBe(0)
-    for (const object of result.room.objects) {
+    for (const object of nonExitObjects(result.room)) {
       if (object.type === 'scroll' || object.type === 'npc') {
         expect('interaction' in object ? object.interaction : undefined).toBeDefined()
       } else {
@@ -1216,9 +1232,9 @@ describe('assembleRoom', () => {
     expect(diagnostics.skippedObjectReasonCounts.invalidTransform).toBe(0)
     expect(diagnostics.repairAttempted).toBe(false)
     expect(diagnostics.failedStage).toBeUndefined()
-    expect(room.objects.map((object) => object.type)).toEqual(['book', 'chest', 'map'])
-    expect(room.objects.map((object) => object.rotationY)).toEqual([0, 0, 0])
-    expect(room.objects.map((object) => object.scale)).toEqual([1, 1, 1])
+    expect(nonExitObjects(room).map((object) => object.type)).toEqual(['book', 'chest', 'map'])
+    expect(nonExitObjects(room).map((object) => object.rotationY)).toEqual([0, 0, 0])
+    expect(nonExitObjects(room).map((object) => object.scale)).toEqual([1, 1, 1])
     expect(validateRoom(room).ok).toBe(true)
   })
 
@@ -1237,7 +1253,7 @@ describe('assembleRoom', () => {
     expect(result.diagnostics.objectTransformsRepaired).toBe(1)
     expect(result.diagnostics.skippedObjectCount).toBe(1)
     expect(result.diagnostics.skippedObjectReasonCounts.invalidPosition).toBe(1)
-    expect(result.room.objects).toHaveLength(0)
+    expect(nonExitObjects(result.room)).toHaveLength(0)
   })
 
   it('malformed interaction still skips after transform repair', () => {
@@ -1250,7 +1266,7 @@ describe('assembleRoom', () => {
     expect(result.diagnostics.objectTransformsRepaired).toBe(1)
     expect(result.diagnostics.skippedObjectCount).toBe(1)
     expect(result.diagnostics.skippedObjectReasonCounts.invalidInteraction).toBe(1)
-    expect(result.room.objects).toHaveLength(0)
+    expect(nonExitObjects(result.room)).toHaveLength(0)
   })
 
   it('unknown type still skips after transform repair', () => {
@@ -1263,7 +1279,7 @@ describe('assembleRoom', () => {
     expect(result.diagnostics.objectTransformsRepaired).toBe(1)
     expect(result.diagnostics.skippedObjectCount).toBe(1)
     expect(result.diagnostics.skippedObjectReasonCounts.unknownType).toBe(1)
-    expect(result.room.objects).toHaveLength(0)
+    expect(nonExitObjects(result.room)).toHaveLength(0)
   })
 
   it('alias and transform repairs compose before loadRoomSpec', () => {
@@ -1273,10 +1289,10 @@ describe('assembleRoom', () => {
     expect(diagnostics.aliasesRepaired).toBe(1)
     expect(diagnostics.objectTransformsRepaired).toBe(1)
     expect(diagnostics.skippedObjectCount).toBe(0)
-    expect(room.objects).toHaveLength(1)
-    expect(room.objects[0]!.type).toBe('table')
-    expect(room.objects[0]!.rotationY).toBe(0)
-    expect(room.objects[0]!.scale).toBe(1)
+    expect(nonExitObjects(room)).toHaveLength(1)
+    expect(nonExitObjects(room)[0]!.type).toBe('table')
+    expect(nonExitObjects(room)[0]!.rotationY).toBe(0)
+    expect(nonExitObjects(room)[0]!.scale).toBe(1)
   })
 
   it('fallback paths report objectTransformsRepaired 0', () => {
@@ -1344,7 +1360,7 @@ describe('assembleRoom', () => {
     expect(diagnostics.provenance).toBe('generated')
     expect(diagnostics.aliasesRepaired).toBe(1) // type WAS rewritten
     expect(diagnostics.skippedObjectCount).toBe(1) // but object still rejected
-    expect(room.objects).toHaveLength(0)
+    expect(nonExitObjects(room)).toHaveLength(0)
   })
 
   it('unmapped alias stays skipped (mystery marker), aliasesRepaired 0', () => {
@@ -1353,7 +1369,7 @@ describe('assembleRoom', () => {
     expect(diagnostics.provenance).toBe('generated')
     expect(diagnostics.aliasesRepaired).toBe(0)
     expect(diagnostics.skippedObjectCount).toBe(1)
-    expect(room.objects).toHaveLength(0)
+    expect(nonExitObjects(room)).toHaveLength(0)
   })
 
   it('json parse error path reports aliasesRepaired 0', () => {

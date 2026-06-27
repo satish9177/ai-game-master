@@ -45,6 +45,7 @@ Throughout these docs:
   Generated Room Object Purpose v0 — generated assembly/domain;
   Generated Room Explore Loop v0 — generated assembly/domain + existing browser UI;
   Generated Room NPC Presence v0 — generated assembly/domain;
+  Generated Room Exit Navigation v0 — generated assembly/domain + existing browser navigation;
   NPC Dialogue Room Context v0 — browser/domain/dialogue).
 - 🔜 **Planned** — designed and approved, not yet built (next slices).
 - ❌ **Not built** — future shape only; documented so we don't paint into a corner.

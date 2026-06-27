@@ -5,6 +5,7 @@ import { validateRoom } from '../domain/validateRoom'
 import { assembleRoom } from '../domain/assembleRoom'
 import { GENERATED_ROOM } from '../domain/generatedRoomLayout'
 import { fallbackRoom } from '../domain/examples/fallbackRoom'
+import { buildExitLookup } from '../app/exits'
 
 // The published vocabulary the renderer has builders for (ADR-0001, CONVENTIONS.md).
 const KNOWN_TYPES = [
@@ -136,6 +137,8 @@ describe('FakeRoomGenerator', () => {
     for (const prompt of COVERAGE_PROMPTS) {
       const result = assembleRoom(await gen.generate(prompt), fallback)
       expect(result.diagnostics.provenance).toBe('generated')
+      expect(result.diagnostics.exitNavigationEnsured).toBe(true)
+      expect(buildExitLookup(result.room).size).toBeGreaterThanOrEqual(1)
       expect(result.diagnostics.failedStage).toBeUndefined()
       expect(result.diagnostics.repairAttempted).toBe(false)
       expect(validateRoom(result.room).ok).toBe(true)
