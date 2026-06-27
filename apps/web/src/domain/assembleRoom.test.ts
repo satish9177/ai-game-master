@@ -209,6 +209,50 @@ describe('assembleRoom', () => {
     expect(validateRoom(room).ok).toBe(true)
   })
 
+  it('post-apoc theme option changes the focal anchor while preserving later assembly behavior', () => {
+    const token = 'adjacent:gen-1234abcd:exit:north'
+    const { room, diagnostics } = assembleRoom(
+      raw(validSpec({
+        id: 'post-apoc-compose',
+        name: `Generated room - ${token}`,
+        shell: { dimensions: { width: 18, depth: 18, height: 4 }, exits: [{ side: 'north', width: 3 }] },
+        spawn: { position: [0, 1.7, 4] },
+        objects: [
+          { type: 'throne', position: [0, 0, 0] },
+          { type: 'altar', position: [0.5, 0, 0] },
+          { type: 'statue', position: [-0.5, 0, 0] },
+          { type: 'corpse', position: [1, 0, 1] },
+          { type: 'machine', position: [3, 0, 3] },
+          {
+            type: 'paper',
+            position: [0, 0, 2],
+            interaction: {
+              key: 'E',
+              prompt: `Read ${token}`,
+              body: `Notes mention ${token}`,
+            },
+          },
+        ],
+      })),
+      fallback,
+      { themePack: 'post-apoc', requestsNpc: true },
+    )
+
+    const machine = room.objects.find((object) => object.type === 'machine')
+    expect(machine?.position[0]).toBe(0)
+    expect(machine?.position[2]).toBeLessThan(0)
+    expect(room.objects.map((object) => object.type)).toEqual(
+      expect.arrayContaining(['throne', 'altar', 'statue', 'corpse', 'machine']),
+    )
+    expect(diagnostics.provenance).toBe('generated')
+    expect(diagnostics.exitNavigationEnsured).toBe(true)
+    expect(diagnostics.displayTextSanitized).toBe(true)
+    expect(diagnostics.npcInserted).toBe(true)
+    expect(buildExitLookup(room).size).toBeGreaterThanOrEqual(1)
+    expect(room.objects.some((object) => object.type === 'npc')).toBe(true)
+    expect(validateRoom(room).ok).toBe(true)
+  })
+
   it('falls back on invalid JSON with failedStage "json"', () => {
     const { room, diagnostics } = assembleRoom(RAW_INVALID_JSON, fallback)
     expect(room).toBe(fallback)
@@ -216,6 +260,17 @@ describe('assembleRoom', () => {
     expect(diagnostics.failedStage).toBe('json')
     expect(diagnostics.repairAttempted).toBe(false)
     expect(diagnostics.initialFatalCodes).toEqual([])
+  })
+
+  it('post-apoc theme option keeps fallback branches safe', () => {
+    const { room, diagnostics } = assembleRoom(RAW_INVALID_JSON, fallback, { themePack: 'post-apoc' })
+
+    expect(room).toBe(fallback)
+    expect(diagnostics.provenance).toBe('fallback')
+    expect(diagnostics.failedStage).toBe('json')
+    expect(diagnostics.composed).toBe(false)
+    expect(diagnostics.exitNavigationEnsured).toBe(false)
+    expect(validateRoom(room).ok).toBe(true)
   })
 
   it('falls back on an invalid schema envelope with failedStage "schema"', () => {

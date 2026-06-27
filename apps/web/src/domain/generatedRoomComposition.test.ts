@@ -45,8 +45,11 @@ function expectFocalAnchor(obj: RoomObject) {
   )
 }
 
-function selectAnchorIndex(rawObjects: unknown[]) {
-  return selectGeneratedStoryAnchorIndex(makeRoom(rawObjects).objects)
+function selectAnchorIndex(
+  rawObjects: unknown[],
+  options: Parameters<typeof selectGeneratedStoryAnchorIndex>[1] = {},
+) {
+  return selectGeneratedStoryAnchorIndex(makeRoom(rawObjects).objects, options)
 }
 
 // ─── selectGeneratedStoryAnchorIndex ─────────────────────────────────────────
@@ -70,6 +73,33 @@ describe('selectGeneratedStoryAnchorIndex', () => {
       { type: 'table', position: [4, 0, 0] },
       { type: 'throne', position: [5, 0, 0] },
     ])).toBe(5)
+  })
+
+  it('fantasy-keep keeps throne, altar, and statue ahead of machine and corpse', () => {
+    expect(selectAnchorIndex([
+      { type: 'machine', position: [0, 0, 0] },
+      { type: 'corpse', position: [1, 0, 0] },
+      { type: 'statue', position: [2, 0, 0] },
+      { type: 'altar', position: [3, 0, 0] },
+      { type: 'throne', position: [4, 0, 0] },
+    ], { themePack: 'fantasy-keep' })).toBe(4)
+  })
+
+  it('post-apoc prioritizes machine and corpse over fantasy anchors when all are present', () => {
+    expect(selectAnchorIndex([
+      { type: 'throne', position: [0, 0, 0] },
+      { type: 'altar', position: [1, 0, 0] },
+      { type: 'statue', position: [2, 0, 0] },
+      { type: 'corpse', position: [3, 0, 0] },
+      { type: 'machine', position: [4, 0, 0] },
+    ], { themePack: 'post-apoc' })).toBe(4)
+
+    expect(selectAnchorIndex([
+      { type: 'throne', position: [0, 0, 0] },
+      { type: 'altar', position: [1, 0, 0] },
+      { type: 'statue', position: [2, 0, 0] },
+      { type: 'corpse', position: [3, 0, 0] },
+    ], { themePack: 'post-apoc' })).toBe(3)
   })
 
   it('prioritizes altar over statue, evidence, devices, cache, and documents', () => {
@@ -1075,6 +1105,42 @@ describe('story anchor composition integration', () => {
     expect(throne.position[2]).toBeLessThan(0)
     expect(Math.abs(composed.objects[0]!.position[0])).toBeGreaterThanOrEqual(COMPOSITION.CORRIDOR_HALF)
     expect(Math.abs(composed.objects[1]!.position[0])).toBeGreaterThanOrEqual(COMPOSITION.CORRIDOR_HALF)
+  })
+
+  it('post-apoc makes machine the focal anchor ahead of throne, altar, statue, and corpse', () => {
+    const room = makeRoom([
+      { type: 'throne', position: [0, 0, 0] },
+      { type: 'altar', position: [0.5, 0, 0] },
+      { type: 'statue', position: [-0.5, 0, 0] },
+      { type: 'corpse', position: [1, 0, 1] },
+      { type: 'machine', position: [3, 0, 3] },
+    ])
+    const before = structuredClone(room.objects)
+
+    const { room: composed, diagnostics } = composeGeneratedRoom(room, { themePack: 'post-apoc' })
+
+    expect(diagnostics.lacksAnchor).toBe(false)
+    expect(composed.objects).toHaveLength(room.objects.length)
+    expect(room.objects).toEqual(before)
+    expect(composed.objects.map((object) => object.type)).toEqual(room.objects.map((object) => object.type))
+    expectFocalAnchor(composed.objects[4]!)
+    expect(composed.objects[4]!.type).toBe('machine')
+  })
+
+  it('post-apoc makes corpse the focal anchor when machine is absent', () => {
+    const room = makeRoom([
+      { type: 'throne', position: [0, 0, 0] },
+      { type: 'altar', position: [0.5, 0, 0] },
+      { type: 'statue', position: [-0.5, 0, 0] },
+      { type: 'corpse', position: [3, 0, 3] },
+    ])
+
+    const { room: composed } = composeGeneratedRoom(room, { themePack: 'post-apoc' })
+
+    expect(composed.objects).toHaveLength(room.objects.length)
+    expect(composed.objects.map((object) => object.type)).toEqual(['throne', 'altar', 'statue', 'corpse'])
+    expectFocalAnchor(composed.objects[3]!)
+    expect(composed.objects[3]!.type).toBe('corpse')
   })
 
   it('uses altar as the primary anchor when no throne exists', () => {

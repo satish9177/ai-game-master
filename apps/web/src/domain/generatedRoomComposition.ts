@@ -2,6 +2,7 @@ import { computePlayableBounds, objectFootprintRadius } from './generatedRoomLay
 import type { PlayableBounds } from './generatedRoomLayout'
 import type { LoadedRoom } from './loadRoomSpec'
 import type { RoomObject } from './roomSpec'
+import type { GeneratedRoomVisualTheme } from './generatedRoomThemeVocabulary'
 
 /**
  * Generated-room composition (generated-room-composition-v0, stage 2.7).
@@ -64,6 +65,10 @@ export type ComposedRoom = {
   diagnostics: CompositionDiagnostics
 }
 
+export type ComposeGeneratedRoomOptions = {
+  themePack?: GeneratedRoomVisualTheme
+}
+
 // ─── constants ─────────────────────────────────────────────────────────────────
 
 /**
@@ -123,6 +128,20 @@ const STORY_ANCHOR_PRIORITY: Partial<Record<RoomObject['type'], number>> = {
   paper: 6,
 }
 
+const POST_APOC_STORY_ANCHOR_PRIORITY: Partial<Record<RoomObject['type'], number>> = {
+  machine: 0,
+  corpse: 1,
+  artifact: 2,
+  chest: 3,
+  table: 4,
+  map: 4,
+  book: 4,
+  paper: 4,
+  throne: 5,
+  altar: 6,
+  statue: 7,
+}
+
 // ─── classification ────────────────────────────────────────────────────────────
 
 /**
@@ -178,12 +197,18 @@ export function classifyGeneratedCompositionRole(obj: RoomObject): CompositionRo
  * Uses only validated RoomObject type values; never reads names, prompts, body
  * text, raw generated JSON, or inferred purpose.
  */
-export function selectGeneratedStoryAnchorIndex(objects: RoomObject[]): number {
+export function selectGeneratedStoryAnchorIndex(
+  objects: RoomObject[],
+  options: ComposeGeneratedRoomOptions = {},
+): number {
+  const priorityTable = options.themePack === 'post-apoc'
+    ? POST_APOC_STORY_ANCHOR_PRIORITY
+    : STORY_ANCHOR_PRIORITY
   let bestIndex = -1
   let bestPriority = Infinity
 
   for (let i = 0; i < objects.length; i += 1) {
-    const priority = STORY_ANCHOR_PRIORITY[objects[i]!.type]
+    const priority = priorityTable[objects[i]!.type]
     if (priority == null) continue
     if (priority < bestPriority) {
       bestIndex = i
@@ -247,11 +272,14 @@ export function computeGeneratedCompositionZones(
  * Returns the SAME room reference when no object needed relocation.
  * Never mutates the input room or its objects.
  */
-export function composeGeneratedRoom(room: LoadedRoom): ComposedRoom {
+export function composeGeneratedRoom(
+  room: LoadedRoom,
+  options: ComposeGeneratedRoomOptions = {},
+): ComposedRoom {
   const bounds = computePlayableBounds(room.shell.dimensions, room.shell.wallThickness)
   const roles = room.objects.map(classifyGeneratedCompositionRole)
 
-  const anchorIdx = selectGeneratedStoryAnchorIndex(room.objects)
+  const anchorIdx = selectGeneratedStoryAnchorIndex(room.objects, options)
   const lacksAnchor = anchorIdx === -1
   const lacksInteractable = !room.objects.some((obj, i) =>
     roles[i] === 'interactable' || isInteractiveStoryAnchor(obj))

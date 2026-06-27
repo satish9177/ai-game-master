@@ -54,6 +54,7 @@ import { worldBibleToAdjacentThemeSeed } from './domain/worldBible/worldBibleToS
 import { buildAdjacentRoomSeed } from './app/buildAdjacentRoomSeed'
 import { prepareGeneratedRoomSeed } from './app/worldBible'
 import { buildPromptGeneratedRoomSource } from './app/buildPromptGeneratedRoomSource'
+import { themeVocabulary } from './domain/generatedRoomThemeVocabulary'
 
 import { NPCDialogueService } from './dialogue/NPCDialogueService'
 
@@ -319,10 +320,15 @@ function App() {
       try {
         const prepared = await prepareGeneratedRoomSeed(prompt, worldBibleSeeder, logger)
         if (version !== requestVersion.current) return
+        const vocabulary = themeVocabulary(prepared.worldBible?.themePack)
+        const generatedPromptGenerator = roomGeneratorSelectionLog.provider === 'fake'
+          ? new FakeRoomGenerator(vocabulary)
+          : promptGenerator
         const source = buildPromptGeneratedRoomSource({
-          generator: promptGenerator,
+          generator: generatedPromptGenerator,
           rawUserPrompt: prompt,
           generatorSeed: prepared.generatorSeed,
+          themePack: prepared.worldBible?.themePack,
           logger,
           fallbackRoom,
         })
@@ -345,15 +351,17 @@ function App() {
         const adjacentThemeSeed = prepared.worldBible
           ? worldBibleToAdjacentThemeSeed(prepared.worldBible)
           : undefined
+        const generatedAdjacentGenerator = new FakeRoomGenerator(vocabulary)
         const generatedPregenerator = new AdjacentRoomPregenerator(
           generatedCache,
           roomRegistry,
           (roomId) =>
             new GeneratedRoomSource(
-              adjacentGenerator,
+              generatedAdjacentGenerator,
               buildAdjacentRoomSeed(roomId, adjacentThemeSeed),
               logger,
               fallbackRoom,
+              { themePack: prepared.worldBible?.themePack },
             ),
           fallbackRoom,
           logger,

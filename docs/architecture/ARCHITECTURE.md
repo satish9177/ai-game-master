@@ -48,6 +48,7 @@ Throughout these docs:
   Generated Room Exit Navigation v0 — generated assembly/domain + existing browser navigation;
   Generated Room Display Sanitization v0 — generated assembly/domain;
   Adjacent Room Theme Continuity v0 — browser composition/domain projection;
+  Generated Room Theme Vocabulary v0 — fake/generated assembly + browser composition;
   NPC Dialogue Room Context v0 — browser/domain/dialogue).
 - 🔜 **Planned** — designed and approved, not yet built (next slices).
 - ❌ **Not built** — future shape only; documented so we don't paint into a corner.
@@ -413,6 +414,46 @@ clear narrative focal idea without adding gameplay systems
   rewards, inventory, loot, combat, story state, living-world simulation, memory,
   or NPC dialogue context. Visible story presentation is intentionally deferred to
   a later `room-inspect-summary-v0` feature.
+
+## Generated Room Theme Vocabulary v0
+
+âœ… **Implemented, fake/generated assembly + browser composition.** Generated Room
+Theme Vocabulary v0 uses the existing structured World Bible `themePack` to keep
+fake prompt-generated rooms and their generated adjacent rooms within the current
+theme vocabulary
+([ADR-0044](./decisions/ADR-0044-generated-room-theme-vocabulary-v0.md)).
+
+```text
+WorldBible themePack
+  -> themeVocabulary(themePack)
+  -> FakeRoomGenerator(vocabulary)
+  -> generated JSON
+  -> assembleRoom(..., { themePack })
+  -> theme-aware composition
+  -> trusted renderer
+```
+
+- **Existing theme packs only:** v0 supports `fantasy-keep` and `post-apoc`.
+  Sci-fi/spaceship is deferred because the current theme schema has no sci-fi
+  pack; prompts for those concepts still classify into the existing packs until a
+  later theme-pack/classifier/content-pack feature.
+- **Constructor DI for the fake:** `FakeRoomGenerator` consumes
+  `GeneratedRoomThemeVocabulary` by constructor injection. Missing vocabulary
+  falls back to the existing/default fantasy behavior, so existing callers keep
+  working.
+- **Primary + adjacent consistency:** `App` resolves vocabulary from
+  `prepared.worldBible?.themePack` for prompt-generated fake rooms and injects the
+  same vocabulary into that generated play's adjacent fake generator. The authored
+  example pregenerator remains default.
+- **Theme-aware composition:** `assembleRoom` passes optional structured
+  `themePack` to `composeGeneratedRoom`. `post-apoc` prioritizes `machine` and
+  `corpse` as story anchors; missing theme and `fantasy-keep` preserve the
+  existing `throne`/`altar`/`statue` priority.
+- **Safety boundaries unchanged:** no `RoomSpec` schema change, renderer/builder
+  change, assets/GLTF/textures, real-provider prompt theming, backend, memory,
+  quest, inventory, or combat change. Diagnostics remain count/boolean/provenance
+  only and never log raw prompt, seed strings, room/object names, generated JSON,
+  provider output, or interaction body/title text.
 
 ## Room Inspect Summary v0
 
@@ -1417,9 +1458,10 @@ the raw-prompt seed, and only a room-generator throw/reject is `unavailable`.
 | `domain/ports/WorldBibleSeeder.ts` | Domain-safe `WorldBibleSeeder` port: prompt → validated `WorldBibleSeed`. |
 | `domain/worldBible/worldBibleSeed.ts` | Strict, versioned, bounded initial-canon schema/types, including the bounded opening arc. Not event/current-state data. |
 | `domain/worldBible/worldBibleToSeed.ts` | Pure deterministic title-first projection to a generator seed capped at 160 characters. |
+| `domain/generatedRoomThemeVocabulary.ts` | Pure generated-room theme vocabulary resolver ([ADR-0044](./decisions/ADR-0044-generated-room-theme-vocabulary-v0.md)) for the existing `fantasy-keep` and `post-apoc` theme packs. Returns deterministic object pools, prop shapes, palette, NPC names, and `neverAppear` suppressions for fake/generated rooms. Missing theme falls back to default fantasy behavior; no sci-fi/spaceship support. |
 | `generation/FakeWorldBibleSeeder.ts` | Browser-local deterministic seeder over the shared PRNG and two theme packs; validates internally, has no real model/I/O/logger. |
 | `generation/prng.ts` | Deterministic seeded PRNG (`xmur3` + `mulberry32`) and a small `Rng` helper. Pure — no I/O, no `Math.random`/`Date.now`. |
-| `generation/FakeRoomGenerator.ts` | A deterministic `RoomGenerator`: prompt → seeded PRNG → RoomSpec **data**, serialized with `JSON.stringify`. Emits only the published vocabulary; same prompt → byte-identical output. No real model. The **default** prompt generator and the always-fake adjacent generator. |
+| `generation/FakeRoomGenerator.ts` | A deterministic `RoomGenerator`: prompt -> seeded PRNG -> RoomSpec **data**, serialized with `JSON.stringify`. Consumes optional `GeneratedRoomThemeVocabulary` by constructor DI; missing vocabulary uses default fantasy behavior. Emits only the published vocabulary; same prompt -> byte-identical output. No real model. |
 | `generation/OpenAICompatibleRoomGenerator.ts` | The opt-in **real** `RoomGenerator` ([ADR-0023](./decisions/ADR-0023-real-room-generator-provider-v0.md)): one generic adapter for any OpenAI-compatible endpoint (OpenAI/DeepSeek). One non-streaming `fetch` POST over an injected transport seam, hard `AbortController` timeout, no retry, no SDK; returns `choices[0].message.content` **verbatim**. Imports no logger; throws only fixed safe codes (`llm-request-failed`/`llm-timeout`/`llm-empty-response`). No parse/validate/repair here. |
 | `generation/llmRoomPrompt.ts` | Pure, side-effect-free prompt builder for the real provider: a static system message (published vocabulary, exact `object.type` allowlist, synonym guidance, story-anchor guidance, RoomSpec shape, conventions) + one user message carrying the seed clamped to a hard `MAX_SEED_CHARS`. Data-only; no renderer/builders/assets/code instructions. No I/O, no logger; bounds are unit-tested. |
 | `app/llmConfig.ts` | The **only** browser module that reads `import.meta.env`. Parses a typed `LlmConfig` (provider/model/key/`maxTokens`/`timeoutMs`), holds the provider → built-in base-URL map, and the `isRealProviderComplete` check. `generation/**` never reads env. |
@@ -1427,22 +1469,23 @@ the raw-prompt seed, and only a room-generator throw/reject is `unavailable`.
 | `domain/validateRoom.ts` | Pure semantic validator: `validateRoom(room) → RoomValidationResult` of severity-tagged issues. Checks *playability* (dimensions, spawn-in-bounds, object/light budgets, usable interactions) over a loaded room — a domain peer of `loadRoomSpec`. No I/O, no logger, no React/Three ([ADR-0011](./decisions/ADR-0011-semantic-room-validator-v0.md)). |
 | `domain/repairRoom.ts` | Pure deterministic repair: `repairRoom(room) → LoadedRoom`. Non-mutating; only clamps spawn into the walkable AABB and truncates over-hard-budget objects/torches — never resizes rooms or invents content. Code peer of `validateRoom` ([ADR-0020](./decisions/ADR-0020-room-generation-repair-fallback-v0.md)). |
 | `domain/generatedRoomLayout.ts` | Generated-room layout contract ([ADR-0031](./decisions/ADR-0031-generated-room-layout-contract-v0.md)): `GENERATED_ROOM` constants (default 18, min 14, max 24, max objects 30); four benign normalizers in `assembleRoom` — `clampGeneratedShell` (2.5; width/depth → `[14..24]`), `repairGeneratedObjects` (2.6; X/Z bounds + count cap ≤ 30, drops decorative first), `repairGeneratedSpawn` (2.8; clamp + deterministic nudge away from blocking objects), `repairGeneratedExits` (2.9; snap to nearest wall face). Pure, no I/O, no logger, no mutation. Never applied to authored/static/fallback rooms. |
-| `domain/generatedRoomComposition.ts` | Generated-room composition and story-anchor selection ([ADR-0032](./decisions/ADR-0032-generated-room-composition-v0.md), [ADR-0034](./decisions/ADR-0034-generated-room-story-anchors-v0.md)): pure role classification, zone computation, `selectGeneratedStoryAnchorIndex`, and `composeGeneratedRoom` stage 2.7. Relocates existing objects only to clear the central corridor and foreground one derived anchor/NPC/interactable/clutter placement; preserves count and non-position fields; missing roles are diagnostic-only. Safe booleans: `composed`, `lacksAnchor`, `lacksInteractable`. Never applied to authored/static/fallback rooms. |
+| `domain/generatedRoomComposition.ts` | Generated-room composition and story-anchor selection ([ADR-0032](./decisions/ADR-0032-generated-room-composition-v0.md), [ADR-0034](./decisions/ADR-0034-generated-room-story-anchors-v0.md), [ADR-0044](./decisions/ADR-0044-generated-room-theme-vocabulary-v0.md)): pure role classification, zone computation, `selectGeneratedStoryAnchorIndex`, and `composeGeneratedRoom` stage 2.7. Relocates existing objects only to clear the central corridor and foreground one derived anchor/NPC/interactable/clutter placement; preserves count and non-position fields; missing roles are diagnostic-only. Accepts optional structured `themePack`: `post-apoc` prefers `machine`/`corpse`; missing theme and `fantasy-keep` preserve default priority. Safe booleans: `composed`, `lacksAnchor`, `lacksInteractable`. Never applied to authored/static/fallback rooms. |
 | `domain/generatedRoomAliases.ts` / `domain/generatedRoomObjectTransforms.ts` | Generated-room visual vocabulary normalizers ([ADR-0033](./decisions/ADR-0033-generated-room-visual-vocabulary-v0.md)): allowlisted type-only alias repair and optional transform repair before `loadRoomSpec`. They never repair required fields, interactions, positions, or arbitrary/fuzzy nouns; direct `loadRoomSpec` behavior stays strict. |
-| `domain/assembleRoom.ts` | Pure assembly pipeline: `assembleRoom(rawText, fallbackRoom) → { room, diagnostics }`. Composes `JSON.parse` → `repairGeneratedAliases` → `repairGeneratedObjectTransforms` → `loadRoomSpec` → `clampGeneratedShell` (2.5) → `repairGeneratedObjects` (2.6) → `composeGeneratedRoom` (2.7) → `repairGeneratedSpawn` (2.8) → `repairGeneratedExits` (2.9) → `validateRoom` → `repairRoom` → re-validate → fallback; **always** returns a zero-fatal room plus safe diagnostics (provenance/stage/codes/counts/booleans/normalization flags). Synchronous, no I/O, never logs ([ADR-0020](./decisions/ADR-0020-room-generation-repair-fallback-v0.md), [ADR-0031](./decisions/ADR-0031-generated-room-layout-contract-v0.md), [ADR-0032](./decisions/ADR-0032-generated-room-composition-v0.md), [ADR-0033](./decisions/ADR-0033-generated-room-visual-vocabulary-v0.md), [ADR-0034](./decisions/ADR-0034-generated-room-story-anchors-v0.md)). |
+| `domain/assembleRoom.ts` | Pure assembly pipeline: `assembleRoom(rawText, fallbackRoom, options) -> { room, diagnostics }`. Composes `JSON.parse` -> `repairGeneratedAliases` -> `repairGeneratedObjectTransforms` -> `loadRoomSpec` -> `clampGeneratedShell` (2.5) -> `repairGeneratedObjects` (2.6) -> `composeGeneratedRoom` (2.7, optional structured `themePack`) -> `repairGeneratedSpawn` (2.8) -> `repairGeneratedExits` (2.9) -> `validateRoom` -> `repairRoom` -> re-validate -> fallback; **always** returns a zero-fatal room plus safe diagnostics (provenance/stage/codes/counts/booleans/normalization flags). Synchronous, no I/O, never logs ([ADR-0020](./decisions/ADR-0020-room-generation-repair-fallback-v0.md), [ADR-0031](./decisions/ADR-0031-generated-room-layout-contract-v0.md), [ADR-0032](./decisions/ADR-0032-generated-room-composition-v0.md), [ADR-0033](./decisions/ADR-0033-generated-room-visual-vocabulary-v0.md), [ADR-0034](./decisions/ADR-0034-generated-room-story-anchors-v0.md), [ADR-0044](./decisions/ADR-0044-generated-room-theme-vocabulary-v0.md)). |
 | `domain/examples/fallbackRoom.ts` | The trusted, data-only fallback room (the `throneRoom` authoring pattern): a small in-bounds stone antechamber, zero fatal/zero warning, no prompt or story text. Injected by the host as `assembleRoom`'s last resort. |
 | `room/GeneratedRoomSource.ts` | A `RoomSource` adapter (composition layer) that runs the generator, then `assembleRoom`. A generator throw/reject → `unavailable`; otherwise **always** `ok:true` with `provenance` (`generated`/`repaired`/`fallback`). Logs one safe line (provenance/stage/codes/counts/boolean diagnostics, including count-only vocabulary diagnostics) — never prompt/raw JSON/story text/object names. |
 | `app/AdjacentRoomPregenerator.ts` | Composition-layer room-acquisition seam ([ADR-0021](./decisions/ADR-0021-adjacent-room-pregeneration-v0.md)). `resolveRoom(id)` is cache-first, in-flight-aware, and total (authored → `RoomRegistry`; non-authored → `GeneratedRoomSource → assembleRoom`, id-normalized; never throws). `warmAdjacent(room)` warms the current room's exits in the background, capped at `maxJobs` (default 3), depth-1. Implements the narrow `RoomResolver` that `NavigationService` depends on. |
 | `app/PromptBar.tsx` | Presentational prompt input + Generate button — app composition chrome, **not** renderer UI. Trims/validates; emits `onSubmit(prompt)`. |
 | `app/worldBible.ts` | Prompt-path composition helper: seed + project + safe enum/count/length logging; on failure return the raw prompt and no bible. |
 | `app/fallbackNotice.ts` | The static, prompt-free notice copy + the pure `shouldShowFallbackNotice(provenance)` decision (show for `repaired`/`fallback`). |
-| `App.tsx` | Composition root: selects the prompt-path generator once via `selectRoomGenerator(readLlmConfig())` (real provider when configured, else fake) and logs the safe selection summary; keeps a separate `FakeRoomGenerator` for adjacent pre-generation. PromptBar submit seeds/projects a bible, passes the compact seed to the unchanged `GeneratedRoomSource` (using the selected generator), and stores the optional bible on generated `ActivePlay`. Authored bootstrap/pregeneration remain bible-free and fake. Constructs `SaveGameService` + `LocalStorageSaveSlotStore`; owns `handleSave`/`handleLoad` with `requestVersion` guarding and renders `<SaveLoadBar>`. Derives `guardEnabled` (provider !== `'fake'`) and `guardCap` (`llmConfig.sessionCap`, default 10) once at module level; holds `usageCountRef`/`usageCount` and `inFlightRef`/`inFlight` pairs for guardrail state; count increments before `getRoom()` resolves so failures/fallbacks still count; in-flight lock drives `PromptBar disabled={inFlight}`; at-cap gate stores prompt until `handleGenerateAnyway` grants confirm; renders `<UsageMeter>` only when `guardEnabled`. |
+| `App.tsx` | Composition root: selects the prompt-path generator once via `selectRoomGenerator(readLlmConfig())` (real provider when configured, else fake) and logs the safe selection summary; keeps a separate default `FakeRoomGenerator` for authored/example adjacent pre-generation. PromptBar submit seeds/projects a bible, resolves `themeVocabulary(prepared.worldBible?.themePack)`, passes the compact seed to `GeneratedRoomSource`, and stores the optional bible on generated `ActivePlay`. When the prompt path is fake, it constructs `FakeRoomGenerator(vocabulary)` for the primary room and for that generated play's adjacent generator; generated adjacents also pass the structured `themePack` into `assembleRoom`. Authored bootstrap/pregeneration remain bible-free/default. Constructs `SaveGameService` + `LocalStorageSaveSlotStore`; owns `handleSave`/`handleLoad` with `requestVersion` guarding and renders `<SaveLoadBar>`. Derives `guardEnabled` (provider !== `'fake'`) and `guardCap` (`llmConfig.sessionCap`, default 10) once at module level; holds `usageCountRef`/`usageCount` and `inFlightRef`/`inFlight` pairs for guardrail state; count increments before `getRoom()` resolves so failures/fallbacks still count; in-flight lock drives `PromptBar disabled={inFlight}`; at-cap gate stores prompt until `handleGenerateAnyway` grants confirm; renders `<UsageMeter>` only when `guardEnabled`. |
 | `app/saveSlotStore.ts` | `SaveSlotStore` interface + `KeyValueStore` seam + read/write/has/clear slot logic + `LocalStorageSaveSlotStore` browser binding (key `aigm.save.slot`). Reads return parsed `SlotWrapper \| null`; writes JSON-stringify the full wrapper. All `localStorage` access wrapped in try/catch; never throws into the render cycle. Tested over an in-memory `KeyValueStore` fake (key round-trips, absence, throwing fake for unavailable/quota). |
 | `app/buildRestoredPlay.ts` | Pure helper: `buildRestoredPlay(state, resolveResult, fallbackRoom) → { play: ActivePlay; degraded: boolean }`. Wraps the resolved room (or fallback under `currentRoomId`) into `roomSource`; sets `navigation = exampleNavigation`, `initialPlayer = projectPlayerHud(state)`, `degraded = !ok \|\| source !== 'registry'`. Imports no store/service; never mutates inputs. Tested (authored/generated/failed-resolve cases; purity/no-mutation). |
 
 Tested with **Vitest**: the PRNG (determinism/divergence/ranges), the fake
 room generator, `WorldBibleSeed` schema/projection, `FakeWorldBibleSeeder`
 (determinism, two-way theme mapping, bounds, data-only/no side effects), the
+generated-room theme vocabulary resolver and FakeRoomGenerator vocabulary DI,
 non-blocking app helper and its leakage guard, `validateRoom`, repair/fallback,
 the generated-room layout normalizers (`generatedRoomLayout.ts`: shell clamp,
 object bounds + count cap, spawn repair, exit snapping — same-reference optimization,

@@ -11,6 +11,7 @@ import { assignGeneratedObjectPurpose } from './generatedRoomObjectPurpose'
 import { ensureGeneratedNpcPresence } from './ensureGeneratedNpcPresence'
 import { ensureGeneratedExitNavigation } from './ensureGeneratedExitNavigation'
 import { sanitizeGeneratedDisplayText } from './sanitizeGeneratedDisplayText'
+import type { GeneratedRoomVisualTheme } from './generatedRoomThemeVocabulary'
 
 /**
  * Room assembly pipeline (room-generation-repair-fallback v0). A pure,
@@ -158,6 +159,7 @@ export type AssembledRoom = {
 
 export type AssembleRoomOptions = {
   requestsNpc?: boolean
+  themePack?: GeneratedRoomVisualTheme
 }
 
 export function assembleRoom(
@@ -213,7 +215,7 @@ export function assembleRoom(
   const objectsRepaired = objectsFixed !== clamped
 
   // Stage 2.7 — arrange existing objects before the finalizers get the final say.
-  const composition = composeGeneratedRoom(objectsFixed)
+  const composition = composeGeneratedRoom(objectsFixed, { themePack: options.themePack })
   const { composed, lacksAnchor, lacksInteractable } = composition.diagnostics
 
   // Stage 2.8 — clamp and nudge the generated spawn into a safe floor position.

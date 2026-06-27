@@ -1,4 +1,9 @@
 import type { RoomGenerator } from '../domain/ports/RoomGenerator'
+import {
+  type GeneratedRoomThemeVocabulary,
+  themeVocabulary,
+} from '../domain/generatedRoomThemeVocabulary'
+import type { RoomObject } from '../domain/roomSpec'
 import { createRng, xmur3 } from './prng'
 
 /**
@@ -28,17 +33,8 @@ import { createRng, xmur3 } from './prng'
  * ground objects anchored at their floor base, colors as #rrggbb.
  */
 
-// Author-facing color fields, all valid #rrggbb. Variety here is the main reason
-// different prompts read as visibly different rooms.
-const FLOOR_COLORS = ['#4a4036', '#3c3a33', '#52423a', '#3a3f3a', '#46403c'] as const
-const WALL_COLORS = ['#6b6355', '#5a5347', '#6a5f52', '#585a52', '#625a4e'] as const
-const PROP_COLORS = ['#8a7d5a', '#6f7a8a', '#8a5a5a', '#5a8a6f', '#7a6f8a', '#888888'] as const
-const PROP_SHAPES = ['box', 'cylinder', 'cone', 'sphere'] as const
-const NPC_NAMES = ['Malik', 'Bram', 'Sera', 'Torval', 'Lyra', 'Garrick', 'Edda', 'Roan'] as const
-const ANCHOR_TYPES = ['throne', 'altar', 'statue'] as const
-const DOCUMENT_TYPES = ['scroll', 'book', 'paper', 'map'] as const
-const PRACTICAL_TYPES = ['chest', 'corpse', 'table'] as const
-const STRANGE_TYPES = ['machine', 'artifact', 'candle'] as const
+const DEFAULT_VOCABULARY = themeVocabulary('fantasy-keep')
+type PropShape = GeneratedRoomThemeVocabulary['propShapes'][number]
 
 /** Snap to a 0.5 m grid so coordinates stay tidy and round-trip cleanly. */
 const snap = (v: number): number => Math.round(v * 2) / 2
@@ -56,18 +52,52 @@ function pickForPrompt<const T extends readonly string[]>(prompt: string, salt: 
   return choices[xmur3(`${salt}:${prompt}`)() % choices.length]!
 }
 
-function buildAnchor(type: (typeof ANCHOR_TYPES)[number], z: number): unknown {
+function allowedTypes(
+  pool: readonly RoomObject['type'][],
+  fallback: readonly RoomObject['type'][],
+  neverAppear: ReadonlySet<RoomObject['type']>,
+): readonly RoomObject['type'][] {
+  const allowed = pool.filter((type) => !neverAppear.has(type))
+  if (allowed.length > 0) return allowed
+
+  const fallbackAllowed = fallback.filter((type) => !neverAppear.has(type))
+  return fallbackAllowed.length > 0 ? fallbackAllowed : ['prop']
+}
+
+function allowedShapes(
+  pool: readonly PropShape[],
+  fallback: readonly PropShape[],
+): readonly PropShape[] {
+  return pool.length > 0 ? pool : fallback
+}
+
+function buildAnchor(type: RoomObject['type'], z: number): unknown {
   switch (type) {
+    case 'scroll':
+      return {
+        type,
+        position: [0, 0.5, z],
+        rotationY: 180,
+        interaction: { key: 'E', prompt: 'Press E to read the scroll' },
+      }
+    case 'npc':
+      return {
+        type,
+        name: 'Guide',
+        position: [0, 0, z],
+        rotationY: 180,
+        interaction: { key: 'F', prompt: 'Press F to speak with Guide' },
+      }
     case 'altar':
     case 'statue':
       return { type, position: [0, 0, z], rotationY: 180 }
     default:
-      return { type: 'throne', position: [0, 0, z], rotationY: 180 }
+      return { type, position: [0, 0, z], rotationY: 180 }
   }
 }
 
 function buildDocument(
-  type: (typeof DOCUMENT_TYPES)[number],
+  type: RoomObject['type'],
   position: [number, number, number],
   label: string,
 ): unknown {
@@ -87,16 +117,16 @@ function buildDocument(
   return { type, position, rotationY: 8 }
 }
 
-function buildPracticalProp(type: (typeof PRACTICAL_TYPES)[number], position: [number, number, number]): unknown {
+function buildPracticalProp(type: RoomObject['type'], position: [number, number, number]): unknown {
   return { type, position, rotationY: type === 'corpse' ? -22 : 14 }
 }
 
-function buildStrangeProp(type: (typeof STRANGE_TYPES)[number], position: [number, number, number]): unknown {
+function buildStrangeProp(type: RoomObject['type'], position: [number, number, number]): unknown {
   return { type, position, rotationY: type === 'candle' ? 0 : -12 }
 }
 
 /** Build the room as a plain JSON-shaped value (data only, never typed code). */
-function buildRoom(prompt: string): unknown {
+function buildRoom(prompt: string, vocabulary: GeneratedRoomThemeVocabulary): unknown {
   const rng = createRng(prompt)
   // A stable id from an independent hash, so it does not depend on how many
   // draws the body happens to make.
@@ -109,8 +139,14 @@ function buildRoom(prompt: string): unknown {
   const halfW = width / 2
   const halfD = depth / 2
 
-  const floorColor = rng.pick(FLOOR_COLORS)
-  const wallColor = rng.pick(WALL_COLORS)
+  const floorColor = rng.pick(vocabulary.palette.floor)
+  const wallColor = rng.pick(vocabulary.palette.wall)
+  const neverAppear = new Set(vocabulary.neverAppear)
+  const anchorTypes = allowedTypes(vocabulary.anchorPool, DEFAULT_VOCABULARY.anchorPool, neverAppear)
+  const documentTypes = allowedTypes(vocabulary.documentPool, DEFAULT_VOCABULARY.documentPool, neverAppear)
+  const practicalTypes = allowedTypes(vocabulary.practicalPool, DEFAULT_VOCABULARY.practicalPool, neverAppear)
+  const strangeTypes = allowedTypes(vocabulary.strangePool, DEFAULT_VOCABULARY.strangePool, neverAppear)
+  const propShapes = allowedShapes(vocabulary.propShapes, DEFAULT_VOCABULARY.propShapes)
 
   // 1–2 exits on distinct walls.
   const sides = ['north', 'south', 'east', 'west'] as const
@@ -130,10 +166,12 @@ function buildRoom(prompt: string): unknown {
   const objects: unknown[] = []
 
   // Focal anchor at the north end, facing the room (yaw 180 → -Z north).
-  objects.push(buildAnchor(pickForPrompt(prompt, 'anchor', ANCHOR_TYPES), snap(-halfD + 2)))
+  objects.push(buildAnchor(pickForPrompt(prompt, 'anchor', anchorTypes), snap(-halfD + 2)))
 
   // Central rug, lifted a hair off the floor to avoid z-fighting.
-  objects.push({ type: 'rug', position: [0, 0.01, 0], size: [4, snap(halfD)] })
+  if (!neverAppear.has('rug')) {
+    objects.push({ type: 'rug', position: [0, 0.01, 0], size: [4, snap(halfD)] })
+  }
 
   // Symmetric pillars down the side walls, each pair optionally torch-lit.
   const pairs = rng.int(1, 4) // 1..3 pairs
@@ -150,25 +188,25 @@ function buildRoom(prompt: string): unknown {
   }
 
   // Deterministic vocabulary sample for browser QA; all still pure RoomSpec data.
-  const primaryDocument = pickForPrompt(prompt, 'document-a', DOCUMENT_TYPES)
-  const secondaryDocument = pickForPrompt(prompt, 'document-b', DOCUMENT_TYPES)
+  const primaryDocument = pickForPrompt(prompt, 'document-a', documentTypes)
+  const secondaryDocument = pickForPrompt(prompt, 'document-b', documentTypes)
   objects.push(buildDocument(primaryDocument, [snap(-halfW + 2.2), 0, snap(-1.5)], label))
   if (secondaryDocument !== primaryDocument && rng.bool(0.55)) {
     objects.push(buildDocument(secondaryDocument, [snap(halfW - 2.2), 0, snap(1.2)], label))
   }
 
   objects.push(buildPracticalProp(
-    pickForPrompt(prompt, 'practical', PRACTICAL_TYPES),
+    pickForPrompt(prompt, 'practical', practicalTypes),
     [snap(-halfW + 2.3), 0, snap(halfD * 0.2)],
   ))
   objects.push(buildStrangeProp(
-    pickForPrompt(prompt, 'strange', STRANGE_TYPES),
+    pickForPrompt(prompt, 'strange', strangeTypes),
     [snap(halfW - 2.3), 0, snap(-halfD * 0.2)],
   ))
 
   // Often an NPC with a name and a talk interaction.
   if (rng.bool(0.75)) {
-    const name = rng.pick(NPC_NAMES)
+    const name = rng.pick(vocabulary.npcNames)
     objects.push({
       type: 'npc',
       name,
@@ -182,10 +220,10 @@ function buildRoom(prompt: string): unknown {
   for (let i = 0; i < propCount; i++) {
     objects.push({
       type: 'prop',
-      shape: rng.pick(PROP_SHAPES),
+      shape: rng.pick(propShapes),
       position: [snap(rng.range(-halfW + 1.5, halfW - 1.5)), 0, snap(rng.range(-halfD + 2, halfD - 2))],
       size: [round1(rng.range(0.5, 1.5)), round1(rng.range(0.5, 1.5)), round1(rng.range(0.5, 1.5))],
-      color: rng.pick(PROP_COLORS),
+      color: rng.pick(vocabulary.palette.prop),
     })
   }
 
@@ -204,12 +242,18 @@ function buildRoom(prompt: string): unknown {
 }
 
 export class FakeRoomGenerator implements RoomGenerator {
+  private readonly vocabulary: GeneratedRoomThemeVocabulary
+
+  constructor(vocabulary: GeneratedRoomThemeVocabulary = DEFAULT_VOCABULARY) {
+    this.vocabulary = vocabulary
+  }
+
   /**
    * Produce a room as raw, untrusted JSON text. Deterministic and pure: the same
    * prompt returns a byte-identical string. The caller must `JSON.parse` and then
    * validate via `loadRoomSpec` before anything reaches the renderer.
    */
   async generate(prompt: string): Promise<string> {
-    return JSON.stringify(buildRoom(prompt))
+    return JSON.stringify(buildRoom(prompt, this.vocabulary))
   }
 }

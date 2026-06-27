@@ -344,6 +344,39 @@ builders, while keeping normal validation authoritative.
   raw prompts, provider bodies, generated JSON, raw skipped objects, object text,
   room names, API keys, or PII.
 
+
+## 4h. Generated room theme vocabulary degradation ✅ v0 (default fallback)
+
+Generated Room Theme Vocabulary v0
+([ADR-0044](./decisions/ADR-0044-generated-room-theme-vocabulary-v0.md)) uses the
+structured `WorldBibleSeed.themePack` to choose fake/generated-room vocabulary and
+story-anchor priority. v0 supports only the existing `fantasy-keep` and
+`post-apoc` theme packs.
+
+| Theme-vocabulary condition | Detection | Handling | Logging |
+| --- | --- | --- | --- |
+| Missing theme pack | `themeVocabulary(undefined)` or omitted `assembleRoom` theme option | fall back to default/fantasy vocabulary and default story-anchor priority | no theme diagnostic |
+| Known `fantasy-keep` theme | structured enum from `WorldBibleSeed.themePack` | use existing fantasy/default pools and `throne`/`altar`/`statue` anchor priority | no theme text logged |
+| Known `post-apoc` theme | structured enum from `WorldBibleSeed.themePack` | use post-apoc fake pools; suppress fantasy-biased generated pool entries such as `throne`, `altar`, `statue`, `scroll`, `candle`, `rug`; prefer `machine`/`corpse` as anchors | no theme text or object names logged |
+| Sci-fi/spaceship prompt | current seeder/classifier maps prompts only into existing theme packs | room still follows one of the existing packs; sci-fi/spaceship is not fixed by this v0 | no prompt or seed parsing |
+| Theme context unavailable during World Bible seeding | case 4c non-blocking failure path | existing raw-prompt seed path plus default vocabulary/anchor priority | fixed world-bible failure code only |
+
+- **No seed parsing.** Theme is the structured theme pack only. Generated seed
+  strings, adjacent room ids, raw prompts, and provider output are not parsed for
+  theme.
+- **Never suppress safety-critical generated objects.** `arch` and `npc` must not
+  be included in `neverAppear`; exit navigation and NPC presence depend on those
+  object types remaining available.
+- **Authored/example rooms unchanged.** The authored/example global pregenerator
+  keeps default fake behavior; authored/static/fallback rooms never enter the
+  generated-room theme vocabulary normalizers.
+- **Provenance unchanged.** Theme vocabulary and theme-aware composition are
+  benign generated-room behavior. They do not create `repaired`/`fallback`
+  provenance or user notices by themselves.
+- **Logging remains safe.** Logs must not include raw prompt, seed strings,
+  generated JSON, provider output, room names, object names, or interaction
+  title/body text. No new content-bearing diagnostics were added.
+
 ## 5. Backend / network failure ✅ API edge v0 · 🔜 browser client
 
 The Node API edge exists, but the browser does not call it yet. v0 therefore
@@ -978,6 +1011,7 @@ interactable person to talk to
 | 4e | Generated room layout normalization | shell clamp (2.5); footprint-aware object bounds + count cap + wall-light nudge + mystery-marker anchor clamp (2.6); spawn safe-area repair (2.8); exit wall-snap (2.9) — all pre-semantic | benign normalization keeps `provenance: generated` and shows no notice; authored/fallback rooms untouched | ✅ v0 |
 | 4f | Generated room composition and story-anchor normalization | role classification + deterministic zones (2.7), plus one derived story-anchor selector over validated `RoomObject.type`; after object legality and before spawn/exit finalizers | existing objects repositioned only; missing anchor/interactable accepted; no gameplay semantics; `provenance: generated`, no notice; authored/static/fallback untouched | ✅ v0 |
 | 4g | Generated room visual vocabulary normalization | trusted vocabulary/builders; generated alias repair; optional transform repair; skipped reason buckets | valid safe concepts render as readable objects; unknown/malformed entries remain mystery markers; benign normalization keeps `provenance: generated` | ✅ v0 |
+| 4h | Generated room theme vocabulary degradation | structured `WorldBibleSeed.themePack` only; missing theme/default path; no prompt or seed parsing | missing/unknown context falls back to default fantasy vocabulary and anchor priority; post-apoc suppresses fantasy-biased fake pools while keeping arch/npc; sci-fi/spaceship deferred to later theme packs | ✅ v0 |
 | 5 | Backend/network | validated API requests + typed results | safe API envelope; browser retry state 🔜 | ✅ API edge v0 |
 | 6 | DB / persistence failure | typed results (rooms, conflicts) + fail-fast throws (open/migration/corrupt session) | safe API error; no browser surface yet | ✅ API-backed v0 |
 | 7 | Pre-gen not ready | one `resolveRoom` seam: cache hit / in-flight join / on-demand resolve (capped, depth-1 warming) | instant cached room, or safe on-demand resolve/generate; never a freeze | ✅ v0 (browser); status lifecycle 🔜 |

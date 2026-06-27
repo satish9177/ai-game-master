@@ -283,10 +283,11 @@ describe('GeneratedRoomSource', () => {
     ]
     for (const gen of cases) {
       const { logger, entries } = createSpyLogger()
-      await newSource(gen, prompt, logger).getRoom()
+      await newSource(gen, prompt, logger, { themePack: 'post-apoc' }).getRoom()
       expect(entries.length).toBeGreaterThan(0) // every path logs at least once
       const dump = JSON.stringify(entries)
       expect(dump).not.toContain(prompt)
+      expect(dump).not.toContain('post-apoc')
       expect(dump).not.toContain('SECRET-NPC-NAME-9000')
       expect(dump).not.toContain('SECRET-PROMPT-LABEL')
       expect(dump).not.toContain('SECRET-STORY-BODY-TEXT')
