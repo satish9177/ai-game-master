@@ -320,6 +320,8 @@ describe('assembleRoom', () => {
       'objectTransformsRepaired',
       'purposesAssigned',
       'npcInserted',
+      'displayTextSanitized',
+      'displayTextSanitizationCount',
       'skippedObjectReasonCounts',
     ])
 
@@ -350,6 +352,8 @@ describe('assembleRoom', () => {
       expect(typeof diagnostics.objectTransformsRepaired).toBe('number')
       expect(typeof diagnostics.purposesAssigned).toBe('number')
       expect(typeof diagnostics.npcInserted).toBe('boolean')
+      expect(typeof diagnostics.displayTextSanitized).toBe('boolean')
+      expect(typeof diagnostics.displayTextSanitizationCount).toBe('number')
       expect(typeof diagnostics.skippedObjectReasonCounts).toBe('object')
       expect(diagnostics.skippedObjectReasonCounts).not.toBeNull()
       for (const val of Object.values(diagnostics.skippedObjectReasonCounts)) {
@@ -985,6 +989,164 @@ describe('assembleRoom', () => {
       'SECRET_GENERATED_BODY',
     ]) {
       expect(diagnosticsJson).not.toContain(forbidden)
+    }
+  })
+
+  // --- generated-room display text sanitization (Slice B) ---
+  //
+  // Structural generated ids may remain authoritative identity/navigation data,
+  // but must not leak through allowlisted player-facing display fields.
+
+  it('sanitizes adjacent-style generated structural ids from player-facing display fields', () => {
+    const result = assembleRoom(raw(validSpec({
+      id: 'adjacent:gen-1234abcd:exit:north',
+      name: 'Generated room - adjacent:gen-1234abcd:exit:north',
+      shell: { dimensions: { width: 18, depth: 18, height: 4 }, exits: [{ side: 'north', width: 3 }] },
+      spawn: { position: [0, 1.7, 5] },
+      objects: [
+        {
+          type: 'arch',
+          id: 'adjacent:gen-1234abcd:exit:north',
+          position: [0, 0, -9],
+          interaction: {
+            key: 'E',
+            prompt: 'Generated room - adjacent:gen-1234abcd:exit:north',
+            exit: { toRoomId: 'adjacent:gen-1234abcd:exit:north' },
+          },
+        },
+        {
+          type: 'scroll',
+          id: 'scroll-1',
+          position: [3, 0, -2],
+          interaction: {
+            key: 'E',
+            prompt: 'Read',
+            body: 'The scroll reads: "adjacent:gen-1234abcd:exit:north"',
+          },
+        },
+        {
+          type: 'npc',
+          id: 'npc-1',
+          name: 'Guide adjacent:gen-1234abcd:exit:north',
+          position: [-3, 0, -2],
+          interaction: {
+            key: 'F',
+            prompt: 'Talk to adjacent:gen-1234abcd:exit:north',
+            body: 'They gesture toward adjacent:gen-1234abcd:exit:north.',
+            dialogue: {
+              persona: 'adjacent:gen-1234abcd:exit:north',
+              greeting: 'I came from adjacent:gen-1234abcd:exit:north.',
+              prompts: [
+                {
+                  id: 'ask-adjacent:gen-1234abcd:exit:north',
+                  label: 'Ask about adjacent:gen-1234abcd:exit:north',
+                },
+              ],
+            },
+          },
+        },
+      ],
+    })), fallback)
+
+    const arch = result.room.objects.find((object) => object.type === 'arch')
+    const scroll = result.room.objects.find((object) => object.type === 'scroll')
+    const npc = result.room.objects.find((object) => object.type === 'npc')
+
+    expect(result.diagnostics.provenance).toBe('generated')
+    expect(result.diagnostics.displayTextSanitized).toBe(true)
+    expect(result.diagnostics.displayTextSanitizationCount).toBeGreaterThan(0)
+    expect(result.room.name).toBe('Generated room')
+    expect(interactionFor(arch!)?.prompt).toBe('Generated room - a nearby room')
+    expect(interactionFor(scroll!)?.body).toBe('The scroll reads: "a nearby room"')
+    expect(npc).toMatchObject({ name: 'Guide a nearby room' })
+    expect(interactionFor(npc!)?.prompt).toBe('Talk to a nearby room')
+    expect(interactionFor(npc!)?.body).toBe('They gesture toward a nearby room.')
+    expect(interactionFor(npc!)?.dialogue?.greeting).toBe('I came from a nearby room.')
+    expect(interactionFor(npc!)?.dialogue?.prompts?.[0]?.label).toBe('Ask about a nearby room')
+  })
+
+  it('keeps structural room id, object id, dialogue ids, and exit target unchanged after display sanitization', () => {
+    const result = assembleRoom(raw(validSpec({
+      id: 'adjacent:gen-1234abcd:exit:north',
+      name: 'Generated room - adjacent:gen-1234abcd:exit:north',
+      shell: { dimensions: { width: 18, depth: 18, height: 4 }, exits: [{ side: 'north', width: 3 }] },
+      spawn: { position: [0, 1.7, 5] },
+      objects: [
+        {
+          type: 'arch',
+          id: 'adjacent:gen-1234abcd:exit:north',
+          position: [0, 0, -9],
+          interaction: {
+            key: 'E',
+            prompt: 'Enter adjacent:gen-1234abcd:exit:north',
+            exit: { toRoomId: 'adjacent:gen-1234abcd:exit:north' },
+          },
+        },
+        {
+          type: 'npc',
+          id: 'npc-1',
+          name: 'Mira',
+          position: [-3, 0, -2],
+          interaction: {
+            key: 'F',
+            prompt: 'Talk',
+            dialogue: {
+              persona: 'adjacent:gen-1234abcd:exit:north',
+              prompts: [
+                {
+                  id: 'ask-adjacent:gen-1234abcd:exit:north',
+                  label: 'Ask about adjacent:gen-1234abcd:exit:north',
+                },
+              ],
+            },
+          },
+        },
+      ],
+    })), fallback)
+
+    const arch = result.room.objects.find((object) => object.type === 'arch')
+    const npc = result.room.objects.find((object) => object.type === 'npc')
+
+    expect(result.room.id).toBe('adjacent:gen-1234abcd:exit:north')
+    expect(arch?.id).toBe('adjacent:gen-1234abcd:exit:north')
+    expect(interactionFor(arch!)?.exit?.toRoomId).toBe('adjacent:gen-1234abcd:exit:north')
+    expect(interactionFor(npc!)?.dialogue?.persona).toBe('adjacent:gen-1234abcd:exit:north')
+    expect(interactionFor(npc!)?.dialogue?.prompts?.[0]?.id).toBe(
+      'ask-adjacent:gen-1234abcd:exit:north',
+    )
+    expect(interactionFor(arch!)?.prompt).toBe('Enter a nearby room')
+    expect(interactionFor(npc!)?.dialogue?.prompts?.[0]?.label).toBe('Ask about a nearby room')
+  })
+
+  it('clean generated content reports no display text sanitization', () => {
+    const result = assembleRoom(RAW_VALID, fallback)
+
+    expect(result.diagnostics.provenance).toBe('generated')
+    expect(result.diagnostics.displayTextSanitized).toBe(false)
+    expect(result.diagnostics.displayTextSanitizationCount).toBe(0)
+  })
+
+  it('fallback branches report no display text sanitization', () => {
+    const semanticWithContaminatedText = raw(validSpec({
+      name: 'Generated room - adjacent:gen-1234abcd:exit:north',
+      shell: { dimensions: { width: 18, depth: 18, height: 400 }, exits: [{ side: 'north', width: 3 }] },
+      objects: [{
+        type: 'scroll',
+        position: [0, 0, -2],
+        interaction: {
+          key: 'E',
+          prompt: 'Read adjacent:gen-1234abcd:exit:north',
+          body: 'The scroll reads adjacent:gen-1234abcd:exit:north.',
+        },
+      }],
+    }))
+
+    for (const input of [RAW_INVALID_JSON, RAW_INVALID_SCHEMA, semanticWithContaminatedText]) {
+      const { room, diagnostics } = assembleRoom(input, fallback)
+      expect(room).toBe(fallback)
+      expect(diagnostics.provenance).toBe('fallback')
+      expect(diagnostics.displayTextSanitized).toBe(false)
+      expect(diagnostics.displayTextSanitizationCount).toBe(0)
     }
   })
 

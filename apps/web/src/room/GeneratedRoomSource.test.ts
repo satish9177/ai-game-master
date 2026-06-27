@@ -236,6 +236,8 @@ describe('GeneratedRoomSource', () => {
     expect(typeof entry.context.purposesAssigned).toBe('number')
     expect(typeof entry.context.exitNavigationEnsured).toBe('boolean')
     expect(typeof entry.context.npcInserted).toBe('boolean')
+    expect(typeof entry.context.displayTextSanitized).toBe('boolean')
+    expect(typeof entry.context.displayTextSanitizationCount).toBe('number')
     expect(typeof entry.context.skippedObjectReasonCounts).toBe('object')
   })
 
@@ -290,6 +292,54 @@ describe('GeneratedRoomSource', () => {
       expect(dump).not.toContain('SECRET-STORY-BODY-TEXT')
       expect(dump).not.toContain('SECRET-RAW-CONTENT-7777')
     }
+  })
+
+  it('logs display sanitization diagnostics without leaking before or after display text', async () => {
+    const token = 'adjacent:gen-1234abcd:exit:north'
+    const CONTAMINATED_DISPLAY_SPEC = JSON.stringify({
+      ...base,
+      id: token,
+      name: `Generated room - ${token}`,
+      objects: [
+        {
+          type: 'arch',
+          id: token,
+          position: [0, 0, -9],
+          interaction: {
+            key: 'E',
+            prompt: `Enter ${token}`,
+            exit: { toRoomId: token },
+          },
+        },
+        {
+          type: 'scroll',
+          id: 'scroll-with-display-text',
+          position: [3, 0, -2],
+          interaction: {
+            key: 'E',
+            prompt: 'Read',
+            title: `Title ${token}`,
+            body: `The scroll reads: "${token}"`,
+          },
+        },
+      ],
+    })
+    const { logger, entries } = createSpyLogger()
+
+    await newSource(generatorReturning(CONTAMINATED_DISPLAY_SPEC), 'p', logger).getRoom()
+
+    expect(entries).toHaveLength(1)
+    expect(entries[0]!.context.displayTextSanitized).toBe(true)
+    expect(typeof entries[0]!.context.displayTextSanitizationCount).toBe('number')
+    expect(entries[0]!.context.displayTextSanitizationCount).toBeGreaterThan(0)
+
+    const dump = JSON.stringify(entries)
+    expect(dump).not.toContain(token)
+    expect(dump).not.toContain('Generated room')
+    expect(dump).not.toContain('a nearby room')
+    expect(dump).not.toContain('The scroll reads')
+    expect(dump).not.toContain('Title')
+    expect(dump).not.toContain('Enter')
   })
 
   it('every FakeRoomGenerator output is generated and playable (no repair/fallback)', async () => {

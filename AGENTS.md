@@ -2,6 +2,10 @@
 
 Rules for AI coding agents and contributors. Read this before coding.
 
+This file is the always-on constitution for the repo. Keep it short, strict, and task-focused. Detailed architecture/status lives in `docs/architecture/` and related ADRs.
+
+---
+
 ## Core workflow
 
 * Design first. Do not implement until the maintainer approves.
@@ -11,6 +15,10 @@ Rules for AI coding agents and contributors. Read this before coding.
 * Keep changes small, reviewable, and independently testable.
 * When unsure about a boundary, ask before coding.
 * For feature work, the approved implementation plan is the task-specific source of truth.
+* Do not mix refactors with feature work unless explicitly approved.
+* Prefer targeted verification over running unrelated expensive checks, unless the change is broad or safety-sensitive.
+
+---
 
 ## Project identity
 
@@ -18,9 +26,113 @@ AI Game Master is a browser-based controlled 3D / isometric solo RPG engine.
 
 A room is described by validated data-only `RoomSpec` JSON and rendered by trusted, hand-written Three.js code.
 
-Current app: `apps/web` using React, TypeScript, Vite, Three.js, zod, Node, and SQLite.
+Current app:
+
+* `apps/web`
+* React
+* TypeScript
+* Vite
+* Three.js
+* zod
+* Node
+* SQLite
 
 FastAPI/Python are not part of the MVP backend path.
+
+---
+
+## Minimum Safe Change Rule
+
+Before writing code, choose the smallest safe solution.
+
+Use this ladder before creating new files, abstractions, services, schemas, or systems:
+
+1. Does this change actually need to exist for the approved feature slice?
+2. Is the behavior already present in the codebase?
+3. Can an existing `RoomSpec`, `RoomViewer`, room source, validation, renderer, hook, service, store, projection, or test helper be reused?
+4. Can TypeScript, React, Three.js, browser APIs, Node, or SQLite already do this simply?
+5. Can an already-installed dependency solve it without adding a new dependency?
+6. Can this be solved with a small local change instead of a new abstraction?
+7. Only then add the minimum new code required.
+
+This rule is about reducing unnecessary code, not removing safety.
+
+Never reduce, bypass, or weaken:
+
+* `RoomSpec` / `SceneSpec` validation
+* trusted renderer boundaries
+* raw prompt / generated text / provider output leakage protection
+* deterministic repair/fallback behavior
+* authoritative `WorldSession` / event-log / SQLite boundaries
+* memory firewall rules
+* tests for safety-sensitive behavior
+* architecture docs / ADRs when the feature changes boundaries
+* no-executable-code-from-LLM constraints
+* logging redaction and secret safety
+
+Prefer:
+
+* small diffs
+* local changes near the existing flow
+* pure functions for generation/safety/domain logic
+* deterministic tests
+* existing fixtures/builders/helpers
+* boring code over clever code
+* explicit feature-slice boundaries
+
+Avoid:
+
+* new global state unless required
+* new service layers for v0 features
+* schema changes unless explicitly approved
+* broad refactors mixed with feature work
+* future-proof abstractions without current use
+* changing unrelated files to make the solution look cleaner
+* adding dependencies for small problems
+
+For every implementation plan, include a short **Minimum Safe Change Check**:
+
+* What existing code is reused?
+* What new code is actually necessary?
+* What safety boundaries remain unchanged?
+* What targeted tests prove the change?
+
+---
+
+## Ponytail usage
+
+Ponytail-style rules are allowed as an advisory anti-overengineering aid.
+
+Ponytail or any similar agent skill/plugin must never override:
+
+1. this `AGENTS.md`
+2. the maintainer-approved implementation plan
+3. `docs/architecture/ARCHITECTURE.md`
+4. `docs/architecture/BOUNDARIES.md`
+5. the relevant ADR for the current feature
+
+Allowed Ponytail-style usage:
+
+* ask the agent to find unnecessary abstractions
+* ask the agent to reduce diff size
+* ask the agent to reuse existing code
+* ask the agent to avoid new dependencies
+* ask the agent to review whether a feature was overbuilt
+
+Not allowed:
+
+* removing validation to reduce code
+* removing tests to reduce code
+* weakening safety boundaries to reduce code
+* replacing explicit architecture with clever shortcuts
+* changing unrelated code because Ponytail suggests a smaller global design
+* using plugin hooks that edit files without maintainer review
+
+The correct rule for this project is:
+
+> minimum safe code, not minimum code.
+
+---
 
 ## Non-negotiable architecture rules
 
@@ -29,206 +141,174 @@ FastAPI/Python are not part of the MVP backend path.
 * The renderer must stay hand-written and trusted.
 * `RoomSpec` and domain models must remain renderer-agnostic.
 * SQLite/world-session current state plus append-only event log are authoritative.
-* Summaries, memories, retrieval, and LLM text never override authoritative state.
+* Summaries, memories, retrieval, dialogue, and LLM text never override authoritative state.
 * The browser must not access SQLite or Node-only persistence directly.
 * The frontend remains intentionally in-memory unless the maintainer explicitly approves backend wiring.
+* Browser `localStorage`, where used, is byte parking only and never authoritative truth.
 * The renderer must not import React, DB, network, server, or persistence code.
 * React UI must not import Three.js engine internals except through approved host/composition seams.
 * Persistence stays Node-only and browser-excluded.
 * Use the logger abstraction. Do not add scattered `console.log`.
-* Never log secrets, API keys, raw prompts, generated JSON, provider request/response bodies, or PII.
-* Keep DI simple through constructor/function parameters. Do not add heavy frameworks, Redux, Nest, heavy ORMs, or new package/workspace structure without approval.
-* WorldSession current state plus append-only event log are authoritative; SQLite is authoritative where backend persistence is wired.
+* Never log secrets, API keys, raw prompts, generated JSON, provider request/response bodies, player text, NPC dialogue, room/object names, narrative content, or PII.
+* Keep DI simple through constructor/function parameters.
+* Do not add heavy frameworks, Redux, Nest, heavy ORMs, or new package/workspace structure without approval.
+* `WorldSession` current state plus append-only event log are authoritative; SQLite is authoritative where backend persistence is wired.
 
-## NPC memory (npc-memory-persistence-v0) — shipped, headless
+---
 
-The first NPC memory layer is **implemented, headless, and Node/SQLite-only**; the
-browser stays in-memory and unwired ([ADR-0024](docs/architecture/decisions/ADR-0024-npc-memory-persistence-v0.md)).
-**Memory is supporting context only and can never become world truth.** The
-`WorldSession` event log + reducers remain the sole authority, and the memory layer
-holds **no reference to `WorldSession`/`WorldStore`/`WorldCommand`/`WorldEvent`** — it
-has no code path to mutate state (the *memory firewall*, lint-enforced). Player claims
-are claims, NPC beliefs/observations can be wrong, dialogue summaries can't update
-truth, and `source:'llm'` memories can't apply state changes.
+## LLM and generation safety
 
-| Module | Role |
-| --- | --- |
-| `domain/memory/contracts.ts` | Strict versioned schema: strict `(worldId, sessionId, npcId)` scope; kinds `player_claim`/`npc_belief`/`npc_observation`/`dialogue_summary`; source `player`/`npc`/`game`/`llm` (**no `system`**); informational-only `confidence`; inert `text` ≤ 280. Imports only `zod`; exports no command/event-producing function. |
-| `domain/memory/firewall.ts` | Pure firewall: `validateMemoryDraft` (write), `filterMemoriesForScope` (read), `selectRecallMemories` (deterministic `seq` desc → `memoryId`; defaults `limit 8`, `maxChars 600`). |
-| `domain/ports/NpcMemoryStore.ts` | Insert-only port (typed `session-not-found`/`conflict`; no update/delete). |
-| `memory/NpcMemoryService.ts` | Headless `remember`/`recall`; injects store/`Clock`/`IdGenerator`/`Logger` — **no `WorldSession`**, no append path. |
-| `memory/InMemoryNpcMemoryStore.ts` | Pure in-memory adapter (tests / future browser path). |
-| `persistence/SqliteNpcMemoryStore.ts` · `persistence/migrations/0002_npc_memories.ts` | SQLite store + migration: FK to `world_sessions`, scope index, `UNIQUE(session_id, npc_id, seq)`, no-update trigger (DELETE left open). Read boundary re-validates and re-asserts JSON scope; corrupt/scope-divergent rows are skipped. |
+Generation boundaries are strict.
 
-`src/memory/**` has a lint wall stricter than the other application layers — it also
-forbids importing `world-session`/`interactions`/`encounters`/`dialogue`. v0 adds **no
-API, no dialogue/LLM wiring, no prompt injection, and no renderer/RoomSpec/Three.js
-change**. Logs never include memory `text`, player lines, NPC/room names, provider
-prompts/responses, generated JSON, keys, or PII.
+Allowed from LLM/generation:
 
-## Room memory (living-world-room-memory-v0) — shipped, headless
+* data-only `RoomSpec`-like proposals
+* text proposals that are parsed and validated before use
+* safe booleans/enums/counts where explicitly designed
+* provider-agnostic diagnostics that do not expose content
 
-The first **room** memory layer is **implemented, headless, and Node/SQLite-only**; the
-browser stays in-memory and unwired ([ADR-0025](docs/architecture/decisions/ADR-0025-living-world-room-memory-v0.md)).
-**Room memory is supporting context only and can never become room truth.**
-`WorldState.roomStates` (`.visited`, `.flags`) and the append-only `WorldEvent[]`
-remain the sole authority; the memory layer holds **no reference to
-`WorldSession`/`WorldStore`/`WorldCommand`/`WorldEvent`/`WorldState`** — it has no
-code path to mutate state (the *room-memory firewall*, lint-enforced). Player claims
-are claims, `room_observation` is not authoritative truth, `room_note`/`room_summary`
-are inert supporting context, and `source:'llm'` memories can't apply state changes.
+Never allow from LLM/generation:
 
-| Module | Role |
-| --- | --- |
-| `domain/memory/roomContracts.ts` | Strict versioned schema: strict `(worldId, sessionId, roomId)` scope; kinds `player_claim`/`room_observation`/`room_note`/`room_summary`; source `player`/`npc`/`game`/`llm` (**no `system`**); informational-only `confidence`; inert `text` ≤ 280. `roomId` is a plain string — not FK'd to `rooms`. Imports only `zod`; exports no command/event-producing function. |
-| `domain/memory/roomFirewall.ts` | Pure firewall: `validateRoomMemoryDraft` (write), `filterRoomMemoriesForScope` (read), `selectRecallRoomMemories` (deterministic `seq` desc → `memoryId`; defaults `limit 8`, `maxChars 600`). Standalone — does not import or alter the NPC firewall. |
-| `domain/ports/RoomMemoryStore.ts` | Insert-only port (typed `session-not-found`/`conflict`; no update/delete). |
-| `memory/RoomMemoryService.ts` | Headless `remember`/`recall`; injects store/`Clock`/`IdGenerator`/`Logger` — **no `WorldSession`**, no append path. |
-| `memory/InMemoryRoomMemoryStore.ts` | Pure in-memory adapter (tests / future browser path). |
-| `persistence/SqliteRoomMemoryStore.ts` · `persistence/migrations/0003_room_memories.ts` | SQLite store + migration: FK to `world_sessions` (**no FK to `rooms`**), scope index, `UNIQUE(session_id, room_id, seq)`, no-update trigger (DELETE left open). Read boundary re-validates and re-asserts JSON scope; corrupt/scope-divergent rows are skipped. |
+* executable code
+* renderer code
+* React components
+* Three.js objects
+* SQL
+* migrations
+* event-log mutations
+* world-state mutations
+* direct memory writes unless routed through approved firewall/service
+* raw prompt replay
+* raw provider output replay
 
-Covered by the same `src/memory/**` lint wall as NPC memory — also forbids
-`world-session`/`interactions`/`encounters`/`dialogue`. **No `eslint.config.js` change
-was needed** — existing blocks cover all new files. v0 adds **no API, no dialogue/LLM
-wiring, no room-generation injection, no adjacent-room pregeneration wiring, no prompt
-injection, and no renderer/RoomSpec/Three.js change.** Logs never include memory `text`,
-player lines, room/NPC display names, provider prompts/responses, generated JSON, keys,
-or PII.
+Generated rooms must pass the trusted pipeline before render. Failed, invalid, or unsafe generation must repair, fallback, or degrade safely.
 
-## Inventory & Health UI v0 — shipped, browser
+---
 
-A **display-only player HUD** is implemented in the browser, surfacing
-`player.health`, `player.status`, and `inventory` from the existing authoritative
-`WorldState` ([ADR-0026](docs/architecture/decisions/ADR-0026-inventory-health-ui-v0.md)).
+## Memory rules
 
-| Module | Role |
-| --- | --- |
-| `renderer/ui/playerHud.ts` + `playerHud.test.ts` | Pure `projectPlayerHud(state) → PlayerHudView` projection + Vitest tests (health fraction, item mapping, status copy, purity/no-mutation, structural read-only). No domain/service import. |
-| `renderer/ui/StatusHud.tsx` | Presentational React: health bar + `current/max` text; inventory list (explicit "No items" when empty); status chips (omitted when empty). `pointer-events:none`; `role="status"` + `aria-live="polite"`. |
-| `App.tsx` wiring | Owns `playerHud: PlayerHudView | null`; seeds at both session-start sites; resets on new prompt; renders `<StatusHud>` as an App-level overlay sibling of `RoomViewer` (survives navigation remounts). |
-| `RoomViewer.tsx` wiring | Single `onWorldStateChange?: (state: WorldState) => void` prop; called only after interaction/encounter `applied`/`already-resolved` resolves. No other change. |
+Memory is supporting context only. It is never world truth.
 
-**The HUD is a read-only render cache — never truth, never written back.** v0 adds
-**no combat, no health/damage model, no inventory economy, no item actions, no
-equipment, no status-effect engine, no backend wiring, no memory integration, no LLM
-item generation, no `RoomSpec` change, no Three.js engine change, no new dependency,
-and no DOM/component tests.** Logs never include item names/ids, health values/deltas,
-status strings, or any narrative content.
+Current memory layers are headless and Node/SQLite-only unless explicitly approved otherwise:
 
-## Session Save/Load v0 — shipped, browser
+* NPC memory
+* room memory
 
-A **manual browser save/load** is implemented: one named `localStorage` slot stores
-the integrity-checked `SaveGame` JSON; every load re-validates through the full
-`SaveGameService` boundary before any state change
-([ADR-0027](docs/architecture/decisions/ADR-0027-session-save-load-v0.md)).
+Memory layers must not import or mutate:
 
-| Module | Role |
-| --- | --- |
-| `app/saveSlotStore.ts` | `SaveSlotStore` interface + `LocalStorageSaveSlotStore` (key `aigm.save.slot`). `localStorage` wrapped in try/catch; never throws into render. `KeyValueStore` seam enables in-memory testing. |
-| `app/buildRestoredPlay.ts` | Pure helper: `(state, resolveResult, fallbackRoom) → { play, degraded }`. Wraps resolved room; `degraded` true when room is non-authored or unresolvable. No store/service import. |
-| `renderer/ui/SaveLoadBar.tsx` | Presentational save/load bar: `{ canSave, hasSave, busy, error, onSave, onContinue }`. Calm `role="alert"` errors only; no save content shown. |
-| `App.tsx` wiring | Constructs `SaveGameService` + `LocalStorageSaveSlotStore`; owns `handleSave`/`handleLoad` with `requestVersion` guarding; renders `<SaveLoadBar>` as an App-level overlay. |
+* `WorldSession`
+* `WorldStore`
+* `WorldCommand`
+* `WorldEvent`
+* `WorldState`
+* interactions
+* encounters
+* dialogue paths unless an approved feature explicitly wires a read-only recall path
 
-**`localStorage` is a byte parking spot, never truth.** Only `saveGameJson` is read on
-load; slot metadata (`label`/`savedAt`/`currentRoomId`) is display-only and ignored on
-load. v0 adds **no backend, no API client, no autosave, no multiple slots, no file
-export/import, no generated `RoomSpec` / room-cache / world-bible persistence, no
-memory/NPC integration, no LLM replay, no `RoomViewer` change, and no new dependency.**
-Logs never include SaveGame JSON, seed name, event payloads, item names/ids, room names,
-dialogue, prompt text, or any narrative/PII.
+Memory writes must pass the relevant firewall and store boundary.
 
-## Demo Quest Loop v0 — shipped, browser
+Memory text is inert. Player claims are claims. NPC beliefs can be wrong. Room observations are not authoritative truth. `source:'llm'` memories cannot apply state changes.
 
-A **deterministic authored demo quest** ("The Steward's Toll") surfaces as a **read-only
-quest tracker** overlay — a pure projection of authoritative `WorldState` for the authored
-example world session ([ADR-0028](docs/architecture/decisions/ADR-0028-demo-quest-loop-v0.md)).
+Do not log memory text, player lines, NPC names, room names, generated content, prompts, provider bodies, keys, or PII.
 
-| Module | Role |
-| --- | --- |
-| `domain/quests/questSpec.ts` | `QuestSpec`/`QuestSpecSchema` (zod-validated authored data; closed condition vocabulary: `room-flag`, `room-visited`, `has-item`, `has-status`). Imports only `zod`; exports no command/event-producing function. |
-| `domain/quests/evaluateQuest.ts` | Pure `evaluateQuest(spec, state) → QuestView`. Total, deterministic, no I/O; reads defensively (optional chaining); missing rooms/flags/visited → `false`, never throws. |
-| `domain/examples/demoQuest.ts` | Hand-authored `demoQuestSpec` literal: "The Steward's Toll", three objectives tied to existing `throne-room` flags (`interaction:offering-coffer`, `encounter:malik-encounter`) and `ruined-safehouse` visited. |
-| `renderer/ui/QuestTracker.tsx` | Presentational React: `{ view: QuestView }` in, DOM out. No `three`, engine internals, `world-session`, or services. `pointer-events:none`; `role="status"` + `aria-live="polite"`. |
-| `App.tsx` wiring | Owns `quest: QuestView | null`; attaches `demoQuestSpec` only for the authored example bootstrap and for anchor-gated restores (`'throne-room' in state.roomStates`); re-projects via `refreshDerivedViews(state)` at all four state points (bootstrap, `onWorldStateChange`, `handleNavigate` `navigated`, load); renders `<QuestTracker>` as an App-level overlay. |
+---
 
-**The quest tracker is a read-only lens — never truth, never written back.** v0 adds
-**no quest engine, no new `WorldEvent` or `WorldCommand`, no reducer change, no authored-room
-edit, no LLM quest generation, no backend/memory/persistence wiring, no new dependency,
-and no DOM/component tests.** Quest/objective text, ids, flag keys, item names/ids, status
-strings, and any narrative content are never logged.
+## UI projection rules
 
-## Consequence Journal v0 — shipped, browser
+HUDs, quest trackers, journals, meters, save/load bars, and similar UI panels are read-only projections unless the approved feature explicitly says otherwise.
 
-A **six-entry authored consequence journal** surfaces as a **collapsible read-only journal
-panel** — a pure projection of authoritative `WorldState` for the authored example world session
-([ADR-0029](docs/architecture/decisions/ADR-0029-consequence-journal-v0.md)).
+Read-only projections:
 
-| Module | Role |
-| --- | --- |
-| `domain/journal/journalSpec.ts` | `JournalSpec`/`JournalEntrySpec`/`JournalSpecSchema` (zod-validated authored data; reuses the closed `ObjectiveCondition` vocabulary from `questSpec.ts`). Imports only `zod`; exports no command/event-producing function. |
-| `domain/journal/projectJournal.ts` | Pure `projectJournal(spec, state) → JournalView`. Total, deterministic, no I/O; reads defensively via the shared exported `evaluateCondition`; missing rooms/flags/statuses/items → `false`, never throws. Emits only true entries in authored order. |
-| `domain/examples/demoJournal.ts` | Hand-authored `demoJournalSpec` literal: six entries tied to existing `WorldState` conditions — `throne-room` flags (tribute coin, Malik), `ruined-safehouse` visited, `infected` status, `encounter:walker-encounter` flag, and `royal-writ` inventory. |
-| `renderer/ui/JournalPanel.tsx` | Presentational React: `{ view: JournalView }` in, DOM out. Collapsible, collapsed by default; empty state "Nothing of consequence yet."; interactive collapse toggle; `pointer-events:none` for text; `role="status"` + `aria-live="polite"`. No `three`, engine internals, `world-session`, or services. |
-| `domain/quests/evaluateQuest.ts` (export added) | `evaluateCondition(condition, state): boolean` is now exported (previously private) — a pure shared helper for both quest and journal evaluation. No behavior change to the quest path. |
-| `App.tsx` wiring | Owns `journal: JournalView | null`; attaches `demoJournalSpec` only for the authored example bootstrap and for anchor-gated restores (`'throne-room' in state.roomStates`); `refreshDerivedViews(state)` (introduced with ADR-0028) now also sets `journal`; renders `<JournalPanel>` as an App-level overlay. |
+* may read authoritative state
+* may project view models
+* may render UI
+* must not become truth
+* must not write back into domain state
+* must not create events/commands unless explicitly approved
+* must not import Three.js engine internals unless through approved seams
 
-**The journal is a read-only lens — never truth, never written back.** v0 adds **no new
-`WorldEvent` or `WorldCommand`, no reducer change, no authored-room edit, no LLM summarization,
-no memory integration, no backend/API/persistence changes, no `SaveGame` schema change, no new
-dependency, and no DOM/component tests.** Journal title/entry text, ids, flag keys, item
-names/ids, status strings, room display names, and any narrative content are never logged.
+Existing examples:
 
-## Cost/Usage Guardrails v0 — shipped, browser
+* Inventory & Health HUD
+* Demo Quest Tracker
+* Consequence Journal
+* Usage Meter
+* Save/Load Bar
 
-A **local request-count safety guardrail** wraps the PromptBar prompt-generation path when a
-real provider is selected — counting real attempts against a configurable session cap, warning
-as the cap nears, and requiring an explicit **confirm-to-continue** at cap
-([ADR-0030](docs/architecture/decisions/ADR-0030-cost-usage-guardrails-v0.md)).
+Keep UI components presentational where possible.
 
-| Module | Role |
-| --- | --- |
-| `domain/usage/usageGuard.ts` | Pure types (`UsageGuardConfig`, `UsageGuardState`, `UsageGuardStatus`) + four pure helpers (`initialUsageState`, `recordAttempt`, `resetUsage`, `evaluate`). No I/O, no logger, no React. Covered by pure Vitest; no DOM dependency. |
-| `renderer/ui/UsageMeter.tsx` | Presentational React overlay: props `{ count, cap, status, onGenerateAnyway, onReset }` in, DOM out. Returns `null` when `status === 'inert'`. `role="status"` + `aria-live="polite"`. No `three`, engine internals, `world-session`, or services. |
-| `app/llmConfig.ts` (extended) | `VITE_AIGM_LLM_SESSION_CAP` parsed via existing `parsePositiveInt`; `DEFAULT_SESSION_CAP = 10`. Surfaced as `llmConfig.sessionCap`. |
-| `App.tsx` wiring | `guardEnabled` (real provider selected) and `guardCap` are module-level constants. App holds `usageCountRef`/`usageCount` and `inFlightRef`/`inFlight` pairs. Count increments **before** `getRoom()` resolves so failures still count. In-flight lock passes `disabled={inFlight}` to `PromptBar`. At-cap gate stores the prompt until `handleGenerateAnyway` grants confirm. `UsageMeter` rendered only when `guardEnabled`. |
+---
 
-**The guardrail is a local in-memory counter — never truth, never written back.** v0 adds **no
-token/cost metering, no provider wrapper change, no billing/payments/accounts/analytics, no
-`SaveGame`/`localStorage`/SQLite/backend usage state, no estimated cost display, no
-room-generation safety pipeline change, no new dependency, and no DOM/component tests.** Logs
-carry count/cap/status enum only — never keys, prompts, seeds, provider bodies, generated JSON,
-token counts, or PII. The fake provider path is completely inert: no count, no meter, no gate,
-no UI. Adjacent pregeneration is fake-only and uncounted.
+## Persistence rules
 
-## Generated Room Layout Contract v0 — shipped, generated-room assembly pipeline
+SQLite persistence is Node-only.
 
-Four **benign layout normalizers** run in `assembleRoom` (stages 2.5–2.8) before
-semantic validation, correcting the spatial layout problems that real LLMs (e.g.,
-DeepSeek) introduce in otherwise valid `RoomSpec` output. Normalization keeps
-`provenance: generated` — the host shows no notice for a layout-normalized-only room
-([ADR-0031](docs/architecture/decisions/ADR-0031-generated-room-layout-contract-v0.md)).
+The browser must not directly access:
 
-| Module | Role |
-| --- | --- |
-| `domain/generatedRoomLayout.ts` | Pure constants (`GENERATED_ROOM`: default 18, min 14, max 24, max objects 30) + four normalizers: `clampGeneratedShell` (width/depth → `[14..24]`), `repairGeneratedObjects` (object X/Z clamp + count cap ≤ 30, drops decorative first), `repairGeneratedSpawn` (clamp + deterministic nudge away from blocking objects), `repairGeneratedExits` (snap exit-carrying objects to nearest wall face). No I/O, no logger, no mutation. |
-| `domain/generatedRoomLayout.test.ts` | Pure Vitest: shell clamp (non-finite/negative/in-range/out-of-range), object bounds repair (position clamping, same-reference optimization), object count cap (drop order), spawn repair (out-of-bounds clamp, crowded-spawn nudge), exit snapping (nearest wall, tie-breaking). No DOM dependency. |
-| `domain/assembleRoom.ts` (updated) | Stages 2.5–2.8 inserted before stage 3 (`validateRoom`). New `RoomDiagnostics` fields: `sizeRepaired`, `objectsRepaired`, `spawnRepaired`, `exitsRepaired` (all booleans; always `false` on fallback). |
-| `room/GeneratedRoomSource.ts` (updated) | Logs `sizeRepaired` alongside the existing provenance/codes/counts. No behavior change for the host or renderer. |
+* SQLite
+* Node persistence adapters
+* server-only stores
+* migrations
+* filesystem-backed persistence
 
-**Scope boundary.** Normalizers run **only** in `assembleRoom` for generated rooms.
-`validateRoom`, `repairRoom`, the fallback room, `GeneratedRoomSource`, renderer, and
-all backend/persistence/memory/gameplay systems are **unchanged.** Authored and static
-rooms are never touched. No new ESLint block: `domain/generatedRoomLayout.ts` is
-covered by the existing domain import rules (peer of `domain/repairRoom.ts`).
+`localStorage` save/load is manual browser save parking only. It is not authoritative truth. Loads must re-validate through the full save/load boundary before state changes.
 
-**Known follow-up.** Stage 2.6 (`repairGeneratedObjects`) clamps exit-carrying objects
-inward before stage 2.8 (`repairGeneratedExits`) snaps them back to a wall. This can
-cause both `objectsRepaired` and `exitsRepaired` to be true when only the wall-snap was
-needed, and a small nearest-wall drift near corners. Both are harmless; a future cleanup
-can make stage 2.6 skip exit-carrying objects.
+Do not add backend/API/browser persistence wiring unless the approved implementation plan explicitly requires it.
 
-**Logs.** The four boolean flags are the only new log surface. They never carry raw
-generated JSON, prompt text, provider body, room names, object content, or keys.
+---
+
+## Renderer and React boundaries
+
+Renderer rules:
+
+* trusted hand-written Three.js only
+* no generated executable renderer code
+* no React imports inside renderer internals unless already approved
+* no DB/network/server/persistence imports
+* no direct memory or world-session mutation
+
+React rules:
+
+* React owns composition and UI
+* React may host renderer through approved seams
+* React must not reach into Three.js internals except through approved host/composition APIs
+* React overlays should be presentational and read-only unless explicitly approved
+
+---
+
+## Current implemented feature map
+
+This section is a quick orientation only. For details, read the relevant ADR.
+
+Implemented or shipped areas include:
+
+* NPC dialogue foundation
+* multi-room navigation/cache
+* backend SQLite persistence
+* backend world-session API
+* room-generation repair/fallback
+* adjacent-room pregeneration
+* NPC memory persistence v0
+* living-world room memory v0
+* inventory & health UI v0
+* session save/load v0
+* demo quest loop v0
+* consequence journal v0
+* cost/usage guardrails v0
+* generated room layout contract v0
+* generated room composition and visual vocabulary foundations
+* NPC dialogue room-context grounding
+* generated-room NPC presence
+
+Do not paste full shipped-feature tables into this file. Detailed shipped notes should live in ADRs, architecture docs, or a dedicated status file.
+
+Suggested location for long status notes:
+
+* `docs/status/SHIPPED-FEATURES.md`
+
+Read detailed shipped notes only when the current task touches that feature area.
+
+---
 
 ## Current guardrails
 
@@ -252,23 +332,112 @@ Do not add unless explicitly requested by the maintainer or by the approved impl
 * minimap
 * GLTF asset pipeline
 * npm workspaces or extracted packages
+* Redux
+* NestJS
+* heavy ORM
+* new package manager
+* broad folder/package restructuring
+
+---
 
 ## What to read before planning
 
 Always read:
 
 1. `AGENTS.md`
-2. `docs/architecture/ARCHITECTURE.md` (see the status legend at the top for what is currently implemented)
+2. `docs/architecture/ARCHITECTURE.md`
 3. `docs/architecture/BOUNDARIES.md`
 
 Read only if relevant:
 
-* `docs/architecture/ARCHITECTURE.md`
 * `docs/architecture/FAILURE-MODES.md`
 * `docs/architecture/CONVENTIONS.md`
 * the ADR directly related to the requested feature
+* the files in the code path being changed
+* focused tests for the touched modules
 
 Do not read every ADR unless the task requires it.
+
+---
+
+## Planning requirements
+
+Before implementation, provide a short plan with:
+
+1. Goal of the feature slice
+2. Files likely to change
+3. Existing code to reuse
+4. Minimum new code needed
+5. Safety boundaries that remain unchanged
+6. Tests to add or update
+7. Verification commands
+
+For safety-sensitive features, also include:
+
+* failure modes
+* fallback/degradation behavior
+* logging/redaction impact
+* schema impact
+* whether any authoritative state can change
+
+Do not implement until the maintainer approves the plan.
+
+---
+
+## Implementation rules
+
+During implementation:
+
+* Keep the diff small.
+* Stay inside the approved files/areas.
+* Do not opportunistically refactor.
+* Do not rename/move files unless needed for the approved feature.
+* Do not change public schemas without approval.
+* Do not add dependencies without approval.
+* Do not weaken tests.
+* Do not update snapshots blindly.
+* Do not change generated/provider safety behavior unless explicitly part of the task.
+* Prefer pure functions for domain logic.
+* Prefer deterministic tests over brittle UI tests.
+* Prefer existing helpers and fixtures.
+
+---
+
+## Logging and diagnostics
+
+Use the logger abstraction.
+
+Logs may include:
+
+* safe enums
+* booleans
+* counts
+* stable diagnostic codes
+* provenance flags
+* high-level status
+
+Logs must not include:
+
+* API keys
+* secrets
+* raw prompts
+* player text
+* generated JSON
+* provider request bodies
+* provider response bodies
+* generated descriptions
+* room names
+* object names
+* NPC names
+* dialogue text
+* memory text
+* SaveGame JSON
+* event payload narrative content
+* PII
+
+When in doubt, log less.
+
+---
 
 ## Build and verify
 
@@ -281,3 +450,79 @@ npm run test
 ```
 
 For docs-only changes, run the smallest relevant check and report if a check was skipped.
+
+For targeted code changes, prefer targeted tests first, then broader verification if the touched area is central or safety-sensitive.
+
+Examples:
+
+```bash
+npm run test -- generatedRoomLayout
+npm run test -- saveGame
+npm run test -- memory
+npm run lint
+npm run build
+```
+
+Do not claim checks passed unless they were actually run.
+
+---
+
+## Commit rules
+
+Do not commit automatically.
+
+When the maintainer asks for a commit:
+
+* include only relevant files
+* run `git diff --check`
+* use a clear message
+* mention verification performed
+* do not amend/rebase unless asked
+
+Suggested commit style:
+
+```bash
+git commit -m "feat: add generated room exit navigation v0"
+git commit -m "test: cover room exit projection"
+git commit -m "docs: record generated room exit navigation decision"
+```
+
+---
+
+## Review checklist
+
+Before handing off, verify:
+
+* The approved slice is complete.
+* Scope did not expand.
+* No unrelated files changed.
+* No new dependency was added without approval.
+* No schema changed without approval.
+* No generated executable code path was introduced.
+* No browser-to-SQLite path was introduced.
+* No renderer trust boundary was weakened.
+* No memory firewall was weakened.
+* No authoritative state rule was bypassed.
+* No unsafe logging was added.
+* Tests cover the important behavior.
+* Build/lint/test status is reported honestly.
+
+---
+
+## When in doubt
+
+Ask before coding when the question affects:
+
+* schema design
+* persistence
+* backend/API wiring
+* memory truth boundaries
+* world-state/event-log authority
+* renderer boundaries
+* generated content safety
+* provider behavior
+* new dependencies
+* major UI behavior
+* scope expansion
+
+For minor local implementation choices, prefer the smallest safe change and proceed within the approved plan.

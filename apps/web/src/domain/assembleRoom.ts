@@ -10,6 +10,7 @@ import { repairGeneratedObjectTransforms } from './generatedRoomObjectTransforms
 import { assignGeneratedObjectPurpose } from './generatedRoomObjectPurpose'
 import { ensureGeneratedNpcPresence } from './ensureGeneratedNpcPresence'
 import { ensureGeneratedExitNavigation } from './ensureGeneratedExitNavigation'
+import { sanitizeGeneratedDisplayText } from './sanitizeGeneratedDisplayText'
 
 /**
  * Room assembly pipeline (room-generation-repair-fallback v0). A pure,
@@ -132,6 +133,16 @@ export type RoomDiagnostics = {
   /** Whether one safe generated NPC was inserted from an explicit boolean request. */
   npcInserted: boolean
   /**
+   * Whether generated structural ids were removed from allowlisted player-facing
+   * display text. Count-only; never carries the strings that were sanitized.
+   */
+  displayTextSanitized: boolean
+  /**
+   * Number of allowlisted display string fields changed by display-text
+   * sanitization. Counts fields, not token occurrences.
+   */
+  displayTextSanitizationCount: number
+  /**
    * Aggregate count of skipped object entries by validation failure reason,
    * as classified by the lenient loader. Count-only: no raw type strings or
    * field values are stored. For fallback rooms the counts reflect the authored
@@ -242,15 +253,22 @@ export function assembleRoom(
   const npcPresenceFixed = npcPresenceResult.room
   const { npcInserted } = npcPresenceResult
 
+  // Stage 2.13 — remove generated structural ids from allowlisted display text
+  // only. Structural ids used for room identity/navigation are intentionally
+  // untouched; the allowlist lives inside sanitizeGeneratedDisplayText.
+  const displayTextResult = sanitizeGeneratedDisplayText(npcPresenceFixed)
+  const displayTextFixed = displayTextResult.room
+  const { displayTextSanitized, displayTextSanitizationCount } = displayTextResult
+
   // Stage 3 — semantic playability. No fatal issue → accept as generated. Benign
   // normalizations (Stages 2.5–2.9) keep provenance `generated` and show no notice;
   // they are reported via `sizeRepaired`/`objectsRepaired`/`spawnRepaired`/
   // `exitsRepaired` for logs only. A `repairRoom` pass (Stage 4) is the only
   // thing that yields `repaired`.
-  const initial = validateRoom(npcPresenceFixed)
+  const initial = validateRoom(displayTextFixed)
   if (initial.ok) {
     return {
-      room: npcPresenceFixed,
+      room: displayTextFixed,
       diagnostics: {
         provenance: 'generated',
         sizeRepaired,
@@ -270,7 +288,9 @@ export function assembleRoom(
         objectTransformsRepaired,
         purposesAssigned,
         npcInserted,
-        skippedObjectReasonCounts: npcPresenceFixed.skippedObjectReasonCounts,
+        displayTextSanitized,
+        displayTextSanitizationCount,
+        skippedObjectReasonCounts: displayTextFixed.skippedObjectReasonCounts,
       },
     }
   }
@@ -282,7 +302,7 @@ export function assembleRoom(
   // repairable fatals that are not covered by generated-room normalizers.
   // repairRoom itself remains unit-tested directly.
   const initialFatalCodes = distinctFatalCodes(initial)
-  const repaired = repairRoom(npcPresenceFixed)
+  const repaired = repairRoom(displayTextFixed)
   const revalidated = validateRoom(repaired)
   if (revalidated.ok) {
     return {
@@ -306,6 +326,8 @@ export function assembleRoom(
         objectTransformsRepaired,
         purposesAssigned,
         npcInserted,
+        displayTextSanitized,
+        displayTextSanitizationCount,
         skippedObjectReasonCounts: repaired.skippedObjectReasonCounts,
       },
     }
@@ -335,6 +357,8 @@ export function assembleRoom(
       objectTransformsRepaired: 0,
       purposesAssigned: 0,
       npcInserted: false,
+      displayTextSanitized: false,
+      displayTextSanitizationCount: 0,
       skippedObjectReasonCounts: fallbackRoom.skippedObjectReasonCounts,
     },
   }
@@ -367,6 +391,8 @@ function toFallback(
       objectTransformsRepaired: 0,
       purposesAssigned: 0,
       npcInserted: false,
+      displayTextSanitized: false,
+      displayTextSanitizationCount: 0,
       skippedObjectReasonCounts: fallbackRoom.skippedObjectReasonCounts,
     },
   }
