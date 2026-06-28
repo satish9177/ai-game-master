@@ -9,7 +9,7 @@ import { createConsoleLogger } from '../platform/logger/consoleLogger'
 import { isWebGL2Available } from '../platform/browser/webglSupport'
 import { buildRoomDialogueContext } from '../domain/dialogue/buildRoomDialogueContext'
 import type { EncounterSpec } from '../domain/encounters/encounterSpec'
-import type { NPCDialogueTurn, RoomDialogueContext } from '../domain/dialogue/contracts'
+import type { NPCDialogueTurn, QuestDialogueContext, RoomDialogueContext } from '../domain/dialogue/contracts'
 import type { InteractionService } from '../interactions/InteractionService'
 import type { EncounterService } from '../encounters/EncounterService'
 import type { NPCDialogueService } from '../dialogue/NPCDialogueService'
@@ -44,6 +44,7 @@ type RoomViewerProps = {
   npcDialogueService: NPCDialogueService
   onNavigate: (toRoomId: string) => Promise<NavigationResult>
   onWorldStateChange?: (state: WorldState) => void
+  questStage?: QuestDialogueContext
 }
 
 export function RoomViewer({
@@ -54,6 +55,7 @@ export function RoomViewer({
   npcDialogueService,
   onNavigate,
   onWorldStateChange,
+  questStage,
 }: RoomViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const engineRef = useRef<Engine | null>(null)
@@ -62,6 +64,12 @@ export function RoomViewer({
   const exitLookupRef = useRef<ExitLookup>(new Map())
   const npcDialogueLookupRef = useRef<NPCDialogueLookup>(new Map())
   const roomDialogueContextRef = useRef<RoomDialogueContext | undefined>(undefined)
+  // Keep current quest stage readable by the engine's keydown-driven open/say
+  // callbacks without re-creating the engine on each quest change.
+  const questStageRef = useRef<QuestDialogueContext | undefined>(undefined)
+  useEffect(() => {
+    questStageRef.current = questStage
+  }, [questStage])
   const activeEncounterRef = useRef<{ encounter: EncounterSpec; ref: string | undefined } | null>(
     null,
   )
@@ -189,6 +197,7 @@ export function RoomViewer({
           history: [],
           playerLine: undefined,
           roomContext: roomDialogueContextRef.current,
+          questStage: questStageRef.current,
         })).then((result) => {
           if (cancelled || npcDialogueRequestRef.current !== requestId) return
           npcDialoguePendingRef.current = false
@@ -322,6 +331,7 @@ export function RoomViewer({
         history,
         playerLine: prompt?.id,
         roomContext: roomDialogueContextRef.current,
+        questStage: questStageRef.current,
       })).then((result) => {
         if (
           activeNPCDialogueRef.current !== target

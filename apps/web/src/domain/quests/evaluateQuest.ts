@@ -11,6 +11,7 @@ export type QuestView = {
   questId: string
   title: string
   status: 'active' | 'complete'
+  activeObjectiveId: string | null
   objectives: QuestObjectiveView[]
 }
 
@@ -37,10 +38,12 @@ export function evaluateQuest(spec: QuestSpec, state: WorldState): QuestView {
     done: evaluateCondition(obj.condition, state),
   }))
   const complete = objectives.every((obj) => obj.done)
+  const activeObjectiveId = objectives.find((obj) => !obj.done)?.id ?? null
   return {
     questId: spec.questId,
     title: spec.title,
     status: complete ? 'complete' : 'active',
+    activeObjectiveId,
     objectives,
   }
 }

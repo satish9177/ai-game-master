@@ -1,5 +1,5 @@
 import type { WorldState } from '../world/worldState'
-import type { NPCDialogueContext, NPCDialogueTurn, RoomDialogueContext } from './contracts'
+import type { NPCDialogueContext, NPCDialogueTurn, QuestDialogueContext, RoomDialogueContext } from './contracts'
 
 export type DialogueNPC = {
   npcId: string
@@ -13,6 +13,7 @@ export function buildDialogueContext(
   npc: DialogueNPC,
   history: NPCDialogueTurn[],
   roomContext?: RoomDialogueContext,
+  questContext?: QuestDialogueContext,
 ): NPCDialogueContext {
   return {
     roomId: state.currentRoomId,
@@ -20,6 +21,7 @@ export function buildDialogueContext(
     npcName: npc.npcName,
     ...(npc.persona !== undefined ? { persona: npc.persona } : {}),
     ...(roomContext !== undefined ? { room: copyRoomDialogueContext(roomContext) } : {}),
+    ...(questContext !== undefined ? { quest: { ...questContext } } : {}),
     player: {
       health: { ...state.player.health },
       status: [...state.player.status],

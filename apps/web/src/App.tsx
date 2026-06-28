@@ -548,6 +548,7 @@ function App() {
           npcDialogueService={npcDialogueService}
           onNavigate={handleNavigate}
           onWorldStateChange={refreshDerivedViews}
+          questStage={quest ? { activeObjectiveId: quest.activeObjectiveId, status: quest.status } : undefined}
         />
       ) : (
         <div className="room-viewer-root">

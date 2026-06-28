@@ -35,6 +35,7 @@ describe('evaluateQuest — demo quest spine', () => {
   it('all objectives incomplete on empty state', () => {
     const view = evaluateQuest(demoQuestSpec, makeState())
     expect(view.objectives.map((o) => o.done)).toEqual([false, false, false])
+    expect(view.activeObjectiveId).toBe('claim-tribute-coin')
     expect(view.status).toBe('active')
   })
 
@@ -48,6 +49,7 @@ describe('evaluateQuest — demo quest spine', () => {
     expect(done(view, 'claim-tribute-coin')).toBe(true)
     expect(done(view, 'get-past-steward-malik')).toBe(false)
     expect(done(view, 'enter-the-safehouse')).toBe(false)
+    expect(view.activeObjectiveId).toBe('get-past-steward-malik')
     expect(view.status).toBe('active')
   })
 
@@ -61,6 +63,7 @@ describe('evaluateQuest — demo quest spine', () => {
     expect(done(view, 'claim-tribute-coin')).toBe(false)
     expect(done(view, 'get-past-steward-malik')).toBe(true)
     expect(done(view, 'enter-the-safehouse')).toBe(false)
+    expect(view.activeObjectiveId).toBe('claim-tribute-coin')
     expect(view.status).toBe('active')
   })
 
@@ -74,6 +77,7 @@ describe('evaluateQuest — demo quest spine', () => {
     expect(done(view, 'claim-tribute-coin')).toBe(false)
     expect(done(view, 'get-past-steward-malik')).toBe(false)
     expect(done(view, 'enter-the-safehouse')).toBe(true)
+    expect(view.activeObjectiveId).toBe('claim-tribute-coin')
     expect(view.status).toBe('active')
   })
 
@@ -92,6 +96,7 @@ describe('evaluateQuest — demo quest spine', () => {
     })
     const view = evaluateQuest(demoQuestSpec, state)
     expect(view.objectives.every((o) => o.done)).toBe(true)
+    expect(view.activeObjectiveId).toBeNull()
     expect(view.status).toBe('complete')
   })
 
@@ -111,6 +116,7 @@ describe('evaluateQuest — demo quest spine', () => {
     expect(done(view, 'claim-tribute-coin')).toBe(true)
     expect(done(view, 'get-past-steward-malik')).toBe(true)
     expect(done(view, 'enter-the-safehouse')).toBe(false)
+    expect(view.activeObjectiveId).toBe('enter-the-safehouse')
     expect(view.status).toBe('active')
   })
 })
@@ -227,7 +233,9 @@ describe('evaluateQuest — defensive: missing room/flag/item/status', () => {
       ],
     }
     expect(() => evaluateQuest(spec, makeState())).not.toThrow()
-    expect(done(evaluateQuest(spec, makeState()), 'o1')).toBe(false)
+    const view = evaluateQuest(spec, makeState())
+    expect(done(view, 'o1')).toBe(false)
+    expect(view.activeObjectiveId).toBe('o1')
   })
 
   it('room-flag: false and no throw when flags record is absent', () => {
@@ -241,7 +249,9 @@ describe('evaluateQuest — defensive: missing room/flag/item/status', () => {
     }
     const state = makeState({ roomStates: { r: { visited: true } } })
     expect(() => evaluateQuest(spec, state)).not.toThrow()
-    expect(done(evaluateQuest(spec, state), 'o1')).toBe(false)
+    const view = evaluateQuest(spec, state)
+    expect(done(view, 'o1')).toBe(false)
+    expect(view.activeObjectiveId).toBe('o1')
   })
 
   it('room-visited: false and no throw when room is absent', () => {
@@ -252,7 +262,9 @@ describe('evaluateQuest — defensive: missing room/flag/item/status', () => {
       objectives: [{ id: 'o1', text: 'T1', condition: { kind: 'room-visited', roomId: 'missing' } }],
     }
     expect(() => evaluateQuest(spec, makeState())).not.toThrow()
-    expect(done(evaluateQuest(spec, makeState()), 'o1')).toBe(false)
+    const view = evaluateQuest(spec, makeState())
+    expect(done(view, 'o1')).toBe(false)
+    expect(view.activeObjectiveId).toBe('o1')
   })
 
   it('unrelated/generated state returns all incomplete', () => {
@@ -262,6 +274,7 @@ describe('evaluateQuest — defensive: missing room/flag/item/status', () => {
     })
     const view = evaluateQuest(demoQuestSpec, state)
     expect(view.objectives.every((o) => !o.done)).toBe(true)
+    expect(view.activeObjectiveId).toBe('claim-tribute-coin')
     expect(view.status).toBe('active')
   })
 })
@@ -297,6 +310,7 @@ describe('evaluateQuest — purity and no mutation', () => {
     const a = evaluateQuest(demoQuestSpec, state)
     const b = evaluateQuest(demoQuestSpec, state)
     expect(JSON.stringify(a)).toBe(JSON.stringify(b))
+    expect(a.activeObjectiveId).toBe('get-past-steward-malik')
   })
 
   it('produces questId and title from spec unchanged', () => {
@@ -323,6 +337,7 @@ describe('evaluateQuest — save/load restore implication', () => {
     expect(done(view, 'claim-tribute-coin')).toBe(true)
     expect(done(view, 'get-past-steward-malik')).toBe(true)
     expect(done(view, 'enter-the-safehouse')).toBe(false)
+    expect(view.activeObjectiveId).toBe('enter-the-safehouse')
     expect(view.status).toBe('active')
   })
 
@@ -341,6 +356,7 @@ describe('evaluateQuest — save/load restore implication', () => {
     })
     const view = evaluateQuest(demoQuestSpec, restoredState)
     expect(view.status).toBe('complete')
+    expect(view.activeObjectiveId).toBeNull()
     expect(view.objectives.every((o) => o.done)).toBe(true)
   })
 })

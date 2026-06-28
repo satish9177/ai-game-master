@@ -25,12 +25,18 @@ export type NPCDialogueTurn = {
   text: string
 }
 
+export type QuestDialogueContext = {
+  activeObjectiveId: string | null
+  status: 'active' | 'complete'
+}
+
 export type NPCDialogueContext = {
   roomId: string
   npcId: string
   npcName: string
   persona?: string
   room?: RoomDialogueContext
+  quest?: QuestDialogueContext
   player: {
     health: { current: number; max: number }
     status: string[]

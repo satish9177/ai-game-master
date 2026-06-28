@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { NPCDialogueRequest, RoomDialogueContext } from '../domain/dialogue/contracts'
+import type { NPCDialogueRequest, QuestDialogueContext, RoomDialogueContext } from '../domain/dialogue/contracts'
 import { FakeNPCDialogueProvider } from './FakeNPCDialogueProvider'
 
 function request(overrides: Partial<NPCDialogueRequest['context']> = {}): NPCDialogueRequest {
@@ -144,6 +144,59 @@ describe('FakeNPCDialogueProvider', () => {
     }))
 
     expect(withUnsupportedFocus).toEqual(withoutRoom)
+  })
+
+  it('returns a distinct authored clue for each activeObjectiveId', async () => {
+    const provider = new FakeNPCDialogueProvider()
+    const makeRequest = (quest: QuestDialogueContext): NPCDialogueRequest =>
+      request({ quest })
+
+    const claimCoin = await provider.reply(makeRequest({ activeObjectiveId: 'claim-tribute-coin', status: 'active' }))
+    const getPassMalik = await provider.reply(makeRequest({ activeObjectiveId: 'get-past-steward-malik', status: 'active' }))
+    const enterSafehouse = await provider.reply(makeRequest({ activeObjectiveId: 'enter-the-safehouse', status: 'active' }))
+
+    expect(claimCoin.text).toContain('tribute coffer')
+    expect(getPassMalik.text).toContain('Malik')
+    expect(enterSafehouse.text).toContain('north arch')
+
+    expect(claimCoin.text).not.toBe(getPassMalik.text)
+    expect(getPassMalik.text).not.toBe(enterSafehouse.text)
+    expect(claimCoin.text).not.toBe(enterSafehouse.text)
+  })
+
+  it('returns a completion clue when activeObjectiveId is null and status is complete', async () => {
+    const provider = new FakeNPCDialogueProvider()
+    const response = await provider.reply(request({ quest: { activeObjectiveId: null, status: 'complete' } }))
+
+    expect(response.text).toContain("steward's toll")
+  })
+
+  it('falls back to persona lines when quest is absent', async () => {
+    const provider = new FakeNPCDialogueProvider()
+    const withQuest = await provider.reply(request({ quest: { activeObjectiveId: 'claim-tribute-coin', status: 'active' } }))
+    const noQuest = await provider.reply(request())
+
+    expect(withQuest.text).not.toBe(noQuest.text)
+    expect(noQuest.text).toBe('The hall has seen quieter days, but you are welcome here.')
+  })
+
+  it('keeps explicit prompt responses ahead of quest clues', async () => {
+    const provider = new FakeNPCDialogueProvider()
+    const response = await provider.reply({
+      ...request({ quest: { activeObjectiveId: 'claim-tribute-coin', status: 'active' } }),
+      playerLine: 'ask-hall',
+    })
+
+    expect(response.text).toBe('The court scattered when the roads fell silent.')
+    expect(response.text).not.toContain('tribute coffer')
+  })
+
+  it('keeps quest clues ahead of persona cycle for unknown objective ids', async () => {
+    const provider = new FakeNPCDialogueProvider()
+    const unknownObjective = await provider.reply(request({ quest: { activeObjectiveId: 'unknown-future-objective', status: 'active' } }))
+    const noQuest = await provider.reply(request())
+
+    expect(unknownObjective.text).toBe(noQuest.text)
   })
 
   it('does not leak room names, object names, raw JSON, prompts, interaction text, or generated descriptions', async () => {

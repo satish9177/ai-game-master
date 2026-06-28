@@ -28,6 +28,18 @@ const FALLBACK_LINES = [
   'Some answers are safer shared face to face.',
 ] as const
 
+const QUEST_CLUE: Readonly<Record<string, Readonly<Record<string, string>>>> = {
+  'friendly-aide': {
+    'claim-tribute-coin': 'The tribute coffer sits somewhere in this hall. Find it and take the coin inside.',
+    'get-past-steward-malik': 'The coin is yours — well done. Now Steward Malik stands between you and the door.',
+    'enter-the-safehouse': 'Malik has been dealt with. Follow the north arch; it leads to the safehouse.',
+  },
+}
+
+const QUEST_COMPLETION_LINES: Readonly<Record<string, string>> = {
+  'friendly-aide': "You made it through. The steward's toll is paid.",
+}
+
 const ROOM_FOCUS_LINES: Partial<Record<RoomObject['type'], string>> = {
   corpse: 'A body lies here. Watch your step.',
   altar: 'That altar makes this place feel important.',
@@ -55,6 +67,9 @@ export class FakeNPCDialogueProvider implements NPCDialogueProvider {
       : undefined
     if (prompted) return { text: prompted }
 
+    const questClue = questClueLine(request, key)
+    if (questClue) return { text: questClue }
+
     const personaLines = PERSONA_LINES[key]
     if (personaLines) {
       const promptOffset = request.playerLine ? stableIndex(request.playerLine, personaLines.length) : 0
@@ -71,6 +86,18 @@ export class FakeNPCDialogueProvider implements NPCDialogueProvider {
     const index = (request.context.history.length + promptOffset + identityOffset) % lines.length
     return { text: lines[index] ?? FALLBACK_LINES[0] }
   }
+}
+
+function questClueLine(request: NPCDialogueRequest, key: string): string | undefined {
+  const quest = request.context.quest
+  if (!quest) return undefined
+  if (quest.status === 'complete' && quest.activeObjectiveId === null) {
+    return QUEST_COMPLETION_LINES[key]
+  }
+  if (quest.activeObjectiveId !== null) {
+    return QUEST_CLUE[key]?.[quest.activeObjectiveId]
+  }
+  return undefined
 }
 
 function roomGroundedFallback(request: NPCDialogueRequest): string | undefined {

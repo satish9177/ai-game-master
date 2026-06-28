@@ -1,5 +1,5 @@
 import { buildDialogueContext } from '../domain/dialogue/buildDialogueContext'
-import type { NPCDialogueSpec, NPCDialogueTurn, RoomDialogueContext } from '../domain/dialogue/contracts'
+import type { NPCDialogueSpec, NPCDialogueTurn, QuestDialogueContext, RoomDialogueContext } from '../domain/dialogue/contracts'
 import type { NPCDialogueProvider } from '../domain/ports/NPCDialogueProvider'
 import type { Logger } from '../platform/logger/Logger'
 import type { WorldSession } from '../world-session/WorldSession'
@@ -20,6 +20,7 @@ export type NPCDialogueInput = {
   history: NPCDialogueTurn[]
   playerLine?: string
   roomContext?: RoomDialogueContext
+  quest?: QuestDialogueContext
 }
 
 /** Read-only NPC dialogue coordinator. It has no world-session append capability. */
@@ -54,6 +55,7 @@ export class NPCDialogueService {
       { npcId, npcName, persona: input.persona ?? dialogue.persona },
       history,
       input.roomContext,
+      input.quest,
     )
 
     try {

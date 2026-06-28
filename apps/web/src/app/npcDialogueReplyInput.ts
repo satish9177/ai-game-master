@@ -1,6 +1,6 @@
 import type { NPCDialogueTarget } from './dialogue'
 import type { NPCDialogueInput } from '../dialogue/NPCDialogueService'
-import type { NPCDialogueTurn, RoomDialogueContext } from '../domain/dialogue/contracts'
+import type { NPCDialogueTurn, QuestDialogueContext, RoomDialogueContext } from '../domain/dialogue/contracts'
 
 export function buildNPCDialogueReplyInput({
   sessionId,
@@ -8,12 +8,14 @@ export function buildNPCDialogueReplyInput({
   history,
   playerLine,
   roomContext,
+  questStage,
 }: {
   sessionId: string
   target: NPCDialogueTarget
   history: NPCDialogueTurn[]
   playerLine?: string
   roomContext?: RoomDialogueContext
+  questStage?: QuestDialogueContext
 }): NPCDialogueInput {
   return {
     sessionId,
@@ -24,5 +26,6 @@ export function buildNPCDialogueReplyInput({
     history,
     playerLine,
     ...(roomContext !== undefined ? { roomContext } : {}),
+    ...(questStage !== undefined ? { quest: questStage } : {}),
   }
 }

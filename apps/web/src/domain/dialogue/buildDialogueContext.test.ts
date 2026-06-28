@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { WorldState } from '../world/worldState'
-import type { NPCDialogueTurn, RoomDialogueContext } from './contracts'
+import type { NPCDialogueTurn, QuestDialogueContext, RoomDialogueContext } from './contracts'
 import { buildDialogueContext } from './buildDialogueContext'
 
 const state: WorldState = {
@@ -119,6 +119,47 @@ describe('buildDialogueContext', () => {
     expect(first.player.status).not.toBe(state.player.status)
     expect(first.history).not.toBe(history)
     expect(first.history[0]).not.toBe(history[0])
+  })
+
+  it('copies quest ids/enums through and does not alias the input', () => {
+    const questContext: QuestDialogueContext = {
+      activeObjectiveId: 'claim-tribute-coin',
+      status: 'active',
+    }
+    const context = buildDialogueContext(
+      state,
+      { npcId: 'aide', npcName: 'Asha', persona: 'friendly-aide' },
+      history,
+      undefined,
+      questContext,
+    )
+
+    expect(context.quest).toEqual({ activeObjectiveId: 'claim-tribute-coin', status: 'active' })
+    expect(context.quest).not.toBe(questContext)
+  })
+
+  it('copies quest with null activeObjectiveId and complete status', () => {
+    const questContext: QuestDialogueContext = { activeObjectiveId: null, status: 'complete' }
+    const context = buildDialogueContext(
+      state,
+      { npcId: 'aide', npcName: 'Asha' },
+      history,
+      undefined,
+      questContext,
+    )
+
+    expect(context.quest).toEqual({ activeObjectiveId: null, status: 'complete' })
+  })
+
+  it('omits quest when absent', () => {
+    const context = buildDialogueContext(
+      state,
+      { npcId: 'aide', npcName: 'Asha', persona: 'friendly-aide' },
+      history,
+    )
+
+    expect(context.quest).toBeUndefined()
+    expect(context).not.toHaveProperty('quest')
   })
 
   it('does not introduce free-text leakage beyond existing dialogue context fields', () => {

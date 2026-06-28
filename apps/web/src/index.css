@@ -429,6 +429,9 @@ body {
   align-items: flex-start;
   gap: 0.4rem;
   margin-bottom: 0.25rem;
+  padding: 0.12rem 0.18rem;
+  border-radius: 0.35rem;
+  border: 1px solid transparent;
   color: #cfc7b6;
   font-size: 0.8rem;
 }
@@ -437,12 +440,39 @@ body {
   color: #8b8576;
 }
 
+.quest-tracker-objective--current {
+  background: rgba(104, 154, 193, 0.14);
+  border-color: rgba(104, 154, 193, 0.5);
+  color: #f3ead2;
+}
+
+.quest-tracker-objective--completed-recently {
+  animation: quest-tracker-completed-pulse 900ms ease-out;
+}
+
 .quest-tracker-check {
   flex: none;
+  min-width: 1.5rem;
+  color: #d8c16a;
+  font-size: 0.72rem;
+  line-height: 1.45;
 }
 
 .quest-tracker-objective-text {
+  flex: 1 1 auto;
+  min-width: 0;
   line-height: 1.3;
+}
+
+.quest-tracker-current-label {
+  flex: none;
+  align-self: center;
+  padding: 0.05rem 0.3rem;
+  border-radius: 0.35rem;
+  background: rgba(104, 154, 193, 0.22);
+  color: #d8ecff;
+  font-size: 0.65rem;
+  font-weight: 600;
 }
 
 .quest-tracker-complete {
@@ -452,6 +482,27 @@ body {
   color: #6fcf7a;
   font-size: 0.8rem;
   font-weight: 600;
+  line-height: 1.3;
+}
+
+@keyframes quest-tracker-completed-pulse {
+  0% {
+    background: rgba(111, 207, 122, 0.32);
+    border-color: rgba(111, 207, 122, 0.7);
+  }
+
+  100% {
+    background: transparent;
+    border-color: transparent;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .quest-tracker-objective--completed-recently {
+    animation: none;
+    background: rgba(111, 207, 122, 0.16);
+    border-color: rgba(111, 207, 122, 0.5);
+  }
 }
 
 /* ---------- consequence journal overlay ---------- */

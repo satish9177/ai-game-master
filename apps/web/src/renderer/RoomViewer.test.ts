@@ -231,4 +231,88 @@ describe('RoomViewer NPC dialogue room context wiring', () => {
     expect(serializedRoomContext).not.toContain('Secret interaction title')
     expect(serializedRoomContext).not.toContain('Secret interaction body')
   })
+
+  it('passes the current quest stage into NPCDialogueService.reply when opening NPC dialogue', async () => {
+    const replies: unknown[] = []
+    const room = loadedRoom()
+
+    const props = {
+      roomSource: { getRoom: async () => ({ ok: true, room }) },
+      sessionId: 'session-1',
+      interactionService: { resolve: async () => ({ status: 'rejected', reason: 'missing-effect' }) },
+      encounterService: { resolve: async () => ({ status: 'failed', reason: 'not-found' }) },
+      npcDialogueService: {
+        reply: async (input: unknown) => {
+          replies.push(input)
+          return { status: 'replied', turn: { speaker: 'npc', text: 'Quest-aware line.' } }
+        },
+      },
+      onNavigate: async () => ({ status: 'failed', reason: 'not-found' }),
+      questStage: { activeObjectiveId: 'get-past-steward-malik', status: 'active' },
+    } as unknown as Parameters<typeof RoomViewer>[0]
+    RoomViewer(props)
+
+    await Promise.resolve()
+    await Promise.resolve()
+
+    const engine = mockState.engineInstances[0]
+    engine?.onRequestOpenInteraction?.({
+      id: 'room-npc',
+      type: 'npc',
+      label: 'Secret NPC Object Name',
+      affordance: 'talk',
+      key: 'F',
+      prompt: 'Secret interaction prompt',
+      position: { x: 0, y: 0, z: -3 },
+    })
+
+    await Promise.resolve()
+
+    expect(replies).toHaveLength(1)
+    expect(replies[0]).toMatchObject({
+      npcId: 'room-npc',
+      history: [],
+      playerLine: undefined,
+      quest: { activeObjectiveId: 'get-past-steward-malik', status: 'active' },
+    })
+  })
+
+  it('omits the quest stage when none is provided', async () => {
+    const replies: unknown[] = []
+    const room = loadedRoom()
+
+    const props = {
+      roomSource: { getRoom: async () => ({ ok: true, room }) },
+      sessionId: 'session-1',
+      interactionService: { resolve: async () => ({ status: 'rejected', reason: 'missing-effect' }) },
+      encounterService: { resolve: async () => ({ status: 'failed', reason: 'not-found' }) },
+      npcDialogueService: {
+        reply: async (input: unknown) => {
+          replies.push(input)
+          return { status: 'replied', turn: { speaker: 'npc', text: 'A line.' } }
+        },
+      },
+      onNavigate: async () => ({ status: 'failed', reason: 'not-found' }),
+    } as unknown as Parameters<typeof RoomViewer>[0]
+    RoomViewer(props)
+
+    await Promise.resolve()
+    await Promise.resolve()
+
+    const engine = mockState.engineInstances[0]
+    engine?.onRequestOpenInteraction?.({
+      id: 'room-npc',
+      type: 'npc',
+      label: 'Secret NPC Object Name',
+      affordance: 'talk',
+      key: 'F',
+      prompt: 'Secret interaction prompt',
+      position: { x: 0, y: 0, z: -3 },
+    })
+
+    await Promise.resolve()
+
+    expect(replies).toHaveLength(1)
+    expect(replies[0]).not.toHaveProperty('quest')
+  })
 })
