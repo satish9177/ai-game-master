@@ -9,6 +9,8 @@ import { RoomViewer } from './RoomViewer'
 
 const mockState = vi.hoisted(() => ({
   refIndex: 0,
+  stateIndex: 0,
+  stateSetters: [] as Array<ReturnType<typeof vi.fn>>,
   engineInstances: [] as Array<{
     onRequestOpenInteraction: ((target: Interactable) => void) | null
     onActiveInteractionChange: ((target: Interactable | null) => void) | null
@@ -31,10 +33,15 @@ vi.mock('react', async () => {
       mockState.refIndex += 1
       return { current: index === 0 ? { nodeType: 1 } : initial }
     },
-    useState: (initial: unknown) => [
-      typeof initial === 'function' ? (initial as () => unknown)() : initial,
-      vi.fn(),
-    ],
+    useState: (initial: unknown) => {
+      const setter = vi.fn()
+      mockState.stateSetters[mockState.stateIndex] = setter
+      mockState.stateIndex += 1
+      return [
+        typeof initial === 'function' ? (initial as () => unknown)() : initial,
+        setter,
+      ]
+    },
   }
 })
 
@@ -102,12 +109,16 @@ function loadedRoom() {
 describe('RoomViewer NPC dialogue room context wiring', () => {
   beforeEach(() => {
     mockState.refIndex = 0
+    mockState.stateIndex = 0
+    mockState.stateSetters.length = 0
     mockState.engineInstances.length = 0
   })
 
   afterEach(() => {
     vi.clearAllMocks()
     mockState.refIndex = 0
+    mockState.stateIndex = 0
+    mockState.stateSetters.length = 0
     mockState.engineInstances.length = 0
   })
 
@@ -314,5 +325,86 @@ describe('RoomViewer NPC dialogue room context wiring', () => {
 
     expect(replies).toHaveLength(1)
     expect(replies[0]).not.toHaveProperty('quest')
+  })
+
+  it('uses authored post-use body for an already-resolved offering coffer', async () => {
+    const room = loadRoomSpec({
+      schemaVersion: 1,
+      id: 'throne-room',
+      name: 'Throne Room',
+      shell: { dimensions: { width: 14, depth: 20, height: 6 } },
+      spawn: { position: [0, 1.7, 8] },
+      objects: [{
+        type: 'crate',
+        id: 'offering-coffer',
+        position: [3, 0, 4],
+        interaction: {
+          key: 'E',
+          prompt: 'Press E to open the offering coffer',
+          body: 'A coffer of tribute left for the court. A single gold coin remains.',
+          effect: {
+            kind: 'take-item',
+            item: { itemId: 'gold-coin', name: 'Gold Coin', quantity: 1 },
+          },
+        },
+      }],
+    })
+    const state = {
+      schemaVersion: 1,
+      worldId: '00000000-0000-4000-8000-000000000001',
+      sessionId: '00000000-0000-4000-8000-000000000002',
+      currentRoomId: 'throne-room',
+      player: { health: { current: 10, max: 10 }, status: [] },
+      inventory: [],
+      roomStates: {
+        'throne-room': {
+          visited: true,
+          flags: { 'interaction:offering-coffer': true },
+        },
+      },
+      revision: 1,
+      updatedAt: '2026-06-28T00:00:00.000Z',
+    }
+
+    const props = {
+      roomSource: { getRoom: async () => ({ ok: true, room }) },
+      sessionId: 'session-1',
+      interactionService: {
+        resolve: async () => ({ status: 'already-resolved', outcome: { kind: 'nothing' }, state }),
+      },
+      encounterService: { resolve: async () => ({ status: 'failed', reason: 'not-found' }) },
+      npcDialogueService: {
+        reply: async () => ({ status: 'replied', turn: { speaker: 'npc', text: 'A line.' } }),
+      },
+      onNavigate: async () => ({ status: 'failed', reason: 'not-found' }),
+    } as unknown as Parameters<typeof RoomViewer>[0]
+    RoomViewer(props)
+
+    await Promise.resolve()
+    await Promise.resolve()
+
+    const engine = mockState.engineInstances[0]
+    engine?.onRequestOpenInteraction?.({
+      id: 'offering-coffer',
+      type: 'crate',
+      label: 'Offering coffer',
+      affordance: 'take',
+      key: 'E',
+      prompt: 'Press E to open the offering coffer',
+      body: 'A coffer of tribute left for the court. A single gold coin remains.',
+      position: { x: 3, y: 0, z: 4 },
+    })
+
+    await Promise.resolve()
+
+    const setDialogue = mockState.stateSetters[1]
+    expect(setDialogue).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'offering-coffer',
+      body: 'A coffer of tribute left for the court. A single gold coin remains.',
+    }))
+    expect(setDialogue).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'offering-coffer',
+      body: 'The coffer lies open and empty - the coin is gone.',
+    }))
   })
 })

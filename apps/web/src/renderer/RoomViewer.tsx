@@ -15,6 +15,7 @@ import type { EncounterService } from '../encounters/EncounterService'
 import type { NPCDialogueService } from '../dialogue/NPCDialogueService'
 import type { NavigationResult } from '../app/NavigationService'
 import type { WorldState } from '../domain/world/worldState'
+import { authoredPostUseInteractionBody } from '../app/authoredInteractionBody'
 import { buildNPCDialogueReplyInput } from '../app/npcDialogueReplyInput'
 import {
   buildInteractionEffectLookup,
@@ -229,6 +230,10 @@ export function RoomViewer({
         if (cancelled) return
         if (result.status === 'applied' || result.status === 'already-resolved') {
           onWorldStateChange?.(result.state)
+        }
+        if (result.status === 'already-resolved') {
+          const body = authoredPostUseInteractionBody({ objectId: target.id, state: result.state })
+          if (body) setDialogue({ ...target, body })
         }
         setResultMessage(interactionResultMessage(result))
       }).catch(() => {
