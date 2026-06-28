@@ -293,6 +293,7 @@ Implemented or shipped areas include:
 * inventory & health UI v0
 * session save/load v0
 * demo quest loop v0
+* demo quest mechanical reactivity v0
 * consequence journal v0
 * cost/usage guardrails v0
 * generated room layout contract v0

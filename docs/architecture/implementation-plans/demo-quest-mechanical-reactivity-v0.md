@@ -1,8 +1,9 @@
 # Implementation Plan — `feature/demo-quest-mechanical-reactivity-v0`
 
-> Status: **design approved — not yet implemented.** Maintainer approved the mechanical
-> exit-gate scope on 2026-06-28; no source written yet. The ADR for this slice is
-> [ADR-0046](../decisions/ADR-0046-demo-quest-mechanical-reactivity-v0.md) (Proposed).
+> Status: **completed / implemented.** Maintainer approved the mechanical
+> exit-gate scope on 2026-06-28; the feature shipped in three source slices plus docs closeout.
+> The ADR for this slice is
+> [ADR-0046](../decisions/ADR-0046-demo-quest-mechanical-reactivity-v0.md) (Accepted / Implemented).
 >
 > Companion docs: [ARCHITECTURE](../ARCHITECTURE.md) · [BOUNDARIES](../BOUNDARIES.md) ·
 > [FAILURE-MODES](../FAILURE-MODES.md) · [CONVENTIONS](../CONVENTIONS.md). Direct precedent and
@@ -39,9 +40,13 @@ gate is a pure predicate over `WorldState`; blocking appends nothing.
 
 ## 1. Status
 
-**Design approved — not yet implemented.** Docs-only artifact (this plan + ADR-0046, plus a
-reconciliation note in ADR-0045). Source slices below are pending maintainer go-ahead, one slice at
-a time.
+**Completed / implemented.** The feature shipped one slice at a time:
+
+1. Pure exit-gate predicate + `blocked` message support.
+2. App/composition-root north-arch gate wiring before `NavigationService.navigate`.
+3. Authored coffer post-use empty body on the existing `already-resolved` interaction path.
+
+Docs closeout marks ADR-0046 and this implementation plan as implemented.
 
 ## 2. Current repo facts (verified against source)
 
@@ -86,11 +91,11 @@ a time.
    never emits it).
 4. **`navigationResultMessage`** returns the barred copy for `'blocked'`.
 
-### In (optional second beat — plan only, not this slice's headline)
+### In
 
 5. **Coffer post-use body** — a pure authored map keyed on object id + its one-shot flag, applied in
    `RoomViewer` on an `already-resolved` result, so the panel body reads as emptied. No
-   `throneRoom.ts`/schema edit. Sequenced after the headline gate; may be deferred entirely.
+   `throneRoom.ts`/schema edit. Implemented after the headline gate.
 
 ### Out
 
@@ -137,19 +142,19 @@ dependency · new lint block.
 `renderer/engine/**` · `generation/**` · `domain/world/saveGame.ts` / `world-session/saveGame.ts` ·
 `eslint.config.js` · `package.json`.
 
-## 7. Final implementation slices (one at a time, each independently testable)
+## 7. Final implementation slices (completed)
 
-1. **`feat(app): pure exit-gate predicate + blocked message`** — `evaluateExitGate`,
+1. **Completed — `feat(app): pure exit-gate predicate + blocked message`** — `evaluateExitGate`,
    `NavigationResult` `'blocked'` union member, `navigationResultMessage('blocked')`. Unit tests for
-   the predicate and the message. Inert (not yet wired).
-2. **`feat(app): enforce north-arch gate at composition root`** — `App.handleNavigate` reads
+   the predicate and the message. Inert until slice 2.
+2. **Completed — `feat(app): enforce north-arch gate at composition root`** — `App.handleNavigate` reads
    authoritative `WorldState`, consults the predicate (scoped to the attached demo quest), returns
    `blocked` when the Malik flag is unset. Wiring test: blocked before the flag asserts **no event
    appended / revision unchanged**; navigates after the flag.
-3. **`feat(ui): coffer post-use body`** *(optional / may defer)* — authored map + `RoomViewer`
+3. **Completed — `feat(ui): coffer post-use body`** — authored map + `RoomViewer`
    `already-resolved` body swap; lookup unit test.
-4. **`docs`** — flip ADR-0046 status to Accepted/Implemented and update the ARCHITECTURE feature map
-   after merge.
+4. **Completed — `docs`** — flip ADR-0046 status to Accepted/Implemented and update the
+   ARCHITECTURE/AGENTS feature maps.
 
 ## 8. Test plan
 
@@ -169,6 +174,40 @@ dependency · new lint block.
 Verification commands: `npm run test -- exits`, `npm run test -- NavigationService`,
 then `npm run lint` and `npm run build` (run from `apps/web`).
 
+### Verification Summary
+
+Slice 1:
+
+- `npm.cmd run test -- exitGate` passed.
+- `npm.cmd run test -- exits` passed.
+- `npm.cmd run test -- NavigationService` passed.
+- `npm.cmd run test` passed: 104 test files, 1752 tests.
+- `npm.cmd run lint` passed.
+- `npm.cmd run build` passed.
+- `git diff --check` passed with LF/CRLF warnings only.
+
+Slice 2:
+
+- `npm.cmd run test -- exitGate` passed.
+- `npm.cmd run test -- gatedNavigation` passed.
+- `npm.cmd run test -- exits` passed.
+- `npm.cmd run test -- NavigationService` passed.
+- `npm.cmd run lint` passed.
+- `npm.cmd run build` passed with the existing Vite chunk-size warning.
+- `git diff --check` passed with LF/CRLF warnings only.
+
+Slice 3:
+
+- `npm.cmd run test -- interaction` passed: 5 test files, 37 tests.
+- `npm.cmd run test -- RoomViewer` passed: 1 test file, 7 tests.
+- `npm.cmd run lint` passed.
+- `npm.cmd run build` passed with the existing Vite chunk-size warning.
+- `git diff --check` passed with LF/CRLF warnings only.
+
+Docs closeout:
+
+- `git diff --check` only; no source tests required for docs-only changes.
+
 ## 9. Manual smoke checklist
 
 1. Load the authored world. In the throne room, **before** Malik: press E on the north arch →
@@ -180,6 +219,10 @@ then `npm run lint` and `npm run build` (run from `apps/web`).
    **empty** ("the coin is gone"), not "a single gold coin remains."
 5. Prompt-generate a room → arches navigate freely (no gate), no coffer override, no quest tracker —
    confirms authored-only scoping.
+
+Manual browser smoke was not run during docs closeout. The expected smoke path above is covered by
+targeted unit tests for the predicate, composition-root gate decision, navigation message, coffer
+post-use helper, and `RoomViewer` repeated-interaction body swap.
 
 ## 10. Failure modes / safety
 

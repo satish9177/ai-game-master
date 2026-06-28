@@ -1,6 +1,6 @@
 # ADR-0046: Demo Quest Mechanical Reactivity v0 — composition-root exit gate on the Malik flag
 
-- **Status:** Proposed — design approved 2026-06-28, **not yet implemented (docs-only artifact)**
+- **Status:** Accepted / Implemented - shipped 2026-06-28
 - **Date:** 2026-06-28
 - **Deciders:** Project owner
 - **Extends:** [ADR-0045](./ADR-0045-demo-quest-reactive-loop-v1.md) (Demo Quest Reactive Loop v1),
@@ -10,7 +10,7 @@
   [ADR-0014](./ADR-0014-object-interactions-v0.md) (coffer take-item),
   [ADR-0013](./ADR-0013-world-state-event-log-v0.md) (authoritative `WorldState`)
 
-> Full pre-code design in the implementation plan
+> Implemented from the pre-code design in the implementation plan
 > [`demo-quest-mechanical-reactivity-v0`](../implementation-plans/demo-quest-mechanical-reactivity-v0.md).
 
 ## Context
@@ -43,10 +43,17 @@ Every hook needed already exists:
 ## Decision
 
 Ship **a single authored, composition-root exit gate** keyed on the existing
-`encounter:malik-encounter` flag, plus a planned-but-deferred coffer post-use body beat. The v0
+`encounter:malik-encounter` flag, plus an authored coffer post-use body beat. The v0
 defining property of the quest is preserved: **the quest stays a derived lens, not a system.**
 `WorldSession` + the append-only `WorldEvent[]` + reducers remain the sole authority; the gate
 **reads** an authoritative flag and **appends nothing**.
+
+Implemented slices:
+
+1. A pure `evaluateExitGate` predicate and `blocked` navigation message support.
+2. App/composition-root north-arch gate wiring before `NavigationService.navigate`.
+3. A pure authored post-use body helper for the tribute coffer, used only on the
+   `already-resolved` interaction path.
 
 ```
 RoomViewer.onRequestOpenInteraction (exit branch, unchanged)
@@ -90,15 +97,15 @@ reaction can flip an objective or write a flag, and the gate cannot be driven by
 view. The gate **appends no event**, so the append-only log never records a move the player did not
 make, and there is no state to corrupt.
 
-### 4. Coffer post-use body (object beat) — planned, deferred to a second slice
+### 4. Coffer post-use body (object beat)
 
 The coffer's mechanical state already changes today (first E appends `item-added` + sets
-`interaction:offering-coffer`; re-press is idempotent `already-resolved`). v0 **plans but does not
-yet implement** a small refinement: when that flag is set, the interaction panel body reads as
-emptied ("The coffer lies open and empty — the coin is gone.") instead of the static "a single gold
-coin remains." It would be a pure authored map keyed on object id + its one-shot flag, applied in
-`RoomViewer` on an `already-resolved` result — read-only, authored-object-scoped, no
-`throneRoom.ts`/schema edit. It is sequenced as an **optional second beat** after the headline gate.
+`interaction:offering-coffer`; re-press is idempotent `already-resolved`). v0 adds a small
+refinement: when that flag is set, the interaction panel body reads as emptied ("The coffer lies
+open and empty - the coin is gone.") instead of the static "a single gold coin remains." This is a
+pure authored helper keyed on object id + the existing one-shot flag, applied in `RoomViewer` only
+on an `already-resolved` result. It is read-only, authored-object-scoped, and requires no
+`throneRoom.ts` or schema edit.
 
 ### 5. Softlock argument (why the gate is safe)
 
@@ -138,11 +145,12 @@ Free, exactly as v0/v1: the gate is a pure function of the restored authoritativ
 ### Boundaries
 
 Every touched file sits inside an existing lint block and every dependency direction is already
-allowed: `app/exits.ts` (or a new `app/exitGate.ts`) and `App.tsx` are the composition root;
-`NavigationService.ts` gains a passive union member only. The renderer engine, `world-session`,
-`interactions`, `encounters`, `dialogue`, `memory`, `persistence`, `server`, `generation`, the
-`RoomSpec`/world schemas, `eslint.config.js`, and `package.json` are untouched. **No new lint
-block.**
+allowed: `app/exits.ts`, `app/exitGate.ts`, `app/gatedNavigation.ts`, and `App.tsx` are the
+composition root; `NavigationService.ts` gains a passive union member only and stays generic.
+`app/authoredInteractionBody.ts` is a pure authored UI helper consumed by `RoomViewer` on an
+existing result path. The renderer engine, `world-session`, `interactions`, `encounters`,
+`dialogue`, `memory`, `persistence`, `server`, `generation`, the `RoomSpec`/world schemas,
+`eslint.config.js`, and `package.json` are untouched. **No new lint block.**
 
 ### Tests
 
@@ -154,8 +162,8 @@ Pure Vitest, co-located, no new deps, no DOM framework:
   unchanged.
 - `handleNavigate` wiring (recommended) — blocked before the flag **asserts no event appended /
   revision unchanged**; navigates after the flag is set.
-- Coffer post-use body lookup (only if/when the second beat ships) — returns the post-use body only
-  when the authored flag is set; `undefined` otherwise; pure.
+- Coffer post-use body lookup — returns the post-use body only when the authored flag is set;
+  `undefined` otherwise; pure. `RoomViewer` uses that body only on `already-resolved`.
 - Regression — existing `NavigationService.test.ts` stays green (service behavior untouched);
   prompt path has no quest → predicate returns not-gated.
 
@@ -187,18 +195,32 @@ discipline.
   at the composition root.
 - **No domain footprint.** Zero new events, commands, reducers, schema fields, or persisted state;
   one pure predicate plus a passive result-type union member.
+- **Coffer repeated-use copy now reflects state.** The authored tribute coffer still grants the
+  coin exactly once through existing interaction idempotency; repeated use only swaps the displayed
+  body after the existing `interaction:offering-coffer` flag is present.
 - **No softlock.** Malik is always resolvable (fight has no requirement); the gate appends nothing
   and is one-directional; the UI lock always releases.
 - **Hidden for prompt-generated sessions.** The v0 anchor-room gate is reused and the predicate is
   not-gated for any non-authored pair.
 - **Save/load restores gate state for free.** No `SaveGame` change.
 - **Known limitations:** single authored demo gate only; the "unlock" is binary (barred → open),
-  not a graded/affordance change; the coffer beat is planned but unimplemented; gating makes Malik
+  not a graded/affordance change; gating makes Malik
   mandatory, so a future low-HP-arrival path would force the −15 HP fight (safe in the authored
   demo, which starts at full health with a free coin and a non-consuming distract).
-- **Deferred (future):** the coffer post-use body beat; a reactive 3D-HUD prompt or new affordance
-  for the arch; a generic data-driven gate vocabulary; multiple/chained gates; quest rewards;
-  generated-quest/generated-room gating; LLM/real-provider quest dialogue.
+- **Deferred (future):** a reactive 3D-HUD prompt or new affordance for the arch; a generic
+  data-driven gate vocabulary; multiple/chained gates; quest rewards; generated-quest/generated-room
+  gating; LLM/real-provider quest dialogue.
+
+## Implementation Notes
+
+The shipped implementation deliberately kept the mechanical reactivity local:
+
+- `NavigationService` behavior stayed unchanged and generic. It resolves rooms and moves sessions
+  exactly as before; it does not know about quests, Malik, authored room ids, or coffer state.
+- No `RoomSpec` schema, `WorldEvent`, `WorldCommand`, reducer, backend, persistence, save-game,
+  generated-room, or quest-authority change was introduced.
+- The coffer body change is presentation-only on an existing `already-resolved` result; it grants no
+  item and appends no event.
 
 ## Reconciliation with ADR-0045
 

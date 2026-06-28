@@ -38,6 +38,7 @@ Throughout these docs:
   Inventory & Health UI v0 — browser;
   Session Save/Load v0 — browser;
   Demo Quest Loop v0 — browser;
+  Demo Quest Mechanical Reactivity v0 — browser composition/UI;
   Consequence Journal v0 — browser;
   Cost/Usage Guardrails v0 — browser;
   Room Inspect Summary v0 — browser;
@@ -1151,6 +1152,24 @@ objective itself.
   lines were added to `App`/`RoomViewer`. Quest/objective text, ids, flag keys, item names/ids,
   status strings, room display names, and narrative content are never logged — mirrors the
   ADR-0013/0014/0015/0026 content-free log discipline.
+
+## Demo Quest Mechanical Reactivity v0
+
+✅ **Implemented, browser composition/UI.** The authored demo quest now has one small mechanical
+reaction: the throne-room north arch is refused until Steward Malik is resolved, then navigates as
+before. The gate reads the existing authoritative
+`roomStates['throne-room'].flags['encounter:malik-encounter']` flag and returns a `blocked`
+navigation result before the generic navigation service is called
+([ADR-0046](./decisions/ADR-0046-demo-quest-mechanical-reactivity-v0.md)).
+
+- **Three small slices.** The feature added a pure `evaluateExitGate` predicate and blocked message,
+  App/composition-root gate wiring, and an authored post-use body for the tribute coffer once the
+  existing `interaction:offering-coffer` flag is set.
+- **NavigationService stayed generic.** It still resolves rooms and moves sessions without quest,
+  Malik, authored-room, or coffer knowledge; `blocked` is produced by the composition-root gate.
+- **Authority and boundaries unchanged.** No `RoomSpec` schema, `WorldEvent`, `WorldCommand`,
+  reducer, backend, persistence, save-game, generated-room, or quest-authority change. The coffer
+  body swap is presentation-only on the existing `already-resolved` interaction result.
 
 ## Consequence Journal v0
 
