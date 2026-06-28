@@ -121,6 +121,17 @@ same `QuestView` (the same authoritative Malik flag the quest reads); it is **na
 only** — the arch's navigation is unchanged and always usable, so there is **zero softlock
 surface**. Outside the throne room or with no quest attached, the overlay is not rendered.
 
+> **Superseded for the mechanical behavior by
+> [ADR-0046](./ADR-0046-demo-quest-mechanical-reactivity-v0.md) (Demo Quest Mechanical
+> Reactivity v0).** The "arch's navigation is unchanged and always usable" stance above —
+> and the "optional non-blocking soft exit gate" / "mechanical object/exit unlock" entries
+> in §5 and Deferred — are now handled by that follow-up ADR: the north arch is mechanically
+> gated on `encounter:malik-encounter` at the composition root (`App.handleNavigate`, not
+> `NavigationService`), still with **zero softlock surface** because Malik's `fight` choice
+> has no requirement and is always resolvable. If this §4 narrative overlay is built, its
+> "barred/open" copy must read the **same** Malik flag so notice and mechanics never
+> disagree; if it is not built, the gate's `blocked` message is the visible feedback.
+
 ### 5. Explicitly excluded from v1
 
 - **The optional soft exit gate** (a non-blocking `App.handleNavigate` check on the Malik
