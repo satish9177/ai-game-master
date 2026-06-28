@@ -22,6 +22,7 @@ export function buildPromptGeneratedRoomSource({
 }): GeneratedRoomSource {
   return new GeneratedRoomSource(generator, generatorSeed, logger, fallbackRoom, {
     requestsNpc: detectsNpcRequest(rawUserPrompt),
+    enrichObjectiveTarget: true,
     themePack,
   })
 }

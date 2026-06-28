@@ -492,7 +492,46 @@ describe('App fake-provider prompt path renders a generated QuestTracker', () =>
     expect(completed.quest?.status).toBe('complete')
   })
 
-  it('a marker-less room (real-provider shape) degrades to no quest without crashing', async () => {
+  it('a marker-less prompt-generated room (real-provider shape) gets an objective target', async () => {
+    const generator: RoomGenerator = {
+      generate: async () => JSON.stringify({
+        schemaVersion: 1,
+        id: 'generated-room',
+        name: 'Generated Room',
+        shell: {
+          dimensions: { width: 18, depth: 18, height: 4 },
+          exits: [{ side: 'north', width: 3 }],
+        },
+        spawn: { position: [0, 1.7, 5] },
+        objects: [
+          {
+            type: 'book',
+            position: [0, 0, -2],
+            interaction: { key: 'E', prompt: 'Read', body: 'Some pages.' },
+          },
+          { type: 'crate', position: [2, 0, 0] },
+        ],
+      }),
+    }
+    const source = buildPromptGeneratedRoomSource({
+      generator,
+      rawUserPrompt: 'a room with a readable clue',
+      generatorSeed: 'safe generated seed',
+      logger: noopLogger,
+      fallbackRoom: makeRoom([]),
+    })
+    const result = await source.getRoom()
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+
+    const attachment = await buildGeneratedObjectiveAttachment(result.room, new FakeObjectiveGenerator())
+    expect(attachment).not.toBeNull()
+
+    const views = computeDerivedViews(makeState({ currentRoomId: result.room.id }), attachment!.questSpec, null)
+    expect(views.quest).not.toBeNull()
+  })
+
+  it('a direct marker-less room without prompt-path enrichment degrades to no quest without crashing', async () => {
     // A room with interactions but NO stable id + inspect effect — the shape a
     // real provider produces. The objective must degrade to none, not throw.
     const room = makeRoom([

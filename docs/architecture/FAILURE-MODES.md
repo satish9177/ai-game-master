@@ -377,6 +377,46 @@ story-anchor priority. v0 supports only the existing `fantasy-keep` and
   generated JSON, provider output, room names, object names, or interaction
   title/body text. No new content-bearing diagnostics were added.
 
+## 4i. Generated room objective-target enrichment 🔜 v0 (benign, always `generated`)
+
+Generated rooms — especially real-LLM rooms — typically lack the stable `id` and
+`interaction.effect` that `assembleObjective` requires to attach a generated quest objective.
+The object-purpose stage (ADR-0037) intentionally adds only presentation text (`key/prompt/title/body`)
+and no effect, so no flag can be set and `assembleObjective` correctly returns `null`.
+
+Generated Room Objective Target Enrichment v0
+([ADR-0048](./decisions/ADR-0048-generated-room-objective-target-enrichment-v0.md)) closes
+this gap by promoting exactly one eligible generated-room object to objective-ready as a benign
+normalization stage before the final `validateRoom`.
+
+| Enrichment condition | Detection | Handling | Logging |
+| --- | --- | --- | --- |
+| Object already objective-ready (id + effect + no encounter) | `ensureGeneratedObjectiveTarget` step 1: short-circuit | no-op; same room reference returned | `objectiveTargetEnriched: false` |
+| Eligible purpose-type inspectable present (purpose interaction, no effect) | step 2–3: type-ranked candidate set, deterministic pick | add `effect: { kind: 'inspect' }`; assign constant id `'generated-objective-target'` if missing (suffix on collision) | `objectiveTargetEnriched: true` bool only |
+| No eligible candidate exists (only npc/arch/exit/encounter/unknown objects) | step 4: empty candidate set | no-op; room plays without objective | `objectiveTargetEnriched: false` |
+
+- **Gated:** runs only when `AssembleRoomOptions.enrichObjectiveTarget === true`, which is
+  set only by `buildPromptGeneratedRoomSource` (prompt-generated first-room path). Adjacent
+  pregeneration, authored bootstrap, fallback, and repaired paths are never enriched.
+- **Pipeline position:** Stage 2.12.5 — after `ensureGeneratedNpcPresence` (2.12) and before
+  `sanitizeGeneratedDisplayText` (2.13) / final `validateRoom` (3). The promoted object is
+  therefore checked by the existing final validation step.
+- **Provenance.** Enrichment is benign: enriched rooms keep `provenance: generated`, set no
+  `failedStage`, and show no repaired/fallback notice.
+- **`assembleObjective` not weakened.** The satisfiability gate is unchanged; enrichment
+  guarantees the prerequisites so the gate passes rather than dropping to `null`.
+- **No content invention.** If no eligible object exists, `objectiveTargetEnriched: false` and
+  the room plays without a quest objective. No new object is ever inserted.
+- **Effect flag safety.** `effect.flag` is never set; `planInspect` derives the flag key
+  automatically as `'interaction:' + id`, matching the key `assembleObjective` stores in
+  `condition.flag`.
+- **Fake rooms unchanged.** `FakeRoomGenerator` rooms already have an objective-ready
+  `objective-document` object; the short-circuit short-circuits immediately, `objectiveTargetEnriched:
+  false`, output byte-identical.
+- **Logging remains safe.** `objectiveTargetEnriched` is boolean-only. Logs must not contain
+  the promoted object's id, type string, name, interaction text, generated JSON, room name, or
+  provider output. No new content-bearing diagnostic was added.
+
 ## 5. Backend / network failure ✅ API edge v0 · 🔜 browser client
 
 The Node API edge exists, but the browser does not call it yet. v0 therefore

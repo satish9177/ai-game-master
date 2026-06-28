@@ -50,8 +50,11 @@ Throughout these docs:
   Generated Room Display Sanitization v0 — generated assembly/domain;
   Adjacent Room Theme Continuity v0 — browser composition/domain projection;
   Generated Room Theme Vocabulary v0 — fake/generated assembly + browser composition;
+  Generated Room Objective Target Enrichment v0 — generated assembly/domain;
   NPC Dialogue Room Context v0 — browser/domain/dialogue).
-- 🔜 **Planned** — designed and approved, not yet built (next slices).
+- 🔜 **Planned** — designed and approved, not yet built (next slices). Current:
+  Generated Story Objective Contract v0 — domain/quests/assembly + dialogue/UI
+  ([ADR-0047](./decisions/ADR-0047-generated-story-objective-contract-v0.md)).
 - ❌ **Not built** — future shape only; documented so we don't paint into a corner.
 
 ## Status today (Renderer Foundation v0)
@@ -633,6 +636,59 @@ the generated-room domain pipeline
 - **Soft cap note:** the inserted NPC is added after the soft generated object cap
   but before hard final validation. This is intentional so an explicitly
   requested NPC is not dropped by soft composition trimming.
+
+## Generated Story Objective Contract v0
+
+🔜 **Planned, domain/quests/assembly + dialogue/UI.** Generated Story Objective Contract v0
+delivers a narrow, validated data contract for a generated story objective proposal and a pure
+validate-or-drop assembler that converts a valid proposal into the existing trusted `QuestSpec`,
+enabling prompt-generated rooms to carry one small story beat without changing the quest engine
+([ADR-0047](./decisions/ADR-0047-generated-story-objective-contract-v0.md)).
+
+- **Two independent pipelines:** room assembly (unchanged) and objective assembly (new, runs
+  after a valid generated room exists). A dropped or missing objective leaves the room playing
+  normally; it never affects room provenance, the renderer, or world state.
+- **`GeneratedObjectiveSpec` schema:** a narrow, strict proposal schema (`interact-object`,
+  `resolve-encounter`, `visit-room` condition kinds; all text fields bounded). The generator
+  names an `objectId` or `roomId`; the trusted assembler derives the internal flag key. No
+  raw flag strings, no code, no open enums.
+- **`assembleObjective`:** pure, total, throw-free pipeline — parse → schema → satisfiability
+  check → text sanitization → build `QuestSpec`. An unsatisfiable condition is dropped, never
+  invented. Returns `{ spec: QuestSpec | null; hint; completionHint; diagnostics }`.
+- **`FakeObjectiveGenerator`:** deterministic fake source behind a new `ObjectiveGenerator`
+  port. References only objects with stable ids and the required interaction. Returns
+  `Promise<string | null>`.
+- **NPC hint wiring:** `QuestDialogueContext` gains optional `hint` and `completionHint`
+  fields (inert display only, never logged). `FakeNPCDialogueProvider` prefers the generated
+  hint over the authored `QUEST_CLUE` table when present; absent → byte-identical to today.
+- **Quest tracker:** the hardcoded authored completion sentence is replaced with the generic
+  `{view.title} is complete.` so the tracker works for any `QuestSpec`.
+- **Authority unchanged:** `WorldSession` + event log + reducers remain sole truth. Generated
+  objectives observe flags that existing interactions already set; they append nothing.
+- **No generated gate:** navigation remains free on all generated-room paths.
+
+## Generated Room Objective Target Enrichment v0
+
+✅ **Implemented, generated assembly/domain.** Generated Room Objective Target Enrichment v0 closes the gap
+between `assembleObjective` (which requires an eligible object in the room) and real-LLM rooms
+(which typically lack the stable `id` and `interaction.effect` the assembler requires), by
+promoting exactly one eligible generated-room object to objective-ready as a benign normalization
+stage in `assembleRoom`
+([ADR-0048](./decisions/ADR-0048-generated-room-objective-target-enrichment-v0.md)).
+
+- **Promote-only, never invent:** the stage (`ensureGeneratedObjectiveTarget`) operates on the
+  existing assembled object list. It adds a stable id (if missing) and `effect: { kind: 'inspect' }`
+  to one eligible purpose-type object; it never creates a new object or sets `effect.flag`.
+- **Boolean-option gate:** controlled by `AssembleRoomOptions.enrichObjectiveTarget` (default
+  `false`; `true` only on the prompt-generated first-room path in `buildPromptGeneratedRoomSource`).
+  Adjacent pregeneration, authored bootstrap, repaired, and fallback paths are unaffected.
+- **Stage 2.12.5 in `assembleRoom`:** after `ensureGeneratedNpcPresence` and before
+  `sanitizeGeneratedDisplayText` / final `validateRoom`. The promoted object is validated with
+  the rest of the room.
+- **Short-circuit for fake rooms:** `FakeRoomGenerator` rooms already carry an objective-ready
+  `objective-document` object; the stage no-ops immediately, output byte-identical.
+- **Benign normalization:** keeps `provenance: generated`, shows no notice, reports only
+  `objectiveTargetEnriched: boolean`.
 
 ## Isometric Camera Foundation
 

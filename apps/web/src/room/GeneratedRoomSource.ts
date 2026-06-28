@@ -100,6 +100,7 @@ export class GeneratedRoomSource implements RoomSource {
       objectTransformsRepaired: diagnostics.objectTransformsRepaired,
       purposesAssigned: diagnostics.purposesAssigned,
       npcInserted: diagnostics.npcInserted,
+      objectiveTargetEnriched: diagnostics.objectiveTargetEnriched,
       displayTextSanitized: diagnostics.displayTextSanitized,
       displayTextSanitizationCount: diagnostics.displayTextSanitizationCount,
       skippedObjectReasonCounts: diagnostics.skippedObjectReasonCounts,

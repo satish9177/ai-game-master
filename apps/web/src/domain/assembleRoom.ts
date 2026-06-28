@@ -10,6 +10,7 @@ import { repairGeneratedObjectTransforms } from './generatedRoomObjectTransforms
 import { assignGeneratedObjectPurpose } from './generatedRoomObjectPurpose'
 import { ensureGeneratedNpcPresence } from './ensureGeneratedNpcPresence'
 import { ensureGeneratedExitNavigation } from './ensureGeneratedExitNavigation'
+import { ensureGeneratedObjectiveTarget } from './generatedRoomObjectiveTarget'
 import { sanitizeGeneratedDisplayText } from './sanitizeGeneratedDisplayText'
 import type { GeneratedRoomVisualTheme } from './generatedRoomThemeVocabulary'
 
@@ -134,6 +135,11 @@ export type RoomDiagnostics = {
   /** Whether one safe generated NPC was inserted from an explicit boolean request. */
   npcInserted: boolean
   /**
+   * Whether one existing generated object was promoted to objective-ready.
+   * Boolean-only; never carries object ids, text, names, or generated content.
+   */
+  objectiveTargetEnriched: boolean
+  /**
    * Whether generated structural ids were removed from allowlisted player-facing
    * display text. Count-only; never carries the strings that were sanitized.
    */
@@ -159,6 +165,7 @@ export type AssembledRoom = {
 
 export type AssembleRoomOptions = {
   requestsNpc?: boolean
+  enrichObjectiveTarget?: boolean
   themePack?: GeneratedRoomVisualTheme
 }
 
@@ -255,10 +262,16 @@ export function assembleRoom(
   const npcPresenceFixed = npcPresenceResult.room
   const { npcInserted } = npcPresenceResult
 
-  // Stage 2.13 — remove generated structural ids from allowlisted display text
-  // only. Structural ids used for room identity/navigation are intentionally
-  // untouched; the allowlist lives inside sanitizeGeneratedDisplayText.
-  const displayTextResult = sanitizeGeneratedDisplayText(npcPresenceFixed)
+  // Stage 2.12.5 - optionally promote one existing eligible generated object to
+  // objective-ready. Gated off by default; adds only an inspect effect.
+  const objectiveTargetResult = options.enrichObjectiveTarget === true
+    ? ensureGeneratedObjectiveTarget(npcPresenceFixed)
+    : { room: npcPresenceFixed, objectiveTargetEnriched: false }
+  const objectiveTargetFixed = objectiveTargetResult.room
+  const { objectiveTargetEnriched } = objectiveTargetResult
+
+  // Stage 2.13 - display sanitization runs after objective target enrichment.
+  const displayTextResult = sanitizeGeneratedDisplayText(objectiveTargetFixed)
   const displayTextFixed = displayTextResult.room
   const { displayTextSanitized, displayTextSanitizationCount } = displayTextResult
 
@@ -290,6 +303,7 @@ export function assembleRoom(
         objectTransformsRepaired,
         purposesAssigned,
         npcInserted,
+        objectiveTargetEnriched,
         displayTextSanitized,
         displayTextSanitizationCount,
         skippedObjectReasonCounts: displayTextFixed.skippedObjectReasonCounts,
@@ -328,6 +342,7 @@ export function assembleRoom(
         objectTransformsRepaired,
         purposesAssigned,
         npcInserted,
+        objectiveTargetEnriched,
         displayTextSanitized,
         displayTextSanitizationCount,
         skippedObjectReasonCounts: repaired.skippedObjectReasonCounts,
@@ -359,6 +374,7 @@ export function assembleRoom(
       objectTransformsRepaired: 0,
       purposesAssigned: 0,
       npcInserted: false,
+      objectiveTargetEnriched: false,
       displayTextSanitized: false,
       displayTextSanitizationCount: 0,
       skippedObjectReasonCounts: fallbackRoom.skippedObjectReasonCounts,
@@ -393,6 +409,7 @@ function toFallback(
       objectTransformsRepaired: 0,
       purposesAssigned: 0,
       npcInserted: false,
+      objectiveTargetEnriched: false,
       displayTextSanitized: false,
       displayTextSanitizationCount: 0,
       skippedObjectReasonCounts: fallbackRoom.skippedObjectReasonCounts,

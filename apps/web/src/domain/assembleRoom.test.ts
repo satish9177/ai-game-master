@@ -375,6 +375,7 @@ describe('assembleRoom', () => {
       'objectTransformsRepaired',
       'purposesAssigned',
       'npcInserted',
+      'objectiveTargetEnriched',
       'displayTextSanitized',
       'displayTextSanitizationCount',
       'skippedObjectReasonCounts',
@@ -407,6 +408,7 @@ describe('assembleRoom', () => {
       expect(typeof diagnostics.objectTransformsRepaired).toBe('number')
       expect(typeof diagnostics.purposesAssigned).toBe('number')
       expect(typeof diagnostics.npcInserted).toBe('boolean')
+      expect(typeof diagnostics.objectiveTargetEnriched).toBe('boolean')
       expect(typeof diagnostics.displayTextSanitized).toBe('boolean')
       expect(typeof diagnostics.displayTextSanitizationCount).toBe('number')
       expect(typeof diagnostics.skippedObjectReasonCounts).toBe('object')
@@ -1431,6 +1433,90 @@ describe('assembleRoom', () => {
     expect(JSON.stringify(chest)).not.toContain('ProviderTrace')
     expect(JSON.stringify(chest)).not.toContain('steal-name')
     expect(JSON.stringify(chest)).not.toContain('generated_object_name')
+  })
+
+  it('enrichObjectiveTarget false/default preserves current behavior', () => {
+    const input = raw(validSpec({
+      shell: { dimensions: { width: 18, depth: 18, height: 4 }, exits: [{ side: 'north', width: 3 }] },
+      spawn: { position: [0, 1.7, 5] },
+      objects: [{ type: 'book', position: [0, 0, -2] }],
+    }))
+
+    const implicitDefault = assembleRoom(input, fallback)
+    const explicitFalse = assembleRoom(input, fallback, { enrichObjectiveTarget: false })
+
+    expect(implicitDefault.diagnostics.objectiveTargetEnriched).toBe(false)
+    expect(explicitFalse.diagnostics.objectiveTargetEnriched).toBe(false)
+    expect(interactionFor(implicitDefault.room.objects.find((object) => object.type === 'book')!)?.effect).toBeUndefined()
+    expect(explicitFalse).toEqual(implicitDefault)
+  })
+
+  it('enrichObjectiveTarget true promotes an eligible object through assembleRoom', () => {
+    const result = assembleRoom(raw(validSpec({
+      shell: { dimensions: { width: 18, depth: 18, height: 4 }, exits: [{ side: 'north', width: 3 }] },
+      spawn: { position: [0, 1.7, 5] },
+      objects: [{ type: 'book', position: [0, 0, -2] }],
+    })), fallback, { enrichObjectiveTarget: true })
+
+    const book = result.room.objects.find((object) => object.type === 'book')!
+    const interaction = interactionFor(book)
+
+    expect(result.diagnostics.provenance).toBe('generated')
+    expect(result.diagnostics.objectiveTargetEnriched).toBe(true)
+    expect(book.id).toBe('generated-objective-target')
+    expect(interaction).toMatchObject({
+      key: 'E',
+      prompt: 'Read',
+      title: 'Read',
+      body: READ_BODY,
+      effect: { kind: 'inspect' },
+    })
+    expect(interaction?.effect).not.toHaveProperty('flag')
+    expect(validateRoom(result.room).ok).toBe(true)
+  })
+
+  it('objectiveTargetEnriched is false when enrichment no-ops', () => {
+    const result = assembleRoom(raw(validSpec({
+      shell: { dimensions: { width: 18, depth: 18, height: 4 }, exits: [{ side: 'north', width: 3 }] },
+      spawn: { position: [0, 1.7, 5] },
+      objects: [{
+        type: 'scroll',
+        id: 'objective-document',
+        position: [0, 0.5, -2],
+        interaction: { key: 'E', prompt: 'Read', body: 'Existing safe body.', effect: { kind: 'inspect' } },
+      }],
+    })), fallback, { enrichObjectiveTarget: true })
+
+    expect(result.diagnostics.provenance).toBe('generated')
+    expect(result.diagnostics.objectiveTargetEnriched).toBe(false)
+    expect(result.room.objects).toHaveLength(2)
+  })
+
+  it('objectiveTargetEnriched is false for fallback paths', () => {
+    const semanticWithAssignableObject = raw(validSpec({
+      shell: { dimensions: { width: 18, depth: 18, height: 400 }, exits: [{ side: 'north', width: 3 }] },
+      objects: [{ type: 'book', position: [0, 0, 0] }],
+    }))
+
+    for (const input of [RAW_INVALID_JSON, RAW_INVALID_SCHEMA, semanticWithAssignableObject]) {
+      const { room, diagnostics } = assembleRoom(input, fallback, { enrichObjectiveTarget: true })
+      expect(room).toBe(fallback)
+      expect(diagnostics.provenance).toBe('fallback')
+      expect(diagnostics.objectiveTargetEnriched).toBe(false)
+    }
+  })
+
+  it('final validateRoom still runs after objective target enrichment', () => {
+    const result = assembleRoom(raw(validSpec({
+      shell: { dimensions: { width: 18, depth: 18, height: 4 }, exits: [{ side: 'north', width: 3 }] },
+      spawn: { position: [0, 1.7, 5] },
+      objects: [{ type: 'book', position: [0, 10, -2] }],
+    })), fallback, { enrichObjectiveTarget: true })
+
+    expect(result.diagnostics.provenance).toBe('generated')
+    expect(result.diagnostics.objectiveTargetEnriched).toBe(true)
+    expect(result.diagnostics.warningCount).toBeGreaterThan(0)
+    expect(validateRoom(result.room).issues.some((issue) => issue.code === 'object-above-ceiling')).toBe(true)
   })
 
   // --- generated-room optional transform repair (Slice 7F) ---

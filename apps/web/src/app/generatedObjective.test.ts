@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { loadRoomSpec, type LoadedRoom } from '../domain/loadRoomSpec'
 import type { ObjectiveGenerator } from '../domain/ports/ObjectiveGenerator'
+import type { RoomGenerator } from '../domain/ports/RoomGenerator'
 import type { RoomSpec } from '../domain/roomSpec'
 import type { WorldState } from '../domain/world/worldState'
 import { assembleRoom } from '../domain/assembleRoom'
@@ -8,9 +9,22 @@ import { fallbackRoom } from '../domain/examples/fallbackRoom'
 import { evaluateQuest } from '../domain/quests/evaluateQuest'
 import { FakeObjectiveGenerator } from '../generation/FakeObjectiveGenerator'
 import { FakeRoomGenerator } from '../generation/FakeRoomGenerator'
+import { GeneratedRoomSource } from '../room/GeneratedRoomSource'
+import type { Logger } from '../platform/logger/Logger'
+import { buildPromptGeneratedRoomSource } from './buildPromptGeneratedRoomSource'
 import { buildGeneratedObjectiveAttachment, buildGeneratedObjectiveQuestSpec } from './generatedObjective'
 
 const FALLBACK = loadRoomSpec(fallbackRoom)
+
+const noopLogger: Logger = {
+  debug() {},
+  info() {},
+  warn() {},
+  error() {},
+  child() {
+    return noopLogger
+  },
+}
 
 /** Assemble a room exactly as the prompt-generated path does (generator → pipeline). */
 async function assemblePromptRoom(prompt: string): Promise<LoadedRoom> {
@@ -204,5 +218,150 @@ describe('generated objective on a real prompt-generated room', () => {
     expect(dump).not.toContain('TOP-SECRET-PROMPT')
     expect(dump).not.toContain('Generated room')
     expect(dump).not.toContain('scroll reads')
+  })
+
+  it('prompt-generated first room enriches a real-provider-shaped object into an objective target', async () => {
+    const generatedRoom = JSON.stringify({
+      schemaVersion: 1,
+      id: 'generated-room',
+      name: 'Generated Room',
+      shell: {
+        dimensions: { width: 18, depth: 18, height: 4 },
+        exits: [{ side: 'north', width: 3 }],
+      },
+      spawn: { position: [0, 1.7, 5] },
+      objects: [
+        {
+          type: 'book',
+          position: [0, 0, -2],
+          interaction: { key: 'E', prompt: 'Read', body: 'Some pages.' },
+        },
+        { type: 'crate', position: [2, 0, 0] },
+      ],
+    })
+    const generator: RoomGenerator = { generate: async () => generatedRoom }
+    const source = buildPromptGeneratedRoomSource({
+      generator,
+      rawUserPrompt: 'SECRET_PROMPT_should_not_reach_objective',
+      generatorSeed: 'safe structural seed',
+      logger: noopLogger,
+      fallbackRoom: FALLBACK,
+    })
+
+    const result = await source.getRoom()
+    expect(result.ok).toBe(true)
+    if (!result.ok) throw new Error('expected generated room')
+
+    const target = result.room.objects.find((object) => object.id === 'generated-objective-target')
+    expect(target).toBeDefined()
+    expect(target && 'interaction' in target ? target.interaction?.effect : undefined).toEqual({ kind: 'inspect' })
+
+    const attachment = await buildGeneratedObjectiveAttachment(result.room, new FakeObjectiveGenerator())
+    expect(attachment).not.toBeNull()
+    const condition = attachment!.questSpec.objectives[0]!.condition
+    expect(condition).toEqual({
+      kind: 'room-flag',
+      roomId: 'generated-room',
+      flag: 'interaction:generated-objective-target',
+    })
+    expect(JSON.stringify(attachment)).not.toContain('SECRET_PROMPT')
+  })
+
+  it('generated objective completes through the interaction:<objectId> flag path after enrichment', async () => {
+    const generator: RoomGenerator = {
+      generate: async () => JSON.stringify({
+        schemaVersion: 1,
+        id: 'generated-room',
+        name: 'Generated Room',
+        shell: {
+          dimensions: { width: 18, depth: 18, height: 4 },
+          exits: [{ side: 'north', width: 3 }],
+        },
+        spawn: { position: [0, 1.7, 5] },
+        objects: [{ type: 'paper', position: [0, 0, -2] }],
+      }),
+    }
+    const source = buildPromptGeneratedRoomSource({
+      generator,
+      rawUserPrompt: 'quiet document room',
+      generatorSeed: 'quiet document seed',
+      logger: noopLogger,
+      fallbackRoom: FALLBACK,
+    })
+    const result = await source.getRoom()
+    expect(result.ok).toBe(true)
+    if (!result.ok) throw new Error('expected generated room')
+
+    const attachment = await buildGeneratedObjectiveAttachment(result.room, new FakeObjectiveGenerator())
+    expect(attachment).not.toBeNull()
+    const condition = attachment!.questSpec.objectives[0]!.condition
+    expect(condition.kind).toBe('room-flag')
+    if (condition.kind !== 'room-flag') throw new Error('expected room-flag condition')
+    expect(condition.flag).toBe('interaction:generated-objective-target')
+
+    const completed = evaluateQuest(
+      attachment!.questSpec,
+      makeState({
+        currentRoomId: result.room.id,
+        roomStates: { [result.room.id]: { visited: true, flags: { [condition.flag]: true } } },
+      }),
+    )
+    expect(completed.status).toBe('complete')
+  })
+
+  it('fake generated room keeps its baked objective target unchanged on the prompt path', async () => {
+    const source = buildPromptGeneratedRoomSource({
+      generator: new FakeRoomGenerator(),
+      rawUserPrompt: 'a quiet archive',
+      generatorSeed: 'a quiet archive',
+      logger: noopLogger,
+      fallbackRoom: FALLBACK,
+    })
+    const result = await source.getRoom()
+    expect(result.ok).toBe(true)
+    if (!result.ok) throw new Error('expected generated room')
+
+    const bakedTarget = result.room.objects.find((object) => object.id === 'objective-document')
+    expect(bakedTarget).toBeDefined()
+    expect(result.room.objects.some((object) => object.id === 'generated-objective-target')).toBe(false)
+
+    const attachment = await buildGeneratedObjectiveAttachment(result.room, new FakeObjectiveGenerator())
+    expect(attachment?.questSpec.objectives[0]?.condition).toEqual({
+      kind: 'room-flag',
+      roomId: result.room.id,
+      flag: 'interaction:objective-document',
+    })
+  })
+
+  it('adjacent generated rooms remain excluded from objective target enrichment', async () => {
+    const generator: RoomGenerator = {
+      generate: async () => JSON.stringify({
+        schemaVersion: 1,
+        id: 'adjacent-room',
+        name: 'Adjacent Room',
+        shell: {
+          dimensions: { width: 18, depth: 18, height: 4 },
+          exits: [{ side: 'north', width: 3 }],
+        },
+        spawn: { position: [0, 1.7, 5] },
+        objects: [
+          {
+            type: 'book',
+            position: [0, 0, -2],
+            interaction: { key: 'E', prompt: 'Read', body: 'Some pages.' },
+          },
+        ],
+      }),
+    }
+    const source = new GeneratedRoomSource(generator, 'adjacent:room-a', noopLogger, FALLBACK)
+
+    const result = await source.getRoom()
+    expect(result.ok).toBe(true)
+    if (!result.ok) throw new Error('expected generated room')
+
+    const book = result.room.objects.find((object) => object.type === 'book')
+    expect(book?.id).toBeUndefined()
+    expect(book && 'interaction' in book ? book.interaction?.effect : undefined).toBeUndefined()
+    await expect(buildGeneratedObjectiveAttachment(result.room, new FakeObjectiveGenerator())).resolves.toBeNull()
   })
 })
