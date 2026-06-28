@@ -43,6 +43,8 @@ describe('exit helpers', () => {
   it('maps navigation outcomes to calm user-facing messages', () => {
     expect(navigationResultMessage({ status: 'rejected', reason: 'missing-exit' }))
       .toBe('The way is blocked.')
+    expect(navigationResultMessage({ status: 'rejected', reason: 'blocked' }))
+      .toBe('The north arch is barred until you deal with Steward Malik.')
     expect(navigationResultMessage({ status: 'rejected', reason: 'already-here' }))
       .toBe('You are already here.')
     expect(navigationResultMessage({ status: 'failed', reason: 'conflict' }))

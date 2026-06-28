@@ -18,6 +18,9 @@ export function buildExitLookup(room: LoadedRoom): ExitLookup {
 
 export function navigationResultMessage(result: NavigationResult): string | undefined {
   if (result.status === 'navigated') return undefined
+  if (result.status === 'rejected' && result.reason === 'blocked') {
+    return 'The north arch is barred until you deal with Steward Malik.'
+  }
   if (result.status === 'rejected' && result.reason === 'already-here') {
     return 'You are already here.'
   }

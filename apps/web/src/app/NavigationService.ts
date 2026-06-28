@@ -6,7 +6,7 @@ import type { WorldSession } from '../world-session/WorldSession'
 
 export type NavigationResult =
   | { status: 'navigated'; room: LoadedRoom; state: WorldState; cacheHit: boolean }
-  | { status: 'rejected'; reason: 'missing-exit' | 'unknown-room' | 'already-here' }
+  | { status: 'rejected'; reason: 'missing-exit' | 'unknown-room' | 'already-here' | 'blocked' }
   | {
       status: 'failed'
       reason: 'conflict' | 'not-found' | 'invalid-room' | 'unavailable'

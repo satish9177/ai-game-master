@@ -33,6 +33,7 @@ import type { NavigationResult } from './app/NavigationService'
 import { PromptBar } from './app/PromptBar'
 import { buildRestoredPlay } from './app/buildRestoredPlay'
 import { computeDerivedViews } from './app/derivedViews'
+import { navigateWithExitGate } from './app/gatedNavigation'
 import { LocalStorageSaveSlotStore } from './app/saveSlotStore'
 import { createConsoleLogger } from './platform/logger/consoleLogger'
 import { SystemClock } from './platform/system/clock'
@@ -508,9 +509,17 @@ function App() {
 
   const handleNavigate = useCallback(async (toRoomId: string): Promise<NavigationResult> => {
     if (!activePlay?.navigation) return { status: 'rejected', reason: 'missing-exit' }
-    const result = await activePlay.navigation.navigate({
+    const navigation = activePlay.navigation
+    const result = await navigateWithExitGate({
       sessionId: activePlay.sessionId,
+      fromRoomId: activePlay.room.id,
       toRoomId,
+      demoQuestEnabled: activePlay.questSpec != null,
+      getWorldState: (sessionId) => worldSession.getWorldState(sessionId),
+      navigate: () => navigation.navigate({
+        sessionId: activePlay.sessionId,
+        toRoomId,
+      }),
     })
     if (result.status === 'navigated') {
       setActivePlay((current) => current?.sessionId === activePlay.sessionId
