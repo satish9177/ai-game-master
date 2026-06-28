@@ -52,10 +52,11 @@ Throughout these docs:
   Generated Room Theme Vocabulary v0 — fake/generated assembly + browser composition;
   Generated Room Objective Target Enrichment v0 — generated assembly/domain;
   Real Generated Objective Provider v0 — generation + app composition;
-  NPC Dialogue Room Context v0 — browser/domain/dialogue).
-- 🔜 **Planned** — designed and approved, not yet built (next slices). Current:
-  Generated Story Objective Contract v0 — domain/quests/assembly + dialogue/UI
-  ([ADR-0047](./decisions/ADR-0047-generated-story-objective-contract-v0.md)).
+  NPC Dialogue Room Context v0 — browser/domain/dialogue;
+  Generated Story Objective Contract v0 — domain/quests/assembly + dialogue/UI;
+  Multi-Call Usage Guardrails / Optional Objective Budget v0 — browser/session-local
+  ([ADR-0050](./decisions/ADR-0050-multi-call-usage-guardrails-v0.md)).
+- 🔜 **Planned** — designed and approved, not yet built (next slices). None currently.
 - ❌ **Not built** — future shape only; documented so we don't paint into a corner.
 
 ## Status today (Renderer Foundation v0)
@@ -640,7 +641,7 @@ the generated-room domain pipeline
 
 ## Generated Story Objective Contract v0
 
-🔜 **Planned, domain/quests/assembly + dialogue/UI.** Generated Story Objective Contract v0
+✅ **Implemented, domain/quests/assembly + dialogue/UI.** Generated Story Objective Contract v0
 delivers a narrow, validated data contract for a generated story objective proposal and a pure
 validate-or-drop assembler that converts a valid proposal into the existing trusted `QuestSpec`,
 enabling prompt-generated rooms to carry one small story beat without changing the quest engine

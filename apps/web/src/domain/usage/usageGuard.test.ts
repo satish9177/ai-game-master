@@ -3,6 +3,7 @@ import {
   initialUsageState,
   recordAttempt,
   resetUsage,
+  canAttemptOptional,
   evaluate,
   type UsageGuardConfig,
 } from './usageGuard'
@@ -43,6 +44,66 @@ describe('resetUsage', () => {
 
   it('returns a fresh object on each call', () => {
     expect(resetUsage()).not.toBe(resetUsage())
+  })
+})
+
+describe('canAttemptOptional', () => {
+  const cap10: UsageGuardConfig = { cap: 10, enabled: true }
+  const disabled: UsageGuardConfig = { cap: 10, enabled: false }
+
+  describe('disabled guard', () => {
+    it('allows count 0', () => {
+      expect(canAttemptOptional({ count: 0 }, disabled)).toBe(true)
+    })
+
+    it('allows count above cap', () => {
+      expect(canAttemptOptional({ count: 100 }, disabled)).toBe(true)
+    })
+  })
+
+  describe('enabled guard', () => {
+    it('allows count 0 below cap', () => {
+      expect(canAttemptOptional({ count: 0 }, cap10)).toBe(true)
+    })
+
+    it('allows cap - 2', () => {
+      expect(canAttemptOptional({ count: 8 }, cap10)).toBe(true)
+    })
+
+    it('allows cap - 1', () => {
+      expect(canAttemptOptional({ count: 9 }, cap10)).toBe(true)
+    })
+
+    it('rejects count == cap', () => {
+      expect(canAttemptOptional({ count: 10 }, cap10)).toBe(false)
+    })
+
+    it('rejects count > cap', () => {
+      expect(canAttemptOptional({ count: 11 }, cap10)).toBe(false)
+    })
+  })
+
+  describe('cap 1 behavior', () => {
+    const cap1: UsageGuardConfig = { cap: 1, enabled: true }
+
+    it('allows count 0', () => {
+      expect(canAttemptOptional({ count: 0 }, cap1)).toBe(true)
+    })
+
+    it('rejects count 1', () => {
+      expect(canAttemptOptional({ count: 1 }, cap1)).toBe(false)
+    })
+  })
+
+  describe('purity', () => {
+    it('does not mutate state or config inputs', () => {
+      const state = { count: 9 }
+      const config = { cap: 10, enabled: true }
+      canAttemptOptional(state, config)
+      expect(state.count).toBe(9)
+      expect(config.cap).toBe(10)
+      expect(config.enabled).toBe(true)
+    })
   })
 })
 

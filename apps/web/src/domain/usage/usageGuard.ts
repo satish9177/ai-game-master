@@ -28,6 +28,11 @@ export function resetUsage(): UsageGuardState {
   return { count: 0 }
 }
 
+export function canAttemptOptional(state: UsageGuardState, config: UsageGuardConfig): boolean {
+  if (!config.enabled) return true
+  return state.count < config.cap
+}
+
 /**
  * Derive the display verdict from the current count and config.
  * Pure — no I/O, no mutation, no React/provider imports.

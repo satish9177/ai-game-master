@@ -25,7 +25,7 @@ import { FakeWorldBibleSeeder } from './generation/FakeWorldBibleSeeder'
 import { readLlmConfig } from './app/llmConfig'
 import { selectRoomGenerator } from './app/selectRoomGenerator'
 import { selectObjectiveGenerator } from './app/selectObjectiveGenerator'
-import { evaluate, recordAttempt, initialUsageState } from './domain/usage/usageGuard'
+import { evaluate, recordAttempt, initialUsageState, canAttemptOptional } from './domain/usage/usageGuard'
 import type { UsageGuardConfig } from './domain/usage/usageGuard'
 import { ErrorBoundary } from './app/ErrorBoundary'
 import { AdjacentRoomPregenerator } from './app/AdjacentRoomPregenerator'
@@ -384,9 +384,19 @@ function App() {
         const generatedNavigation = new NavigationService(worldSession, generatedPregenerator, logger)
         generatedPregenerator.warmAdjacent(result.room)
         const initialPlayer = projectPlayerHud(started.state)
-        const generatedObjective = result.provenance === 'generated'
-          ? await buildGeneratedObjectiveAttachment(result.room, objectiveGenerator)
-          : null
+        let generatedObjective: Awaited<ReturnType<typeof buildGeneratedObjectiveAttachment>> = null
+        if (result.provenance === 'generated') {
+          const objectiveAllowed = canAttemptOptional(
+            { count: usageCountRef.current },
+            { cap: guardCap, enabled: guardEnabled },
+          )
+          if (objectiveAllowed) {
+            logger.info('optional objective generation allowed', { count: usageCountRef.current, cap: guardCap })
+            generatedObjective = await buildGeneratedObjectiveAttachment(result.room, objectiveGenerator)
+          } else {
+            logger.info('optional objective generation skipped', { count: usageCountRef.current, cap: guardCap, reason: 'usage-cap' })
+          }
+        }
         if (version !== requestVersion.current) return
         questSpecRef.current = generatedObjective?.questSpec ?? null
         setQuestHints(generatedObjective
