@@ -300,6 +300,7 @@ Implemented or shipped areas include:
 * generated room composition and visual vocabulary foundations
 * NPC dialogue room-context grounding
 * generated-room NPC presence
+* real generated objective provider v0
 
 Do not paste full shipped-feature tables into this file. Detailed shipped notes should live in ADRs, architecture docs, or a dedicated status file.
 

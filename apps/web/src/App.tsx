@@ -21,10 +21,10 @@ import { GeneratedRoomSource } from './room/GeneratedRoomSource'
 import { RoomRegistry } from './room/RoomRegistry'
 import { SessionRoomCache } from './room/SessionRoomCache'
 import { FakeRoomGenerator } from './generation/FakeRoomGenerator'
-import { FakeObjectiveGenerator } from './generation/FakeObjectiveGenerator'
 import { FakeWorldBibleSeeder } from './generation/FakeWorldBibleSeeder'
 import { readLlmConfig } from './app/llmConfig'
 import { selectRoomGenerator } from './app/selectRoomGenerator'
+import { selectObjectiveGenerator } from './app/selectObjectiveGenerator'
 import { evaluate, recordAttempt, initialUsageState } from './domain/usage/usageGuard'
 import type { UsageGuardConfig } from './domain/usage/usageGuard'
 import { ErrorBoundary } from './app/ErrorBoundary'
@@ -78,7 +78,9 @@ const guardCap = llmConfig.sessionCap
 // Background adjacent pre-generation stays deterministic and offline: it always
 // uses a FakeRoomGenerator, so warming never calls a real provider or spends.
 const adjacentGenerator = new FakeRoomGenerator()
-const objectiveGenerator = new FakeObjectiveGenerator()
+const { generator: objectiveGenerator, log: objectiveGeneratorSelectionLog } =
+  selectObjectiveGenerator(llmConfig)
+logger.info('objective generator selected', objectiveGeneratorSelectionLog)
 const worldBibleSeeder = new FakeWorldBibleSeeder()
 const idGenerator = new UuidGenerator()
 const worldStore = new InMemoryWorldStore()

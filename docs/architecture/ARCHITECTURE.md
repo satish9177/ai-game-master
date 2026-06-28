@@ -51,6 +51,7 @@ Throughout these docs:
   Adjacent Room Theme Continuity v0 — browser composition/domain projection;
   Generated Room Theme Vocabulary v0 — fake/generated assembly + browser composition;
   Generated Room Objective Target Enrichment v0 — generated assembly/domain;
+  Real Generated Objective Provider v0 — generation + app composition;
   NPC Dialogue Room Context v0 — browser/domain/dialogue).
 - 🔜 **Planned** — designed and approved, not yet built (next slices). Current:
   Generated Story Objective Contract v0 — domain/quests/assembly + dialogue/UI
@@ -689,6 +690,54 @@ stage in `assembleRoom`
   `objective-document` object; the stage no-ops immediately, output byte-identical.
 - **Benign normalization:** keeps `provenance: generated`, shows no notice, reports only
   `objectiveTargetEnriched: boolean`.
+
+## Real Generated Objective Provider v0
+
+✅ **Implemented, generation + app composition.** Real Generated Objective Provider v0 wires a
+real, network-backed `ObjectiveGenerator` (`OpenAICompatibleObjectiveGenerator`) behind the
+unchanged `ObjectiveGenerator` port so prompt-generated DeepSeek/OpenAI first rooms can receive
+an objective proposal from the same configured real provider family, while the deterministic
+fake remains the default/fallback
+([ADR-0049](./decisions/ADR-0049-real-generated-objective-provider-v0.md)).
+
+- **Same port, same safety gate.** `OpenAICompatibleObjectiveGenerator` implements the unchanged
+  `ObjectiveGenerator` port. `buildGeneratedObjectiveAttachment` and `assembleObjective`
+  remain the sole trust and satisfiability gate: parse, strict schema, satisfiability, and text
+  sanitization. A hallucinated or ineligible `objectId`, invalid JSON, unsafe JSON, schema
+  violation, provider failure, timeout, empty output, or unsatisfiable condition all degrade to
+  `null` / no quest.
+- **Mirrors the real room provider (ADR-0023).** One non-streaming POST to any
+  OpenAI-compatible chat-completions endpoint; injected `LlmTransport` seam; hard
+  `AbortController` timeout (`OBJECTIVE_TIMEOUT_MS = 12_000` ms); no retry; returns
+  `choices[0].message.content` verbatim. Fixed-code error throws only
+  (`objective-llm-request-failed` / `objective-llm-timeout` / `objective-llm-empty-response`);
+  no API key, request/response body, or generated text in errors.
+- **`selectObjectiveGenerator(config)`** mirrors `selectRoomGenerator`. Reuses the same
+  `LlmConfig` / `isRealProviderComplete` / `REAL_PROVIDER_BASE_URLS` — no new `VITE_*`
+  environment variables. `FakeObjectiveGenerator` is selected when config is incomplete.
+- **Closed structural digest only.** `buildObjectivePromptMessages` projects only
+  `listInteractObjectiveCandidates(room) → [{ objectId, type }]` into the prompt. No raw room
+  JSON, user prompt, room/object names, descriptions, interaction prompt/title/body text, hints,
+  generated text, or provider output reaches the objective prompt or logs.
+- **Provider is raw-text only.** It returns `choices[0].message.content` verbatim and does not
+  parse, repair, strip code fences, or validate objective JSON. The unchanged assembler owns
+  every semantic decision.
+- **`interact-object` only in v0.** ADR-0048 enrichment guarantees one eligible
+  `interact-object` target; `resolve-encounter` and `visit-room` generation are deferred.
+- **Prompt-generated first room only.** App keeps the existing `result.provenance === 'generated'`
+  gate. Authored/demo bootstrap keeps its authored quest; adjacent generated rooms do not call
+  the real objective provider and are not objective-enriched by this feature.
+- **Blocking v0 call, no separate meter.** Objective generation is awaited before room entry on
+  the real prompt path. There is no async objective attach and no objective-specific usage
+  meter in v0.
+- **All safety properties preserved.** `assembleObjective` unchanged; no generated mechanical
+  gates, navigation locks, quest engine, generated flag strings, RoomSpec/schema, world-state,
+  event/reducer, SaveGame, persistence, backend, renderer, or navigation-gate changes.
+- **Dev-only / BYOK caveat (same as ADR-0023).** `VITE_*` keys are inlined into the browser
+  bundle; v0 is local-dev only. Hosted production moves the provider server-side later.
+- **Deferred.** Async objective attach; objective usage meter; shared predicate extraction with
+  `FakeObjectiveGenerator` / `objectiveCandidates`; generated mechanical gates; a quest engine;
+  multi-step objectives; objective persistence; richer provider/router support.
 
 ## Isometric Camera Foundation
 

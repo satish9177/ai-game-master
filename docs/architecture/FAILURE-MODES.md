@@ -417,6 +417,57 @@ normalization stage before the final `validateRoom`.
   the promoted object's id, type string, name, interaction text, generated JSON, room name, or
   provider output. No new content-bearing diagnostic was added.
 
+## 4j. Real objective provider failure / degrade ✅ v0 (degrade / null → no quest)
+
+The opt-in `OpenAICompatibleObjectiveGenerator` (OpenAI/DeepSeek; off by default) makes one
+real network call on the prompt-generated first-room path, **after** the room has been
+assembled. Like the real room provider (case 4d), every failure degrades safely: incomplete
+config selects `FakeObjectiveGenerator`, and any hard failure maps to `null` — the room plays
+normally with no quest tracker and no NPC hint
+([ADR-0049](./decisions/ADR-0049-real-generated-objective-provider-v0.md)).
+
+| Situation | Detection | Handling / result | Logging |
+| --- | --- | --- | --- |
+| Incomplete config (provider/key/model) | `selectObjectiveGenerator` → `isRealProviderComplete` false | select `FakeObjectiveGenerator`; offline, deterministic | `provider:'fake'`, fixed reason `config-disabled` |
+| Network error / non-2xx / non-JSON body | `OpenAICompatibleObjectiveGenerator` | throw fixed-code `Error` → `buildGeneratedObjectiveAttachment` catch → `null` → no quest | fixed code `objective-llm-request-failed` via caller |
+| Hard timeout (abort) | `AbortController` (`OBJECTIVE_TIMEOUT_MS = 12_000` ms) | same: throw → catch → `null` → no quest | fixed code `objective-llm-timeout` via caller |
+| Empty `choices[0].message.content` | content check in provider | return `null` (no throw) → no quest | no log line; `null` returned to `buildGeneratedObjectiveAttachment` |
+| Malformed / fenced / non-JSON model output | `assembleObjective` stage 1: `JSON.parse` fails | `parse-failed` → `spec: null` → no quest; room plays normally | `dropCode: 'parse-failed'`, boolean diagnostics only |
+| Schema-invalid / extra keys / flag-key string in output | `assembleObjective` stage 2: strict zod | `schema-invalid` → `null` → no quest | `dropCode: 'schema-invalid'`, `conditionKind: null` |
+| Hallucinated or ineligible `objectId` | `assembleObjective` stage 3: satisfiability gate | `condition-unsatisfiable` → `null` → no quest | `conditionUnsatisfiable: true`, `conditionKind` enum |
+| Valid, satisfiable proposal with real provider | `assembleObjective` stages 1–5: clean pass | `QuestSpec` assembled; tracker + NPC hint appear | `objectiveAttached: true`, `conditionKind` enum |
+| Unexpected throw from provider or assembler | `buildGeneratedObjectiveAttachment` outer `try/catch` | `null` → no quest | no additional log line (catch is silent; room logs provenance as normal) |
+
+- **Bounded:** one call, `OBJECTIVE_TIMEOUT_MS = 12_000` ms hard cap, **no retry**.
+  Adjacent pre-generation, authored bootstrap, repaired rooms, and fallback rooms never reach
+  the objective provider.
+- **Blocking in v0:** the objective call is awaited before `enterActivePlay`, so a timeout
+  adds up to 12 s of pre-render latency on the real path. Async objective attach is deferred.
+- **Sanitized errors are a hard requirement.** The provider catches all transport/network
+  failures and rethrows a fixed-shape `Error` whose `message` is one of the three safe codes
+  above — never the API key, request/response body, generated content, or raw error detail.
+  A unit test asserts the thrown message contains no substring of the injected key, room id,
+  object id, or response body.
+- **Selection log safety.** The composition root logs only `{ provider, model }` (real) or
+  `{ provider:'fake', reason:'config-disabled' }`. Never the API key, prompt digest,
+  candidates list, generated JSON, generated text, object ids, or room name.
+- **Closed prompt digest.** The real objective prompt contains only structural candidate pairs:
+  `{ objectId, type }`. It never includes raw room JSON, user prompt, object names,
+  descriptions, interaction prompt/title/body, hints, generated text, or provider output.
+- **`assembleObjective` is unchanged.** Its parse → schema → satisfiability → sanitize →
+  build pipeline is the sole trust boundary. The provider is upstream of it and cannot weaken it.
+- **Room is always unaffected.** No objective failure, drop, or degradation changes the room's
+  provenance, renderer behavior, or world state. The existing fallback/repaired notice is
+  independent of the objective pipeline.
+- **No mechanical gates.** v0 adds no generated gates, navigation locks, quest engine,
+  persistence, save fields, RoomSpec/schema changes, world events, reducers, backend routes, or
+  navigation-gate changes.
+- **Deferred.** Async objective attach, an objective usage meter, shared predicate extraction
+  with `FakeObjectiveGenerator` / `objectiveCandidates`, generated mechanical gates, a quest
+  engine, multi-step objectives, objective persistence, and richer provider/router support.
+- **Dev-only / BYOK caveat (same as case 4d).** `VITE_*` keys are inlined into the browser
+  bundle; v0 is local-dev only. Hosted production moves the provider server-side later.
+
 ## 5. Backend / network failure ✅ API edge v0 · 🔜 browser client
 
 The Node API edge exists, but the browser does not call it yet. v0 therefore

@@ -5,6 +5,8 @@ import type { RoomGenerator } from '../domain/ports/RoomGenerator'
 import type { RoomSpec } from '../domain/roomSpec'
 import type { WorldState } from '../domain/world/worldState'
 import { assembleRoom } from '../domain/assembleRoom'
+import type { RoomProvenance } from '../domain/assembleRoom'
+import { demoQuestSpec } from '../domain/examples/demoQuest'
 import { fallbackRoom } from '../domain/examples/fallbackRoom'
 import { evaluateQuest } from '../domain/quests/evaluateQuest'
 import { FakeObjectiveGenerator } from '../generation/FakeObjectiveGenerator'
@@ -77,6 +79,16 @@ function makeState(overrides: Partial<WorldState> = {}): WorldState {
     updatedAt: UPDATED_AT,
     ...overrides,
   }
+}
+
+async function attachObjectiveLikeApp(
+  room: LoadedRoom,
+  provenance: RoomProvenance | undefined,
+  generator: ObjectiveGenerator,
+) {
+  return provenance === 'generated'
+    ? buildGeneratedObjectiveAttachment(room, generator)
+    : Promise.resolve(null)
 }
 
 describe('buildGeneratedObjectiveQuestSpec', () => {
@@ -155,6 +167,68 @@ describe('buildGeneratedObjectiveQuestSpec', () => {
     }
 
     await expect(buildGeneratedObjectiveAttachment(makeRoom(), generator)).resolves.toBeNull()
+  })
+
+  it('App-equivalent provenance gate attaches only on generated provenance', async () => {
+    const room = makeRoom()
+    const calls: string[] = []
+    const generator: ObjectiveGenerator = {
+      generate: async (generatedRoom) => {
+        calls.push(generatedRoom.id)
+        return JSON.stringify({
+          title: 'Real objective',
+          description: 'Inspect the object.',
+          hint: 'Look for the object.',
+          completionHint: 'The object is handled.',
+          condition: { kind: 'interact-object', objectId: 'note-1' },
+        })
+      },
+    }
+
+    await expect(attachObjectiveLikeApp(room, 'fallback', generator)).resolves.toBeNull()
+    await expect(attachObjectiveLikeApp(room, 'repaired', generator)).resolves.toBeNull()
+    await expect(attachObjectiveLikeApp(room, undefined, generator)).resolves.toBeNull()
+    expect(calls).toEqual([])
+
+    const attachment = await attachObjectiveLikeApp(room, 'generated', generator)
+    expect(attachment?.questSpec.objectives[0]?.condition).toEqual({
+      kind: 'room-flag',
+      roomId: 'generated-room',
+      flag: 'interaction:note-1',
+    })
+    expect(calls).toEqual(['generated-room'])
+  })
+
+  it('provider failure and invalid output safely degrade to no quest', async () => {
+    const room = makeRoom()
+    const throwingGenerator: ObjectiveGenerator = {
+      generate: async () => {
+        throw new Error('objective-llm-request-failed')
+      },
+    }
+    const invalidGenerator: ObjectiveGenerator = {
+      generate: async () => '{"title":"not valid for schema"}',
+    }
+
+    await expect(attachObjectiveLikeApp(room, 'generated', throwingGenerator)).resolves.toBeNull()
+    await expect(attachObjectiveLikeApp(room, 'generated', invalidGenerator)).resolves.toBeNull()
+  })
+
+  it('authored/demo path does not call the real objective generator', async () => {
+    let calls = 0
+    const realGenerator: ObjectiveGenerator = {
+      generate: async () => {
+        calls += 1
+        return '{}'
+      },
+    }
+
+    const authoredQuest = evaluateQuest(demoQuestSpec, makeState({ currentRoomId: 'throne-room' }))
+
+    expect(authoredQuest.status).toBe('active')
+    expect(calls).toBe(0)
+    await expect(attachObjectiveLikeApp(makeRoom(), undefined, realGenerator)).resolves.toBeNull()
+    expect(calls).toBe(0)
   })
 
   it('does not expose prompt, room, object, or raw provider text through the trusted spec', async () => {
@@ -363,5 +437,38 @@ describe('generated objective on a real prompt-generated room', () => {
     expect(book?.id).toBeUndefined()
     expect(book && 'interaction' in book ? book.interaction?.effect : undefined).toBeUndefined()
     await expect(buildGeneratedObjectiveAttachment(result.room, new FakeObjectiveGenerator())).resolves.toBeNull()
+  })
+
+  it('adjacent generated rooms do not call the real objective generator', async () => {
+    let objectiveCalls = 0
+    const objectiveGenerator: ObjectiveGenerator = {
+      generate: async () => {
+        objectiveCalls += 1
+        return '{}'
+      },
+    }
+    const roomGenerator: RoomGenerator = {
+      generate: async () => JSON.stringify({
+        schemaVersion: 1,
+        id: 'adjacent-room',
+        name: 'Adjacent Room',
+        shell: {
+          dimensions: { width: 18, depth: 18, height: 4 },
+          exits: [{ side: 'north', width: 3 }],
+        },
+        spawn: { position: [0, 1.7, 5] },
+        objects: [{ type: 'paper', position: [0, 0, -2] }],
+      }),
+    }
+    const source = new GeneratedRoomSource(roomGenerator, 'adjacent:room-b', noopLogger, FALLBACK)
+
+    const result = await source.getRoom()
+
+    expect(result.ok).toBe(true)
+    expect(objectiveCalls).toBe(0)
+    if (result.ok) {
+      await expect(attachObjectiveLikeApp(result.room, undefined, objectiveGenerator)).resolves.toBeNull()
+    }
+    expect(objectiveCalls).toBe(0)
   })
 })
