@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import { assembleObjective } from '../domain/quests/assembleObjective'
+import { assembleRoom } from '../domain/assembleRoom'
+import { fallbackRoom } from '../domain/examples/fallbackRoom'
 import { loadRoomSpec, type LoadedRoom } from '../domain/loadRoomSpec'
 import type { RoomSpec } from '../domain/roomSpec'
 import { FakeObjectiveGenerator } from './FakeObjectiveGenerator'
+import { FakeRoomGenerator } from './FakeRoomGenerator'
 
 function makeRoom(overrides: Partial<RoomSpec> = {}): LoadedRoom {
   return loadRoomSpec({
@@ -129,6 +132,29 @@ describe('FakeObjectiveGenerator', () => {
     expect(raw).not.toContain('Object prompt')
     expect(raw).not.toContain('Provider body')
     expect(raw).not.toContain('generated JSON')
+  })
+
+  // Regression for the Slice 4 smoke gap: real FakeRoomGenerator output (run
+  // through the assembly pipeline, as the App does) must expose an interactable
+  // the generator can anchor a satisfiable objective to.
+  it('selects a satisfiable objective object from a real prompt-generated room', async () => {
+    const fallback = loadRoomSpec(fallbackRoom)
+    for (const prompt of ['a quiet archive', 'a haunted hall', 'a dripping crypt']) {
+      const assembled = assembleRoom(await new FakeRoomGenerator().generate(prompt), fallback)
+      expect(assembled.diagnostics.provenance).toBe('generated')
+
+      const raw = await new FakeObjectiveGenerator().generate(assembled.room)
+      expect(raw, `no objective for prompt "${prompt}"`).not.toBeNull()
+
+      const parsed = JSON.parse(raw!) as { condition: { kind: string; objectId: string } }
+      const target = assembled.room.objects.find((object) => object.id === parsed.condition.objectId)
+      expect(target, 'objective object must exist in the room').toBeDefined()
+      const interaction = target && 'interaction' in target ? target.interaction : undefined
+      expect(interaction?.effect?.kind).toBe('inspect')
+
+      // It round-trips into a valid QuestSpec on the same room.
+      expect(assembleObjective(raw!, assembled.room).diagnostics.objectiveValid).toBe(true)
+    }
   })
 })
 

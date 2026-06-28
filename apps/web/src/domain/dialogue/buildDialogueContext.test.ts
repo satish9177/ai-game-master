@@ -125,6 +125,8 @@ describe('buildDialogueContext', () => {
     const questContext: QuestDialogueContext = {
       activeObjectiveId: 'claim-tribute-coin',
       status: 'active',
+      hint: 'Sanitized generated hint.',
+      completionHint: 'Sanitized generated completion.',
     }
     const context = buildDialogueContext(
       state,
@@ -134,7 +136,12 @@ describe('buildDialogueContext', () => {
       questContext,
     )
 
-    expect(context.quest).toEqual({ activeObjectiveId: 'claim-tribute-coin', status: 'active' })
+    expect(context.quest).toEqual({
+      activeObjectiveId: 'claim-tribute-coin',
+      status: 'active',
+      hint: 'Sanitized generated hint.',
+      completionHint: 'Sanitized generated completion.',
+    })
     expect(context.quest).not.toBe(questContext)
   })
 

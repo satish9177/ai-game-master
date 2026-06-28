@@ -2,12 +2,24 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import { AppRoomEntryOverlay } from './App'
 import { buildPromptGeneratedRoomSource } from './app/buildPromptGeneratedRoomSource'
+import { buildGeneratedObjectiveAttachment, buildGeneratedObjectiveQuestSpec } from './app/generatedObjective'
 import { FALLBACK_NOTICE } from './app/fallbackNotice'
 import { buildRoomIntroView } from './app/roomIntro'
 import { loadRoomSpec } from './domain/loadRoomSpec'
 import type { LoadedRoom } from './domain/loadRoomSpec'
+import { evaluateQuest } from './domain/quests/evaluateQuest'
+import type { WorldState } from './domain/world/worldState'
+import type { ObjectiveGenerator } from './domain/ports/ObjectiveGenerator'
 import type { RoomGenerator } from './domain/ports/RoomGenerator'
 import type { Logger } from './platform/logger/Logger'
+import { computeDerivedViews } from './app/derivedViews'
+import { QuestTracker } from './renderer/ui/QuestTracker'
+import { FakeObjectiveGenerator } from './generation/FakeObjectiveGenerator'
+import { FakeRoomGenerator } from './generation/FakeRoomGenerator'
+import { FakeWorldBibleSeeder } from './generation/FakeWorldBibleSeeder'
+import { FakeNPCDialogueProvider } from './dialogue/FakeNPCDialogueProvider'
+import { prepareGeneratedRoomSeed } from './app/worldBible'
+import { themeVocabulary } from './domain/generatedRoomThemeVocabulary'
 
 const noopLogger: Logger = {
   debug() {},
@@ -18,6 +30,10 @@ const noopLogger: Logger = {
     return noopLogger
   },
 }
+
+const WORLD_ID = '00000000-0000-4000-8000-000000000001'
+const SESSION_ID = '00000000-0000-4000-8000-000000000002'
+const UPDATED_AT = '2026-01-01T00:00:00.000Z'
 
 function makeRoom(objects: unknown[], id = 'room-a', name = 'ruined investigation room'): LoadedRoom {
   return loadRoomSpec({
@@ -31,6 +47,21 @@ function makeRoom(objects: unknown[], id = 'room-a', name = 'ruined investigatio
     spawn: { position: [0, 1.7, 6] },
     objects,
   })
+}
+
+function makeState(overrides: Partial<WorldState> = {}): WorldState {
+  return {
+    schemaVersion: 1,
+    worldId: WORLD_ID,
+    sessionId: SESSION_ID,
+    currentRoomId: 'generated-room',
+    player: { health: { current: 75, max: 100 }, status: [] },
+    inventory: [],
+    roomStates: {},
+    revision: 1,
+    updatedAt: UPDATED_AT,
+    ...overrides,
+  }
 }
 
 function renderOverlay(room: LoadedRoom | null, notice: string | null = null, entrySeq = 1) {
@@ -167,5 +198,315 @@ describe('App generated room NPC request wiring', () => {
     if (result.ok) {
       expect(result.room.objects.some((object) => object.type === 'npc')).toBe(false)
     }
+  })
+})
+
+describe('App generated objective prompt-path wiring', () => {
+  it('attaches a trusted QuestSpec when FakeObjectiveGenerator returns valid raw JSON', async () => {
+    const room = makeRoom([
+      {
+        type: 'scroll',
+        id: 'note-1',
+        position: [0, 0, -2],
+        interaction: { key: 'E', prompt: 'Read secret prompt', effect: { kind: 'inspect' } },
+      },
+    ], 'generated-room', 'Secret Generated Room')
+
+    const spec = await buildGeneratedObjectiveQuestSpec(room, new FakeObjectiveGenerator())
+
+    expect(spec).toMatchObject({
+      questId: 'generated-room-objective',
+      title: 'Secure the room',
+      anchorRoomId: 'generated-room',
+      objectives: [
+        {
+          id: 'generated-0',
+          text: 'Investigate the marked feature.',
+          condition: { kind: 'room-flag', roomId: 'generated-room', flag: 'interaction:note-1' },
+        },
+      ],
+    })
+  })
+
+  it('generated QuestSpec works with evaluateQuest when the referenced interaction flag is set', async () => {
+    const room = makeRoom([
+      {
+        type: 'scroll',
+        id: 'note-1',
+        position: [0, 0, -2],
+        interaction: { key: 'E', prompt: 'Read', effect: { kind: 'inspect' } },
+      },
+    ], 'generated-room')
+    const spec = await buildGeneratedObjectiveQuestSpec(room, new FakeObjectiveGenerator())
+
+    expect(spec).not.toBeNull()
+    expect(evaluateQuest(spec!, makeState()).objectives[0]?.done).toBe(false)
+    expect(
+      evaluateQuest(
+        spec!,
+        makeState({
+          roomStates: { 'generated-room': { visited: true, flags: { 'interaction:note-1': true } } },
+        }),
+      ).objectives[0]?.done,
+    ).toBe(true)
+  })
+
+  it('keeps questSpec null for null, bad, or throwing objective results while preserving the room', async () => {
+    const room = makeRoom([
+      { type: 'crate', id: 'crate-1', position: [0, 0, -2] },
+    ], 'generated-room')
+    const before = JSON.stringify(room)
+    const badGenerator: ObjectiveGenerator = { generate: async () => '{"bad"' }
+    const throwingGenerator: ObjectiveGenerator = {
+      generate: async () => {
+        throw new Error('fixed-test-error')
+      },
+    }
+
+    await expect(buildGeneratedObjectiveQuestSpec(room, new FakeObjectiveGenerator())).resolves.toBeNull()
+    await expect(buildGeneratedObjectiveQuestSpec(room, badGenerator)).resolves.toBeNull()
+    await expect(buildGeneratedObjectiveQuestSpec(room, throwingGenerator)).resolves.toBeNull()
+    expect(JSON.stringify(room)).toBe(before)
+  })
+
+  it('does not leak room, object, prompt, or raw provider text into generated quest specs', async () => {
+    const room = makeRoom([
+      {
+        type: 'scroll',
+        id: 'note-1',
+        position: [0, 0, -2],
+        interaction: {
+          key: 'E',
+          prompt: 'Read secret prompt',
+          body: 'Raw provider body should not appear.',
+          effect: { kind: 'inspect' },
+        },
+      },
+    ], 'generated-room', 'Secret Room Name')
+
+    const spec = await buildGeneratedObjectiveQuestSpec(room, new FakeObjectiveGenerator())
+    const dump = JSON.stringify(spec)
+
+    expect(dump).not.toContain('Secret Room Name')
+    expect(dump).not.toContain('Read secret prompt')
+    expect(dump).not.toContain('Raw provider body')
+    expect(dump).not.toContain('generated JSON')
+  })
+
+  it('renders a QuestTracker for a prompt-generated room and completes on interaction', async () => {
+    // Mirror the App's prompt path: real generator → assembly pipeline → objective.
+    const source = buildPromptGeneratedRoomSource({
+      generator: new FakeRoomGenerator(),
+      rawUserPrompt: 'a quiet archive',
+      generatorSeed: 'a quiet archive',
+      logger: noopLogger,
+      fallbackRoom: makeRoom([]),
+    })
+    const result = await source.getRoom()
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+
+    const attachment = await buildGeneratedObjectiveAttachment(result.room, new FakeObjectiveGenerator())
+    expect(attachment).not.toBeNull()
+
+    // The tracker renders (App gates `{quest && <QuestTracker/>}` on this view).
+    const active = computeDerivedViews(
+      makeState({ currentRoomId: result.room.id }),
+      attachment!.questSpec,
+      null,
+    )
+    expect(active.quest).not.toBeNull()
+    const html = renderToStaticMarkup(<QuestTracker view={active.quest!} />)
+    expect(html).toContain('Secure the room')
+    expect(html).toContain('Investigate the marked feature.')
+
+    // Interacting with the chosen object sets its flag and completes the objective.
+    const condition = attachment!.questSpec.objectives[0]!.condition
+    expect(condition.kind).toBe('room-flag')
+    if (condition.kind !== 'room-flag') return
+    const completed = computeDerivedViews(
+      makeState({
+        currentRoomId: result.room.id,
+        roomStates: { [result.room.id]: { visited: true, flags: { [condition.flag]: true } } },
+      }),
+      attachment!.questSpec,
+      null,
+    )
+    expect(completed.quest?.status).toBe('complete')
+  })
+
+  it('prompt-generated objective context can surface hint without demo quest copy', async () => {
+    const room = makeRoom([
+      {
+        type: 'scroll',
+        id: 'note-1',
+        position: [0, 0, -2],
+        interaction: { key: 'E', prompt: 'Read', effect: { kind: 'inspect' } },
+      },
+    ], 'generated-room')
+    const attachment = await buildGeneratedObjectiveAttachment(room, new FakeObjectiveGenerator())
+    expect(attachment).not.toBeNull()
+
+    const provider = new FakeNPCDialogueProvider()
+    const reply = await provider.reply({
+      context: {
+        roomId: 'generated-room',
+        npcId: 'generated-npc',
+        npcName: 'Generated NPC',
+        persona: 'friendly-aide',
+        quest: {
+          activeObjectiveId: 'generated-0',
+          status: 'active',
+          hint: attachment!.hint,
+          completionHint: attachment!.completionHint,
+        },
+        player: { health: { current: 75, max: 100 }, status: [], inventoryItemIds: [] },
+        history: [],
+      },
+    })
+
+    expect(reply.text).toBe(attachment!.hint)
+    expect(reply.text).not.toContain('Steward')
+    expect(reply.text).not.toContain('Malik')
+    expect(reply.text).not.toContain('tribute coffer')
+  })
+})
+
+// Browser-equivalent smoke for the FAKE-provider prompt path. The earlier unit
+// tests fed the raw prompt straight to a default FakeRoomGenerator, skipping the
+// two live-only steps the App actually runs: world-bible seeding (which picks the
+// themePack + a generator SEED that differs from the raw prompt) and the
+// themePack vocabulary. This drives that exact orchestration so a future
+// regression in the seed/themePack wiring is caught instead of slipping through.
+//
+// NOTE on the real-provider gap this codifies: when a REAL room generator is
+// configured the live room has no `objective-document` marker, so the objective
+// degrades to none by design. These tests pin the supported fake-provider path.
+async function runFakePromptPath(prompt: string) {
+  const prepared = await prepareGeneratedRoomSeed(prompt, new FakeWorldBibleSeeder(), noopLogger)
+  // Mirror App.handlePrompt: themePack vocabulary + the world-bible generator seed
+  // (NOT the raw prompt) feed the fake generator through the assembly pipeline.
+  const vocabulary = themeVocabulary(prepared.worldBible?.themePack)
+  const source = buildPromptGeneratedRoomSource({
+    generator: new FakeRoomGenerator(vocabulary),
+    rawUserPrompt: prompt,
+    generatorSeed: prepared.generatorSeed,
+    themePack: prepared.worldBible?.themePack,
+    logger: noopLogger,
+    fallbackRoom: makeRoom([]),
+  })
+  const result = await source.getRoom()
+  if (!result.ok) throw new Error('expected a playable room')
+  // App gates objective attachment on a clean `generated` room.
+  const attachment = result.provenance === 'generated'
+    ? await buildGeneratedObjectiveAttachment(result.room, new FakeObjectiveGenerator())
+    : null
+  return { result, attachment }
+}
+
+describe('App fake-provider prompt path renders a generated QuestTracker', () => {
+  // Includes a post-apoc ("survivor") prompt: the one from the failing smoke,
+  // which routes through a different themePack/seed than the fantasy prompts.
+  const PROMPTS = [
+    'Create a quiet archive room with one survivor NPC, one readable document, one crate, and one exit.',
+    'a quiet archive',
+    'a haunted hall',
+    'a dripping crypt',
+  ]
+
+  it.each(PROMPTS)('attaches a satisfiable objective and renders the tracker for %j', async (prompt) => {
+    const { result, attachment } = await runFakePromptPath(prompt)
+
+    if (!result.ok) throw new Error('expected a playable room')
+    expect(result.provenance).toBe('generated')
+    expect(attachment, `no objective attached for prompt ${JSON.stringify(prompt)}`).not.toBeNull()
+
+    // questSpecRef.current → computeDerivedViews → a non-null quest view is what
+    // gates `{quest && <QuestTracker/>}` in the App.
+    const views = computeDerivedViews(
+      makeState({ currentRoomId: result.room.id }),
+      attachment!.questSpec,
+      null,
+    )
+    expect(views.quest).not.toBeNull()
+
+    const html = renderToStaticMarkup(<QuestTracker view={views.quest!} />)
+    expect(html).toContain('Secure the room')
+    expect(html).toContain('Investigate the marked feature.')
+  })
+
+  it('surfaces the generated hint through the same questStage the App builds', async () => {
+    const { result, attachment } = await runFakePromptPath(
+      'Create a quiet archive room with one survivor NPC, one readable document, one crate, and one exit.',
+    )
+    if (!result.ok) throw new Error('expected a playable room')
+    expect(attachment).not.toBeNull()
+
+    const views = computeDerivedViews(
+      makeState({ currentRoomId: result.room.id }),
+      attachment!.questSpec,
+      null,
+    )
+    expect(views.quest).not.toBeNull()
+
+    // Build the RoomViewer `questStage` exactly as App.tsx does (quest view +
+    // the separate sanitized hint state), then confirm the NPC surfaces the hint.
+    const questStage = {
+      activeObjectiveId: views.quest!.activeObjectiveId,
+      status: views.quest!.status,
+      hint: attachment!.hint,
+      completionHint: attachment!.completionHint,
+    }
+    const reply = await new FakeNPCDialogueProvider().reply({
+      context: {
+        roomId: result.room.id,
+        npcId: 'generated-npc',
+        npcName: 'Generated NPC',
+        persona: 'friendly-aide',
+        quest: questStage,
+        player: { health: { current: 75, max: 100 }, status: [], inventoryItemIds: [] },
+        history: [],
+      },
+    })
+
+    expect(reply.text).toBe(attachment!.hint)
+  })
+
+  it('interacting with the referenced target completes the generated objective', async () => {
+    const { result, attachment } = await runFakePromptPath('a quiet archive')
+    if (!result.ok) throw new Error('expected a playable room')
+    expect(attachment).not.toBeNull()
+
+    const condition = attachment!.questSpec.objectives[0]!.condition
+    expect(condition.kind).toBe('room-flag')
+    if (condition.kind !== 'room-flag') return
+
+    const completed = computeDerivedViews(
+      makeState({
+        currentRoomId: result.room.id,
+        roomStates: { [result.room.id]: { visited: true, flags: { [condition.flag]: true } } },
+      }),
+      attachment!.questSpec,
+      null,
+    )
+    expect(completed.quest?.status).toBe('complete')
+  })
+
+  it('a marker-less room (real-provider shape) degrades to no quest without crashing', async () => {
+    // A room with interactions but NO stable id + inspect effect — the shape a
+    // real provider produces. The objective must degrade to none, not throw.
+    const room = makeRoom([
+      {
+        type: 'book',
+        position: [0, 0, -2],
+        interaction: { key: 'E', prompt: 'Read', body: 'Some pages.' },
+      },
+      { type: 'crate', position: [2, 0, 0] },
+    ])
+    const attachment = await buildGeneratedObjectiveAttachment(room, new FakeObjectiveGenerator())
+    expect(attachment).toBeNull()
+
+    const views = computeDerivedViews(makeState({ currentRoomId: room.id }), null, null)
+    expect(views.quest).toBeNull()
   })
 })

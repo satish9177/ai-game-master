@@ -28,6 +28,8 @@ export type NPCDialogueTurn = {
 export type QuestDialogueContext = {
   activeObjectiveId: string | null
   status: 'active' | 'complete'
+  hint?: string
+  completionHint?: string
 }
 
 export type NPCDialogueContext = {

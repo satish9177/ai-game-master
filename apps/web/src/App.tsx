@@ -21,6 +21,7 @@ import { GeneratedRoomSource } from './room/GeneratedRoomSource'
 import { RoomRegistry } from './room/RoomRegistry'
 import { SessionRoomCache } from './room/SessionRoomCache'
 import { FakeRoomGenerator } from './generation/FakeRoomGenerator'
+import { FakeObjectiveGenerator } from './generation/FakeObjectiveGenerator'
 import { FakeWorldBibleSeeder } from './generation/FakeWorldBibleSeeder'
 import { readLlmConfig } from './app/llmConfig'
 import { selectRoomGenerator } from './app/selectRoomGenerator'
@@ -54,6 +55,7 @@ import { worldBibleToAdjacentThemeSeed } from './domain/worldBible/worldBibleToS
 import { buildAdjacentRoomSeed } from './app/buildAdjacentRoomSeed'
 import { prepareGeneratedRoomSeed } from './app/worldBible'
 import { buildPromptGeneratedRoomSource } from './app/buildPromptGeneratedRoomSource'
+import { buildGeneratedObjectiveAttachment } from './app/generatedObjective'
 import { themeVocabulary } from './domain/generatedRoomThemeVocabulary'
 
 import { NPCDialogueService } from './dialogue/NPCDialogueService'
@@ -76,6 +78,7 @@ const guardCap = llmConfig.sessionCap
 // Background adjacent pre-generation stays deterministic and offline: it always
 // uses a FakeRoomGenerator, so warming never calls a real provider or spends.
 const adjacentGenerator = new FakeRoomGenerator()
+const objectiveGenerator = new FakeObjectiveGenerator()
 const worldBibleSeeder = new FakeWorldBibleSeeder()
 const idGenerator = new UuidGenerator()
 const worldStore = new InMemoryWorldStore()
@@ -121,6 +124,11 @@ type ActivePlay = {
   initialPlayer: PlayerHudView
   questSpec?: QuestSpec
   journalSpec?: JournalSpec
+}
+
+type QuestHintState = {
+  hint: string
+  completionHint: string
 }
 
 type AppRoomIntroProps = {
@@ -230,6 +238,7 @@ function App() {
   const [roomEntrySeq, setRoomEntrySeq] = useState(0)
   const [playerHud, setPlayerHud] = useState<PlayerHudView | null>(null)
   const [quest, setQuest] = useState<QuestView | null>(null)
+  const [questHints, setQuestHints] = useState<QuestHintState | null>(null)
   const [journal, setJournal] = useState<JournalView | null>(null)
   const [fatalMessage, setFatalMessage] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
@@ -275,6 +284,7 @@ function App() {
       if (result) {
         const { initialState, ...play } = result
         questSpecRef.current = result.questSpec ?? null
+        setQuestHints(null)
         journalSpecRef.current = result.journalSpec ?? null
         enterActivePlay(play)
         refreshDerivedViews(initialState)
@@ -311,6 +321,7 @@ function App() {
     setActivePlay(null)
     setPlayerHud(null)
     setQuest(null)
+    setQuestHints(null)
     setJournal(null)
     questSpecRef.current = null
     journalSpecRef.current = null
@@ -371,6 +382,14 @@ function App() {
         const generatedNavigation = new NavigationService(worldSession, generatedPregenerator, logger)
         generatedPregenerator.warmAdjacent(result.room)
         const initialPlayer = projectPlayerHud(started.state)
+        const generatedObjective = result.provenance === 'generated'
+          ? await buildGeneratedObjectiveAttachment(result.room, objectiveGenerator)
+          : null
+        if (version !== requestVersion.current) return
+        questSpecRef.current = generatedObjective?.questSpec ?? null
+        setQuestHints(generatedObjective
+          ? { hint: generatedObjective.hint, completionHint: generatedObjective.completionHint }
+          : null)
         enterActivePlay({
           room: result.room,
           roomSource: preloadedRoomSource(result.room),
@@ -380,8 +399,9 @@ function App() {
           adjacentPregenerator: generatedPregenerator,
           ...(prepared.worldBible ? { worldBible: prepared.worldBible } : {}),
           initialPlayer,
+          ...(generatedObjective ? { questSpec: generatedObjective.questSpec } : {}),
         })
-        setPlayerHud(initialPlayer)
+        refreshDerivedViews(started.state)
         // A repaired or fallback room couldn't be built exactly as asked — show the
         // static, prompt-free notice. A clean `generated` room shows nothing.
         if (shouldShowFallbackNotice(result.provenance)) setNotice(FALLBACK_NOTICE)
@@ -396,7 +416,7 @@ function App() {
       logger.error('generated room source threw', { code: 'room-source-failed' })
       setFatalMessage(ROOM_UNAVAILABLE)
     })
-  }, [enterActivePlay])
+  }, [enterActivePlay, refreshDerivedViews])
 
   const handleGenerateAnyway = useCallback(() => {
     confirmGrantedRef.current = true
@@ -483,6 +503,7 @@ function App() {
       const restoredQuestSpec = isAuthoredWorld ? demoQuestSpec : undefined
       const restoredJournalSpec = isAuthoredWorld ? demoJournalSpec : undefined
       questSpecRef.current = restoredQuestSpec ?? null
+      setQuestHints(null)
       journalSpecRef.current = restoredJournalSpec ?? null
 
       enterActivePlay({
@@ -557,7 +578,11 @@ function App() {
           npcDialogueService={npcDialogueService}
           onNavigate={handleNavigate}
           onWorldStateChange={refreshDerivedViews}
-          questStage={quest ? { activeObjectiveId: quest.activeObjectiveId, status: quest.status } : undefined}
+          questStage={quest ? {
+            activeObjectiveId: quest.activeObjectiveId,
+            status: quest.status,
+            ...(questHints ? { hint: questHints.hint, completionHint: questHints.completionHint } : {}),
+          } : undefined}
         />
       ) : (
         <div className="room-viewer-root">

@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import type { QuestView } from '../../domain/quests/evaluateQuest'
 
+const DEMO_QUEST_ID = 'the-stewards-toll'
+
 export function QuestTracker({ view }: { view: QuestView }) {
   const previousObjectivesRef = useRef(view.objectives)
   const [recentlyCompletedIds, setRecentlyCompletedIds] = useState<ReadonlySet<string>>(
@@ -69,7 +71,9 @@ export function QuestTracker({ view }: { view: QuestView }) {
       </ul>
       {view.status === 'complete' && (
         <div className="quest-tracker-complete">
-          The Steward&apos;s Toll is complete. The road north is yours.
+          {view.questId === DEMO_QUEST_ID
+            ? <>The Steward&apos;s Toll is complete. The road north is yours.</>
+            : <>{view.title} is complete.</>}
         </div>
       )}
     </div>

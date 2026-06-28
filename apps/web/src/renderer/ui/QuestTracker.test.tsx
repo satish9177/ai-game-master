@@ -5,7 +5,7 @@ import type { QuestView } from '../../domain/quests/evaluateQuest'
 
 function questView(overrides: Partial<QuestView> = {}): QuestView {
   return {
-    questId: 'demo-quest',
+    questId: 'the-stewards-toll',
     title: "The Steward's Toll",
     status: 'active',
     activeObjectiveId: 'claim-tribute-coin',
@@ -64,6 +64,27 @@ describe('QuestTracker', () => {
     )
 
     expect(html).toContain("The Steward&#x27;s Toll is complete. The road north is yours.")
+  })
+
+  it('shows generic completion acknowledgment for generated quests', () => {
+    const html = renderToStaticMarkup(
+      <QuestTracker
+        view={questView({
+          questId: 'generated-room-objective',
+          title: 'Secure the room',
+          status: 'complete',
+          activeObjectiveId: null,
+          objectives: [
+            { id: 'generated-0', text: 'Investigate the marked feature.', done: true },
+          ],
+        })}
+      />,
+    )
+
+    expect(html).toContain('Secure the room is complete.')
+    expect(html).not.toContain('Steward')
+    expect(html).not.toContain('Malik')
+    expect(html).not.toContain('road north')
   })
 
   it('does not crash when a complete quest has no active objective', () => {

@@ -171,6 +171,34 @@ describe('FakeNPCDialogueProvider', () => {
     expect(response.text).toContain("steward's toll")
   })
 
+  it('prefers generated quest hint over authored QUEST_CLUE when present', async () => {
+    const provider = new FakeNPCDialogueProvider()
+    const response = await provider.reply(request({
+      quest: {
+        activeObjectiveId: 'claim-tribute-coin',
+        status: 'active',
+        hint: 'Sanitized generated hint.',
+      },
+    }))
+
+    expect(response.text).toBe('Sanitized generated hint.')
+    expect(response.text).not.toContain('tribute coffer')
+  })
+
+  it('prefers generated completionHint over authored completion line when present', async () => {
+    const provider = new FakeNPCDialogueProvider()
+    const response = await provider.reply(request({
+      quest: {
+        activeObjectiveId: null,
+        status: 'complete',
+        completionHint: 'Sanitized generated completion.',
+      },
+    }))
+
+    expect(response.text).toBe('Sanitized generated completion.')
+    expect(response.text).not.toContain("steward's toll")
+  })
+
   it('falls back to persona lines when quest is absent', async () => {
     const provider = new FakeNPCDialogueProvider()
     const withQuest = await provider.reply(request({ quest: { activeObjectiveId: 'claim-tribute-coin', status: 'active' } }))
@@ -178,6 +206,17 @@ describe('FakeNPCDialogueProvider', () => {
 
     expect(withQuest.text).not.toBe(noQuest.text)
     expect(noQuest.text).toBe('The hall has seen quieter days, but you are welcome here.')
+  })
+
+  it('falls back to authored QUEST_CLUE when generated hint is absent', async () => {
+    const provider = new FakeNPCDialogueProvider()
+    const response = await provider.reply(request({
+      quest: { activeObjectiveId: 'claim-tribute-coin', status: 'active' },
+    }))
+
+    expect(response.text).toBe(
+      'The tribute coffer sits somewhere in this hall. Find it and take the coin inside.',
+    )
   })
 
   it('keeps explicit prompt responses ahead of quest clues', async () => {

@@ -92,9 +92,10 @@ function questClueLine(request: NPCDialogueRequest, key: string): string | undef
   const quest = request.context.quest
   if (!quest) return undefined
   if (quest.status === 'complete' && quest.activeObjectiveId === null) {
-    return QUEST_COMPLETION_LINES[key]
+    return quest.completionHint ?? QUEST_COMPLETION_LINES[key]
   }
   if (quest.activeObjectiveId !== null) {
+    if (quest.hint) return quest.hint
     return QUEST_CLUE[key]?.[quest.activeObjectiveId]
   }
   return undefined

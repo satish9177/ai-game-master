@@ -96,7 +96,28 @@ function buildAnchor(type: RoomObject['type'], z: number): unknown {
   }
 }
 
+/**
+ * Stable id for the single generated objective-eligible readable in a room.
+ * Constant (never prompt-derived, so it carries no prompt text) and applied to
+ * exactly one object, so there is no id collision. A generated story objective
+ * may reference this id; the existing inspect interaction path then sets a
+ * stable `interaction:<id>` flag (planInteraction), which is what completes the
+ * objective. Without an id AND an effect, no flag is ever set and an objective
+ * for it would be unsatisfiable — so both are required, here, on one object.
+ */
+const OBJECTIVE_DOCUMENT_ID = 'objective-document'
+
 function buildDocument(
+  type: RoomObject['type'],
+  position: [number, number, number],
+  label: string,
+  objectiveTarget = false,
+): unknown {
+  const document = buildReadable(type, position, label)
+  return objectiveTarget ? asObjectiveTarget(document) : document
+}
+
+function buildReadable(
   type: RoomObject['type'],
   position: [number, number, number],
   label: string,
@@ -115,6 +136,27 @@ function buildDocument(
   if (type === 'map') return { type, position, rotationY: 12 }
   if (type === 'book') return { type, position, rotationY: -18 }
   return { type, position, rotationY: 8 }
+}
+
+/**
+ * Mark a readable as the room's completable objective target: give it the stable
+ * id and an `inspect` effect so interacting sets `interaction:<id>`. Pure data
+ * only — this is the same JSON an effect-carrying authored object would have, not
+ * generated behavior. Any existing prompt/body text is preserved; non-scroll
+ * readables (map/book/paper) gain a minimal read interaction.
+ */
+function asObjectiveTarget(document: unknown): unknown {
+  const existing = (document as { interaction?: { prompt?: string; body?: string } }).interaction
+  return {
+    ...(document as object),
+    id: OBJECTIVE_DOCUMENT_ID,
+    interaction: {
+      key: 'E',
+      prompt: existing?.prompt ?? 'Press E to read it',
+      body: existing?.body ?? 'You read it carefully.',
+      effect: { kind: 'inspect' },
+    },
+  }
 }
 
 function buildPracticalProp(type: RoomObject['type'], position: [number, number, number]): unknown {
@@ -190,7 +232,10 @@ function buildRoom(prompt: string, vocabulary: GeneratedRoomThemeVocabulary): un
   // Deterministic vocabulary sample for browser QA; all still pure RoomSpec data.
   const primaryDocument = pickForPrompt(prompt, 'document-a', documentTypes)
   const secondaryDocument = pickForPrompt(prompt, 'document-b', documentTypes)
-  objects.push(buildDocument(primaryDocument, [snap(-halfW + 2.2), 0, snap(-1.5)], label))
+  // The primary document is always present, so marking it the objective target
+  // gives every generated room exactly one satisfiable interactable for a
+  // generated objective to anchor to.
+  objects.push(buildDocument(primaryDocument, [snap(-halfW + 2.2), 0, snap(-1.5)], label, true))
   if (secondaryDocument !== primaryDocument && rng.bool(0.55)) {
     objects.push(buildDocument(secondaryDocument, [snap(halfW - 2.2), 0, snap(1.2)], label))
   }
