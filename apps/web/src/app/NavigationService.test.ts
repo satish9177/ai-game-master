@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { Clock } from '../domain/ports/Clock'
 import type { IdGenerator } from '../domain/ports/IdGenerator'
+import type { RoomProvenance } from '../domain/assembleRoom'
 import { projectWorldState } from '../domain/world/applyEvent'
 import { loadRoomSpec } from '../domain/loadRoomSpec'
 import type { LoadedRoom } from '../domain/loadRoomSpec'
@@ -69,8 +70,15 @@ function resolved(
   room: LoadedRoom,
   source: 'cache' | 'registry' | 'generated',
   cacheHit = false,
+  provenance?: RoomProvenance,
 ): RoomResolver {
-  return fixedResolver({ ok: true, room, cacheHit, source })
+  return fixedResolver({
+    ok: true,
+    room,
+    cacheHit,
+    source,
+    ...(provenance !== undefined ? { provenance } : {}),
+  })
 }
 
 async function start(session: WorldSession) {
@@ -120,6 +128,34 @@ describe('NavigationService', () => {
 
     const result = await service.navigate({ sessionId: state.sessionId, toRoomId: roomB.id })
     expect(result.status === 'navigated' && result.cacheHit).toBe(true)
+  })
+
+  it('passes resolver provenance through on navigated results', async () => {
+    const harness = createHarness()
+    const state = await start(harness.session)
+    const service = new NavigationService(
+      harness.session,
+      resolved(roomB, 'generated', false, 'fallback'),
+      harness.logger,
+    )
+
+    const result = await service.navigate({ sessionId: state.sessionId, toRoomId: roomB.id })
+
+    expect(result.status).toBe('navigated')
+    if (result.status !== 'navigated') return
+    expect(result.provenance).toBe('fallback')
+  })
+
+  it('leaves navigated provenance undefined when the resolver returns none', async () => {
+    const harness = createHarness()
+    const state = await start(harness.session)
+    const service = new NavigationService(harness.session, resolved(roomB, 'registry'), harness.logger)
+
+    const result = await service.navigate({ sessionId: state.sessionId, toRoomId: roomB.id })
+
+    expect(result.status).toBe('navigated')
+    if (result.status !== 'navigated') return
+    expect(result.provenance).toBeUndefined()
   })
 
   it('maps an invalid-room resolver failure to failed without appending', async () => {

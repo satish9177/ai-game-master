@@ -52,11 +52,12 @@ Throughout these docs:
   Generated Room Theme Vocabulary v0 — fake/generated assembly + browser composition;
   Generated Room Objective Target Enrichment v0 — generated assembly/domain;
   Real Generated Objective Provider v0 — generation + app composition;
+  Generated Objective Per Room v0 — browser/app composition;
   NPC Dialogue Room Context v0 — browser/domain/dialogue;
   Generated Story Objective Contract v0 — domain/quests/assembly + dialogue/UI;
   Multi-Call Usage Guardrails / Optional Objective Budget v0 — browser/session-local
   ([ADR-0050](./decisions/ADR-0050-multi-call-usage-guardrails-v0.md)).
-- 🔜 **Planned** — designed and approved, not yet built (next slices). None currently.
+- 🔜 **Planned** — designed and approved, not yet built (next slices). None currently listed.
 - ❌ **Not built** — future shape only; documented so we don't paint into a corner.
 
 ## Status today (Renderer Foundation v0)
@@ -682,8 +683,9 @@ stage in `assembleRoom`
   existing assembled object list. It adds a stable id (if missing) and `effect: { kind: 'inspect' }`
   to one eligible purpose-type object; it never creates a new object or sets `effect.flag`.
 - **Boolean-option gate:** controlled by `AssembleRoomOptions.enrichObjectiveTarget` (default
-  `false`; `true` only on the prompt-generated first-room path in `buildPromptGeneratedRoomSource`).
-  Adjacent pregeneration, authored bootstrap, repaired, and fallback paths are unaffected.
+  `false`; `true` on the prompt-generated first-room path and on generated-play adjacent
+  room sources only). Authored/demo adjacent pregeneration, repaired, and fallback paths
+  are unaffected.
 - **Stage 2.12.5 in `assembleRoom`:** after `ensureGeneratedNpcPresence` and before
   `sanitizeGeneratedDisplayText` / final `validateRoom`. The promoted object is validated with
   the rest of the room.
@@ -696,8 +698,8 @@ stage in `assembleRoom`
 
 ✅ **Implemented, generation + app composition.** Real Generated Objective Provider v0 wires a
 real, network-backed `ObjectiveGenerator` (`OpenAICompatibleObjectiveGenerator`) behind the
-unchanged `ObjectiveGenerator` port so prompt-generated DeepSeek/OpenAI first rooms can receive
-an objective proposal from the same configured real provider family, while the deterministic
+unchanged `ObjectiveGenerator` port so prompt-generated DeepSeek/OpenAI rooms can receive
+objective proposals from the same configured real provider family, while the deterministic
 fake remains the default/fallback
 ([ADR-0049](./decisions/ADR-0049-real-generated-objective-provider-v0.md)).
 
@@ -725,20 +727,60 @@ fake remains the default/fallback
   every semantic decision.
 - **`interact-object` only in v0.** ADR-0048 enrichment guarantees one eligible
   `interact-object` target; `resolve-encounter` and `visit-room` generation are deferred.
-- **Prompt-generated first room only.** App keeps the existing `result.provenance === 'generated'`
-  gate. Authored/demo bootstrap keeps its authored quest; adjacent generated rooms do not call
-  the real objective provider and are not objective-enriched by this feature.
-- **Blocking v0 call, no separate meter.** Objective generation is awaited before room entry on
-  the real prompt path. There is no async objective attach and no objective-specific usage
-  meter in v0.
+- **Prompt-generated plays only.** App keeps the `result.provenance === 'generated'`
+  gate. Authored/demo/restored plays keep their authored or absent quest behavior. Generated
+  adjacent rooms can receive an objective only on room entry through the App composition root;
+  background `warmAdjacent` remains provider-free and never calls the objective provider.
+- **Room-entry timing.** Objective generation for the prompt-generated first room is still
+  awaited before initial room entry. Generated adjacent rooms use the per-room on-enter path:
+  the room appears first, then objective attachment completes asynchronously if allowed. There
+  is no objective-specific usage meter in v0.
 - **All safety properties preserved.** `assembleObjective` unchanged; no generated mechanical
   gates, navigation locks, quest engine, generated flag strings, RoomSpec/schema, world-state,
   event/reducer, SaveGame, persistence, backend, renderer, or navigation-gate changes.
 - **Dev-only / BYOK caveat (same as ADR-0023).** `VITE_*` keys are inlined into the browser
   bundle; v0 is local-dev only. Hosted production moves the provider server-side later.
-- **Deferred.** Async objective attach; objective usage meter; shared predicate extraction with
-  `FakeObjectiveGenerator` / `objectiveCandidates`; generated mechanical gates; a quest engine;
-  multi-step objectives; objective persistence; richer provider/router support.
+- **Deferred.** Objective usage meter; shared predicate extraction with `FakeObjectiveGenerator`
+  / `objectiveCandidates`; generated mechanical gates; a quest engine; multi-step objectives;
+  objective persistence; richer provider/router support.
+
+## Generated Objective Per Room v0
+
+✅ **Implemented, browser/app composition.** Generated Objective Per Room v0 extends the
+existing generated-objective pipeline from the prompt-generated first room to generated rooms
+entered during a prompt-generated play, without moving the trust boundary or changing the quest
+engine ([ADR-0051](./decisions/ADR-0051-generated-objective-per-room-v0.md)).
+
+- **Provenance plumbing:** `AdjacentRoomPregenerator` retains generated-room provenance
+  (`generated` / `repaired` / `fallback`) per `roomId`, including cache hits.
+  `NavigationService` passes that provenance through on successful `navigated` results without
+  interpreting it. Authored/registry rooms expose no generated provenance.
+- **Generated-play adjacents only:** the generated-play adjacent `GeneratedRoomSource` factory
+  enables `enrichObjectiveTarget: true`; the authored/demo/example pregenerator remains on the
+  default unenriched path. `warmAdjacent` remains provider-free and never calls the objective
+  provider.
+- **Prompt-generated play flag:** App marks only prompt-generated plays with
+  `objectivesPerRoom: true`. Authored bootstrap, demo, restored, repaired, and fallback paths
+  are excluded from per-room objective attachment.
+- **Session-local memo:** App keeps an in-memory `Map<roomId, GeneratedObjectiveQuestAttachment
+  | null>`. Room #1 is seeded from the existing prompt-generated objective result; revisits
+  restore cached attachments synchronously, and cached `null` prevents retries. This memo is
+  session-local only and is not persisted through save/load.
+- **On-enter attach:** when navigation enters a generated-provenance room with no memo entry,
+  App starts a fire-and-forget objective attachment after the room/state projection updates.
+  The call is guarded by `canAttemptOptional({ count }, { cap, enabled })`. Allowed calls reuse
+  `buildGeneratedObjectiveAttachment`; budget skips, provider failures, invalid objective JSON,
+  and unsatisfiable objectives all memoize `null`.
+- **Stale discard:** async results apply only if the current active play still has the same
+  session id and room id. If the player moved away, the result remains memoized but does not
+  update the visible `QuestTracker` or NPC hint state.
+- **Boundaries unchanged:** `assembleObjective` remains the sole objective trust gate. There are
+  no generated mechanical gates, quest chains, backend enforcement, token-billing changes,
+  multi-objective quest engine changes, `RoomSpec` schema changes, world-event/reducer changes,
+  persistence changes, or renderer changes.
+- **Deferred:** generated objective save/load persistence, cross-room story threading,
+  generated mechanical gates/rewards, multi-step quest chains, objective-specific usage meters,
+  and server-side/hosted objective-provider execution remain future work.
 
 ## Isometric Camera Foundation
 

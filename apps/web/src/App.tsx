@@ -16,6 +16,7 @@ import type { JournalView } from './domain/journal/projectJournal'
 import type { JournalSpec } from './domain/journal/journalSpec'
 import { demoJournalSpec } from './domain/examples/demoJournal'
 import type { WorldState } from './domain/world/worldState'
+import type { ObjectiveGenerator } from './domain/ports/ObjectiveGenerator'
 import type { RoomSource } from './domain/ports/RoomSource'
 import { GeneratedRoomSource } from './room/GeneratedRoomSource'
 import { RoomRegistry } from './room/RoomRegistry'
@@ -37,6 +38,7 @@ import { computeDerivedViews } from './app/derivedViews'
 import { navigateWithExitGate } from './app/gatedNavigation'
 import { LocalStorageSaveSlotStore } from './app/saveSlotStore'
 import { createConsoleLogger } from './platform/logger/consoleLogger'
+import type { Logger } from './platform/logger/Logger'
 import { SystemClock } from './platform/system/clock'
 import { UuidGenerator } from './platform/system/idGenerator'
 import { InMemoryWorldStore } from './world-session/InMemoryWorldStore'
@@ -46,6 +48,7 @@ import { SaveGameService } from './world-session/saveGame'
 import { InteractionService } from './interactions/InteractionService'
 import { EncounterService } from './encounters/EncounterService'
 import { loadRoomSpec, type LoadedRoom } from './domain/loadRoomSpec'
+import type { RoomProvenance } from './domain/assembleRoom'
 import { fallbackRoom as fallbackRoomSpec } from './domain/examples/fallbackRoom'
 import { FALLBACK_NOTICE, shouldShowFallbackNotice } from './app/fallbackNotice'
 import { buildRoomIntroView } from './app/roomIntro'
@@ -55,7 +58,10 @@ import { worldBibleToAdjacentThemeSeed } from './domain/worldBible/worldBibleToS
 import { buildAdjacentRoomSeed } from './app/buildAdjacentRoomSeed'
 import { prepareGeneratedRoomSeed } from './app/worldBible'
 import { buildPromptGeneratedRoomSource } from './app/buildPromptGeneratedRoomSource'
-import { buildGeneratedObjectiveAttachment } from './app/generatedObjective'
+import {
+  buildGeneratedObjectiveAttachment,
+  type GeneratedObjectiveQuestAttachment,
+} from './app/generatedObjective'
 import { themeVocabulary } from './domain/generatedRoomThemeVocabulary'
 
 import { NPCDialogueService } from './dialogue/NPCDialogueService'
@@ -126,11 +132,93 @@ type ActivePlay = {
   initialPlayer: PlayerHudView
   questSpec?: QuestSpec
   journalSpec?: JournalSpec
+  objectivesPerRoom?: boolean
 }
 
 type QuestHintState = {
   hint: string
   completionHint: string
+}
+
+type PerRoomObjectiveMemo = Map<string, GeneratedObjectiveQuestAttachment | null>
+
+type CurrentPlayIdentity = {
+  room: Pick<LoadedRoom, 'id'>
+  sessionId: string
+} | null
+
+export function readPerRoomObjectiveMemo(memo: PerRoomObjectiveMemo, roomId: string): {
+  cached: boolean
+  questSpec: QuestSpec | null
+  questHints: QuestHintState | null
+} {
+  if (!memo.has(roomId)) return { cached: false, questSpec: null, questHints: null }
+  const attachment = memo.get(roomId) ?? null
+  return {
+    cached: true,
+    questSpec: attachment?.questSpec ?? null,
+    questHints: attachment
+      ? { hint: attachment.hint, completionHint: attachment.completionHint }
+      : null,
+  }
+}
+
+export function shouldStartPerRoomObjectiveAttach(input: {
+  objectivesPerRoom?: boolean
+  provenance?: RoomProvenance
+  memo: PerRoomObjectiveMemo
+  roomId: string
+}): boolean {
+  return input.objectivesPerRoom === true
+    && input.provenance === 'generated'
+    && !input.memo.has(input.roomId)
+}
+
+export async function attachPerRoomObjectiveOnEnter(input: {
+  room: LoadedRoom
+  sessionId: string
+  memo: PerRoomObjectiveMemo
+  usageCount: number
+  guardConfig: UsageGuardConfig
+  objectiveGenerator: ObjectiveGenerator
+  logger: Pick<Logger, 'debug' | 'info'>
+  getCurrentPlay: () => CurrentPlayIdentity
+  applyAttachment: (attachment: GeneratedObjectiveQuestAttachment | null) => void
+  refreshAfterApply: () => Promise<void>
+  buildAttachment?: typeof buildGeneratedObjectiveAttachment
+}): Promise<void> {
+  const roomId = input.room.id
+  if (input.memo.has(roomId)) return
+
+  const buildAttachment = input.buildAttachment ?? buildGeneratedObjectiveAttachment
+  let attachment: GeneratedObjectiveQuestAttachment | null = null
+  if (canAttemptOptional({ count: input.usageCount }, input.guardConfig)) {
+    input.logger.info('optional objective generation allowed', {
+      count: input.usageCount,
+      cap: input.guardConfig.cap,
+      roomId,
+    })
+    attachment = await buildAttachment(input.room, input.objectiveGenerator)
+  } else {
+    input.logger.info('optional objective generation skipped', {
+      count: input.usageCount,
+      cap: input.guardConfig.cap,
+      roomId,
+      reason: 'usage-cap',
+    })
+  }
+
+  input.memo.set(roomId, attachment)
+
+  const current = input.getCurrentPlay()
+  if (current?.sessionId !== input.sessionId || current.room.id !== roomId) {
+    input.logger.debug('per-room objective stale', { roomId })
+    return
+  }
+
+  input.applyAttachment(attachment)
+  input.logger.debug('per-room objective attached', { roomId, attached: attachment != null })
+  await input.refreshAfterApply()
 }
 
 type AppRoomIntroProps = {
@@ -237,6 +325,7 @@ function bootstrapExamplePlay(): Promise<ExampleBootstrapResult | null> {
 
 function App() {
   const [activePlay, setActivePlay] = useState<ActivePlay | null>(null)
+  const activePlayRef = useRef<ActivePlay | null>(null)
   const [roomEntrySeq, setRoomEntrySeq] = useState(0)
   const [playerHud, setPlayerHud] = useState<PlayerHudView | null>(null)
   const [quest, setQuest] = useState<QuestView | null>(null)
@@ -247,6 +336,7 @@ function App() {
   const requestVersion = useRef(0)
   const questSpecRef = useRef<QuestSpec | null>(null)
   const journalSpecRef = useRef<JournalSpec | null>(null)
+  const perRoomObjectiveMemoRef = useRef<PerRoomObjectiveMemo>(new Map())
   // Usage guardrail state (real provider only; fake path stays inert).
   // Refs hold the live values for reading inside stable useCallback closures;
   // the parallel state values trigger re-renders for the UsageMeter display.
@@ -260,6 +350,7 @@ function App() {
   const usageStatus = evaluate({ count: usageCount }, guardConfig)
 
   const enterActivePlay = useCallback((play: ActivePlay) => {
+    activePlayRef.current = play
     setActivePlay(play)
     setRoomEntrySeq((seq) => seq + 1)
   }, [])
@@ -320,6 +411,8 @@ function App() {
     }
 
     const version = ++requestVersion.current
+    perRoomObjectiveMemoRef.current = new Map()
+    activePlayRef.current = null
     setActivePlay(null)
     setPlayerHud(null)
     setQuest(null)
@@ -376,7 +469,7 @@ function App() {
               buildAdjacentRoomSeed(roomId, adjacentThemeSeed),
               logger,
               fallbackRoom,
-              { themePack: prepared.worldBible?.themePack },
+              { themePack: prepared.worldBible?.themePack, enrichObjectiveTarget: true },
             ),
           fallbackRoom,
           logger,
@@ -398,6 +491,7 @@ function App() {
           }
         }
         if (version !== requestVersion.current) return
+        perRoomObjectiveMemoRef.current.set(result.room.id, generatedObjective)
         questSpecRef.current = generatedObjective?.questSpec ?? null
         setQuestHints(generatedObjective
           ? { hint: generatedObjective.hint, completionHint: generatedObjective.completionHint }
@@ -412,6 +506,7 @@ function App() {
           ...(prepared.worldBible ? { worldBible: prepared.worldBible } : {}),
           initialPlayer,
           ...(generatedObjective ? { questSpec: generatedObjective.questSpec } : {}),
+          objectivesPerRoom: true,
         })
         refreshDerivedViews(started.state)
         // A repaired or fallback room couldn't be built exactly as asked — show the
@@ -471,6 +566,8 @@ function App() {
 
   const handleLoad = useCallback(() => {
     const version = ++requestVersion.current
+    perRoomObjectiveMemoRef.current = new Map()
+    activePlayRef.current = null
     setSaveLoadStatus('loading')
     setSaveLoadError(null)
     void (async () => {
@@ -555,19 +652,40 @@ function App() {
       }),
     })
     if (result.status === 'navigated') {
+      const shouldAttachObjective = shouldStartPerRoomObjectiveAttach({
+        objectivesPerRoom: activePlay.objectivesPerRoom,
+        provenance: result.provenance,
+        memo: perRoomObjectiveMemoRef.current,
+        roomId: result.room.id,
+      })
+      let nextQuestSpec = activePlay.questSpec
+      if (activePlay.objectivesPerRoom === true) {
+        const perRoomObjective = readPerRoomObjectiveMemo(perRoomObjectiveMemoRef.current, result.room.id)
+        nextQuestSpec = perRoomObjective.questSpec ?? undefined
+        questSpecRef.current = perRoomObjective.questSpec
+        setQuestHints(perRoomObjective.questHints)
+      } else {
+        questSpecRef.current = activePlay.questSpec ?? null
+        setQuestHints(null)
+      }
       setActivePlay((current) => current?.sessionId === activePlay.sessionId
-        ? {
-            room: result.room,
-            roomSource: preloadedRoomSource(result.room),
-            sessionId: activePlay.sessionId,
-            roomCache: activePlay.roomCache,
-            navigation: activePlay.navigation,
-            adjacentPregenerator: activePlay.adjacentPregenerator,
-            worldBible: activePlay.worldBible,
-            initialPlayer: activePlay.initialPlayer,
-            questSpec: activePlay.questSpec,
-            journalSpec: activePlay.journalSpec,
-          }
+        ? (() => {
+            const nextPlay = {
+              room: result.room,
+              roomSource: preloadedRoomSource(result.room),
+              sessionId: activePlay.sessionId,
+              roomCache: activePlay.roomCache,
+              navigation: activePlay.navigation,
+              adjacentPregenerator: activePlay.adjacentPregenerator,
+              worldBible: activePlay.worldBible,
+              initialPlayer: activePlay.initialPlayer,
+              ...(nextQuestSpec ? { questSpec: nextQuestSpec } : {}),
+              journalSpec: activePlay.journalSpec,
+              ...(activePlay.objectivesPerRoom === true ? { objectivesPerRoom: true } : {}),
+            }
+            activePlayRef.current = nextPlay
+            return nextPlay
+          })()
         : current)
       setRoomEntrySeq((seq) => seq + 1)
       // Warm the next frontier from the room we just entered.
@@ -575,6 +693,30 @@ function App() {
       // Re-project derived views from the post-move WorldState so objective 3
       // (ruined-safehouse visited) flips done immediately on entering the room.
       refreshDerivedViews(result.state)
+      if (shouldAttachObjective) {
+        const destinationRoom = result.room
+        const destinationSessionId = activePlay.sessionId
+        void attachPerRoomObjectiveOnEnter({
+          room: destinationRoom,
+          sessionId: destinationSessionId,
+          memo: perRoomObjectiveMemoRef.current,
+          usageCount: usageCountRef.current,
+          guardConfig,
+          objectiveGenerator,
+          logger,
+          getCurrentPlay: () => activePlayRef.current,
+          applyAttachment: (attachment) => {
+            questSpecRef.current = attachment?.questSpec ?? null
+            setQuestHints(attachment
+              ? { hint: attachment.hint, completionHint: attachment.completionHint }
+              : null)
+          },
+          refreshAfterApply: async () => {
+            const stateResult = await worldSession.getWorldState(destinationSessionId)
+            if (stateResult.ok) refreshDerivedViews(stateResult.state)
+          },
+        })
+      }
     }
     return result
   }, [activePlay, refreshDerivedViews])

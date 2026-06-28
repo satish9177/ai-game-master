@@ -1,4 +1,5 @@
 import { buildExitLookup } from './exits'
+import type { RoomProvenance } from '../domain/assembleRoom'
 import type { LoadedRoom } from '../domain/loadRoomSpec'
 import { validateRoom } from '../domain/validateRoom'
 import type { RoomLoadResult, RoomSource } from '../domain/ports/RoomSource'
@@ -31,7 +32,13 @@ import type { Logger } from '../platform/logger/Logger'
 export type RoomResolveSource = 'cache' | 'registry' | 'generated'
 
 export type ResolveRoomResult =
-  | { ok: true; room: LoadedRoom; cacheHit: boolean; source: RoomResolveSource }
+  | {
+      ok: true
+      room: LoadedRoom
+      cacheHit: boolean
+      source: RoomResolveSource
+      provenance?: RoomProvenance
+    }
   | { ok: false; reason: 'invalid-room' | 'unavailable' }
 
 /** The narrow abstraction NavigationService depends on (DIP). */
@@ -68,6 +75,7 @@ export class AdjacentRoomPregenerator implements RoomResolver {
   // One shared in-flight map for the door and warming, so a door request and a
   // background warm for the same id collapse to a single job.
   private readonly inFlight = new Map<string, Promise<ResolveRoomResult>>()
+  private readonly provenanceMap = new Map<string, RoomProvenance>()
 
   constructor(
     cache: SessionRoomCache,
@@ -92,7 +100,16 @@ export class AdjacentRoomPregenerator implements RoomResolver {
    */
   async resolveRoom(roomId: string): Promise<ResolveRoomResult> {
     const cached = this.cache.get(roomId)
-    if (cached) return { ok: true, room: cached, cacheHit: true, source: 'cache' }
+    if (cached) {
+      const provenance = this.provenanceMap.get(roomId)
+      return {
+        ok: true,
+        room: cached,
+        cacheHit: true,
+        source: 'cache',
+        ...(provenance !== undefined ? { provenance } : {}),
+      }
+    }
 
     const joined = this.inFlight.get(roomId)
     if (joined) return joined
@@ -172,14 +189,18 @@ export class AdjacentRoomPregenerator implements RoomResolver {
       return { ok: false, reason: result.error.code }
     }
     const room = this.normalize(roomId, result.room)
+    // This branch is generated-source-only today; default missing provenance to
+    // `generated` for backwards compatibility with RoomSource success results.
+    const provenance = result.provenance ?? 'generated'
     this.cache.set(roomId, room)
+    this.provenanceMap.set(roomId, provenance)
     this.log.debug('room resolved', {
       roomId,
       source: 'generated',
       cacheHit: false,
-      provenance: result.provenance,
+      provenance,
     })
-    return { ok: true, room, cacheHit: false, source: 'generated' }
+    return { ok: true, room, cacheHit: false, source: 'generated', provenance }
   }
 
   /**

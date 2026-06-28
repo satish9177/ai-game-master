@@ -1,11 +1,18 @@
 import type { LoadedRoom } from '../domain/loadRoomSpec'
+import type { RoomProvenance } from '../domain/assembleRoom'
 import type { WorldState } from '../domain/world/worldState'
 import type { Logger } from '../platform/logger/Logger'
 import type { RoomResolver } from './AdjacentRoomPregenerator'
 import type { WorldSession } from '../world-session/WorldSession'
 
 export type NavigationResult =
-  | { status: 'navigated'; room: LoadedRoom; state: WorldState; cacheHit: boolean }
+  | {
+      status: 'navigated'
+      room: LoadedRoom
+      state: WorldState
+      cacheHit: boolean
+      provenance?: RoomProvenance
+    }
   | { status: 'rejected'; reason: 'missing-exit' | 'unknown-room' | 'already-here' | 'blocked' }
   | {
       status: 'failed'
@@ -68,6 +75,7 @@ export class NavigationService {
       room: resolved.room,
       state: moved.state,
       cacheHit: resolved.cacheHit,
+      ...(resolved.provenance !== undefined ? { provenance: resolved.provenance } : {}),
     } as const
     this.logResult(sessionId, toRoomId, result, resolved.cacheHit, moved.state.revision)
     return result

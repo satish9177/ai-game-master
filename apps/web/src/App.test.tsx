@@ -1,6 +1,11 @@
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
-import { AppRoomEntryOverlay } from './App'
+import {
+  AppRoomEntryOverlay,
+  attachPerRoomObjectiveOnEnter,
+  readPerRoomObjectiveMemo,
+  shouldStartPerRoomObjectiveAttach,
+} from './App'
 import { buildPromptGeneratedRoomSource } from './app/buildPromptGeneratedRoomSource'
 import { buildGeneratedObjectiveAttachment, buildGeneratedObjectiveQuestSpec } from './app/generatedObjective'
 import { FALLBACK_NOTICE } from './app/fallbackNotice'
@@ -20,6 +25,9 @@ import { FakeWorldBibleSeeder } from './generation/FakeWorldBibleSeeder'
 import { FakeNPCDialogueProvider } from './dialogue/FakeNPCDialogueProvider'
 import { prepareGeneratedRoomSeed } from './app/worldBible'
 import { themeVocabulary } from './domain/generatedRoomThemeVocabulary'
+import { buildAdjacentRoomSeed } from './app/buildAdjacentRoomSeed'
+import { GeneratedRoomSource } from './room/GeneratedRoomSource'
+import { demoQuestSpec } from './domain/examples/demoQuest'
 
 const noopLogger: Logger = {
   debug() {},
@@ -369,6 +377,370 @@ describe('App generated objective prompt-path wiring', () => {
     expect(reply.text).not.toContain('Steward')
     expect(reply.text).not.toContain('Malik')
     expect(reply.text).not.toContain('tribute coffer')
+  })
+})
+
+describe('App generated-play adjacent room source wiring', () => {
+  const markerlessGeneratedRoom = JSON.stringify({
+    schemaVersion: 1,
+    id: 'adjacent-room',
+    name: 'Adjacent Room',
+    shell: {
+      dimensions: { width: 18, depth: 18, height: 4 },
+      exits: [{ side: 'north', width: 3 }],
+    },
+    spawn: { position: [0, 1.7, 5] },
+    objects: [
+      {
+        type: 'book',
+        position: [0, 0, -2],
+        interaction: { key: 'E', prompt: 'Read', body: 'Some pages.' },
+      },
+    ],
+  })
+
+  it('enables objective-target enrichment for generated-play adjacent sources only', async () => {
+    const generator: RoomGenerator = { generate: async () => markerlessGeneratedRoom }
+
+    const generatedPlayAdjacentSource = new GeneratedRoomSource(
+      generator,
+      buildAdjacentRoomSeed('generated-adjacent', undefined),
+      noopLogger,
+      makeRoom([]),
+      { enrichObjectiveTarget: true },
+    )
+    const exampleAdjacentSource = new GeneratedRoomSource(
+      generator,
+      'adjacent:example-adjacent',
+      noopLogger,
+      makeRoom([]),
+    )
+
+    const generatedPlayResult = await generatedPlayAdjacentSource.getRoom()
+    const exampleResult = await exampleAdjacentSource.getRoom()
+
+    expect(generatedPlayResult.ok).toBe(true)
+    expect(exampleResult.ok).toBe(true)
+    if (!generatedPlayResult.ok || !exampleResult.ok) return
+
+    const target = generatedPlayResult.room.objects.find((object) => object.id === 'generated-objective-target')
+    expect(target).toBeDefined()
+    expect(target && 'interaction' in target ? target.interaction?.effect : undefined).toEqual({ kind: 'inspect' })
+
+    const exampleBook = exampleResult.room.objects.find((object) => object.type === 'book')
+    expect(exampleBook?.id).toBeUndefined()
+    expect(exampleBook && 'interaction' in exampleBook ? exampleBook.interaction?.effect : undefined).toBeUndefined()
+  })
+})
+
+describe('App per-room objective memo state', () => {
+  function createSafeLogger() {
+    const logs: Array<{ message: string; context: Record<string, unknown> }> = []
+    const safeLogger: Pick<Logger, 'debug' | 'info'> = {
+      debug: (message, context = {}) => logs.push({ message, context }),
+      info: (message, context = {}) => logs.push({ message, context }),
+    }
+    return { logger: safeLogger, logs }
+  }
+
+  function deferred<T>() {
+    let resolve!: (value: T) => void
+    const promise = new Promise<T>((r) => {
+      resolve = r
+    })
+    return { promise, resolve }
+  }
+
+  async function buildRoomOneAttachment() {
+    const source = buildPromptGeneratedRoomSource({
+      generator: new FakeRoomGenerator(),
+      rawUserPrompt: 'a quiet archive',
+      generatorSeed: 'a quiet archive',
+      logger: noopLogger,
+      fallbackRoom: makeRoom([]),
+    })
+    const result = await source.getRoom()
+    expect(result.ok).toBe(true)
+    if (!result.ok) throw new Error('expected generated room')
+    const attachment = await buildGeneratedObjectiveAttachment(result.room, new FakeObjectiveGenerator())
+    expect(attachment).not.toBeNull()
+    return { room: result.room, attachment: attachment! }
+  }
+
+  it('seeds and restores the prompt-generated room #1 objective attachment', async () => {
+    const { room, attachment } = await buildRoomOneAttachment()
+    const memo = new Map([[room.id, attachment]])
+
+    const restored = readPerRoomObjectiveMemo(memo, room.id)
+
+    expect(restored.cached).toBe(true)
+    expect(restored.questSpec).toBe(attachment.questSpec)
+    expect(restored.questHints).toEqual({
+      hint: attachment.hint,
+      completionHint: attachment.completionHint,
+    })
+  })
+
+  it('clears stale generated quest state for uncached rooms and restores room #1 when revisited', async () => {
+    const { room, attachment } = await buildRoomOneAttachment()
+    const memo = new Map([[room.id, attachment]])
+
+    const uncached = readPerRoomObjectiveMemo(memo, 'generated-adjacent-room')
+    const revisited = readPerRoomObjectiveMemo(memo, room.id)
+
+    expect(uncached).toEqual({ cached: false, questSpec: null, questHints: null })
+    expect(revisited.questSpec).toBe(attachment.questSpec)
+    expect(revisited.questHints?.hint).toBe(attachment.hint)
+  })
+
+  it('treats cached null as a valid cleared objective result', () => {
+    const memo = new Map([['generated-empty-room', null]])
+
+    const restored = readPerRoomObjectiveMemo(memo, 'generated-empty-room')
+
+    expect(restored).toEqual({ cached: true, questSpec: null, questHints: null })
+  })
+
+  it('leaves authored demo quest projection unchanged outside the per-room memo', () => {
+    const state = makeState({ currentRoomId: 'throne-room' })
+    const before = computeDerivedViews(state, demoQuestSpec, null)
+    const memo = new Map([['throne-room', null]])
+    const after = computeDerivedViews(state, demoQuestSpec, null)
+
+    expect(readPerRoomObjectiveMemo(memo, 'throne-room').questSpec).toBeNull()
+    expect(before.quest?.activeObjectiveId).toBe(after.quest?.activeObjectiveId)
+    expect(after.quest?.status).toBe('active')
+  })
+
+  it('does not require an objective provider call to restore navigation memo state', async () => {
+    const { room, attachment } = await buildRoomOneAttachment()
+    let providerCalls = 0
+    const provider: ObjectiveGenerator = {
+      generate: async () => {
+        providerCalls += 1
+        return null
+      },
+    }
+    const memo = new Map([[room.id, attachment]])
+
+    const restored = readPerRoomObjectiveMemo(memo, room.id)
+
+    expect(restored.questSpec).toBe(attachment.questSpec)
+    expect(providerCalls).toBe(0)
+    expect(provider).toBeDefined()
+  })
+
+  it('attaches an objective asynchronously for an uncached generated-provenance room', async () => {
+    const room = makeRoom([
+      {
+        type: 'scroll',
+        id: 'note-1',
+        position: [0, 0, -2],
+        interaction: { key: 'E', prompt: 'Read', effect: { kind: 'inspect' } },
+      },
+    ], 'generated-adjacent')
+    const memo = new Map()
+    const { logger: safeLogger, logs } = createSafeLogger()
+    let providerCalls = 0
+    let applied = false
+    let refreshes = 0
+    const provider: ObjectiveGenerator = {
+      generate: async () => {
+        providerCalls += 1
+        return JSON.stringify({
+          title: 'Secure the room',
+          description: 'Inspect the marked feature.',
+          hint: 'Look for the feature.',
+          completionHint: 'The feature is handled.',
+          condition: { kind: 'interact-object', objectId: 'note-1' },
+        })
+      },
+    }
+
+    expect(shouldStartPerRoomObjectiveAttach({
+      objectivesPerRoom: true,
+      provenance: 'generated',
+      memo,
+      roomId: room.id,
+    })).toBe(true)
+
+    await attachPerRoomObjectiveOnEnter({
+      room,
+      sessionId: SESSION_ID,
+      memo,
+      usageCount: 0,
+      guardConfig: { enabled: false, cap: 3 },
+      objectiveGenerator: provider,
+      logger: safeLogger,
+      getCurrentPlay: () => ({ room, sessionId: SESSION_ID }),
+      applyAttachment: (attachment) => {
+        applied = attachment != null
+      },
+      refreshAfterApply: async () => {
+        refreshes += 1
+      },
+    })
+
+    expect(providerCalls).toBe(1)
+    expect(memo.get(room.id)).not.toBeNull()
+    expect(applied).toBe(true)
+    expect(refreshes).toBe(1)
+    expect(logs).toContainEqual({
+      message: 'optional objective generation allowed',
+      context: { count: 0, cap: 3, roomId: room.id },
+    })
+    expect(logs).toContainEqual({
+      message: 'per-room objective attached',
+      context: { roomId: room.id, attached: true },
+    })
+  })
+
+  it('skips provider calls for cached rooms and non-generated or authored/demo entries', async () => {
+    const { room, attachment } = await buildRoomOneAttachment()
+    const memo = new Map([[room.id, attachment]])
+    let providerCalls = 0
+    const provider: ObjectiveGenerator = {
+      generate: async () => {
+        providerCalls += 1
+        return null
+      },
+    }
+
+    expect(shouldStartPerRoomObjectiveAttach({
+      objectivesPerRoom: true,
+      provenance: 'generated',
+      memo,
+      roomId: room.id,
+    })).toBe(false)
+    expect(shouldStartPerRoomObjectiveAttach({
+      objectivesPerRoom: true,
+      provenance: 'repaired',
+      memo: new Map(),
+      roomId: 'repaired-room',
+    })).toBe(false)
+    expect(shouldStartPerRoomObjectiveAttach({
+      objectivesPerRoom: false,
+      provenance: 'generated',
+      memo: new Map(),
+      roomId: 'authored-room',
+    })).toBe(false)
+
+    await attachPerRoomObjectiveOnEnter({
+      room,
+      sessionId: SESSION_ID,
+      memo,
+      usageCount: 0,
+      guardConfig: { enabled: false, cap: 3 },
+      objectiveGenerator: provider,
+      logger: createSafeLogger().logger,
+      getCurrentPlay: () => ({ room, sessionId: SESSION_ID }),
+      applyAttachment: () => undefined,
+      refreshAfterApply: async () => undefined,
+    })
+
+    expect(providerCalls).toBe(0)
+    const demoQuest = computeDerivedViews(makeState({ currentRoomId: 'throne-room' }), demoQuestSpec, null).quest
+    expect(demoQuest?.status).toBe('active')
+  })
+
+  it('memoizes null on budget skip and leaves the room without a quest', async () => {
+    const room = makeRoom([], 'generated-at-cap')
+    const memo = new Map()
+    const { logger: safeLogger, logs } = createSafeLogger()
+    let providerCalls = 0
+    let applied: unknown = 'not-called'
+    const provider: ObjectiveGenerator = {
+      generate: async () => {
+        providerCalls += 1
+        return '{}'
+      },
+    }
+
+    await attachPerRoomObjectiveOnEnter({
+      room,
+      sessionId: SESSION_ID,
+      memo,
+      usageCount: 3,
+      guardConfig: { enabled: true, cap: 3 },
+      objectiveGenerator: provider,
+      logger: safeLogger,
+      getCurrentPlay: () => ({ room, sessionId: SESSION_ID }),
+      applyAttachment: (attachment) => {
+        applied = attachment
+      },
+      refreshAfterApply: async () => undefined,
+    })
+
+    expect(providerCalls).toBe(0)
+    expect(memo.has(room.id)).toBe(true)
+    expect(memo.get(room.id)).toBeNull()
+    expect(applied).toBeNull()
+    expect(logs).toContainEqual({
+      message: 'optional objective generation skipped',
+      context: { count: 3, cap: 3, roomId: room.id, reason: 'usage-cap' },
+    })
+  })
+
+  it('memoizes null when the objective provider returns null', async () => {
+    const room = makeRoom([], 'generated-no-objective')
+    const memo = new Map()
+    let applied: unknown = 'not-called'
+    const provider: ObjectiveGenerator = { generate: async () => null }
+
+    await attachPerRoomObjectiveOnEnter({
+      room,
+      sessionId: SESSION_ID,
+      memo,
+      usageCount: 0,
+      guardConfig: { enabled: false, cap: 3 },
+      objectiveGenerator: provider,
+      logger: createSafeLogger().logger,
+      getCurrentPlay: () => ({ room, sessionId: SESSION_ID }),
+      applyAttachment: (attachment) => {
+        applied = attachment
+      },
+      refreshAfterApply: async () => undefined,
+    })
+
+    expect(memo.has(room.id)).toBe(true)
+    expect(memo.get(room.id)).toBeNull()
+    expect(applied).toBeNull()
+  })
+
+  it('discards stale async objective results when the player has moved on', async () => {
+    const { room, attachment } = await buildRoomOneAttachment()
+    const nextRoom = makeRoom([], 'next-room')
+    const memo = new Map()
+    const pending = deferred<typeof attachment>()
+    let applied = false
+    let refreshes = 0
+    let current = { room, sessionId: SESSION_ID }
+
+    const attach = attachPerRoomObjectiveOnEnter({
+      room,
+      sessionId: SESSION_ID,
+      memo,
+      usageCount: 0,
+      guardConfig: { enabled: false, cap: 3 },
+      objectiveGenerator: { generate: async () => null },
+      logger: createSafeLogger().logger,
+      getCurrentPlay: () => current,
+      applyAttachment: () => {
+        applied = true
+      },
+      refreshAfterApply: async () => {
+        refreshes += 1
+      },
+      buildAttachment: async () => pending.promise,
+    })
+
+    current = { room: nextRoom, sessionId: SESSION_ID }
+    pending.resolve(attachment)
+    await attach
+
+    expect(memo.get(room.id)).toBe(attachment)
+    expect(applied).toBe(false)
+    expect(refreshes).toBe(0)
   })
 })
 

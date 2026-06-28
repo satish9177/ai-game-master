@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import type { RoomProvenance } from '../domain/assembleRoom'
 import { loadRoomSpec } from '../domain/loadRoomSpec'
 import type { LoadedRoom } from '../domain/loadRoomSpec'
 import { validateRoom } from '../domain/validateRoom'
@@ -71,8 +72,8 @@ const emptyRegistry: PregenRoomRegistry = {
   resolve: () => ({ ok: false, reason: 'unknown-room' }) as RoomRegistryResult,
 }
 
-function okSource(room: LoadedRoom): RoomSource {
-  return { getRoom: async () => ({ ok: true, room, provenance: 'generated' }) }
+function okSource(room: LoadedRoom, provenance: RoomProvenance = 'generated'): RoomSource {
+  return { getRoom: async () => ({ ok: true, room, provenance }) }
 }
 
 function deferred<T>() {
@@ -124,7 +125,7 @@ describe('AdjacentRoomPregenerator.resolveRoom', () => {
     expect(factoryCalls).toBe(0)
   })
 
-  it('resolves an authored room through the registry and caches it (never generated)', async () => {
+  it('resolves an authored room through the registry and cache hits without provenance', async () => {
     const cache = new SessionRoomCache()
     const { logger } = createLogger()
     let factoryCalls = 0
@@ -141,9 +142,14 @@ describe('AdjacentRoomPregenerator.resolveRoom', () => {
     )
 
     const result = await pregen.resolveRoom('throne-room')
+    const cached = await pregen.resolveRoom('throne-room')
 
     expect(result.ok && result.source).toBe('registry')
     expect(result.ok && result.room.id).toBe('throne-room')
+    expect(result.ok && result.provenance).toBeUndefined()
+    expect(cached.ok && cached.source).toBe('cache')
+    expect(cached.ok && cached.cacheHit).toBe(true)
+    expect(cached.ok && cached.provenance).toBeUndefined()
     expect(cache.get('throne-room')?.id).toBe('throne-room')
     expect(factoryCalls).toBe(0)
   })
@@ -159,10 +165,55 @@ describe('AdjacentRoomPregenerator.resolveRoom', () => {
 
     expect(result.ok && result.source).toBe('generated')
     expect(result.ok && result.room.id).toBe('crypt')
+    expect(result.ok && result.provenance).toBe('generated')
     expect(cache.get('crypt')?.id).toBe('crypt')
     // The original generated room is not mutated; the cache holds a normalized copy.
     expect(generated.id).toBe('gen-abc123')
     expect(cache.get('crypt')).not.toBe(generated)
+  })
+
+  it('retains repaired and fallback provenance from generated room assembly', async () => {
+    const repairedPregen = new AdjacentRoomPregenerator(
+      new SessionRoomCache(),
+      emptyRegistry,
+      () => okSource(makeRoom('repaired-source'), 'repaired'),
+      fallbackRoom,
+      createLogger().logger,
+    )
+    const fallbackPregen = new AdjacentRoomPregenerator(
+      new SessionRoomCache(),
+      emptyRegistry,
+      () => okSource(makeRoom('fallback-source'), 'fallback'),
+      fallbackRoom,
+      createLogger().logger,
+    )
+
+    const repaired = await repairedPregen.resolveRoom('repaired-room')
+    const fallback = await fallbackPregen.resolveRoom('fallback-room')
+
+    expect(repaired.ok && repaired.provenance).toBe('repaired')
+    expect(fallback.ok && fallback.provenance).toBe('fallback')
+  })
+
+  it('returns retained generated provenance on a cache hit', async () => {
+    const cache = new SessionRoomCache()
+    const { logger } = createLogger()
+    let factoryCalls = 0
+    const factory: RoomSourceFactory = () => {
+      factoryCalls += 1
+      return okSource(makeRoom('gen-crypt'), 'repaired')
+    }
+    const pregen = new AdjacentRoomPregenerator(cache, emptyRegistry, factory, fallbackRoom, logger)
+
+    const miss = await pregen.resolveRoom('crypt')
+    const hit = await pregen.resolveRoom('crypt')
+
+    expect(miss.ok && miss.cacheHit).toBe(false)
+    expect(miss.ok && miss.provenance).toBe('repaired')
+    expect(hit.ok && hit.cacheHit).toBe(true)
+    expect(hit.ok && hit.source).toBe('cache')
+    expect(hit.ok && hit.provenance).toBe('repaired')
+    expect(factoryCalls).toBe(1)
   })
 
   it('joins an in-flight job instead of generating twice', async () => {
