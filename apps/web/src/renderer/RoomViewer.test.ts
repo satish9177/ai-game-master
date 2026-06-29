@@ -243,6 +243,30 @@ describe('RoomViewer NPC dialogue room context wiring', () => {
     expect(serializedRoomContext).not.toContain('Secret interaction body')
   })
 
+  it('passes resolvedObjectIds through to engine.setRoom when provided', async () => {
+    const room = loadedRoom()
+    const resolvedObjectIds = new Set(['room-npc'])
+
+    const props = {
+      roomSource: { getRoom: async () => ({ ok: true, room }) },
+      sessionId: 'session-1',
+      interactionService: { resolve: async () => ({ status: 'rejected', reason: 'missing-effect' }) },
+      encounterService: { resolve: async () => ({ status: 'failed', reason: 'not-found' }) },
+      npcDialogueService: {
+        reply: async () => ({ status: 'replied', turn: { speaker: 'npc', text: 'A line.' } }),
+      },
+      onNavigate: async () => ({ status: 'failed', reason: 'not-found' }),
+      resolvedObjectIds,
+    } as unknown as Parameters<typeof RoomViewer>[0]
+    RoomViewer(props)
+
+    await Promise.resolve()
+    await Promise.resolve()
+
+    const engine = mockState.engineInstances[0]
+    expect(engine?.setRoom).toHaveBeenCalledWith(room, { resolvedObjectIds })
+  })
+
   it('passes the current quest stage into NPCDialogueService.reply when opening NPC dialogue', async () => {
     const replies: unknown[] = []
     const room = loadedRoom()

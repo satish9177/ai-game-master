@@ -62,10 +62,13 @@ Throughout these docs:
   Generated Room Bidirectional Links v0 — deterministic, data-only return exits for
   generated-play adjacent rooms
   ([ADR-0052](./decisions/ADR-0052-generated-room-bidirectional-links-v0.md));
+  Generated Room Object State v0 - read-only generated-play presentation projection
+  over existing `WorldState.roomStates[roomId].flags`
+  ([ADR-0054](./decisions/ADR-0054-generated-room-object-state-v0.md));
   Return Exit Visual Affordance v0 — purple return arches plus pink return rings,
   with forward/authored exits unchanged
   ([ADR-0053](./decisions/ADR-0053-return-exit-visual-affordance-v0.md)).
-- 🔜 **Planned** — designed and approved, not yet built (next slices).
+- 🔜 **Planned** — future approved slices, when present, are listed here.
 - ❌ **Not built** — future shape only; documented so we don't paint into a corner.
 
 ## Status today (Renderer Foundation v0)
@@ -789,6 +792,45 @@ engine ([ADR-0051](./decisions/ADR-0051-generated-objective-per-room-v0.md)).
 - **Deferred:** generated objective save/load persistence, cross-room story threading,
   generated mechanical gates/rewards, multi-step quest chains, objective-specific usage meters,
   and server-side/hosted objective-provider execution remain future work.
+
+## Generated Room Object State v0
+
+✅ **Implemented, browser/app composition + domain projection + renderer presentation.**
+Generated Room Object State v0 closes the presentation gap for generated rooms that can be
+revisited: objects already inspected or taken in a prior visit appear resolved on re-entry,
+without adding any new persistence layer
+([ADR-0054](./decisions/ADR-0054-generated-room-object-state-v0.md)).
+
+- **Existing authoritative substrate.** `WorldState.roomStates[roomId].flags` already survives
+  navigation across the full generated play — `move` events never clear flags. The one-shot
+  `inspect`/`take-item` flag set by `InteractionService` → `planInteraction` →
+  `room-state-changed` (ADR-0014) persists for free. This is a **presentation gap only**, not a
+  persistence gap.
+- **Pure domain projection.** A new pure function `resolvedObjectIds(room, roomState) →
+  ReadonlySet<string>` reads the existing flags for each one-shot object with a stable id and a
+  set flag key. It reuses the exported `interactionFlagKey` from `planInteraction.ts` so the
+  projection cannot drift from the writer. `use-item` objects are never included (repeatable by
+  design). No new event type, schema field, or state store.
+- **Generated-play gate.** The `App` composition root computes the resolved set only for
+  generated plays (`objectivesPerRoom === true`) at room entry. Authored/demo paths omit
+  `resolvedObjectIds`, so ring colors and HUD behavior remain visually unchanged.
+- **Entry-time presentation.** `RoomViewer` forwards `resolvedObjectIds` to
+  `engine.setRoom(room, { resolvedObjectIds })`. `buildObjects` dims the existing
+  `interactable-indicator` ring (lower opacity/emissive) for each resolved object id. `Hud.tsx`
+  shows a resolved treatment for the nearest resolved interactable. The `DialoguePanel` still
+  opens and still shows "Already searched." — unchanged.
+- **No live in-room ring update in v0.** The ring state reflects the WorldState at room entry.
+  An object resolved in the current room session sees the updated ring only on the next re-entry.
+- **No mesh removal.** Taken objects remain visible. The dimmed ring is the sole visual signal.
+- **Generated objective targets.** ADR-0048 objective targets carry `effect.kind = 'inspect'`.
+  Completing the objective sets the same flag this projection reads, so the object correctly
+  shows as resolved on return — no extra wiring needed.
+- **Boundaries unchanged.** `WorldState` / event log / reducers — untouched. Engine receives a
+  `ReadonlySet<string>` only; no world-session reference crosses the engine boundary.
+  `domain/roomSpec.ts`, `assembleRoom`, `validateRoom`, `repairRoom`, all generation code,
+  `interactions/InteractionService`, providers, backend, save/load, and all persistence layers are
+  unchanged. v0 adds no DB persistence, rich object-state enum, mesh removal/hiding, live in-room
+  refresh, no-effect inspect tracking, or authored/demo resolved presentation.
 
 ## Isometric Camera Foundation
 

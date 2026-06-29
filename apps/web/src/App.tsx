@@ -49,6 +49,7 @@ import { InteractionService } from './interactions/InteractionService'
 import { EncounterService } from './encounters/EncounterService'
 import { loadRoomSpec, type LoadedRoom } from './domain/loadRoomSpec'
 import type { RoomProvenance } from './domain/assembleRoom'
+import { resolvedObjectIds } from './domain/interactions/resolvedObjects'
 import { fallbackRoom as fallbackRoomSpec } from './domain/examples/fallbackRoom'
 import { FALLBACK_NOTICE, shouldShowFallbackNotice } from './app/fallbackNotice'
 import { buildRoomIntroView } from './app/roomIntro'
@@ -133,6 +134,7 @@ type ActivePlay = {
   questSpec?: QuestSpec
   journalSpec?: JournalSpec
   objectivesPerRoom?: boolean
+  entryResolvedObjectIds?: ReadonlySet<string>
 }
 
 type QuestHintState = {
@@ -272,6 +274,23 @@ export function AppRoomEntryOverlay({
 
 function preloadedRoomSource(room: LoadedRoom): RoomSource {
   return { getRoom: async () => ({ ok: true, room }) }
+}
+
+export function resolvedObjectIdsForRoom(
+  state: WorldState,
+  room: LoadedRoom,
+): ReadonlySet<string> {
+  return resolvedObjectIds(room, state.roomStates[room.id])
+}
+
+export function resolvedObjectIdsForGeneratedPlay(input: {
+  objectivesPerRoom?: boolean
+  state: WorldState
+  room: LoadedRoom
+}): ReadonlySet<string> | undefined {
+  return input.objectivesPerRoom === true
+    ? resolvedObjectIdsForRoom(input.state, input.room)
+    : undefined
 }
 
 function startRoomSession(room: LoadedRoom): Promise<WorldStateResult> {
@@ -509,6 +528,11 @@ function App() {
           initialPlayer,
           ...(generatedObjective ? { questSpec: generatedObjective.questSpec } : {}),
           objectivesPerRoom: true,
+          entryResolvedObjectIds: resolvedObjectIdsForGeneratedPlay({
+            objectivesPerRoom: true,
+            state: started.state,
+            room: result.room,
+          }),
         })
         refreshDerivedViews(started.state)
         // A repaired or fallback room couldn't be built exactly as asked — show the
@@ -683,7 +707,16 @@ function App() {
               initialPlayer: activePlay.initialPlayer,
               ...(nextQuestSpec ? { questSpec: nextQuestSpec } : {}),
               journalSpec: activePlay.journalSpec,
-              ...(activePlay.objectivesPerRoom === true ? { objectivesPerRoom: true } : {}),
+              ...(activePlay.objectivesPerRoom === true
+                ? {
+                    objectivesPerRoom: true,
+                    entryResolvedObjectIds: resolvedObjectIdsForGeneratedPlay({
+                      objectivesPerRoom: true,
+                      state: result.state,
+                      room: result.room,
+                    }),
+                  }
+                : {}),
             }
             activePlayRef.current = nextPlay
             return nextPlay
@@ -739,6 +772,9 @@ function App() {
             status: quest.status,
             ...(questHints ? { hint: questHints.hint, completionHint: questHints.completionHint } : {}),
           } : undefined}
+          {...(activePlay.objectivesPerRoom === true
+            ? { resolvedObjectIds: activePlay.entryResolvedObjectIds }
+            : {})}
         />
       ) : (
         <div className="room-viewer-root">

@@ -166,6 +166,28 @@ body {
   text-transform: uppercase;
 }
 
+.hud--resolved {
+  color: #c8c1b2;
+}
+
+.hud--resolved .hud-affordance {
+  border-color: rgba(200, 193, 178, 0.28);
+  color: #c8c1b2;
+}
+
+.hud-resolved {
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.35rem;
+  padding: 0 0.45rem;
+  border: 1px solid rgba(111, 207, 122, 0.36);
+  border-radius: 999px;
+  color: #a7d8ad;
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
 /* ---------- dialogue / interact panel ---------- */
 .panel-backdrop {
   position: absolute;

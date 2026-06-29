@@ -1,6 +1,14 @@
 import * as THREE from 'three'
 import { describe, expect, it } from 'vitest'
-import { AFFORDANCE_RING_COLOR, RETURN_EXIT_RING_COLOR, buildObjects } from './index'
+import {
+  AFFORDANCE_RING_COLOR,
+  INTERACTABLE_RING_EMISSIVE_INTENSITY,
+  INTERACTABLE_RING_OPACITY,
+  RESOLVED_RING_EMISSIVE_INTENSITY,
+  RESOLVED_RING_OPACITY,
+  RETURN_EXIT_RING_COLOR,
+  buildObjects,
+} from './index'
 import type { LoadedRoom } from '../../../domain/loadRoomSpec'
 import { loadRoomSpec } from '../../../domain/loadRoomSpec'
 import type { Logger } from '../../../platform/logger/Logger'
@@ -60,6 +68,10 @@ function indicatorColor(group: THREE.Group): string {
   return `#${material?.color?.getHexString() ?? ''}`
 }
 
+function indicatorMaterial(group: THREE.Group): THREE.MeshStandardMaterial {
+  return indicatorMesh(group).material as THREE.MeshStandardMaterial
+}
+
 const encounter = {
   id: 'threat',
   title: 'Threat',
@@ -94,11 +106,48 @@ describe('buildObjects interactable indicators', () => {
     expect(ring.name).toBe('interactable-indicator')
     expect(geometry.parameters.innerRadius).toBeCloseTo(0.68)
     expect(geometry.parameters.outerRadius).toBeCloseTo(1.08)
-    expect(material.emissiveIntensity).toBeCloseTo(1.25)
-    expect(material.opacity).toBe(1)
+    expect(material.emissiveIntensity).toBeCloseTo(INTERACTABLE_RING_EMISSIVE_INTENSITY)
+    expect(material.opacity).toBe(INTERACTABLE_RING_OPACITY)
     expect(material.depthWrite).toBe(false)
     expect(material.toneMapped).toBe(false)
     expect(ring.renderOrder).toBe(8)
+  })
+
+  it('dims resolved interactable indicators without changing color or geometry', () => {
+    const unresolved = buildObjects(roomWith([{ ...scroll, id: 'scroll-1' }]), noopLogger)
+    const resolved = buildObjects(
+      roomWith([{ ...scroll, id: 'scroll-1' }]),
+      noopLogger,
+      new Set(['scroll-1']),
+    )
+    const unresolvedMaterial = indicatorMaterial(unresolved)
+    const resolvedMaterial = indicatorMaterial(resolved)
+    const unresolvedGeometry = indicatorMesh(unresolved).geometry as THREE.RingGeometry
+    const resolvedGeometry = indicatorMesh(resolved).geometry as THREE.RingGeometry
+
+    expect(indicatorColor(resolved)).toBe(indicatorColor(unresolved))
+    expect(resolvedGeometry.parameters.innerRadius).toBeCloseTo(
+      unresolvedGeometry.parameters.innerRadius,
+    )
+    expect(resolvedGeometry.parameters.outerRadius).toBeCloseTo(
+      unresolvedGeometry.parameters.outerRadius,
+    )
+    expect(resolvedMaterial.opacity).toBeCloseTo(RESOLVED_RING_OPACITY)
+    expect(resolvedMaterial.emissiveIntensity).toBeCloseTo(RESOLVED_RING_EMISSIVE_INTENSITY)
+    expect(resolvedMaterial.opacity).toBeLessThan(unresolvedMaterial.opacity)
+    expect(resolvedMaterial.emissiveIntensity).toBeLessThan(unresolvedMaterial.emissiveIntensity)
+  })
+
+  it('keeps unresolved indicators unchanged when resolved ids do not match', () => {
+    const g = buildObjects(
+      roomWith([{ ...scroll, id: 'scroll-1' }]),
+      noopLogger,
+      new Set(['other-object']),
+    )
+    const material = indicatorMaterial(g)
+
+    expect(material.opacity).toBe(INTERACTABLE_RING_OPACITY)
+    expect(material.emissiveIntensity).toBeCloseTo(INTERACTABLE_RING_EMISSIVE_INTENSITY)
   })
 
   it('adds no indicator for non-interactable objects', () => {

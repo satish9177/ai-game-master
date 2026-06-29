@@ -24,6 +24,7 @@ export type Interactable = {
   prompt: string
   title?: string
   body?: string
+  resolved?: boolean
   /** World position on the floor plane; used by the engine for proximity. */
   position: { x: number; y: number; z: number }
 }
@@ -33,7 +34,10 @@ export function affordanceForInteractableObject(object: RoomObject): Affordance 
   return interaction ? affordanceFor(interaction, object.type) : undefined
 }
 
-export function buildInteractables(room: LoadedRoom): Interactable[] {
+export function buildInteractables(
+  room: LoadedRoom,
+  resolvedObjectIds?: ReadonlySet<string>,
+): Interactable[] {
   const interactables: Interactable[] = []
 
   // `interaction` is required on scroll/npc and optional on other supported
@@ -42,8 +46,9 @@ export function buildInteractables(room: LoadedRoom): Interactable[] {
     const interaction = 'interaction' in o ? o.interaction : undefined
     if (!interaction) continue
     const affordance = affordanceForInteractableObject(o)
+    const id = 'id' in o ? o.id : undefined
     interactables.push({
-      id: 'id' in o ? o.id : undefined,
+      id,
       type: o.type,
       label: 'name' in o && o.name ? o.name : o.type,
       affordance: affordance ?? 'inspect',
@@ -51,6 +56,7 @@ export function buildInteractables(room: LoadedRoom): Interactable[] {
       prompt: interaction.prompt,
       title: interaction.title,
       body: interaction.body,
+      ...(id !== undefined && resolvedObjectIds?.has(id) ? { resolved: true } : {}),
       position: { x: o.position[0], y: o.position[1], z: o.position[2] },
     })
   }

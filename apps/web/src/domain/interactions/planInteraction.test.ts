@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { InteractionEffectSchema } from './effects'
-import { planInteraction } from './planInteraction'
+import { interactionFlagKey, planInteraction } from './planInteraction'
 import type { WorldState } from '../world/worldState'
 
 const baseState = (overrides: Partial<WorldState> = {}): WorldState => ({
@@ -43,6 +43,12 @@ describe('InteractionEffectSchema', () => {
 })
 
 describe('planInteraction', () => {
+  it('exports the same one-shot flag derivation used by the writer path', () => {
+    expect(interactionFlagKey(undefined, 'case-file')).toBe('interaction:case-file')
+    expect(interactionFlagKey('custom-flag', 'case-file')).toBe('custom-flag')
+    expect(interactionFlagKey(undefined, undefined)).toBeUndefined()
+  })
+
   it('plans inspect with a stable derived flag and recognizes it as resolved', () => {
     const effect = { kind: 'inspect' } as const
     expect(planInteraction({ effect, ref: 'note-1', state: baseState() })).toEqual({

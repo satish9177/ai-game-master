@@ -31,6 +31,7 @@ describe('Hud', () => {
     expect(html).toContain('class="hud-affordance"')
     expect(html).toContain('>Talk</span>')
     expect(html).toContain('Speak with survivor')
+    expect(html).not.toContain('hud-resolved')
   })
 
   it('uses affordance labels instead of raw enum values when a label exists', () => {
@@ -52,5 +53,19 @@ describe('Hud', () => {
     expect(html).not.toContain('{')
     expect(html).not.toContain('"affordance"')
     expect(html).not.toContain('"take"')
+  })
+
+  it('shows resolved treatment while preserving the key and prompt', () => {
+    const html = renderToStaticMarkup(<Hud active={active({
+      resolved: true,
+      prompt: 'Read the note',
+    })} />)
+
+    expect(html).toContain('class="hud hud--resolved"')
+    expect(html).toContain('class="hud-resolved"')
+    expect(html).toContain('aria-label="Already resolved"')
+    expect(html).toContain('>Resolved</span>')
+    expect(html).toContain('>E</span>')
+    expect(html).toContain('Read the note')
   })
 })

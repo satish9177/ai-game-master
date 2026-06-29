@@ -49,7 +49,7 @@ function planInspect(
   ref: string | undefined,
   state: WorldState,
 ): InteractionPlan {
-  const flagKey = oneShotFlag(effect.flag, ref)
+  const flagKey = interactionFlagKey(effect.flag, ref)
   if (flagKey === undefined) return { status: 'rejected', reason: 'missing-id' }
   if (isFlagSet(state, flagKey)) return alreadyResolved()
 
@@ -65,7 +65,7 @@ function planTakeItem(
   ref: string | undefined,
   state: WorldState,
 ): InteractionPlan {
-  const flagKey = oneShotFlag(undefined, ref)
+  const flagKey = interactionFlagKey(undefined, ref)
   if (flagKey === undefined) return { status: 'rejected', reason: 'missing-id' }
   if (isFlagSet(state, flagKey)) return alreadyResolved()
 
@@ -117,7 +117,10 @@ function planUseItem(
   }
 }
 
-function oneShotFlag(explicitFlag: string | undefined, ref: string | undefined): string | undefined {
+export function interactionFlagKey(
+  explicitFlag: string | undefined,
+  ref: string | undefined,
+): string | undefined {
   return explicitFlag ?? (ref ? `interaction:${ref}` : undefined)
 }
 

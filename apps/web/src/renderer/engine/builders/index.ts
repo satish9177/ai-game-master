@@ -27,7 +27,11 @@ import { buildHumanoid } from './parts/humanoid'
  * constructs its prop resting on the local floor plane (y=0); one material per
  * mesh so disposeObject frees every geometry/material exactly once.
  */
-export function buildObjects(room: LoadedRoom, logger: Logger): THREE.Group {
+export function buildObjects(
+  room: LoadedRoom,
+  logger: Logger,
+  resolvedObjectIds?: ReadonlySet<string>,
+): THREE.Group {
   const group = new THREE.Group()
   group.name = 'objects'
 
@@ -44,7 +48,8 @@ export function buildObjects(room: LoadedRoom, logger: Logger): THREE.Group {
       const ringColor = isReturnExitObject(obj)
         ? RETURN_EXIT_RING_COLOR
         : AFFORDANCE_RING_COLOR[affordance] ?? AFFORDANCE_RING_COLOR.inspect
-      group.add(buildInteractableIndicator(obj.position, ringColor))
+      const resolved = obj.id !== undefined && resolvedObjectIds?.has(obj.id) === true
+      group.add(buildInteractableIndicator(obj.position, ringColor, resolved))
     }
   }
 
@@ -378,19 +383,29 @@ export const AFFORDANCE_RING_COLOR: Record<Affordance, string> = {
   use: '#9b7cff',
 }
 export const RETURN_EXIT_RING_COLOR = '#f472b6'
+export const INTERACTABLE_RING_EMISSIVE_INTENSITY = 1.25
+export const INTERACTABLE_RING_OPACITY = 1
+export const RESOLVED_RING_EMISSIVE_INTENSITY = 0.22
+export const RESOLVED_RING_OPACITY = 0.34
 
 /**
  * A static floor ring placed under an interactable object at its XZ (on the
  * floor, not at the object's own height). Renderer-internal discoverability cue;
  * disposed with the scene like every other mesh.
  */
-function buildInteractableIndicator(position: Vec3, color: string): THREE.Object3D {
+function buildInteractableIndicator(
+  position: Vec3,
+  color: string,
+  resolved = false,
+): THREE.Object3D {
   const ring = buildGroundRing({
     innerRadius: 0.68,
     outerRadius: 1.08,
     color,
-    emissiveIntensity: 1.25,
-    opacity: 1,
+    emissiveIntensity: resolved
+      ? RESOLVED_RING_EMISSIVE_INTENSITY
+      : INTERACTABLE_RING_EMISSIVE_INTENSITY,
+    opacity: resolved ? RESOLVED_RING_OPACITY : INTERACTABLE_RING_OPACITY,
     floorY: 0.06,
     renderOrder: 8,
     toneMapped: false,

@@ -4,6 +4,8 @@ import {
   AppRoomEntryOverlay,
   attachPerRoomObjectiveOnEnter,
   readPerRoomObjectiveMemo,
+  resolvedObjectIdsForGeneratedPlay,
+  resolvedObjectIdsForRoom,
   shouldStartPerRoomObjectiveAttach,
 } from './App'
 import { buildPromptGeneratedRoomSource } from './app/buildPromptGeneratedRoomSource'
@@ -377,6 +379,115 @@ describe('App generated objective prompt-path wiring', () => {
     expect(reply.text).not.toContain('Steward')
     expect(reply.text).not.toContain('Malik')
     expect(reply.text).not.toContain('tribute coffer')
+  })
+})
+
+describe('App resolved object projection wiring', () => {
+  function resolvedRoom() {
+    return makeRoom([
+      {
+        type: 'scroll',
+        id: 'case-file',
+        position: [0, 0, -2],
+        interaction: { key: 'E', prompt: 'Read', effect: { kind: 'inspect' } },
+      },
+      {
+        type: 'crate',
+        id: 'supply-crate',
+        position: [2, 0, -2],
+        interaction: {
+          key: 'E',
+          prompt: 'Take',
+          effect: {
+            kind: 'take-item',
+            item: { itemId: 'battery', name: 'Battery', quantity: 1 },
+          },
+        },
+      },
+      {
+        type: 'machine',
+        id: 'repeatable-station',
+        position: [-2, 0, -2],
+        interaction: {
+          key: 'E',
+          prompt: 'Use',
+          effect: { kind: 'use-item', itemId: 'battery', quantity: 1 },
+        },
+      },
+    ], 'generated-room-b')
+  }
+
+  it('resolvedObjectIdsForRoom projects inspect and take one-shot flags', () => {
+    const room = resolvedRoom()
+    const projected = resolvedObjectIdsForRoom(makeState({
+      currentRoomId: room.id,
+      roomStates: {
+        [room.id]: {
+          visited: true,
+          flags: {
+            'interaction:case-file': true,
+            'interaction:supply-crate': true,
+          },
+        },
+      },
+    }), room)
+
+    expect([...projected].sort()).toEqual(['case-file', 'supply-crate'])
+  })
+
+  it('resolvedObjectIdsForRoom keeps use-item repeatable and handles missing room state', () => {
+    const room = resolvedRoom()
+    const projected = resolvedObjectIdsForRoom(makeState({
+      currentRoomId: room.id,
+      roomStates: {
+        [room.id]: {
+          visited: true,
+          flags: { 'interaction:repeatable-station': true },
+        },
+      },
+    }), room)
+
+    expect([...projected]).toEqual([])
+    expect([...resolvedObjectIdsForRoom(makeState({ currentRoomId: room.id }), room)]).toEqual([])
+  })
+
+  it('generated-play App gate returns resolved ids and authored/demo gate omits them', () => {
+    const room = resolvedRoom()
+    const state = makeState({
+      currentRoomId: room.id,
+      roomStates: {
+        [room.id]: { visited: true, flags: { 'interaction:case-file': true } },
+      },
+    })
+
+    expect([...(resolvedObjectIdsForGeneratedPlay({
+      objectivesPerRoom: true,
+      state,
+      room,
+    }) ?? [])]).toEqual(['case-file'])
+    expect(resolvedObjectIdsForGeneratedPlay({
+      objectivesPerRoom: false,
+      state,
+      room,
+    })).toBeUndefined()
+    expect(resolvedObjectIdsForGeneratedPlay({ state, room })).toBeUndefined()
+  })
+
+  it('projects a B-room object after A to B interaction, C travel, and return to B state shape', () => {
+    const roomB = resolvedRoom()
+    const returnedToBState = makeState({
+      currentRoomId: roomB.id,
+      roomStates: {
+        'generated-room-a': { visited: true },
+        [roomB.id]: {
+          visited: true,
+          flags: { 'interaction:case-file': true },
+        },
+        'generated-room-c': { visited: true },
+      },
+    })
+
+    expect([...resolvedObjectIdsForRoom(returnedToBState, roomB)]).toEqual(['case-file'])
   })
 })
 

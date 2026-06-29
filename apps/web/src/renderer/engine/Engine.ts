@@ -14,6 +14,10 @@ import { buildPlayerMarker } from './playerMarker'
 import type { Logger } from '../../platform/logger/Logger'
 import { buildInteractables, type Interactable } from '../../domain/ports/interaction'
 
+export type SetRoomOptions = {
+  resolvedObjectIds?: ReadonlySet<string>
+}
+
 /**
  * Owns the Three.js renderer, scene, camera, and render loop. Pure Three.js
  * with no React dependency so the React layer stays a thin host.
@@ -86,11 +90,11 @@ export class Engine {
   }
 
   /** Receives the validated room, builds the shell, and places the player. */
-  setRoom(room: LoadedRoom): void {
+  setRoom(room: LoadedRoom, options: SetRoomOptions = {}): void {
     this.room = room
     this.scene.add(buildLighting(room.lighting, room.shell.dimensions))
     this.scene.add(buildShell(room, { cutawaySides: this.cutawaySides() }))
-    this.scene.add(buildObjects(room, this.logger))
+    this.scene.add(buildObjects(room, this.logger, options.resolvedObjectIds))
     this.placePlayer(room.spawn)
 
     const { width, depth } = room.shell.dimensions
@@ -103,7 +107,7 @@ export class Engine {
     }
     this.movement = new MovementControls()
 
-    this.interactables.push(...buildInteractables(room))
+    this.interactables.push(...buildInteractables(room, options.resolvedObjectIds))
     window.addEventListener('keydown', this.onInteractKey)
 
     this.logger.info('room received', {

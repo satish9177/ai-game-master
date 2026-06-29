@@ -46,6 +46,7 @@ type RoomViewerProps = {
   onNavigate: (toRoomId: string) => Promise<NavigationResult>
   onWorldStateChange?: (state: WorldState) => void
   questStage?: QuestDialogueContext
+  resolvedObjectIds?: ReadonlySet<string>
 }
 
 export function RoomViewer({
@@ -57,6 +58,7 @@ export function RoomViewer({
   onNavigate,
   onWorldStateChange,
   questStage,
+  resolvedObjectIds,
 }: RoomViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const engineRef = useRef<Engine | null>(null)
@@ -261,7 +263,11 @@ export function RoomViewer({
       roomDialogueContextRef.current = buildRoomDialogueContext(result.room)
       effectLookupRef.current = buildInteractionEffectLookup(result.room)
       try {
-        engine.setRoom(result.room)
+        if (resolvedObjectIds !== undefined) {
+          engine.setRoom(result.room, { resolvedObjectIds })
+        } else {
+          engine.setRoom(result.room)
+        }
       } catch (err) {
         logger.error('engine.setRoom failed', { error: describeError(err) })
         engine.dispose()
@@ -304,6 +310,7 @@ export function RoomViewer({
     npcDialogueService,
     onNavigate,
     onWorldStateChange,
+    resolvedObjectIds,
     roomSource,
     sessionId,
     webgl2Available,

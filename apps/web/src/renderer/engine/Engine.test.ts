@@ -1,8 +1,9 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { loadRoomSpec } from '../../domain/loadRoomSpec'
 import { buildInteractables } from '../../domain/ports/interaction'
 import { assembleRoom } from '../../domain/assembleRoom'
 import { fallbackRoom } from '../../domain/examples/fallbackRoom'
+import { Engine } from './Engine'
 
 const fallback = loadRoomSpec(fallbackRoom)
 const INSPECT_BODY = 'You inspect it carefully, but do not take anything.'
@@ -162,5 +163,102 @@ describe('buildInteractables', () => {
       prompt: 'Enter the archway',
       position: { x: 0, y: 0, z: -4 },
     })
+  })
+
+  it('marks an interactable resolved when its object id is in resolvedObjectIds', () => {
+    const inspect = buildInteractables(room, new Set(['inspect']))
+      .find((interactable) => interactable.id === 'inspect')
+
+    expect(inspect).toMatchObject({
+      id: 'inspect',
+      affordance: 'inspect',
+      prompt: 'Read the note',
+      resolved: true,
+    })
+  })
+
+  it('leaves interactables unresolved when their ids are absent', () => {
+    const inspect = buildInteractables(room, new Set(['take']))
+      .find((interactable) => interactable.id === 'inspect')
+
+    expect(inspect).toMatchObject({
+      id: 'inspect',
+      affordance: 'inspect',
+      prompt: 'Read the note',
+    })
+    expect(inspect).not.toHaveProperty('resolved')
+  })
+
+  it('keeps existing behavior when resolvedObjectIds is omitted', () => {
+    const inspect = buildInteractables(room)
+      .find((interactable) => interactable.id === 'inspect')
+
+    expect(inspect).toMatchObject({
+      id: 'inspect',
+      affordance: 'inspect',
+      prompt: 'Read the note',
+    })
+    expect(inspect).not.toHaveProperty('resolved')
+  })
+
+  it('marks only matching interactables as resolved', () => {
+    const byId = new Map(buildInteractables(room, new Set(['take'])).map((interactable) => [
+      interactable.id,
+      interactable,
+    ]))
+
+    expect(byId.get('take')?.resolved).toBe(true)
+    expect(byId.get('inspect')).not.toHaveProperty('resolved')
+    expect(byId.get('use')).not.toHaveProperty('resolved')
+    expect(byId.has('visual-only')).toBe(false)
+  })
+})
+
+describe('Engine.setRoom options', () => {
+  it('passes resolvedObjectIds through so matching interactables become resolved', () => {
+    const originalWindow = globalThis.window
+    vi.stubGlobal('window', {
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    })
+    const interactables: ReturnType<typeof buildInteractables> = []
+    const fakeEngine = {
+      room: null,
+      scene: { add: vi.fn() },
+      logger: {
+        debug() {},
+        info() {},
+        warn() {},
+        error() {},
+        child() {
+          return this
+        },
+      },
+      cutawaySides: () => [],
+      placePlayer: vi.fn(),
+      interactables,
+      bounds: null,
+      movement: null,
+    }
+
+    try {
+      Engine.prototype.setRoom.call(
+        fakeEngine as never,
+        room,
+        { resolvedObjectIds: new Set(['inspect']) },
+      )
+    } finally {
+      if (originalWindow === undefined) {
+        vi.unstubAllGlobals()
+      } else {
+        vi.stubGlobal('window', originalWindow)
+      }
+    }
+
+    const inspect = interactables.find((interactable) => interactable.id === 'inspect')
+    const take = interactables.find((interactable) => interactable.id === 'take')
+
+    expect(inspect?.resolved).toBe(true)
+    expect(take).not.toHaveProperty('resolved')
   })
 })
