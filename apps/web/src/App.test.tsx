@@ -2,12 +2,14 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import {
   AppRoomEntryOverlay,
+} from './App'
+import {
   attachPerRoomObjectiveOnEnter,
   readPerRoomObjectiveMemo,
   resolvedObjectIdsForGeneratedPlay,
   resolvedObjectIdsForRoom,
   shouldStartPerRoomObjectiveAttach,
-} from './App'
+} from './app/App.helpers'
 import { buildPromptGeneratedRoomSource } from './app/buildPromptGeneratedRoomSource'
 import { buildGeneratedObjectiveAttachment, buildGeneratedObjectiveQuestSpec } from './app/generatedObjective'
 import { FALLBACK_NOTICE } from './app/fallbackNotice'

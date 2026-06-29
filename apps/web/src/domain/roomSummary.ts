@@ -133,12 +133,26 @@ function directionFor(position: RoomObject['position']): RoomSummaryDirection {
 }
 
 function buildSummaryText(roomName: string, focal: RoomObject, supports: RoomObject[]): string {
-  const intro = `You enter ${withArticle(roomName)}.`
+  const intro = `You enter ${introRoomNoun(roomName)}.`
   const focalText = capitalize(NOUNS[focal.type])
   const supportText = supports.length > 0
     ? ` near ${formatSupportList(supports)}`
     : ''
   return `${intro} ${focalText} ${verbFor(focal.type)} ${directionPhrase(directionFor(focal.position))}${supportText}.`
+}
+
+export function introRoomNoun(roomName: string): string {
+  const trimmed = roomName.trim()
+  if (trimmed.length === 0) return 'the room'
+  if (/^generated room\b/i.test(trimmed)) return 'the room'
+
+  const pipeIndex = trimmed.indexOf('|')
+  if (pipeIndex !== -1) {
+    const leading = trimmed.slice(0, pipeIndex).trim()
+    return leading.length > 0 ? withArticle(leading) : 'the room'
+  }
+
+  return withArticle(trimmed)
 }
 
 function withArticle(roomName: string): string {

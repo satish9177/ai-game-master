@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { fallbackRoom } from './examples/fallbackRoom'
 import { loadRoomSpec } from './loadRoomSpec'
 import type { LoadedRoom } from './loadRoomSpec'
-import { buildRoomSummary } from './roomSummary'
+import { buildRoomSummary, introRoomNoun } from './roomSummary'
 
 function makeRoom(objects: unknown[], name = 'ruined investigation room'): LoadedRoom {
   return loadRoomSpec({
@@ -17,6 +17,32 @@ function makeRoom(objects: unknown[], name = 'ruined investigation room'): Loade
     objects,
   })
 }
+
+describe('introRoomNoun', () => {
+  it.each([
+    ['', 'the room'],
+    ['   ', 'the room'],
+    ['Generated room', 'the room'],
+    ['generated room', 'the room'],
+    ['Generated Room', 'the room'],
+    ['Generated room \u2014 post-apoc | tense | survivors', 'the room'],
+    ['gEnErAtEd RoOm \u2014 fantasy-keep | grim | dungeon', 'the room'],
+    ['Ashfall Market | post-apoc | grim', 'the Ashfall Market'],
+    ['Throne Room', 'the Throne Room'],
+    ['A quiet stone antechamber', 'A quiet stone antechamber'],
+    ['Ransacked Safe House', 'the Ransacked Safe House'],
+    ['Ashfall Market \u2014 South Gate', 'the Ashfall Market \u2014 South Gate'],
+  ])('normalizes %j to %j', (roomName, expected) => {
+    expect(introRoomNoun(roomName)).toBe(expected)
+  })
+
+  it('is deterministic and does not mutate boxed input values', () => {
+    const roomName = 'Ashfall Market | post-apoc | grim'
+    expect(introRoomNoun(roomName)).toBe('the Ashfall Market')
+    expect(introRoomNoun(roomName)).toBe('the Ashfall Market')
+    expect(roomName).toBe('Ashfall Market | post-apoc | grim')
+  })
+})
 
 describe('buildRoomSummary', () => {
   it('returns null for an empty room', () => {
@@ -53,6 +79,49 @@ describe('buildRoomSummary', () => {
     expect(summary?.text).toBe(
       'You enter the ruined investigation room. A corpse lies to the north.',
     )
+  })
+
+  it('hides generated-room markers and seed tags from the intro clause', () => {
+    const summary = buildRoomSummary(makeRoom([
+      { type: 'corpse', position: [0, 0, -5] },
+    ], 'Generated room \u2014 post-apoc | tense | survivors'))
+
+    expect(summary?.text).toMatch(/^You enter the room\./)
+    expect(summary?.text).not.toMatch(/generated room/i)
+    expect(summary?.text).not.toContain('post-apoc')
+    expect(summary?.text).not.toContain('tense')
+    expect(summary?.text).not.toContain('survivors')
+    expect(summary?.text).not.toContain('|')
+    expect(summary?.text).not.toContain('\u2014')
+  })
+
+  it('uses a safe generic intro for bare generated-room names', () => {
+    const summary = buildRoomSummary(makeRoom([
+      { type: 'corpse', position: [0, 0, -5] },
+    ], 'Generated room'))
+
+    expect(summary?.text).toMatch(/^You enter the room\./)
+  })
+
+  it('preserves normal authored room names in the intro clause', () => {
+    expect(buildRoomSummary(makeRoom([
+      { type: 'throne', position: [0, 0, -4] },
+    ], 'Throne Room'))?.text).toMatch(/^You enter the Throne Room\./)
+
+    expect(buildRoomSummary(makeRoom([
+      { type: 'corpse', position: [0, 0, -5] },
+    ], 'A quiet stone antechamber'))?.text).toMatch(/^You enter A quiet stone antechamber\./)
+  })
+
+  it('drops pipe-separated tag tails while preserving prose and normal em-dash names', () => {
+    expect(buildRoomSummary(makeRoom([
+      { type: 'corpse', position: [0, 0, -5] },
+    ], 'Ashfall Market | post-apoc | grim'))?.text).toMatch(/^You enter the Ashfall Market\./)
+
+    expect(buildRoomSummary(makeRoom([
+      { type: 'corpse', position: [0, 0, -5] },
+    ], 'Ashfall Market \u2014 South Gate'))?.text)
+      .toMatch(/^You enter the Ashfall Market \u2014 South Gate\./)
   })
 
   it('summarizes machine and artifact rooms as device or mystery focal objects', () => {

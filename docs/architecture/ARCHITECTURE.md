@@ -65,6 +65,9 @@ Throughout these docs:
   Generated Room Object State v0 - read-only generated-play presentation projection
   over existing `WorldState.roomStates[roomId].flags`
   ([ADR-0054](./decisions/ADR-0054-generated-room-object-state-v0.md));
+  Generated Room Entry Intro Polish v0 - pure presentation-layer `introRoomNoun`
+  normalization for room-entry intro text
+  ([ADR-0055](./decisions/ADR-0055-generated-room-entry-intro-polish-v0.md));
   Return Exit Visual Affordance v0 — purple return arches plus pink return rings,
   with forward/authored exits unchanged
   ([ADR-0053](./decisions/ADR-0053-return-exit-visual-affordance-v0.md)).
@@ -831,6 +834,26 @@ without adding any new persistence layer
   `interactions/InteractionService`, providers, backend, save/load, and all persistence layers are
   unchanged. v0 adds no DB persistence, rich object-state enum, mesh removal/hiding, live in-room
   refresh, no-effect inspect tracking, or authored/demo resolved presentation.
+
+## Generated Room Entry Intro Polish v0
+
+✅ **Implemented, pure domain presentation helper.** Generated Room Entry Intro Polish v0 keeps
+the room-entry intro clause from displaying implementation markers such as `"Generated room"` or
+pipe-separated seed tags
+([ADR-0055](./decisions/ADR-0055-generated-room-entry-intro-polish-v0.md)).
+
+- **Pure intro noun normalization.** `introRoomNoun(roomName)` lives in
+  `domain/roomSummary.ts` and is used by `buildSummaryText` for the opening `"You enter ..."`
+  clause. Empty or whitespace names become `"the room"`, names beginning with
+  `"Generated room"` become `"the room"`, and pipe-tagged names keep only the leading prose
+  segment before reusing the existing article behavior.
+- **Authored names stay natural.** Normal room names still pass through the existing
+  `withArticle` behavior, so examples such as `"Throne Room"`,
+  `"A quiet stone antechamber"`, and `"Ashfall Market — South Gate"` keep their existing intro
+  wording.
+- **Boundaries unchanged.** This is source-only presentation text normalization. There are no
+  generation, schema, provider prompt, navigation, objective, renderer, backend, persistence,
+  App/UI plumbing, generated-room naming, logging, LLM intro, or revisit-message changes.
 
 ## Isometric Camera Foundation
 
