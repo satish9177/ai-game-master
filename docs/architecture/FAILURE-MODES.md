@@ -545,6 +545,11 @@ real-LLM status lifecycle remains the future shape of
   capped at `maxJobs` (default 3)**, deduped against cache + in-flight, and
   **depth-1** (a warmed room never warms its own neighbours), so a backtrack
   wastes little work and pre-generation cannot fan out.
+- **Return-exit degradation** ✅ — generated-play adjacent rooms attempt a
+  deterministic return exit only when the structural room id parses as
+  `parentId:exit:<side>`. If parsing misses, or if the enriched room fails
+  re-validation, the original valid room is cached with no return exit. The room
+  remains playable; only backtracking via that synthesized return arch is absent.
 - **User-facing** ✅ — with the synchronous deterministic generator a transition is
   either an instant cache hit or an on-demand resolve in the same tick, so there is
   no "Opening the way…" state to show in v0; the player never freezes or sees a
@@ -1105,7 +1110,7 @@ interactable person to talk to
 | 4h | Generated room theme vocabulary degradation | structured `WorldBibleSeed.themePack` only; missing theme/default path; no prompt or seed parsing | missing/unknown context falls back to default fantasy vocabulary and anchor priority; post-apoc suppresses fantasy-biased fake pools while keeping arch/npc; sci-fi/spaceship deferred to later theme packs | ✅ v0 |
 | 5 | Backend/network | validated API requests + typed results | safe API envelope; browser retry state 🔜 | ✅ API edge v0 |
 | 6 | DB / persistence failure | typed results (rooms, conflicts) + fail-fast throws (open/migration/corrupt session) | safe API error; no browser surface yet | ✅ API-backed v0 |
-| 7 | Pre-gen not ready | one `resolveRoom` seam: cache hit / in-flight join / on-demand resolve (capped, depth-1 warming) | instant cached room, or safe on-demand resolve/generate; never a freeze | ✅ v0 (browser); status lifecycle 🔜 |
+| 7 | Pre-gen not ready / return exit absent | one `resolveRoom` seam: cache hit / in-flight join / on-demand resolve (capped, depth-1 warming); generated return exit parse + re-validation | instant cached room, or safe on-demand resolve/generate; return-exit parse/validation miss → original valid room with no return exit; never a freeze | ✅ v0 (browser); status lifecycle 🔜 |
 | 8 | Iso camera/player presentation | resize→frustum; player-position proximity; scene-graph disposal; cutaway curbs | stable framing, no occlusion or leak | ✅ |
 | 9 | Concurrent world append | optimistic revision check | typed conflict; neither event nor snapshot committed | ✅ headless |
 | 10 | Save integrity mismatch | validate log + seed + projected snapshot | reject whole save | ✅ headless |

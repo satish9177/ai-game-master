@@ -1,5 +1,9 @@
 import { buildExitLookup } from './exits'
 import type { RoomProvenance } from '../domain/assembleRoom'
+import {
+  ensureGeneratedReturnExit,
+  parseGeneratedExitTargetId,
+} from '../domain/generatedReturnExit'
 import type { LoadedRoom } from '../domain/loadRoomSpec'
 import { validateRoom } from '../domain/validateRoom'
 import type { RoomLoadResult, RoomSource } from '../domain/ports/RoomSource'
@@ -55,6 +59,10 @@ export type PregenRoomRegistry = {
 /** Builds a RoomSource that generates the room for a non-authored id. */
 export type RoomSourceFactory = (roomId: string) => RoomSource
 
+export type AdjacentRoomPregeneratorOptions = {
+  ensureReturnExits?: boolean
+}
+
 /**
  * A trusted, semantics-preserving copy of a loaded room with its id replaced.
  * `id` is a plain string label that `validateRoom` never reads, so this only
@@ -72,6 +80,7 @@ export class AdjacentRoomPregenerator implements RoomResolver {
   private readonly fallbackRoom: LoadedRoom
   private readonly log: Logger
   private readonly maxJobs: number
+  private readonly ensureReturnExits: boolean
   // One shared in-flight map for the door and warming, so a door request and a
   // background warm for the same id collapse to a single job.
   private readonly inFlight = new Map<string, Promise<ResolveRoomResult>>()
@@ -84,6 +93,7 @@ export class AdjacentRoomPregenerator implements RoomResolver {
     fallbackRoom: LoadedRoom,
     logger: Logger,
     maxJobs = 3,
+    options: AdjacentRoomPregeneratorOptions = {},
   ) {
     this.cache = cache
     this.registry = registry
@@ -91,6 +101,7 @@ export class AdjacentRoomPregenerator implements RoomResolver {
     this.fallbackRoom = fallbackRoom
     this.log = logger
     this.maxJobs = maxJobs
+    this.ensureReturnExits = options.ensureReturnExits ?? false
   }
 
   /**
@@ -188,7 +199,8 @@ export class AdjacentRoomPregenerator implements RoomResolver {
       this.log.warn('room resolve failed', { roomId, source: 'generated', code: result.error.code })
       return { ok: false, reason: result.error.code }
     }
-    const room = this.normalize(roomId, result.room)
+    const normalized = this.normalize(roomId, result.room)
+    const room = normalized.room
     // This branch is generated-source-only today; default missing provenance to
     // `generated` for backwards compatibility with RoomSource success results.
     const provenance = result.provenance ?? 'generated'
@@ -199,6 +211,7 @@ export class AdjacentRoomPregenerator implements RoomResolver {
       source: 'generated',
       cacheHit: false,
       provenance,
+      returnExitEnsured: normalized.returnExitEnsured,
     })
     return { ok: true, room, cacheHit: false, source: 'generated', provenance }
   }
@@ -209,10 +222,29 @@ export class AdjacentRoomPregenerator implements RoomResolver {
    * relabeling could matter: if it ever failed, the trusted fallback room takes
    * its place under the same id, keeping the resolver total.
    */
-  private normalize(roomId: string, room: LoadedRoom): LoadedRoom {
+  private normalize(roomId: string, room: LoadedRoom): { room: LoadedRoom; returnExitEnsured: boolean } {
     const normalized = withRoomId(room, roomId)
-    if (validateRoom(normalized).ok) return normalized
+    if (validateRoom(normalized).ok) {
+      return this.enrichWithReturnExit(roomId, normalized)
+    }
     this.log.warn('normalized room failed revalidation', { roomId })
-    return withRoomId(this.fallbackRoom, roomId)
+    return { room: withRoomId(this.fallbackRoom, roomId), returnExitEnsured: false }
+  }
+
+  private enrichWithReturnExit(
+    roomId: string,
+    room: LoadedRoom,
+  ): { room: LoadedRoom; returnExitEnsured: boolean } {
+    if (!this.ensureReturnExits) return { room, returnExitEnsured: false }
+
+    const parsed = parseGeneratedExitTargetId(roomId)
+    if (!parsed) return { room, returnExitEnsured: false }
+
+    const enriched = ensureGeneratedReturnExit(room, parsed.parentId, parsed.side)
+    if (enriched.returnExitEnsured && validateRoom(enriched.room).ok) {
+      return { room: enriched.room, returnExitEnsured: true }
+    }
+
+    return { room, returnExitEnsured: false }
   }
 }

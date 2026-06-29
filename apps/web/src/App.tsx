@@ -473,6 +473,8 @@ function App() {
             ),
           fallbackRoom,
           logger,
+          3,
+          { ensureReturnExits: true },
         )
         const generatedNavigation = new NavigationService(worldSession, generatedPregenerator, logger)
         generatedPregenerator.warmAdjacent(result.room)

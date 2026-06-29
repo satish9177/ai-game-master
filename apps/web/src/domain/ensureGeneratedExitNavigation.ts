@@ -6,12 +6,16 @@ export type EnsureGeneratedExitNavigationResult = {
   exitNavigationEnsured: boolean
 }
 
-type ExitSide = LoadedRoom['shell']['exits'][number]['side']
+export type ExitSide = LoadedRoom['shell']['exits'][number]['side']
 type ArchObject = Extract<RoomObject, { type: 'arch' }>
 
 const EXIT_PROMPT = 'Enter next room'
 const DEFAULT_EXIT_WIDTH = 3
 const SIDES: ExitSide[] = ['north', 'south', 'east', 'west']
+
+export function buildGeneratedExitTargetId(roomId: string, side: ExitSide): string {
+  return `${roomId}:exit:${side}`
+}
 
 export function ensureGeneratedExitNavigation(
   room: LoadedRoom,
@@ -20,7 +24,7 @@ export function ensureGeneratedExitNavigation(
 
   const side = chooseExitSide(room)
   const shellExits = ensureShellExit(room, side)
-  const toRoomId = `${room.id}:exit:${side}`
+  const toRoomId = buildGeneratedExitTargetId(room.id, side)
   const id = uniqueExitId(room.objects, room.id, side)
   const existingArchIndex = room.objects.findIndex((object) => object.type === 'arch')
 
@@ -121,7 +125,7 @@ function uniqueExitId(objects: RoomObject[], roomId: string, side: ExitSide): st
   }
 }
 
-function positionForSide(room: LoadedRoom, side: ExitSide): [number, number, number] {
+export function positionForSide(room: LoadedRoom, side: ExitSide): [number, number, number] {
   const { width, depth } = room.shell.dimensions
   switch (side) {
     case 'south':
@@ -136,7 +140,7 @@ function positionForSide(room: LoadedRoom, side: ExitSide): [number, number, num
   }
 }
 
-function rotationForSide(side: ExitSide): number {
+export function rotationForSide(side: ExitSide): number {
   switch (side) {
     case 'south':
       return 180

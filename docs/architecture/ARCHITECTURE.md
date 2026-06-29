@@ -47,6 +47,7 @@ Throughout these docs:
   Generated Room Explore Loop v0 — generated assembly/domain + existing browser UI;
   Generated Room NPC Presence v0 — generated assembly/domain;
   Generated Room Exit Navigation v0 — generated assembly/domain + existing browser navigation;
+  Generated Room Bidirectional Links v0 — browser/app composition + domain helper;
   Generated Room Display Sanitization v0 — generated assembly/domain;
   Adjacent Room Theme Continuity v0 — browser composition/domain projection;
   Generated Room Theme Vocabulary v0 — fake/generated assembly + browser composition;
@@ -56,8 +57,11 @@ Throughout these docs:
   NPC Dialogue Room Context v0 — browser/domain/dialogue;
   Generated Story Objective Contract v0 — domain/quests/assembly + dialogue/UI;
   Multi-Call Usage Guardrails / Optional Objective Budget v0 — browser/session-local
-  ([ADR-0050](./decisions/ADR-0050-multi-call-usage-guardrails-v0.md)).
-- 🔜 **Planned** — designed and approved, not yet built (next slices). None currently listed.
+  ([ADR-0050](./decisions/ADR-0050-multi-call-usage-guardrails-v0.md));
+  Generated Room Bidirectional Links v0 — deterministic, data-only return exits for
+  generated-play adjacent rooms
+  ([ADR-0052](./decisions/ADR-0052-generated-room-bidirectional-links-v0.md)).
+- 🔜 **Planned** — designed and approved, not yet built (next slices).
 - ❌ **Not built** — future shape only; documented so we don't paint into a corner.
 
 ## Status today (Renderer Foundation v0)
@@ -980,6 +984,30 @@ generating a non-authored target instead of blocking
   tests, not the example world. A backend generation endpoint, a real LLM, the
   per-room status lifecycle / "Opening the way…" UI, a parallel-job system, and
   recursive pre-generation remain **future**.
+
+## Generated Room Bidirectional Links v0
+
+✅ **Implemented, browser/app composition + domain helper.** Generated-play
+adjacent rooms now receive a deterministic, data-only return exit back to the
+parent room before the room is cached
+([ADR-0052](./decisions/ADR-0052-generated-room-bidirectional-links-v0.md)).
+
+- **Generated-play only.** The `AdjacentRoomPregenerator` constructed inside
+  `App.handlePrompt` enables return exits. The module-level authored/demo/example
+  pregenerator leaves the option off, so authored/bootstrap pregeneration remains
+  unchanged.
+- **Structural parent detection.** The return edge is derived by parsing generated
+  navigation ids built as `parentId:exit:<side>`. Nested generated ids resolve to
+  the immediate parent; non-structural ids get no return exit.
+- **Cache-hit backtracking.** A generated adjacent room B reached from A gets a
+  return arch pointing to A, baked into B before `cache.set`. A -> B -> A is
+  cache-hit based and does not regenerate A.
+- **Provider-free warming remains.** `warmAdjacent` still uses the same bounded,
+  depth-1, fake/generated adjacent path and makes no real-provider calls.
+- **Boundaries unchanged.** No RoomSpec schema, world state/event log, backend,
+  persistence, objective, provider-prompt, renderer, or navigation-contract
+  change. Generated map persistence, minimap, named destination labels, authored
+  bidirectional links, and renderer animation remain future/non-goals.
 
 ## Backend SQLite Persistence v0
 

@@ -77,6 +77,9 @@ and resolver.
 - No prompt/world-bible theming of adjacent rooms.
 - No real-LLM adjacent pregeneration.
 - No return or bidirectional exits.
+  **(Superseded by [ADR-0052](./ADR-0052-generated-room-bidirectional-links-v0.md) —
+  Generated Room Bidirectional Links v0, which adds a deterministic return exit to the
+  parent room for generated adjacent rooms.)**
 - No guarantee that every shell exit is usable.
 - No destination-aware labels.
 - No door animation.

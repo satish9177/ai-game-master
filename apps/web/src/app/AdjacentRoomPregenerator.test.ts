@@ -11,6 +11,7 @@ import { SessionRoomCache } from '../room/SessionRoomCache'
 import { FakeRoomGenerator } from '../generation/FakeRoomGenerator'
 import { GeneratedRoomSource } from '../room/GeneratedRoomSource'
 import { fallbackRoom as fallbackRoomSpec } from '../domain/examples/fallbackRoom'
+import { LIMITS } from '../domain/validateRoom'
 import type { LogContext, Logger } from '../platform/logger/Logger'
 import {
   AdjacentRoomPregenerator,
@@ -18,6 +19,7 @@ import {
   type PregenRoomRegistry,
   type RoomSourceFactory,
 } from './AdjacentRoomPregenerator'
+import { buildExitLookup } from './exits'
 
 const fallbackRoom = loadRoomSpec(fallbackRoomSpec)
 
@@ -74,6 +76,33 @@ const emptyRegistry: PregenRoomRegistry = {
 
 function okSource(room: LoadedRoom, provenance: RoomProvenance = 'generated'): RoomSource {
   return { getRoom: async () => ({ ok: true, room, provenance }) }
+}
+
+function exitTargets(room: LoadedRoom): string[] {
+  return [...buildExitLookup(room).values()].map((exit) => exit.toRoomId)
+}
+
+function returnExit(room: LoadedRoom, parentRoomId: string) {
+  return room.objects.find((object) => {
+    const interaction = 'interaction' in object ? object.interaction : undefined
+    return object.type === 'arch' && interaction?.exit?.toRoomId === parentRoomId
+  })
+}
+
+function objectBudgetEdgeRoom(id: string): LoadedRoom {
+  return loadRoomSpec({
+    schemaVersion: 1,
+    id,
+    name: 'Budget edge',
+    shell: { dimensions: { width: 18, depth: 18, height: 4 }, exits: [] },
+    spawn: { position: [0, 1.7, 0], yaw: 180 },
+    lighting: { ambient: { intensity: 1 } },
+    objects: Array.from({ length: LIMITS.MAX_OBJECTS_HARD }, (_, index) => ({
+      type: 'candle',
+      id: `candle-${index}`,
+      position: [0, 0, 0],
+    })),
+  })
 }
 
 function deferred<T>() {
@@ -193,6 +222,189 @@ describe('AdjacentRoomPregenerator.resolveRoom', () => {
 
     expect(repaired.ok && repaired.provenance).toBe('repaired')
     expect(fallback.ok && fallback.provenance).toBe('fallback')
+  })
+
+  it('adds a return exit before caching when return exits are enabled', async () => {
+    const cache = new SessionRoomCache()
+    const { logger } = createLogger()
+    let factoryCalls = 0
+    const factory: RoomSourceFactory = () => {
+      factoryCalls += 1
+      return okSource(makeRoom('generated-child'))
+    }
+    const pregen = new AdjacentRoomPregenerator(
+      cache,
+      emptyRegistry,
+      factory,
+      fallbackRoom,
+      logger,
+      3,
+      { ensureReturnExits: true },
+    )
+
+    const miss = await pregen.resolveRoom('R1:exit:north')
+    const hit = await pregen.resolveRoom('R1:exit:north')
+
+    expect(miss.ok && miss.room.id).toBe('R1:exit:north')
+    expect(miss.ok && exitTargets(miss.room)).toContain('R1')
+    expect(miss.ok && returnExit(miss.room, 'R1')).toMatchObject({
+      id: 'R1:exit:north:return-exit:south',
+      position: [0, 0, 4],
+      interaction: { exit: { toRoomId: 'R1' } },
+    })
+    expect(cache.get('R1:exit:north')).toBe(miss.ok && miss.room)
+    expect(hit.ok && hit.cacheHit).toBe(true)
+    expect(hit.ok && exitTargets(hit.room)).toContain('R1')
+    expect(factoryCalls).toBe(1)
+  })
+
+  it('keeps generated return exits disabled by default', async () => {
+    const cache = new SessionRoomCache()
+    const { logger } = createLogger()
+    const pregen = new AdjacentRoomPregenerator(
+      cache,
+      emptyRegistry,
+      () => okSource(makeRoom('generated-child')),
+      fallbackRoom,
+      logger,
+    )
+
+    const result = await pregen.resolveRoom('R1:exit:north')
+
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(exitTargets(result.room)).not.toContain('R1')
+    }
+    const cached = cache.get('R1:exit:north')
+    expect(cached).toBeDefined()
+    expect(cached ? exitTargets(cached) : []).not.toContain('R1')
+  })
+
+  it('does not add a return exit when the generated room id has no structural parent', async () => {
+    const cache = new SessionRoomCache()
+    const { logger } = createLogger()
+    const pregen = new AdjacentRoomPregenerator(
+      cache,
+      emptyRegistry,
+      () => okSource(makeRoom('generated-child')),
+      fallbackRoom,
+      logger,
+      3,
+      { ensureReturnExits: true },
+    )
+
+    const result = await pregen.resolveRoom('plain-generated-room')
+
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(exitTargets(result.room)).toEqual([])
+    }
+    const cached = cache.get('plain-generated-room')
+    expect(cached).toBeDefined()
+    expect(cached ? exitTargets(cached) : []).toEqual([])
+  })
+
+  it('keeps the original valid room when return-exit enrichment fails validation', async () => {
+    const cache = new SessionRoomCache()
+    const { logs, logger } = createLogger()
+    const sourceRoom = objectBudgetEdgeRoom('generated-child')
+    const pregen = new AdjacentRoomPregenerator(
+      cache,
+      emptyRegistry,
+      () => okSource(sourceRoom),
+      fallbackRoom,
+      logger,
+      3,
+      { ensureReturnExits: true },
+    )
+
+    const result = await pregen.resolveRoom('R1:exit:north')
+
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(validateRoom(result.room).ok).toBe(true)
+      expect(result.room.objects).toHaveLength(LIMITS.MAX_OBJECTS_HARD)
+      expect(exitTargets(result.room)).not.toContain('R1')
+      expect(cache.get('R1:exit:north')).toBe(result.room)
+    }
+    expect(logs.find((entry) => entry.message === 'room resolved')?.context).toMatchObject({
+      returnExitEnsured: false,
+    })
+  })
+
+  it('can enrich repaired and fallback generated rooms without changing provenance', async () => {
+    const repairedPregen = new AdjacentRoomPregenerator(
+      new SessionRoomCache(),
+      emptyRegistry,
+      () => okSource(makeRoom('repaired-source'), 'repaired'),
+      fallbackRoom,
+      createLogger().logger,
+      3,
+      { ensureReturnExits: true },
+    )
+    const fallbackPregen = new AdjacentRoomPregenerator(
+      new SessionRoomCache(),
+      emptyRegistry,
+      () => okSource(makeRoom('fallback-source'), 'fallback'),
+      fallbackRoom,
+      createLogger().logger,
+      3,
+      { ensureReturnExits: true },
+    )
+
+    const repaired = await repairedPregen.resolveRoom('R1:exit:north')
+    const fallback = await fallbackPregen.resolveRoom('R1:exit:south')
+
+    expect(repaired.ok && repaired.provenance).toBe('repaired')
+    expect(repaired.ok && exitTargets(repaired.room)).toContain('R1')
+    expect(fallback.ok && fallback.provenance).toBe('fallback')
+    expect(fallback.ok && exitTargets(fallback.room)).toContain('R1')
+  })
+
+  it('does not enrich authored registry rooms even when return exits are enabled', async () => {
+    const cache = new SessionRoomCache()
+    const { logger } = createLogger()
+    let factoryCalls = 0
+    const pregen = new AdjacentRoomPregenerator(
+      cache,
+      new RoomRegistry(),
+      () => {
+        factoryCalls += 1
+        return okSource(makeRoom('generated-child'))
+      },
+      fallbackRoom,
+      logger,
+      3,
+      { ensureReturnExits: true },
+    )
+
+    const result = await pregen.resolveRoom('throne-room')
+
+    expect(result.ok && result.source).toBe('registry')
+    expect(result.ok && result.room.objects.some((object) => object.id?.includes(':return-exit:'))).toBe(false)
+    expect(factoryCalls).toBe(0)
+  })
+
+  it('logs return-exit enrichment as a safe boolean only', async () => {
+    const cache = new SessionRoomCache()
+    const { logs, logger } = createLogger()
+    const pregen = new AdjacentRoomPregenerator(
+      cache,
+      emptyRegistry,
+      () => okSource(makeRoom('generated-child', 'SECRET ROOM NAME')),
+      fallbackRoom,
+      logger,
+      3,
+      { ensureReturnExits: true },
+    )
+
+    await pregen.resolveRoom('R1:exit:north')
+
+    const resolved = logs.find((entry) => entry.message === 'room resolved')
+    expect(resolved?.context.returnExitEnsured).toBe(true)
+    const dump = JSON.stringify(logs)
+    expect(dump).not.toContain('SECRET ROOM NAME')
+    expect(dump).not.toContain('Return to previous room')
   })
 
   it('returns retained generated provenance on a cache hit', async () => {
