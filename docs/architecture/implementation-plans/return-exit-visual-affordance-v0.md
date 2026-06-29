@@ -1,10 +1,11 @@
 # Implementation Plan — `feature/return-exit-visual-affordance-v0`
 
-> Status: **in progress — Slice 1 implemented 2026-06-29.**
+> Status: **implemented.**
 > Maintainer approved the design on 2026-06-29.
+> Implemented on 2026-06-29.
 > The ADR for this slice is
 > [ADR-0053](../decisions/ADR-0053-return-exit-visual-affordance-v0.md)
-> (Accepted — planned).
+> (Accepted — implemented).
 >
 > **Depends on (implemented and merged):**
 > `feature/bidirectional-generated-room-links-v0`
@@ -40,17 +41,17 @@ persistence boundary.
   `typeof object.id === 'string' && object.id.includes(RETURN_EXIT_ID_INFIX)`. Already
   exported (Slice 1 complete).
 - **`AFFORDANCE_RING_COLOR`** (`renderer/engine/builders/index.ts:368`): fixed map from
-  `Affordance` to hex color. `exit` → `'#6bbcff'` (cyan). Return exits currently receive this
-  same cyan ring.
+  `Affordance` to hex color. `exit` → `'#6bbcff'` (cyan). Return exits now override this
+  with `RETURN_EXIT_RING_COLOR` in the renderer builder.
 - **`buildInteractableIndicator`** (`renderer/engine/builders/index.ts:382`): called from
-  `buildObjects` with `(obj.position, affordance)`. Picks color from `AFFORDANCE_RING_COLOR`.
-  This is where Slice 2 adds the return-exit branch.
+  `buildObjects` with `(obj.position, color)`. `buildObjects` resolves the color, including
+  the return-exit branch (Slice 2 complete).
 - **`affordanceForInteractableObject`** (`domain/ports/interaction.ts:31`): derives affordance
   from interaction structure; returns `'exit'` for all exit arches (both forward and return).
   Not changed.
 - **`buildObjects`** (`renderer/engine/builders/index.ts:29`): the loop that calls both
-  `buildKnownObject` and `buildInteractableIndicator`. The call to `buildInteractableIndicator`
-  is the only site that needs a one-branch change in Slice 2.
+  `buildKnownObject` and `buildInteractableIndicator`. It now checks `isReturnExitObject`
+  before assigning the indicator color (Slice 2 complete).
 - **Forward exit arch color** (`ensureGeneratedExitNavigation.ts:56`): `color: '#9a9488'`.
   This is NOT changed by this plan.
 - **Authored exits** (e.g. `throneRoom.ts`): authored arches have ids like `north-arch` — no
@@ -94,7 +95,7 @@ persistence boundary.
 - `isReturnExitObject` pure predicate + `RETURN_EXIT_ARCH_COLOR` + `RETURN_EXIT_ID_INFIX`
   extraction (Slice 1 — done).
 - `RETURN_EXIT_RING_COLOR` constant + one-branch in `buildObjects` + color parameter on
-  `buildInteractableIndicator` (Slice 2).
+  `buildInteractableIndicator` (Slice 2 — done).
 
 **Safety boundaries unchanged:**
 - `RoomSpec` schema — `color` field already exists on arch; no schema version bump.
@@ -145,7 +146,7 @@ Each slice is independently shippable and independently testable. Do not merge s
 
 ---
 
-### Slice 2 — Renderer ring color selection
+### Slice 2 — Renderer ring color selection ✅ complete
 `feat(renderer): paint return exits with a distinct floor ring color`
 
 **Files to change:**
@@ -169,11 +170,14 @@ Each slice is independently shippable and independently testable. Do not merge s
 - A non-exit interactable (e.g. `interaction.effect.kind = 'inspect'`) gets its affordance color,
   not `RETURN_EXIT_RING_COLOR`.
 
-**Verification:** `npm run test -- objectIndicators`, `npm run lint`, `npm run build`
+**Verification (run and confirmed passing):**
+`npm run test -- objectIndicators` → 13 passed
+`npm run test -- generatedReturnExit` → 18 passed
+`npm run build` → clean
 
 ---
 
-### Slice 3 — Docs/status closeout
+### Slice 3 — Docs/status closeout ✅ complete
 `docs: record return exit visual affordance v0`
 
 **Files to change:**
@@ -183,7 +187,7 @@ Each slice is independently shippable and independently testable. Do not merge s
 - `docs/architecture/ARCHITECTURE.md`
   — move the feature from 🔜 Planned to ✅ Implemented in the status legend;
   — add short ✅ section body ("Return Exit Visual Affordance v0").
-- This implementation plan — flip status to `implemented`.
+- This implementation plan — flipped status to `implemented`.
 
 **Verification:** `git diff --check` only.
 

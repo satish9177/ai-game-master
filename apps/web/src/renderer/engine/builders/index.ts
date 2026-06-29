@@ -5,6 +5,7 @@ import {
   affordanceForInteractableObject,
   type Affordance,
 } from '../../../domain/ports/interaction'
+import { isReturnExitObject } from '../../../domain/generatedReturnExit'
 import type { Logger } from '../../../platform/logger/Logger'
 import { buildGroundRing } from './indicators'
 import { buildBook, buildMap, buildPaper } from './documents'
@@ -40,7 +41,10 @@ export function buildObjects(room: LoadedRoom, logger: Logger): THREE.Group {
     // interaction data; the engine's proximity/open logic is unchanged.
     const affordance = affordanceForInteractableObject(obj)
     if (affordance) {
-      group.add(buildInteractableIndicator(obj.position, affordance))
+      const ringColor = isReturnExitObject(obj)
+        ? RETURN_EXIT_RING_COLOR
+        : AFFORDANCE_RING_COLOR[affordance] ?? AFFORDANCE_RING_COLOR.inspect
+      group.add(buildInteractableIndicator(obj.position, ringColor))
     }
   }
 
@@ -373,17 +377,18 @@ export const AFFORDANCE_RING_COLOR: Record<Affordance, string> = {
   take: '#ffd84d',
   use: '#9b7cff',
 }
+export const RETURN_EXIT_RING_COLOR = '#f472b6'
 
 /**
  * A static floor ring placed under an interactable object at its XZ (on the
  * floor, not at the object's own height). Renderer-internal discoverability cue;
  * disposed with the scene like every other mesh.
  */
-function buildInteractableIndicator(position: Vec3, affordance: Affordance): THREE.Object3D {
+function buildInteractableIndicator(position: Vec3, color: string): THREE.Object3D {
   const ring = buildGroundRing({
     innerRadius: 0.68,
     outerRadius: 1.08,
-    color: AFFORDANCE_RING_COLOR[affordance] ?? AFFORDANCE_RING_COLOR.inspect,
+    color,
     emissiveIntensity: 1.25,
     opacity: 1,
     floorY: 0.06,

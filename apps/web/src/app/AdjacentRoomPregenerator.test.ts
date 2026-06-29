@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { RoomProvenance } from '../domain/assembleRoom'
+import { buildGeneratedExitTargetId } from '../domain/ensureGeneratedExitNavigation'
 import { loadRoomSpec } from '../domain/loadRoomSpec'
 import type { LoadedRoom } from '../domain/loadRoomSpec'
 import { validateRoom } from '../domain/validateRoom'
@@ -87,6 +88,12 @@ function returnExit(room: LoadedRoom, parentRoomId: string) {
     const interaction = 'interaction' in object ? object.interaction : undefined
     return object.type === 'arch' && interaction?.exit?.toRoomId === parentRoomId
   })
+}
+
+function firstTargetExcept(room: LoadedRoom, ...excluded: string[]): string {
+  const target = exitTargets(room).find((toRoomId) => !excluded.includes(toRoomId))
+  if (target == null) throw new Error('missing target')
+  return target
 }
 
 function objectBudgetEdgeRoom(id: string): LoadedRoom {
@@ -199,6 +206,109 @@ describe('AdjacentRoomPregenerator.resolveRoom', () => {
     // The original generated room is not mutated; the cache holds a normalized copy.
     expect(generated.id).toBe('gen-abc123')
     expect(cache.get('crypt')).not.toBe(generated)
+  })
+
+  it('rebases generated forward exits to the navigation id before caching', async () => {
+    const cache = new SessionRoomCache()
+    const { logger } = createLogger()
+    const navId = buildGeneratedExitTargetId('genA', 'north')
+    const generated = roomWithExits('genB', [buildGeneratedExitTargetId('genB', 'north')])
+    const pregen = new AdjacentRoomPregenerator(
+      cache,
+      emptyRegistry,
+      () => okSource(generated),
+      fallbackRoom,
+      logger,
+      3,
+      { ensureReturnExits: true },
+    )
+
+    const result = await pregen.resolveRoom(navId)
+
+    expect(result.ok && result.room.id).toBe(navId)
+    expect(result.ok && exitTargets(result.room)).toContain(buildGeneratedExitTargetId(navId, 'north'))
+    expect(cache.get(navId)).toBe(result.ok && result.room)
+    expect(exitTargets(generated)).toEqual([buildGeneratedExitTargetId('genB', 'north')])
+  })
+
+  it('adds a child return exit pointing to the parent navigation id after rebasing forward exits', async () => {
+    const cache = new SessionRoomCache()
+    const { logger } = createLogger()
+    const factory: RoomSourceFactory = (roomId) => {
+      const rawId = roomId === buildGeneratedExitTargetId('genA', 'north') ? 'genB' : 'genC'
+      return okSource(roomWithExits(rawId, [buildGeneratedExitTargetId(rawId, 'north')]))
+    }
+    const pregen = new AdjacentRoomPregenerator(
+      cache,
+      emptyRegistry,
+      factory,
+      fallbackRoom,
+      logger,
+      3,
+      { ensureReturnExits: true },
+    )
+
+    const parent = await pregen.resolveRoom(buildGeneratedExitTargetId('genA', 'north'))
+    expect(parent.ok).toBe(true)
+    if (!parent.ok) return
+    const childId = firstTargetExcept(parent.room, 'genA')
+
+    const child = await pregen.resolveRoom(childId)
+
+    expect(child.ok && exitTargets(child.room)).toContain(parent.room.id)
+    expect(child.ok && returnExit(child.room, parent.room.id)).toBeDefined()
+  })
+
+  it('keeps deep generated backtracking on cache keys instead of regenerating rooms', async () => {
+    const cache = new SessionRoomCache()
+    const roomA = makeRoom('A')
+    cache.set('A', roomA)
+    const { logger } = createLogger()
+    let factoryCalls = 0
+    const factory: RoomSourceFactory = () => {
+      factoryCalls += 1
+      const rawId = `raw-${factoryCalls}`
+      return okSource(roomWithExits(rawId, [buildGeneratedExitTargetId(rawId, 'north')]))
+    }
+    const pregen = new AdjacentRoomPregenerator(
+      cache,
+      emptyRegistry,
+      factory,
+      fallbackRoom,
+      logger,
+      3,
+      { ensureReturnExits: true },
+    )
+
+    const b = await pregen.resolveRoom(buildGeneratedExitTargetId('A', 'north'))
+    expect(b.ok).toBe(true)
+    if (!b.ok) return
+    const cId = firstTargetExcept(b.room, 'A')
+
+    const c = await pregen.resolveRoom(cId)
+    expect(c.ok).toBe(true)
+    if (!c.ok) return
+    const dId = firstTargetExcept(c.room, b.room.id)
+
+    const d = await pregen.resolveRoom(dId)
+    expect(d.ok).toBe(true)
+    if (!d.ok) return
+
+    expect(exitTargets(d.room)).toContain(c.room.id)
+    expect(exitTargets(c.room)).toContain(b.room.id)
+    expect(exitTargets(b.room)).toContain('A')
+
+    const cBacktrack = await pregen.resolveRoom(c.room.id)
+    const bBacktrack = await pregen.resolveRoom(b.room.id)
+    const aBacktrack = await pregen.resolveRoom('A')
+
+    expect(cBacktrack.ok && cBacktrack.cacheHit).toBe(true)
+    expect(cBacktrack.ok && cBacktrack.room).toBe(c.room)
+    expect(bBacktrack.ok && bBacktrack.cacheHit).toBe(true)
+    expect(bBacktrack.ok && bBacktrack.room).toBe(b.room)
+    expect(aBacktrack.ok && aBacktrack.cacheHit).toBe(true)
+    expect(aBacktrack.ok && aBacktrack.room).toBe(roomA)
+    expect(factoryCalls).toBe(3)
   })
 
   it('retains repaired and fallback provenance from generated room assembly', async () => {

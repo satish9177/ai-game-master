@@ -1,6 +1,6 @@
 import * as THREE from 'three'
 import { describe, expect, it } from 'vitest'
-import { AFFORDANCE_RING_COLOR, buildObjects } from './index'
+import { AFFORDANCE_RING_COLOR, RETURN_EXIT_RING_COLOR, buildObjects } from './index'
 import type { LoadedRoom } from '../../../domain/loadRoomSpec'
 import { loadRoomSpec } from '../../../domain/loadRoomSpec'
 import type { Logger } from '../../../platform/logger/Logger'
@@ -57,7 +57,7 @@ function indicatorMesh(group: THREE.Group): THREE.Mesh {
 function indicatorColor(group: THREE.Group): string {
   const ring = indicatorMesh(group)
   const material = ring?.material as THREE.MeshStandardMaterial | undefined
-  return `#${material?.color.getHexString()}`
+  return `#${material?.color?.getHexString() ?? ''}`
 }
 
 const encounter = {
@@ -148,6 +148,42 @@ describe('buildObjects interactable indicators', () => {
 
     expect(indicatorColor(g)).toBe(AFFORDANCE_RING_COLOR.exit)
     expect(indicatorColor(g)).not.toBe(AFFORDANCE_RING_COLOR.inspect)
+  })
+
+  it('uses the return-exit ring color for return-exit namespace ids', () => {
+    const g = buildObjects(roomWith([{
+      type: 'arch',
+      id: 'R1:exit:north:return-exit:south',
+      position: [0, 0, 0],
+      interaction: { key: 'E', prompt: 'Return', exit: { toRoomId: 'R1' } },
+    }]), noopLogger)
+
+    expect(indicatorColor(g)).toBe(RETURN_EXIT_RING_COLOR)
+    expect(indicatorColor(g)).not.toBe(AFFORDANCE_RING_COLOR.exit)
+  })
+
+  it('keeps forward generated exit rings cyan', () => {
+    const g = buildObjects(roomWith([{
+      type: 'arch',
+      id: 'R1:generated-exit:north',
+      position: [0, 0, 0],
+      interaction: { key: 'E', prompt: 'Enter next room', exit: { toRoomId: 'R1:exit:north' } },
+    }]), noopLogger)
+
+    expect(indicatorColor(g)).toBe(AFFORDANCE_RING_COLOR.exit)
+    expect(indicatorColor(g)).not.toBe(RETURN_EXIT_RING_COLOR)
+  })
+
+  it('keeps authored exit rings cyan', () => {
+    const g = buildObjects(roomWith([{
+      type: 'arch',
+      id: 'north-arch',
+      position: [0, 0, 0],
+      interaction: { key: 'E', prompt: 'Leave', exit: { toRoomId: 'ruined-room' } },
+    }]), noopLogger)
+
+    expect(indicatorColor(g)).toBe(AFFORDANCE_RING_COLOR.exit)
+    expect(indicatorColor(g)).not.toBe(RETURN_EXIT_RING_COLOR)
   })
 
   it('uses the approach color for encounter interactions', () => {

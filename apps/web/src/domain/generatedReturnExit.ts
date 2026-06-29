@@ -1,6 +1,7 @@
 import type { LoadedRoom } from './loadRoomSpec'
 import type { RoomObject } from './roomSpec'
 import {
+  buildGeneratedExitTargetId,
   type ExitSide,
   positionForSide,
   rotationForSide,
@@ -52,6 +53,39 @@ export function opposite(side: ExitSide): ExitSide {
     case 'west':
       return 'east'
   }
+}
+
+export function rebaseGeneratedExitTargets(
+  room: LoadedRoom,
+  oldId: string,
+  newId: string,
+): LoadedRoom {
+  if (oldId === newId) return room
+
+  let changed = false
+  const objects = room.objects.map((object) => {
+    if (isReturnExitObject(object)) return object
+
+    const interaction = 'interaction' in object ? object.interaction : undefined
+    if (interaction?.exit?.toRoomId == null) return object
+
+    const parsed = parseGeneratedExitTargetId(interaction.exit.toRoomId)
+    if (!parsed || parsed.parentId !== oldId) return object
+
+    changed = true
+    return {
+      ...object,
+      interaction: {
+        ...interaction,
+        exit: {
+          ...interaction.exit,
+          toRoomId: buildGeneratedExitTargetId(newId, parsed.side),
+        },
+      },
+    } as RoomObject
+  })
+
+  return changed ? { ...room, objects } : room
 }
 
 export function ensureGeneratedReturnExit(

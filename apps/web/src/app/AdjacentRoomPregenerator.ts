@@ -3,6 +3,7 @@ import type { RoomProvenance } from '../domain/assembleRoom'
 import {
   ensureGeneratedReturnExit,
   parseGeneratedExitTargetId,
+  rebaseGeneratedExitTargets,
 } from '../domain/generatedReturnExit'
 import type { LoadedRoom } from '../domain/loadRoomSpec'
 import { validateRoom } from '../domain/validateRoom'
@@ -223,7 +224,7 @@ export class AdjacentRoomPregenerator implements RoomResolver {
    * its place under the same id, keeping the resolver total.
    */
   private normalize(roomId: string, room: LoadedRoom): { room: LoadedRoom; returnExitEnsured: boolean } {
-    const normalized = withRoomId(room, roomId)
+    const normalized = rebaseGeneratedExitTargets(withRoomId(room, roomId), room.id, roomId)
     if (validateRoom(normalized).ok) {
       return this.enrichWithReturnExit(roomId, normalized)
     }

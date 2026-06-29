@@ -1,7 +1,8 @@
 # ADR-0053: Return Exit Visual Affordance v0 — distinct presentation for return exits
 
-- **Status:** Accepted — planned
+- **Status:** Accepted — implemented
 - **Date:** 2026-06-29
+- **Implemented:** 2026-06-29
 - **Deciders:** Project owner
 - **Extends:** [ADR-0052](./ADR-0052-generated-room-bidirectional-links-v0.md) (generated room
   bidirectional links — `ensureGeneratedReturnExit`, `:return-exit:` id namespace, the

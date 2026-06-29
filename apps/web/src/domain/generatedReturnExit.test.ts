@@ -6,6 +6,7 @@ import {
   isReturnExitObject,
   opposite,
   parseGeneratedExitTargetId,
+  rebaseGeneratedExitTargets,
   RETURN_EXIT_ARCH_COLOR,
   RETURN_EXIT_ID_INFIX,
 } from './generatedReturnExit'
@@ -41,6 +42,10 @@ function exitArch(id: string, toRoomId: string, position: [number, number, numbe
   }
 }
 
+function exitTargets(room: LoadedRoom): string[] {
+  return [...buildExitLookup(room).values()].map((exit) => exit.toRoomId)
+}
+
 describe('parseGeneratedExitTargetId', () => {
   it('round-trips ids built by buildGeneratedExitTargetId for all sides', () => {
     for (const side of SIDES) {
@@ -74,6 +79,93 @@ describe('opposite', () => {
     expect(opposite('south')).toBe('north')
     expect(opposite('east')).toBe('west')
     expect(opposite('west')).toBe('east')
+  })
+})
+
+describe('rebaseGeneratedExitTargets', () => {
+  it('rewrites deterministic forward generated-exit targets from the old room id to the new room id', () => {
+    const oldTarget = buildGeneratedExitTargetId('genB', 'north')
+    const newRoomId = buildGeneratedExitTargetId('genA', 'north')
+    const room = roomWith([
+      exitArch('forward', oldTarget, [0, 0, -9]),
+    ])
+
+    const rebased = rebaseGeneratedExitTargets(room, 'genB', newRoomId)
+
+    expect(buildExitLookup(rebased).get('forward')).toEqual({
+      toRoomId: buildGeneratedExitTargetId(newRoomId, 'north'),
+    })
+    expect(rebased.objects[0]?.id).toBe('forward')
+    expect(room.objects[0]).toMatchObject({
+      id: 'forward',
+      interaction: { exit: { toRoomId: oldTarget } },
+    })
+  })
+
+  it('leaves return-exit targets unchanged even when they match the generated-exit id shape', () => {
+    const oldTarget = buildGeneratedExitTargetId('genB', 'south')
+    const room = roomWith([
+      exitArch(`child${RETURN_EXIT_ID_INFIX}south`, oldTarget, [0, 0, 9]),
+    ])
+
+    const rebased = rebaseGeneratedExitTargets(room, 'genB', buildGeneratedExitTargetId('genA', 'north'))
+
+    expect(rebased).toBe(room)
+    expect(buildExitLookup(rebased).get(`child${RETURN_EXIT_ID_INFIX}south`)).toEqual({
+      toRoomId: oldTarget,
+    })
+  })
+
+  it('leaves authored and non-matching exit targets unchanged', () => {
+    const room = roomWith([
+      exitArch('authored', 'throne-room', [0, 0, -9]),
+      exitArch('other-generated', buildGeneratedExitTargetId('other', 'east'), [9, 0, 0]),
+    ])
+
+    const rebased = rebaseGeneratedExitTargets(room, 'genB', buildGeneratedExitTargetId('genA', 'north'))
+
+    expect(rebased).toBe(room)
+    expect(exitTargets(rebased)).toEqual([
+      'throne-room',
+      buildGeneratedExitTargetId('other', 'east'),
+    ])
+  })
+
+  it('preserves object ids and other fields when rewriting only the exit target', () => {
+    const room = roomWith([
+      {
+        type: 'arch',
+        id: 'forward',
+        position: [0, 0, -9],
+        rotationY: 45,
+        scale: 2,
+        width: 4,
+        height: 5,
+        color: '#123456',
+        interaction: {
+          key: 'E',
+          prompt: 'Forward',
+          exit: { toRoomId: buildGeneratedExitTargetId('genB', 'west') },
+        },
+      },
+    ])
+
+    const rebased = rebaseGeneratedExitTargets(room, 'genB', 'genA:exit:north')
+
+    expect(rebased.objects[0]).toMatchObject({
+      id: 'forward',
+      position: [0, 0, -9],
+      rotationY: 45,
+      scale: 2,
+      width: 4,
+      height: 5,
+      color: '#123456',
+      interaction: {
+        key: 'E',
+        prompt: 'Forward',
+        exit: { toRoomId: 'genA:exit:north:exit:west' },
+      },
+    })
   })
 })
 

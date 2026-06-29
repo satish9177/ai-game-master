@@ -48,6 +48,7 @@ Throughout these docs:
   Generated Room NPC Presence v0 — generated assembly/domain;
   Generated Room Exit Navigation v0 — generated assembly/domain + existing browser navigation;
   Generated Room Bidirectional Links v0 — browser/app composition + domain helper;
+  Return Exit Visual Affordance v0 — domain + renderer presentation;
   Generated Room Display Sanitization v0 — generated assembly/domain;
   Adjacent Room Theme Continuity v0 — browser composition/domain projection;
   Generated Room Theme Vocabulary v0 — fake/generated assembly + browser composition;
@@ -60,12 +61,11 @@ Throughout these docs:
   ([ADR-0050](./decisions/ADR-0050-multi-call-usage-guardrails-v0.md));
   Generated Room Bidirectional Links v0 — deterministic, data-only return exits for
   generated-play adjacent rooms
-  ([ADR-0052](./decisions/ADR-0052-generated-room-bidirectional-links-v0.md)).
+  ([ADR-0052](./decisions/ADR-0052-generated-room-bidirectional-links-v0.md));
+  Return Exit Visual Affordance v0 — purple return arches plus pink return rings,
+  with forward/authored exits unchanged
+  ([ADR-0053](./decisions/ADR-0053-return-exit-visual-affordance-v0.md)).
 - 🔜 **Planned** — designed and approved, not yet built (next slices).
-  - Return Exit Visual Affordance v0 — distinct purple arch + pink ring for return exits vs grey
-    arch + cyan ring for forward exits; pure domain predicate on the `:return-exit:` id namespace;
-    no schema, affordance-union, navigation, or provider change
-    ([ADR-0053](./decisions/ADR-0053-return-exit-visual-affordance-v0.md)).
 - ❌ **Not built** — future shape only; documented so we don't paint into a corner.
 
 ## Status today (Renderer Foundation v0)
@@ -1015,10 +1015,10 @@ parent room before the room is cached
 
 ## Return Exit Visual Affordance v0
 
-🔜 **Planned, presentation-only follow-up to ADR-0052.** Return exits work in data
-but are visually indistinguishable from forward exits at range. This slice makes
-them distinct using color only — no navigation, schema, affordance-union, or
-provider change
+✅ **Implemented, presentation-only follow-up to ADR-0052.** Return exits work in
+data and are now visually distinct from forward exits at range. The distinction
+uses color only — no navigation, schema, affordance-union, objective, provider,
+or persistence change
 ([ADR-0053](./decisions/ADR-0053-return-exit-visual-affordance-v0.md)).
 
 - **Detection:** a pure domain predicate `isReturnExitObject(object)` checks
@@ -1037,8 +1037,9 @@ provider change
 - **Boundaries unchanged.** No RoomSpec schema change (`color` is an existing arch
   field). No `Affordance` union change. No HUD chip or prompt change. No navigation,
   objective, provider, world-state, or persistence change.
-- **Deferred:** colorblind iconography (shape/icon), arch geometry change, named
-  return labels, authored bidirectional links, save/load persistence of map links.
+- **Deferred/non-goals:** no new affordance kind, no colorblind icon/shape support
+  yet, no minimap, no animation, no authored return-exit changes, no named return
+  labels, and no save/load persistence of generated map links.
 
 ## Backend SQLite Persistence v0
 
