@@ -25,11 +25,19 @@ export type NPCDialogueTurn = {
   text: string
 }
 
+export type NPCObjectiveKind = 'inspect' | 'resolve' | 'reach' | 'general'
+
+export type NPCObjectiveContext = {
+  status: 'active' | 'complete'
+  kind: NPCObjectiveKind
+}
+
 export type QuestDialogueContext = {
   activeObjectiveId: string | null
   status: 'active' | 'complete'
   hint?: string
   completionHint?: string
+  objective?: NPCObjectiveContext
 }
 
 export type NPCDialogueContext = {

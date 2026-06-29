@@ -5,6 +5,7 @@ import {
 } from './App'
 import {
   attachPerRoomObjectiveOnEnter,
+  buildQuestStage,
   readPerRoomObjectiveMemo,
   resolvedObjectIdsForGeneratedPlay,
   resolvedObjectIdsForRoom,
@@ -214,6 +215,23 @@ describe('App generated room NPC request wiring', () => {
 })
 
 describe('App generated objective prompt-path wiring', () => {
+  const generatedQuestSpec = {
+    questId: 'generated-room-objective',
+    title: 'Generated title',
+    anchorRoomId: 'generated-room-secret',
+    objectives: [
+      {
+        id: 'generated-0',
+        text: 'Generated objective text that must not leak',
+        condition: {
+          kind: 'room-flag' as const,
+          roomId: 'generated-room-secret',
+          flag: 'interaction:object-secret-target',
+        },
+      },
+    ],
+  }
+
   it('attaches a trusted QuestSpec when FakeObjectiveGenerator returns valid raw JSON', async () => {
     const room = makeRoom([
       {
@@ -381,6 +399,105 @@ describe('App generated objective prompt-path wiring', () => {
     expect(reply.text).not.toContain('Steward')
     expect(reply.text).not.toContain('Malik')
     expect(reply.text).not.toContain('tribute coffer')
+  })
+
+  it('adds closed objective context to generated per-room questStage for active objectives', () => {
+    const quest = evaluateQuest(generatedQuestSpec, makeState())
+    const questStage = buildQuestStage({
+      quest,
+      questHints: {
+        hint: 'Generated hint that must stay separate.',
+        completionHint: 'Generated completion hint that must stay separate.',
+      },
+      questSpec: generatedQuestSpec,
+    })
+
+    expect(questStage).toEqual({
+      activeObjectiveId: 'generated-0',
+      status: 'active',
+      hint: 'Generated hint that must stay separate.',
+      completionHint: 'Generated completion hint that must stay separate.',
+      objective: { status: 'active', kind: 'inspect' },
+    })
+  })
+
+  it('omits objective context for authored/demo questStage when generated hints are absent', () => {
+    const quest = evaluateQuest(demoQuestSpec, makeState({ currentRoomId: 'throne-room' }))
+    const questStage = buildQuestStage({
+      quest,
+      questHints: null,
+      questSpec: demoQuestSpec,
+    })
+
+    expect(questStage).toBeDefined()
+    expect(questStage).not.toHaveProperty('objective')
+  })
+
+  it('omits objective context when the active objective cannot be found', () => {
+    const quest = {
+      ...evaluateQuest(generatedQuestSpec, makeState()),
+      activeObjectiveId: 'missing-objective',
+    }
+    const questStage = buildQuestStage({
+      quest,
+      questHints: {
+        hint: 'Generated hint that must stay separate.',
+        completionHint: 'Generated completion hint that must stay separate.',
+      },
+      questSpec: generatedQuestSpec,
+    })
+
+    expect(questStage).toMatchObject({
+      activeObjectiveId: 'missing-objective',
+      status: 'active',
+      hint: 'Generated hint that must stay separate.',
+      completionHint: 'Generated completion hint that must stay separate.',
+    })
+    expect(questStage).not.toHaveProperty('objective')
+  })
+
+  it('marks generated objective context complete when the generated quest is complete', () => {
+    const quest = evaluateQuest(generatedQuestSpec, makeState({
+      roomStates: {
+        'generated-room-secret': {
+          visited: true,
+          flags: { 'interaction:object-secret-target': true },
+        },
+      },
+    }))
+    const questStage = buildQuestStage({
+      quest,
+      questHints: {
+        hint: 'Generated hint that must stay separate.',
+        completionHint: 'Generated completion hint that must stay separate.',
+      },
+      questSpec: generatedQuestSpec,
+    })
+
+    expect(quest.status).toBe('complete')
+    expect(questStage?.objective).toEqual({ status: 'complete', kind: 'inspect' })
+  })
+
+  it('does not leak generated objective details through serialized objective context', () => {
+    const quest = evaluateQuest(generatedQuestSpec, makeState())
+    const questStage = buildQuestStage({
+      quest,
+      questHints: {
+        hint: 'Generated hint with provider output and user prompt text.',
+        completionHint: 'Generated completion with object-secret-target.',
+      },
+      questSpec: generatedQuestSpec,
+    })
+    const serializedObjective = JSON.stringify(questStage?.objective)
+
+    expect(serializedObjective).toBe('{"status":"active","kind":"inspect"}')
+    expect(serializedObjective).not.toContain('object-secret-target')
+    expect(serializedObjective).not.toContain('generated-room-secret')
+    expect(serializedObjective).not.toContain('interaction:')
+    expect(serializedObjective).not.toContain('Generated hint')
+    expect(serializedObjective).not.toContain('Generated objective text')
+    expect(serializedObjective).not.toContain('provider output')
+    expect(serializedObjective).not.toContain('user prompt')
   })
 })
 
@@ -920,7 +1037,7 @@ describe('App fake-provider prompt path renders a generated QuestTracker', () =>
     expect(html).toContain('Investigate the marked feature.')
   })
 
-  it('surfaces the generated hint through the same questStage the App builds', async () => {
+  it('provider consumes a questStage carrying the generated hint', async () => {
     const { result, attachment } = await runFakePromptPath(
       'Create a quiet archive room with one survivor NPC, one readable document, one crate, and one exit.',
     )

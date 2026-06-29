@@ -56,6 +56,7 @@ Throughout these docs:
   Real Generated Objective Provider v0 — generation + app composition;
   Generated Objective Per Room v0 — browser/app composition;
   NPC Dialogue Room Context v0 — browser/domain/dialogue;
+  Generated Room NPC Objective Awareness v1 — browser/domain/dialogue;
   Generated Story Objective Contract v0 — domain/quests/assembly + dialogue/UI;
   Multi-Call Usage Guardrails / Optional Objective Budget v0 — browser/session-local
   ([ADR-0050](./decisions/ADR-0050-multi-call-usage-guardrails-v0.md));
@@ -795,6 +796,20 @@ engine ([ADR-0051](./decisions/ADR-0051-generated-objective-per-room-v0.md)).
 - **Deferred:** generated objective save/load persistence, cross-room story threading,
   generated mechanical gates/rewards, multi-step quest chains, objective-specific usage meters,
   and server-side/hosted objective-provider execution remain future work.
+
+## Generated Room NPC Objective Awareness v1
+
+✅ **Implemented, browser/domain/dialogue.** Generated-room NPC dialogue can now receive an
+optional closed `NPCObjectiveContext` (`kind` + `status` enums) nested in the existing
+`QuestDialogueContext.objective` field
+([ADR-0056](./decisions/ADR-0056-generated-room-npc-objective-awareness-v1.md)).
+
+- The context is derived from validated quest objective condition shape only and drives
+  hand-written deterministic NPC nudge lines.
+- It carries no raw objective JSON, object ids, room ids, flag values, generated hints, provider
+  output, user prompt text, object names, or room descriptions.
+- It is read-only dialogue context: no world-state, objective, memory, event-log, backend,
+  persistence, schema, generation, or renderer mutation is introduced.
 
 ## Generated Room Object State v0
 
@@ -1989,6 +2004,12 @@ is to keep each replacement local to its port.
   typed replies/failures. Repeated turns leave the event log unchanged.
 - ✅ `NPCDialoguePanel` is presentational; canned prompts/Continue and conversation
   history live only in component state. The renderer still emits intent only.
+- ✅ **Generated Room NPC Objective Awareness v1** — a pure `buildNPCObjectiveContext`
+  projection nests a closed `NPCObjectiveContext` (`kind` + `status` enums) into the
+  existing `QuestDialogueContext.objective` field, giving generated-room NPCs safe generic
+  nudge lines keyed on objective kind without surfacing ids, names, or generated text, and
+  without mutating world state, objectives, or memory
+  ([ADR-0056](./decisions/ADR-0056-generated-room-npc-objective-awareness-v1.md)).
 - 🔜 A real validated LLM adapter, free-text input, relationship state,
   summaries/vector recall, speech, and quests remain future work. The first
   **persistent NPC memory** layer now exists headlessly (below), but is **not yet

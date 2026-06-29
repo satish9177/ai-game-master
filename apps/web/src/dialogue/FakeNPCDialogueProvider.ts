@@ -1,5 +1,5 @@
 import type { NPCDialogueProvider } from '../domain/ports/NPCDialogueProvider'
-import type { NPCDialogueRequest, NPCDialogueResponse } from '../domain/dialogue/contracts'
+import type { NPCDialogueRequest, NPCDialogueResponse, NPCObjectiveKind } from '../domain/dialogue/contracts'
 import type { RoomObject } from '../domain/roomSpec'
 
 const PERSONA_LINES: Readonly<Record<string, readonly string[]>> = {
@@ -40,6 +40,59 @@ const QUEST_COMPLETION_LINES: Readonly<Record<string, string>> = {
   'friendly-aide': "You made it through. The steward's toll is paid.",
 }
 
+export const OBJECTIVE_LINES: Readonly<
+  Record<NPCObjectiveKind, Readonly<Record<'active' | 'complete', readonly string[]>>>
+> = {
+  inspect: {
+    active: [
+      'Search this room carefully. The useful thing is probably nearby.',
+      'Take a close look before you move on.',
+      'Anything important here should be found before you leave.',
+    ],
+    complete: [
+      'You found what needed finding.',
+      'That search paid off.',
+      'Nothing else here demands the same attention.',
+    ],
+  },
+  resolve: {
+    active: [
+      'Something here still needs to be dealt with before this place is safe.',
+      'Stay ready. This room is not settled yet.',
+      'Do not leave the matter here unfinished.',
+    ],
+    complete: [
+      'That is dealt with. Keep moving.',
+      'This place is safer now.',
+      'Good. That needed doing.',
+    ],
+  },
+  reach: {
+    active: [
+      'Keep your bearings. The way forward matters here.',
+      'Do not lose track of where you are headed.',
+      'The next step may be beyond this room.',
+    ],
+    complete: [
+      'You reached where you needed to go.',
+      'The path has been followed far enough.',
+      'That part of the way is behind you.',
+    ],
+  },
+  general: {
+    active: [
+      'Look around before moving on. This place still has something to tell us.',
+      'Take your time here. Something still matters.',
+      'Do not rush past what this room is showing you.',
+    ],
+    complete: [
+      'The work here is done.',
+      'You can move on from this place.',
+      'Nothing here needs to hold you now.',
+    ],
+  },
+}
+
 const ROOM_FOCUS_LINES: Partial<Record<RoomObject['type'], string>> = {
   corpse: 'A body lies here. Watch your step.',
   altar: 'That altar makes this place feel important.',
@@ -69,6 +122,9 @@ export class FakeNPCDialogueProvider implements NPCDialogueProvider {
 
     const questClue = questClueLine(request, key)
     if (questClue) return { text: questClue }
+
+    const objectiveNudge = objectiveAwarenessLine(request)
+    if (objectiveNudge) return { text: objectiveNudge }
 
     const personaLines = PERSONA_LINES[key]
     if (personaLines) {
@@ -104,6 +160,14 @@ function questClueLine(request: NPCDialogueRequest, key: string): string | undef
 function roomGroundedFallback(request: NPCDialogueRequest): string | undefined {
   const focusType = request.context.room?.focus?.type
   return focusType ? ROOM_FOCUS_LINES[focusType] : undefined
+}
+
+function objectiveAwarenessLine(request: NPCDialogueRequest): string | undefined {
+  const objective = request.context.quest?.objective
+  if (objective == null) return undefined
+  const lines = OBJECTIVE_LINES[objective.kind][objective.status]
+  const index = request.context.history.length % lines.length
+  return lines[index]
 }
 
 function stableIndex(value: string, length: number): number {

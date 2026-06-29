@@ -1,6 +1,9 @@
 import type { LoadedRoom } from '../domain/loadRoomSpec'
 import type { RoomProvenance } from '../domain/assembleRoom'
+import { buildNPCObjectiveContext } from '../domain/dialogue/buildNPCObjectiveContext'
+import type { QuestDialogueContext } from '../domain/dialogue/contracts'
 import { resolvedObjectIds } from '../domain/interactions/resolvedObjects'
+import type { QuestView } from '../domain/quests/evaluateQuest'
 import type { QuestSpec } from '../domain/quests/questSpec'
 import type { ObjectiveGenerator } from '../domain/ports/ObjectiveGenerator'
 import type { UsageGuardConfig } from '../domain/usage/usageGuard'
@@ -113,4 +116,36 @@ export function resolvedObjectIdsForGeneratedPlay(input: {
   return input.objectivesPerRoom === true
     ? resolvedObjectIdsForRoom(input.state, input.room)
     : undefined
+}
+
+export function buildQuestStage(input: {
+  quest: QuestView | null
+  questHints: QuestHintState | null
+  questSpec: QuestSpec | null
+}): QuestDialogueContext | undefined {
+  const { quest, questHints, questSpec } = input
+  if (quest == null) return undefined
+
+  const objectiveContext = questHints != null
+    ? buildNPCObjectiveContext(
+        objectiveForQuestStage(quest, questSpec),
+        quest.status === 'complete' ? 'complete' : 'active',
+      )
+    : undefined
+
+  return {
+    activeObjectiveId: quest.activeObjectiveId,
+    status: quest.status,
+    ...(questHints ? { hint: questHints.hint, completionHint: questHints.completionHint } : {}),
+    ...(objectiveContext !== undefined ? { objective: objectiveContext } : {}),
+  }
+}
+
+function objectiveForQuestStage(quest: QuestView, questSpec: QuestSpec | null) {
+  if (questSpec == null) return null
+  if (quest.activeObjectiveId != null) {
+    return questSpec.objectives.find((objective) => objective.id === quest.activeObjectiveId) ?? null
+  }
+  if (quest.status !== 'complete') return null
+  return questSpec.objectives.at(-1) ?? null
 }

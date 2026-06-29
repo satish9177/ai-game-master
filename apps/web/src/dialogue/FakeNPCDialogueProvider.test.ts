@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import type { NPCDialogueRequest, QuestDialogueContext, RoomDialogueContext } from '../domain/dialogue/contracts'
-import { FakeNPCDialogueProvider } from './FakeNPCDialogueProvider'
+import type {
+  NPCDialogueRequest,
+  NPCObjectiveContext,
+  QuestDialogueContext,
+  RoomDialogueContext,
+} from '../domain/dialogue/contracts'
+import { FakeNPCDialogueProvider, OBJECTIVE_LINES } from './FakeNPCDialogueProvider'
 
 function request(overrides: Partial<NPCDialogueRequest['context']> = {}): NPCDialogueRequest {
   return {
@@ -25,6 +30,14 @@ const altarRoomContext: RoomDialogueContext = {
   features: [{ type: 'altar', direction: 'north' }],
   affordances: ['inspect'],
   npcCount: 0,
+}
+
+function objectiveQuest(objective: NPCObjectiveContext): QuestDialogueContext {
+  return {
+    activeObjectiveId: 'unknown-generated-objective',
+    status: objective.status,
+    objective,
+  }
 }
 
 describe('FakeNPCDialogueProvider', () => {
@@ -199,6 +212,139 @@ describe('FakeNPCDialogueProvider', () => {
     expect(response.text).not.toContain("steward's toll")
   })
 
+  it.each([
+    [{ kind: 'inspect', status: 'active' }, OBJECTIVE_LINES.inspect.active],
+    [{ kind: 'resolve', status: 'complete' }, OBJECTIVE_LINES.resolve.complete],
+    [{ kind: 'reach', status: 'active' }, OBJECTIVE_LINES.reach.active],
+    [{ kind: 'general', status: 'active' }, OBJECTIVE_LINES.general.active],
+  ] satisfies Array<[NPCObjectiveContext, readonly string[]]>)(
+    'returns a fixed objective-awareness line for %s objectives',
+    async (objective, expectedLines) => {
+      const response = await new FakeNPCDialogueProvider().reply(request({
+        quest: objectiveQuest(objective),
+      }))
+
+      expect(expectedLines).toContain(response.text)
+    },
+  )
+
+  it('selects objective-awareness lines deterministically by kind, status, and history length', async () => {
+    const provider = new FakeNPCDialogueProvider()
+    const objective: NPCObjectiveContext = { kind: 'inspect', status: 'active' }
+    const lines = OBJECTIVE_LINES.inspect.active
+    const oneTurn = [{ speaker: 'npc' as const, text: 'Earlier line.' }]
+    const anotherOneTurn = [{ speaker: 'player' as const, text: 'Different earlier line.' }]
+    const twoTurns = [
+      { speaker: 'npc' as const, text: 'Earlier line.' },
+      { speaker: 'player' as const, text: 'Another line.' },
+    ]
+
+    const first = await provider.reply(request({
+      quest: objectiveQuest(objective),
+      history: oneTurn,
+    }))
+    const sameLength = await provider.reply(request({
+      quest: objectiveQuest(objective),
+      history: anotherOneTurn,
+    }))
+    const rotated = await provider.reply(request({
+      quest: objectiveQuest(objective),
+      history: twoTurns,
+    }))
+
+    expect(sameLength).toEqual(first)
+    expect(lines).toContain(rotated.text)
+    if (new Set(lines).size > 1) expect(rotated.text).not.toBe(first.text)
+  })
+
+  it('uses quest.objective.status instead of quest.status for objective-awareness lines', async () => {
+    const response = await new FakeNPCDialogueProvider().reply(request({
+      quest: {
+        activeObjectiveId: 'unknown-generated-objective',
+        status: 'active',
+        objective: { kind: 'resolve', status: 'complete' },
+      },
+    }))
+
+    expect(OBJECTIVE_LINES.resolve.complete).toContain(response.text)
+    expect(OBJECTIVE_LINES.resolve.active).not.toContain(response.text)
+  })
+
+  it('keeps explicit prompt responses ahead of objective-awareness lines', async () => {
+    const response = await new FakeNPCDialogueProvider().reply({
+      ...request({
+        quest: objectiveQuest({ kind: 'inspect', status: 'active' }),
+      }),
+      playerLine: 'ask-hall',
+    })
+
+    expect(response.text).toBe('The court scattered when the roads fell silent.')
+    expect(OBJECTIVE_LINES.inspect.active).not.toContain(response.text)
+  })
+
+  it('keeps generated and authored quest clues ahead of objective-awareness lines', async () => {
+    const provider = new FakeNPCDialogueProvider()
+
+    const generatedHint = await provider.reply(request({
+      quest: {
+        ...objectiveQuest({ kind: 'inspect', status: 'active' }),
+        hint: 'Sanitized generated hint.',
+      },
+    }))
+    const generatedCompletion = await provider.reply(request({
+      quest: {
+        activeObjectiveId: null,
+        status: 'complete',
+        completionHint: 'Sanitized generated completion.',
+        objective: { kind: 'resolve', status: 'complete' },
+      },
+    }))
+    const authoredClue = await provider.reply(request({
+      quest: {
+        activeObjectiveId: 'claim-tribute-coin',
+        status: 'active',
+        objective: { kind: 'inspect', status: 'active' },
+      },
+    }))
+
+    expect(generatedHint.text).toBe('Sanitized generated hint.')
+    expect(generatedCompletion.text).toBe('Sanitized generated completion.')
+    expect(authoredClue.text).toContain('tribute coffer')
+    expect(OBJECTIVE_LINES.inspect.active).not.toContain(generatedHint.text)
+    expect(OBJECTIVE_LINES.resolve.complete).not.toContain(generatedCompletion.text)
+    expect(OBJECTIVE_LINES.inspect.active).not.toContain(authoredClue.text)
+  })
+
+  it('uses objective-awareness lines before persona and room-grounded fallback lines', async () => {
+    const provider = new FakeNPCDialogueProvider()
+    const objective = { kind: 'general', status: 'active' } satisfies NPCObjectiveContext
+
+    const withPersona = await provider.reply(request({
+      quest: objectiveQuest(objective),
+    }))
+    const withRoomFallback = await provider.reply(request({
+      persona: undefined,
+      npcId: 'unknown-npc',
+      room: altarRoomContext,
+      quest: objectiveQuest(objective),
+    }))
+
+    expect(OBJECTIVE_LINES.general.active).toContain(withPersona.text)
+    expect(OBJECTIVE_LINES.general.active).toContain(withRoomFallback.text)
+    expect(withPersona.text).not.toBe('The hall has seen quieter days, but you are welcome here.')
+    expect(withRoomFallback.text).not.toBe('That altar makes this place feel important.')
+  })
+
+  it('preserves previous behavior when quest.objective is absent', async () => {
+    const provider = new FakeNPCDialogueProvider()
+    const withUnknownObjectiveId = await provider.reply(request({
+      quest: { activeObjectiveId: 'unknown-generated-objective', status: 'active' },
+    }))
+    const noQuest = await provider.reply(request())
+
+    expect(withUnknownObjectiveId).toEqual(noQuest)
+  })
+
   it('falls back to persona lines when quest is absent', async () => {
     const provider = new FakeNPCDialogueProvider()
     const withQuest = await provider.reply(request({ quest: { activeObjectiveId: 'claim-tribute-coin', status: 'active' } }))
@@ -268,5 +414,43 @@ describe('FakeNPCDialogueProvider', () => {
     expect(response.text).not.toContain('Secret Title')
     expect(response.text).not.toContain('Secret Body')
     expect(response.text).not.toContain('generated description')
+  })
+
+  it('does not leak objective target details or prompt fragments from objective-awareness lines', async () => {
+    const response = await new FakeNPCDialogueProvider().reply({
+      ...request({
+        roomId: 'secret-room-id',
+        npcId: 'unknown-npc',
+        npcName: 'Named Object That Must Not Leak',
+        persona: undefined,
+        room: {
+          focus: { type: 'chest', direction: 'east' },
+          features: [{ type: 'chest', direction: 'east' }],
+          affordances: ['inspect'],
+          npcCount: 1,
+        },
+        quest: {
+          activeObjectiveId: 'objective-secret-target',
+          status: 'active',
+          hint: undefined,
+          objective: { kind: 'inspect', status: 'active' },
+        },
+        history: [
+          { speaker: 'player', text: 'raw provider output generated hint object-secret-target' },
+        ],
+      }),
+      playerLine: 'user prompt fragment interaction:object-secret-target secret-room-id generated hint',
+    })
+
+    expect(OBJECTIVE_LINES.inspect.active).toContain(response.text)
+    expect(response.text).not.toContain('objective-secret-target')
+    expect(response.text).not.toContain('object-secret-target')
+    expect(response.text).not.toContain('interaction:')
+    expect(response.text).not.toContain('secret-room-id')
+    expect(response.text).not.toContain('generated hint')
+    expect(response.text).not.toContain('Named Object')
+    expect(response.text).not.toContain('chest')
+    expect(response.text).not.toContain('provider output')
+    expect(response.text).not.toContain('user prompt fragment')
   })
 })
