@@ -3,8 +3,11 @@ import { buildExitLookup } from '../app/exits'
 import { buildGeneratedExitTargetId } from './ensureGeneratedExitNavigation'
 import {
   ensureGeneratedReturnExit,
+  isReturnExitObject,
   opposite,
   parseGeneratedExitTargetId,
+  RETURN_EXIT_ARCH_COLOR,
+  RETURN_EXIT_ID_INFIX,
 } from './generatedReturnExit'
 import { loadRoomSpec, type LoadedRoom } from './loadRoomSpec'
 import { validateRoom } from './validateRoom'
@@ -74,6 +77,38 @@ describe('opposite', () => {
   })
 })
 
+describe('RETURN_EXIT_ID_INFIX', () => {
+  it('is the literal string :return-exit:', () => {
+    expect(RETURN_EXIT_ID_INFIX).toBe(':return-exit:')
+  })
+})
+
+describe('isReturnExitObject', () => {
+  it('returns true for an object whose id contains the return-exit infix', () => {
+    expect(isReturnExitObject({ type: 'arch', id: 'R1:exit:north:return-exit:south', position: [0, 0, 9], rotationY: 180, scale: 1, width: 3, height: 3.5, color: RETURN_EXIT_ARCH_COLOR })).toBe(true)
+  })
+
+  it('returns true for a suffixed collision id', () => {
+    expect(isReturnExitObject({ type: 'arch', id: 'R1:exit:north:return-exit:south:2', position: [0, 0, 9], rotationY: 180, scale: 1, width: 3, height: 3.5, color: RETURN_EXIT_ARCH_COLOR })).toBe(true)
+  })
+
+  it('returns false for a forward generated-exit id', () => {
+    expect(isReturnExitObject({ type: 'arch', id: 'R1:generated-exit:north', position: [0, 0, -9], rotationY: 0, scale: 1, width: 3, height: 3.5, color: '#9a9488' })).toBe(false)
+  })
+
+  it('returns false for an authored room id', () => {
+    expect(isReturnExitObject({ type: 'arch', id: 'throne-room', position: [0, 0, -9], rotationY: 0, scale: 1, width: 3, height: 3.5, color: '#9a9488' })).toBe(false)
+  })
+
+  it('returns false for an object with no id', () => {
+    expect(isReturnExitObject({ type: 'arch', position: [0, 0, -9], rotationY: 0, scale: 1, width: 3, height: 3.5, color: '#9a9488' })).toBe(false)
+  })
+
+  it('returns false for an object with undefined id', () => {
+    expect(isReturnExitObject({ type: 'arch', id: undefined, position: [0, 0, -9], rotationY: 0, scale: 1, width: 3, height: 3.5, color: '#9a9488' })).toBe(false)
+  })
+})
+
 describe('ensureGeneratedReturnExit', () => {
   it('adds a return arch on the side opposite the entry side', () => {
     const room = roomWith([])
@@ -93,6 +128,8 @@ describe('ensureGeneratedReturnExit', () => {
         exit: { toRoomId: 'R1' },
       },
     })
+    expect((arch as { color?: string }).color).toBe(RETURN_EXIT_ARCH_COLOR)
+    expect(isReturnExitObject(arch)).toBe(true)
     expect(result.room.shell.exits).toContainEqual({ side: 'south', width: 3 })
     expect(buildExitLookup(result.room).get(arch.id!)).toEqual({ toRoomId: 'R1' })
   })

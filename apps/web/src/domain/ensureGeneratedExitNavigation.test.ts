@@ -185,6 +185,12 @@ describe('ensureGeneratedExitNavigation', () => {
     expect(validateRoom(result.room).issues.filter((issue) => issue.severity === 'fatal')).toEqual([])
   })
 
+  it('keeps the forward arch color unchanged at #9a9488', () => {
+    const result = ensureGeneratedExitNavigation(roomWith([], []))
+    const arch = result.room.objects.find((object) => object.type === 'arch')!
+    expect((arch as { color?: string }).color).toBe('#9a9488')
+  })
+
   it('is already on the chosen wall so repairGeneratedExits does not move it', () => {
     const { result } = firstExitArch()
     expect(repairGeneratedExits(result.room)).toBe(result.room)

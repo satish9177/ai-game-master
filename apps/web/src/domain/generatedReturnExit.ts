@@ -18,10 +18,17 @@ export type EnsureGeneratedReturnExitResult = {
 
 type ArchObject = Extract<RoomObject, { type: 'arch' }>
 
+export const RETURN_EXIT_ID_INFIX = ':return-exit:'
+export const RETURN_EXIT_ARCH_COLOR = '#c084fc'
+
 const RETURN_PROMPT = 'Return to previous room'
 const DEFAULT_EXIT_WIDTH = 3
 const FALLBACK_SIDES: ExitSide[] = ['south', 'west', 'east', 'north']
 const SIDES: ExitSide[] = ['north', 'south', 'east', 'west']
+
+export function isReturnExitObject(object: RoomObject): boolean {
+  return typeof object.id === 'string' && object.id.includes(RETURN_EXIT_ID_INFIX)
+}
 
 export function parseGeneratedExitTargetId(id: string): GeneratedExitTarget | null {
   const match = /^(.*):exit:(north|south|east|west)$/.exec(id)
@@ -65,7 +72,7 @@ export function ensureGeneratedReturnExit(
     scale: 1,
     width: DEFAULT_EXIT_WIDTH,
     height: 3.5,
-    color: '#9a9488',
+    color: RETURN_EXIT_ARCH_COLOR,
     interaction: {
       key: 'E',
       prompt: RETURN_PROMPT,
@@ -135,7 +142,7 @@ function ensureShellExit(
 
 function uniqueReturnExitId(objects: RoomObject[], roomId: string, side: ExitSide): string {
   const ids = new Set(objects.map((object) => object.id).filter((id): id is string => id != null))
-  const base = `${roomId}:return-exit:${side}`
+  const base = `${roomId}${RETURN_EXIT_ID_INFIX}${side}`
   if (!ids.has(base)) return base
   for (let index = 2; ; index += 1) {
     const candidate = `${base}:${index}`
