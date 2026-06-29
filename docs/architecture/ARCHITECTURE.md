@@ -62,6 +62,10 @@ Throughout these docs:
   generated-play adjacent rooms
   ([ADR-0052](./decisions/ADR-0052-generated-room-bidirectional-links-v0.md)).
 - 🔜 **Planned** — designed and approved, not yet built (next slices).
+  - Return Exit Visual Affordance v0 — distinct purple arch + pink ring for return exits vs grey
+    arch + cyan ring for forward exits; pure domain predicate on the `:return-exit:` id namespace;
+    no schema, affordance-union, navigation, or provider change
+    ([ADR-0053](./decisions/ADR-0053-return-exit-visual-affordance-v0.md)).
 - ❌ **Not built** — future shape only; documented so we don't paint into a corner.
 
 ## Status today (Renderer Foundation v0)
@@ -1008,6 +1012,33 @@ parent room before the room is cached
   persistence, objective, provider-prompt, renderer, or navigation-contract
   change. Generated map persistence, minimap, named destination labels, authored
   bidirectional links, and renderer animation remain future/non-goals.
+
+## Return Exit Visual Affordance v0
+
+🔜 **Planned, presentation-only follow-up to ADR-0052.** Return exits work in data
+but are visually indistinguishable from forward exits at range. This slice makes
+them distinct using color only — no navigation, schema, affordance-union, or
+provider change
+([ADR-0053](./decisions/ADR-0053-return-exit-visual-affordance-v0.md)).
+
+- **Detection:** a pure domain predicate `isReturnExitObject(object)` checks
+  whether `object.id` contains the structural infix `':return-exit:'`, which is
+  already the exclusive id namespace for return arches (ADR-0052). The predicate is
+  content-free and deterministic.
+- **Return arch mesh color:** `RETURN_EXIT_ARCH_COLOR = '#c084fc'` (purple/lavender)
+  wired into `ensureGeneratedReturnExit`'s inserted arch. The arch is 3.5 m tall and
+  readable from across the room — the primary "at range" signal.
+- **Return floor ring color:** `RETURN_EXIT_RING_COLOR = '#f472b6'` (pink/rose)
+  selected in `buildObjects` when `isReturnExitObject` is true. Distinct from forward
+  cyan `AFFORDANCE_RING_COLOR.exit = '#6bbcff'`.
+- **Forward exits, authored exits, and all non-exit rings unchanged.** The predicate
+  returns `false` for `:generated-exit:` ids and authored arch ids; they retain
+  grey mesh + cyan ring.
+- **Boundaries unchanged.** No RoomSpec schema change (`color` is an existing arch
+  field). No `Affordance` union change. No HUD chip or prompt change. No navigation,
+  objective, provider, world-state, or persistence change.
+- **Deferred:** colorblind iconography (shape/icon), arch geometry change, named
+  return labels, authored bidirectional links, save/load persistence of map links.
 
 ## Backend SQLite Persistence v0
 
