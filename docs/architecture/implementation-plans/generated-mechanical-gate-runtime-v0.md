@@ -1,6 +1,6 @@
 # Implementation Plan — `feature/generated-mechanical-gate-runtime-v0`
 
-> Status: **Slice 1 complete: ADR-0063 + this plan (docs-only).**
+> Status: **Complete: Slices 1-5 implemented and verified.**
 > Maintainer approved the re-derive architecture on 2026-07-01.
 >
 > **Depends on (implemented and merged):**
@@ -35,6 +35,9 @@ valid/satisfiable generated mechanical gate, the governed exit is blocked while 
 is locked, and becomes available after the player interacts with the required in-room object.
 
 No schema change, no persistence change, no renderer change, no provider/LLM/cost call.
+The gate is never stored or persisted; save/load re-derives it from restored room data and existing
+`WorldState` flags, with fail-open behavior for missing/corrupt cache data and world-state fetch
+failures.
 
 ---
 

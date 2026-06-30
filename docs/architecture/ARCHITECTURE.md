@@ -105,14 +105,15 @@ Throughout these docs:
   stored, persisted, or enforced — no room mutation, no schema/save-load/navigation/renderer/
   provider/cost change
   ([ADR-0062](./decisions/ADR-0062-generated-mechanical-gate-fake-v0.md)).
-- 🔵 **Planned** — Generated Mechanical Gate Runtime v0 — deterministic runtime enforcement at
+- ✅ **Implemented** — Generated Mechanical Gate Runtime v0 — deterministic runtime enforcement at
   the existing `navigateWithExitGate` seam, generated rooms only (`objectivesPerRoom === true`).
   `evaluateGeneratedExitGate` re-derives the gate from the in-memory `activePlay.room` on each
   navigation attempt, evaluates it against a freshly fetched `WorldState`, and returns
   `reason:'gate-locked'` only when a valid/satisfiable gate governs the attempted exit and the
   unlock flag is absent/false; all other cases (fail, null gate, different exit, flag set) navigate
-  normally. Authored/demo gate path is byte-identical. No schema, persistence, renderer, or
-  provider/cost change
+  normally. Save/load stores no gate data: restored generated rooms re-derive the gate from the
+  restored `LoadedRoom`, and lock state comes from restored `WorldState` flags. Authored/demo gate
+  path is byte-identical. No schema, persistence, renderer, or provider/cost change
   ([ADR-0063](./decisions/ADR-0063-generated-mechanical-gate-runtime-v0.md)).
 - ❌ **Not built** — future shape only; documented so we don't paint into a corner.
 

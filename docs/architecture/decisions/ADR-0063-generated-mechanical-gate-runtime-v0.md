@@ -1,6 +1,6 @@
 # ADR-0063: Generated Mechanical Gate Runtime v0 — deterministic runtime enforcement
 
-- **Status:** Planned (Slice 1: ADR + implementation plan docs only)
+- **Status:** Implemented (Slices 1-5 complete)
 - **Date:** 2026-07-01
 - **Deciders:** Project owner
 - **Extends:**
@@ -29,7 +29,10 @@
 > pure evaluator `evaluateGeneratedExitGate`, wires it into the existing `navigateWithExitGate`
 > behind an `objectivesPerRoom` guard, adds one new rejected reason `'gate-locked'` and a static
 > UI message. No schema change, no persistence change, no renderer change, no provider/LLM/cost
-> call. The authored demo gate path is byte-identical.
+> call. The authored demo gate path is byte-identical. Save/load stores no gate data: after
+> restore, the gate is re-derived from the restored `LoadedRoom` and lock state comes only from
+> restored `WorldState.roomStates` flags; missing/corrupt cache data and `getWorldState` failure
+> fail open.
 
 ---
 

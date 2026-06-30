@@ -2182,6 +2182,11 @@ describe('generated quest restore — handleLoad wiring (ADR-0059, slice 5)', ()
   const ROOM_ID = 'generated-room'
   const OBJECT_ID = 'case-file'
   const FLAG = `interaction:${OBJECT_ID}`
+  const GATE_ROOM_ID = 'gate-restore-room'
+  const GATE_OBJECT_ID = 'gate-control-panel'
+  const GATE_TO_ROOM_ID = 'gate-north-room'
+  const GATE_SIDE_ROOM_ID = 'gate-side-room'
+  const GATE_FLAG = `interaction:${GATE_OBJECT_ID}`
 
   const genRoom = makeRoom(
     [
@@ -2210,6 +2215,39 @@ describe('generated quest restore — handleLoad wiring (ADR-0059, slice 5)', ()
   }
 
   const genHints = { hint: 'Find the case file.', completionHint: 'You found it.' }
+
+  const gateRoom = makeRoom(
+    [
+      {
+        type: 'machine',
+        id: GATE_OBJECT_ID,
+        name: 'SECRET RESTORED GATE CONTROL NAME',
+        position: [0, 0, -2],
+        interaction: {
+          key: 'E',
+          prompt: 'Inspect the secret restored gate control',
+          body: 'SECRET RESTORED GATE DESCRIPTION',
+          effect: { kind: 'inspect' },
+        },
+      },
+      {
+        type: 'arch',
+        id: 'gate-north-arch',
+        name: 'SECRET RESTORED GATE ARCH NAME',
+        position: [0, 0, -8],
+        interaction: { key: 'E', prompt: 'Leave through the sealed arch', exit: { toRoomId: GATE_TO_ROOM_ID } },
+      },
+      {
+        type: 'arch',
+        id: 'gate-side-arch',
+        name: 'SECRET RESTORED SIDE ARCH NAME',
+        position: [5, 0, 0],
+        interaction: { key: 'E', prompt: 'Leave sideways', exit: { toRoomId: GATE_SIDE_ROOM_ID } },
+      },
+    ],
+    GATE_ROOM_ID,
+    'SECRET RESTORED GATE ROOM NAME',
+  )
 
   type SaveInput = Parameters<typeof buildGeneratedQuestSaveJson>[0]
   type Hints = { hint: string; completionHint: string } | null
@@ -2245,6 +2283,65 @@ describe('generated quest restore — handleLoad wiring (ADR-0059, slice 5)', ()
     })
   }
 
+  function restoredGatePlay(world: WorldState) {
+    return restoreFromSavedBlob({ room: gateRoom, objectivesPerRoom: true }, null, world)
+  }
+
+  function restoredGateNavigate(input: {
+    room: LoadedRoom
+    world: WorldState
+    toRoomId?: string
+  }) {
+    const toRoomId = input.toRoomId ?? GATE_TO_ROOM_ID
+    return navigateWithExitGate({
+      sessionId: input.world.sessionId,
+      fromRoomId: input.room.id,
+      toRoomId,
+      demoQuestEnabled: false,
+      getWorldState: async () => ({ ok: true, state: input.world }),
+      navigate: async () => ({
+        status: 'navigated',
+        room: makeRoom([], toRoomId, `Target ${toRoomId}`),
+        state: { ...input.world, currentRoomId: toRoomId },
+        cacheHit: false,
+        provenance: 'generated',
+      }),
+      generatedGateEnabled: true,
+      currentRoom: input.room,
+    })
+  }
+
+  async function worldAfterGateInteraction(): Promise<WorldState> {
+    const store = new InMemoryWorldStore()
+    let id = 30
+    const ids: IdGenerator = {
+      newId: () => `00000000-0000-4000-8000-${String(id++).padStart(12, '0')}`,
+    }
+    let tick = 0
+    const clock: Clock = {
+      now: () => `2026-07-01T01:00:${String(tick++).padStart(2, '0')}.000Z`,
+    }
+    const worldSession = new WorldSession(store, clock, ids, noopLogger)
+    const interaction = new InteractionService(worldSession, noopLogger)
+    const started = await worldSession.startSession({
+      schemaVersion: 1,
+      worldId: WORLD_ID,
+      name: 'Gate restore world',
+      startingRoomId: GATE_ROOM_ID,
+      initialPlayer: { health: { current: 75, max: 100 }, status: [], inventory: [] },
+    })
+    if (!started.ok) throw new Error(started.error.code)
+    const applied = await interaction.resolve({
+      sessionId: started.state.sessionId,
+      effect: { kind: 'inspect' },
+      ref: GATE_OBJECT_ID,
+    })
+    expect(applied.status).toBe('applied')
+    if (applied.status !== 'applied') throw new Error('expected gate interaction to apply')
+    expect(applied.state.roomStates[GATE_ROOM_ID]?.flags?.[GATE_FLAG]).toBe(true)
+    return applied.state
+  }
+
   it('restores objective visibility so the quest tracker renders after load', () => {
     const world = makeState({ currentRoomId: ROOM_ID, roomStates: { [ROOM_ID]: { visited: true } } })
     const play = restoreFromSavedBlob(
@@ -2273,6 +2370,56 @@ describe('generated quest restore — handleLoad wiring (ADR-0059, slice 5)', ()
 
     expect(evaluateQuest(play.questSpec!, completedWorld).status).toBe('complete')
     expect(restoredViews(play, completedWorld).quest?.status).toBe('complete')
+  })
+
+  it('save before interaction restores the generated gate as locked by re-deriving from the room', async () => {
+    const lockedWorld = makeState({
+      currentRoomId: GATE_ROOM_ID,
+      roomStates: { [GATE_ROOM_ID]: { visited: true } },
+    })
+    const play = restoredGatePlay(lockedWorld)
+
+    const result = await restoredGateNavigate({ room: play.room, world: lockedWorld })
+
+    expect(result).toEqual({ status: 'rejected', reason: 'gate-locked' })
+    const message = navigationResultMessage(result)
+    expect(message).toBe('This way is sealed until you deal with what is in this room.')
+    const unsafeDump = JSON.stringify({ message, logs: [] })
+    expect(unsafeDump).not.toContain(GATE_ROOM_ID)
+    expect(unsafeDump).not.toContain(GATE_OBJECT_ID)
+    expect(unsafeDump).not.toContain(GATE_FLAG)
+    expect(unsafeDump).not.toContain(GATE_TO_ROOM_ID)
+    expect(unsafeDump).not.toContain('mechanical-gate')
+    expect(unsafeDump).not.toContain('locked-exit')
+    expect(unsafeDump).not.toContain('unlock-exit')
+    expect(unsafeDump).not.toContain(SECRET_RAW_PROMPT)
+    expect(unsafeDump).not.toContain('SECRET RESTORED')
+  })
+
+  it('interact before save restores the generated gate as unlocked from WorldState flags', async () => {
+    const unlockedWorld = await worldAfterGateInteraction()
+    const play = restoredGatePlay(unlockedWorld)
+
+    const result = await restoredGateNavigate({ room: play.room, world: unlockedWorld })
+
+    expect(result.status).toBe('navigated')
+    if (result.status !== 'navigated') throw new Error('expected restored gate to be unlocked')
+    expect(result.room.id).toBe(GATE_TO_ROOM_ID)
+    expect(result.state.currentRoomId).toBe(GATE_TO_ROOM_ID)
+  })
+
+  it('does not persist generated gate data in generated save blobs', () => {
+    const json = buildGeneratedQuestSaveJson({ room: gateRoom, objectivesPerRoom: true }, null)
+
+    expect(json).toBeDefined()
+    expect(json).not.toContain('mechanicalGate')
+    expect(json).not.toContain('mechanical-gate')
+    expect(json).not.toContain('GeneratedMechanicalGate')
+    expect(json).not.toContain('locked-exit')
+    expect(json).not.toContain('unlock-exit')
+    expect(json).not.toContain('"gate"')
+    expect(json).not.toContain('"gates"')
+    expect(json).not.toContain('"gateId"')
   })
 
   it('restores the resolved-object ring set from the restored room + restored flags', () => {
@@ -2408,6 +2555,45 @@ describe('generated quest restore — handleLoad wiring (ADR-0059, slice 5)', ()
     expect(loadGeneratedRoomCacheSaveState('not json at all').ok).toBe(false)
     expect(play.room.id).toBe(ROOM_ID)
     expect(play.questSpec).toEqual(genQuestSpec)
+  })
+
+  it('corrupt generatedRoomCacheJson does not break current-room generated gate behavior', async () => {
+    const lockedWorld = makeState({
+      currentRoomId: GATE_ROOM_ID,
+      roomStates: { [GATE_ROOM_ID]: { visited: true } },
+    })
+    const play = restoredGatePlay(lockedWorld)
+
+    expect(loadGeneratedRoomCacheSaveState('not json at all').ok).toBe(false)
+    await expect(restoredGateNavigate({ room: play.room, world: lockedWorld }))
+      .resolves.toEqual({ status: 'rejected', reason: 'gate-locked' })
+  })
+
+  it('restored generated rooms with no valid gate remain open', async () => {
+    const ungatedRoom = makeRoom(
+      [
+        { type: 'pillar', id: 'quiet-pillar', position: [0, 0, -2] },
+        {
+          type: 'arch',
+          id: 'ungated-north-arch',
+          position: [0, 0, -8],
+          interaction: { key: 'E', prompt: 'Leave north', exit: { toRoomId: GATE_TO_ROOM_ID } },
+        },
+      ],
+      GATE_ROOM_ID,
+      'Ungated restored generated room',
+    )
+    const world = makeState({
+      currentRoomId: GATE_ROOM_ID,
+      roomStates: { [GATE_ROOM_ID]: { visited: true } },
+    })
+    const play = restoreFromSavedBlob({ room: ungatedRoom, objectivesPerRoom: true }, null, world)
+
+    const result = await restoredGateNavigate({ room: play.room, world })
+
+    expect(result.status).toBe('navigated')
+    if (result.status !== 'navigated') throw new Error('expected invalid/no gate to fail open')
+    expect(result.room.id).toBe(GATE_TO_ROOM_ID)
   })
 
   it('seeds current quest memo even when hints are absent and non-current cached rooms as null', () => {
