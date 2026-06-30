@@ -100,8 +100,12 @@ Enforcement runs only when `generatedGateEnabled` is `true`. In `App.tsx`,
 - Authored rooms / authored demo play (`objectivesPerRoom` falsy) — the generated-gate branch is
   never entered; the authored demo-gate path (`evaluateExitGate`, reason `'blocked'`) is unchanged.
 - Generated rooms / generated play (`objectivesPerRoom: true`) — the new branch runs after the demo
-  check (which is off in generated play because `demoQuestEnabled` is false when there is no authored
-  questSpec).
+  check. The demo check cannot misfire on generated room ids: `evaluateExitGate` is hard-scoped to
+  the authored pair `throne-room → ruined-safehouse` (see `exitGate.ts`), so it returns
+  `{ gated: false }` for any other origin/destination and the generated-gate check then applies
+  independently. Note that generated play with a per-room objective sets `activePlay.questSpec`,
+  so `demoQuestEnabled` can be `true` in generated play; the authored room-id predicate in
+  `evaluateExitGate` is the structural guarantee that the two checks remain isolated.
 
 ### `getWorldState` fetch strategy
 
