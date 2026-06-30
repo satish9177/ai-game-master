@@ -1149,10 +1149,10 @@ state or degrade safely
 
 | Situation | Detection | Handling / result | Logging |
 | --- | --- | --- | --- |
-| Valid `generatedQuestJson` on load | `loadGeneratedQuestSaveState` → `{ok: true}` | `restoreGeneratedQuestPlay` re-validates parked room via `loadRoomSpec`; restores `questSpec`, `storyKind`, `objectivesPerRoom`, `hints`, `entryResolvedObjectIds`; enters generated play; suppresses old fallback notice because parked room is faithful | `generatedQuestRestored: true` bool only |
+| Valid `generatedQuestJson` on load | `loadGeneratedQuestSaveState` → `{ok: true}` | `restoreGeneratedQuestPlay` re-validates parked room via `loadRoomSpec`; restores `questSpec`, `storyKind`, `objectivesPerRoom`, `hints`, `entryResolvedObjectIds`; enters generated play; suppresses old fallback notice because parked room is faithful | `restored: 'generated'` in `world session restored` log |
 | `generatedQuestJson` absent (older or authored save) | `slotResult.generatedQuestJson === undefined` | fall through to authored-world gate; authored sessions unaffected; no error or notice | none |
-| Blob present but `loadGeneratedQuestSaveState` fails (corrupt / wrong version / schema mismatch) | `loadGeneratedQuestSaveState` → `{ok: false}` | fall through to authored-world fallback; `degraded: true` notice shown (same as today for non-authored loads); no error surfaced | error code only |
-| `loadRoomSpec` throws on parked room | `try/catch` in `restoreGeneratedQuestPlay` → `{ok: false, code: 'room-load-failed'}` | fall through to authored-world fallback; `degraded: true` notice | `code` only |
+| Blob present but `loadGeneratedQuestSaveState` fails (corrupt / wrong version / schema mismatch) | `loadGeneratedQuestSaveState` → `{ok: false}` | fall through to authored-world fallback; `degraded: true` notice shown (same as today for non-authored loads); no error surfaced | none — blob failures are silent; no per-failure log line; outcome captured as `restored: 'authored'` or `'degraded'` |
+| `loadRoomSpec` throws on parked room | `try/catch` in `restoreGeneratedQuestPlay` → `{ok: false, code: 'room-load-failed'}` | fall through to authored-world fallback; `degraded: true` notice | none — silent; outcome captured in `restored` enum |
 | Generated save: no `questSpec` in blob (older generated save) | `state.questSpec === undefined` | restores room + `objectivesPerRoom: true` + `storyKind`; quest tracker absent; generated journal still re-projects | — |
 | Generated save: no `storyKind` in blob | `state.storyKind === undefined` | restores room + `questSpec`; story-context entry absent from journal | — |
 | Authored session: `generatedQuestJson` never written | authored play gate: `objectivesPerRoom` not `true` | `SlotWrapper` byte-identical to today; no generated blob written or read | none |
@@ -1166,10 +1166,14 @@ state or degrade safely
 - **No cost meter increment.** `recordAttempt` is not called on load.
 - **`SaveGame` schema unchanged.** Integrity check, `SaveGameSchema`, and all
   `schemaVersion` fields are untouched.
-- **Log discipline.** Log lines on save or load contain only
-  `generatedQuestSaved`/`generatedQuestRestored` booleans and fixed error codes.
-  Room name, object ids, flag keys, quest title, objective text, hint text, and
-  blob content are never logged.
+- **Log discipline.** `handleLoad` emits one log line — `world session restored`
+  with `sessionId` and `restored: 'generated' | 'degraded' | 'authored'` — a
+  closed enum capturing which restore path ran. `generatedQuestJson` load and
+  validation failures inside `restoreGeneratedPlayFromSlot` are silent: no
+  per-failure log line is emitted; the caller falls through to the authored-world
+  gate and the outcome is captured in the `restored` enum value. `handleSave`
+  emits no dedicated blob log line. Room name, object ids, flag keys, quest
+  title, objective text, hint text, and blob content are never logged.
 - **v0 known limitations.** Generated adjacent room cache, worldBible-seeded
   `AdjacentRoomPregenerator`, and full generated-world navigation are not restored.
   Onward navigation after a generated load uses the authored wiring — documented.

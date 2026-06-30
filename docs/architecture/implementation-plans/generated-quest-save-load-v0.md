@@ -50,6 +50,7 @@ the existing projectors once these two are present.
 |---|---|---|
 | `apps/web/src/app/saveSlotStore.ts` | Slice 2 | Optional `generatedQuestJson` on wrapper, `write`, and read result |
 | `apps/web/src/app/saveSlotStore.test.ts` | Slice 2 | New backward-compat and round-trip cases |
+| `apps/web/src/app/App.helpers.ts` | Slice 4 | Added `buildGeneratedQuestSaveJson` pure helper (wraps `buildGeneratedQuestSaveState` for `handleSave`) and exports `QuestHintState` |
 | `apps/web/src/App.tsx` | Slices 4, 5 | Save wiring (Slice 4); load wiring + `questHintsRef` (Slice 5) |
 | `apps/web/src/App.test.tsx` | Slices 4, 5 | New save/load integration coverage |
 | `docs/architecture/ARCHITECTURE.md` | Slice 6 | ✅ status entry for this feature |

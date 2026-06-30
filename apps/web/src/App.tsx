@@ -671,8 +671,11 @@ function App() {
       }
       refreshDerivedViews(stateResult.state)
       setFatalMessage(null)
-      // A successful generated restore re-validates the parked room, so it is
-      // faithful and never raises the authored-fallback notice.
+      // The fallback notice is driven by buildRestoredPlay's `degraded` flag (the
+      // room resolver had to substitute the trusted fallback room), not directly
+      // by blob validation. Invalid or corrupt generatedQuestJson degrades through
+      // the authored fallback path above; the notice only shows when the room
+      // resolution itself was also degraded — not for every blob validation failure.
       setNotice(restoredGeneratedPlay == null && degraded ? FALLBACK_NOTICE : null)
       setSaveLoadStatus('idle')
       logger.info('world session restored', {

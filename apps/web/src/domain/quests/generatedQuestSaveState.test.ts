@@ -6,8 +6,10 @@ import { GENERATED_OBJECTIVE_TEXT_MAX_LENGTH } from './generatedObjectiveSpec'
 import {
   buildGeneratedQuestSaveState,
   loadGeneratedQuestSaveState,
+  GeneratedStoryThreadKindSchema,
   type GeneratedQuestSaveInput,
 } from './generatedQuestSaveState'
+import type { GeneratedStoryThreadKind } from '../generatedStoryThread'
 import type { QuestSpec } from './questSpec'
 
 const validStoryKinds = ['escape', 'investigate', 'survive', 'rescue', 'recover-item'] as const
@@ -294,6 +296,20 @@ describe('loadGeneratedQuestSaveState', () => {
     expect(JSON.stringify(result)).not.toContain('interaction:case-file')
     expect(JSON.stringify(result)).not.toContain('Generated Room')
     expect(JSON.stringify(result)).not.toContain('Resolve the room')
+  })
+})
+
+describe('storyKind schema parity', () => {
+  it('schema options exactly cover the domain GeneratedStoryThreadKind union', () => {
+    // Compile-time (schema ⊆ domain): assigning schema options to a
+    // GeneratedStoryThreadKind[] fails to build if the schema adds a value
+    // absent from the domain union.
+    const schemaOptions: readonly GeneratedStoryThreadKind[] = GeneratedStoryThreadKindSchema.options
+    // Runtime (domain ⊆ schema): all expected domain values must be in the
+    // schema. Update this list when adding a new GeneratedStoryThreadKind value.
+    expect([...schemaOptions].sort()).toEqual(
+      (['escape', 'investigate', 'survive', 'rescue', 'recover-item'] satisfies GeneratedStoryThreadKind[]).sort(),
+    )
   })
 })
 
