@@ -2,7 +2,8 @@
 
 > Feature branch: `feature/generated-room-consequence-journal-v0`
 > ADR: [ADR-0058](../decisions/ADR-0058-generated-room-consequence-journal-v0.md)
-> Status: **Docs created — awaiting Slice 1 approval**
+> Status: **implemented — slices 1–2 complete; docs/status closeout complete.**
+> Implemented on 2026-06-30.
 
 ## Overview
 
@@ -83,6 +84,8 @@ These must hold throughout implementation and be asserted by tests:
 ---
 
 ## Slice 1 — Pure domain projector
+
+**Status:** Complete.
 
 **Goal:** ship `buildGeneratedConsequenceJournal` as a standalone, fully tested pure
 function. Zero runtime behavior change. Zero UI change. Zero App change.
@@ -279,6 +282,8 @@ No other test suites touched.
 
 ## Slice 2 — App wiring and existing JournalPanel rendering
 
+**Status:** Complete.
+
 **Goal:** wire `buildGeneratedConsequenceJournal` into the `computeDerivedViews` /
 `refreshDerivedViews` seam. Prompt-generated sessions render the existing `JournalPanel`
 with generated entries. Authored sessions are unchanged.
@@ -436,6 +441,8 @@ Hand off after full test + build + lint pass. Do not proceed to Slice 3 without 
 ---
 
 ## Slice 3 — Docs / status closeout
+
+**Status:** Complete.
 
 **Goal:** update architecture status docs. No runtime file changes.
 

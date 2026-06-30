@@ -1114,6 +1114,32 @@ composition anchor bias ([ADR-0057](./decisions/ADR-0057-generated-story-threadi
 - **No side effects.** There is no new LLM call, no RoomSpec schema change, and
   no world/memory/objective/NPC mutation.
 
+## 29. Generated room consequence journal ✅ v0 (read-only generated journal projection)
+
+Generated Room Consequence Journal v0 derives a prompt-generated session journal
+from existing authoritative state, the current validated room, closed quest
+status, and optional closed story context
+([ADR-0058](./decisions/ADR-0058-generated-room-consequence-journal-v0.md)).
+
+| Situation | Detection | Handling / result | Logging |
+| --- | --- | --- | --- |
+| No generated journal input | `computeDerivedViews` receives no generated input | authored journal path runs when `JournalSpec` is present; otherwise journal stays `null` | none |
+| Generated input has no `storyContext` | `storyContext === undefined` | story-context entry omitted; safe count/status entries can still appear | none |
+| Generated input has no quest | `quest === null` | objective-complete entry omitted | none |
+| No visited rooms or resolved objects | count is `0` | corresponding count entries omitted; `JournalPanel` shows existing empty state when entries are empty | none |
+| Authored and generated sources are both available defensively | generated input is present | generated journal wins; authored and generated entries are not combined | none |
+
+- **Derived UI only.** The journal stores no state, appends no events, emits no
+  commands, and mutates no objective, object-state, NPC, world, or memory data.
+- **No schema or persistence footprint.** No `RoomSpec`, `QuestSpec`,
+  `JournalSpec`, `SaveGame`, backend, persistence, or save/load shape changed.
+- **Closed text surface.** Journal text comes only from closed templates and
+  safe counts. The projector does not read or output raw prompt, generated
+  descriptions, provider output, room/object names, `QuestView` title or
+  objective text, raw objective JSON, object ids, objective ids, flag text, or
+  WorldBible free text.
+- **No cost impact.** There is no new LLM/provider/network/I/O call.
+
 ---
 
 ## Summary
@@ -1132,6 +1158,7 @@ composition anchor bias ([ADR-0057](./decisions/ADR-0057-generated-story-threadi
 | 4g | Generated room visual vocabulary normalization | trusted vocabulary/builders; generated alias repair; optional transform repair; skipped reason buckets | valid safe concepts render as readable objects; unknown/malformed entries remain mystery markers; benign normalization keeps `provenance: generated` | ✅ v0 |
 | 4h | Generated room theme vocabulary degradation | structured `WorldBibleSeed.themePack` only; missing theme/default path; no prompt or seed parsing | missing/unknown context falls back to default fantasy vocabulary and anchor priority; post-apoc suppresses fantasy-biased fake pools while keeping arch/npc; sci-fi/spaceship deferred to later theme packs | ✅ v0 |
 | 4i | Generated story threading degradation | closed `openingArc.pattern` + structural adjacent `roomId` depth only; escape has no anchor override | missing context/anchor falls back to previous adjacent seed/composition behavior; guidance never becomes quest/world state | ✅ v0 |
+| 4j | Generated room consequence journal degradation | generated journal input over authoritative state + closed status/context only | missing context/quest/counts omit entries or show empty journal; authored and generated journal sources never combine; no state mutation | ✅ v0 |
 | 5 | Backend/network | validated API requests + typed results | safe API envelope; browser retry state 🔜 | ✅ API edge v0 |
 | 6 | DB / persistence failure | typed results (rooms, conflicts) + fail-fast throws (open/migration/corrupt session) | safe API error; no browser surface yet | ✅ API-backed v0 |
 | 7 | Pre-gen not ready / return exit absent | one `resolveRoom` seam: cache hit / in-flight join / on-demand resolve (capped, depth-1 warming); generated return exit parse + re-validation | instant cached room, or safe on-demand resolve/generate; return-exit parse/validation miss → original valid room with no return exit; never a freeze | ✅ v0 (browser); status lifecycle 🔜 |

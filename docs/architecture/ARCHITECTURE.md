@@ -57,6 +57,8 @@ Throughout these docs:
   Generated Room Objective Target Enrichment v0 — generated assembly/domain;
   Real Generated Objective Provider v0 — generation + app composition;
   Generated Objective Per Room v0 — browser/app composition;
+  Generated Room Consequence Journal v0 — browser/app composition + pure
+  generated journal projector;
   NPC Dialogue Room Context v0 — browser/domain/dialogue;
   Generated Room NPC Objective Awareness v1 — browser/domain/dialogue;
   Generated Story Objective Contract v0 — domain/quests/assembly + dialogue/UI;
@@ -513,6 +515,33 @@ quest state, memory, backend persistence, or provider work
 - **Scope boundary:** only generated adjacent rooms in prompt-generated play use
   the thread context. Authored rooms, demo rooms, fallback rooms, restored rooms,
   and the first prompt-generated room remain unchanged.
+
+## Generated Room Consequence Journal v0
+
+✅ **Implemented, browser/app composition + pure domain projector.** Generated
+Room Consequence Journal v0 gives prompt-generated sessions a read-only journal
+surface using the existing `JournalView` and unchanged `JournalPanel`
+([ADR-0058](./decisions/ADR-0058-generated-room-consequence-journal-v0.md)).
+
+- **Pure projector:** `domain/journal/generatedConsequenceJournal.ts` derives a
+  `JournalView` from only `WorldState`, the current validated `LoadedRoom`,
+  `QuestView.status`, and optional closed `GeneratedStoryRoomContext`.
+- **Existing render path:** generated play passes a generated journal input
+  through `computeDerivedViews`; the existing `{journal && <JournalPanel />}`
+  render path displays it. No new UI component was added.
+- **Mutual exclusion:** authored sessions still use `demoJournalSpec` +
+  `projectJournal`; generated sessions use the generated projector. The two
+  journal sources are not combined.
+- **Read-only, not truth:** the generated journal is derived UI only. It stores
+  no journal state, appends no events, emits no commands, mutates no
+  objective/object-state/NPC/world/memory data, and writes nothing to backend,
+  persistence, save-game, or schemas.
+- **Safe content:** journal text comes only from closed hand-written templates
+  and safe counts. The projector does not read or output raw prompt, generated
+  descriptions, provider output, room or object names, `QuestView` title or
+  objective text, raw objective JSON, object ids, objective ids, flag text, or
+  WorldBible free text.
+- **No cost impact:** no new LLM, provider, network, or I/O call.
 
 ## Room Inspect Summary v0
 

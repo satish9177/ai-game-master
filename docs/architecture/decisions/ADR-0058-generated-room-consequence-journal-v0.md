@@ -1,8 +1,13 @@
 # ADR-0058: Generated Room Consequence Journal v0 — derived read-only consequence surface for generated play
 
-- **Status:** Accepted — **pending implementation**
+- **Status:** Accepted — implemented
 - **Date:** 2026-06-30
+- **Implemented:** 2026-06-30
 - **Deciders:** Project owner
+
+> Implemented in two source slices plus docs closeout: Slice 1 added the pure
+> generated consequence journal projector, and Slice 2 wired generated play
+> through `computeDerivedViews` to the existing `JournalPanel`.
 
 ## Context
 
@@ -28,7 +33,8 @@ stored state:
 - `domain/generatedStoryThread.ts` (`deriveStoryThreadContext`) — derives a
   `GeneratedStoryRoomContext { kind, role, pressure }` entirely from closed enums + structural
   room depth. `kind` is the `WorldBibleSeed.openingArc.pattern` enum; already used in the
-  pregenerator closure of `handlePrompt`. Not yet held on `ActivePlay`.
+  pregenerator closure of `handlePrompt` and held on generated `ActivePlay` as the closed
+  `storyKind` enum for projection-time journal derivation.
 
 The gap: the generated play path has no consumer-visible proof that prior choices persisted,
 that adjacent rooms are part of one narrative arc, or that returning to a room does not reset
@@ -39,7 +45,7 @@ generated-session journal"* as a future item.
 
 ## Decision
 
-Ship **Generated Room Consequence Journal v0** — a pure domain projector
+Generated Room Consequence Journal v0 ships a pure domain projector
 `buildGeneratedConsequenceJournal` that derives a safe `JournalView` from existing
 closed-enum and count-only facts, wired into the existing `refreshDerivedViews` /
 `computeDerivedViews` seam, rendered by the unchanged `JournalPanel`.
