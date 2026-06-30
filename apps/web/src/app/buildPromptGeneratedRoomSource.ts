@@ -23,6 +23,7 @@ export function buildPromptGeneratedRoomSource({
   return new GeneratedRoomSource(generator, generatorSeed, logger, fallbackRoom, {
     requestsNpc: detectsNpcRequest(rawUserPrompt),
     enrichObjectiveTarget: true,
+    deriveMechanicalGateDiagnostic: true,
     themePack,
   })
 }

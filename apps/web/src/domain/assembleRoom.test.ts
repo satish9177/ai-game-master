@@ -405,6 +405,7 @@ describe('assembleRoom', () => {
       'displayTextSanitized',
       'displayTextSanitizationCount',
       'skippedObjectReasonCounts',
+      'mechanicalGateAvailable',
     ])
 
     for (const input of inputs) {
@@ -438,6 +439,7 @@ describe('assembleRoom', () => {
       expect(typeof diagnostics.displayTextSanitized).toBe('boolean')
       expect(typeof diagnostics.displayTextSanitizationCount).toBe('number')
       expect(typeof diagnostics.skippedObjectReasonCounts).toBe('object')
+      expect(typeof diagnostics.mechanicalGateAvailable).toBe('boolean')
       expect(diagnostics.skippedObjectReasonCounts).not.toBeNull()
       for (const val of Object.values(diagnostics.skippedObjectReasonCounts)) {
         expect(typeof val).toBe('number')
@@ -1475,6 +1477,73 @@ describe('assembleRoom', () => {
     expect(explicitFalse.diagnostics.objectiveTargetEnriched).toBe(false)
     expect(interactionFor(implicitDefault.room.objects.find((object) => object.type === 'book')!)?.effect).toBeUndefined()
     expect(explicitFalse).toEqual(implicitDefault)
+  })
+
+  it('deriveMechanicalGateDiagnostic is off by default and reports no gate', () => {
+    const input = raw(validSpec({
+      shell: { dimensions: { width: 18, depth: 18, height: 4 }, exits: [{ side: 'north', width: 3 }] },
+      spawn: { position: [0, 1.7, 5] },
+      objects: [{ type: 'book', position: [0, 0, -2] }],
+    }))
+
+    const implicitDefault = assembleRoom(input, fallback)
+    const explicitFalse = assembleRoom(input, fallback, {
+      enrichObjectiveTarget: true,
+      deriveMechanicalGateDiagnostic: false,
+    })
+
+    expect(implicitDefault.diagnostics.mechanicalGateAvailable).toBe(false)
+    expect(explicitFalse.diagnostics.mechanicalGateAvailable).toBe(false)
+  })
+
+  it('deriveMechanicalGateDiagnostic true reports only mechanicalGateAvailable for a gated room', () => {
+    const result = assembleRoom(raw(validSpec({
+      id: 'secret-room-id',
+      shell: { dimensions: { width: 18, depth: 18, height: 4 }, exits: [{ side: 'north', width: 3 }] },
+      spawn: { position: [0, 1.7, 5] },
+      objects: [{ type: 'book', name: 'Secret Book Name', position: [0, 0, -2] }],
+    })), fallback, {
+      enrichObjectiveTarget: true,
+      deriveMechanicalGateDiagnostic: true,
+    })
+
+    expect(result.diagnostics.provenance).toBe('generated')
+    expect(result.diagnostics.objectiveTargetEnriched).toBe(true)
+    expect(result.diagnostics.mechanicalGateAvailable).toBe(true)
+    expect(Object.keys(result.diagnostics)).toContain('mechanicalGateAvailable')
+
+    const diagnosticDump = JSON.stringify(result.diagnostics)
+    expect(diagnosticDump).not.toContain('secret-room-id')
+    expect(diagnosticDump).not.toContain('generated-objective-target')
+    expect(diagnosticDump).not.toContain('interaction:generated-objective-target')
+    expect(diagnosticDump).not.toContain('adjacent:')
+    expect(diagnosticDump).not.toContain('Secret Book Name')
+    expect(diagnosticDump).not.toContain('mechanical-gate')
+    expect(diagnosticDump).not.toContain('locked-exit')
+    expect(diagnosticDump).not.toContain('unlock-exit')
+  })
+
+  it('deriveMechanicalGateDiagnostic true reports false when no flag-writer exists', () => {
+    const result = assembleRoom(raw(validSpec({
+      shell: { dimensions: { width: 18, depth: 18, height: 4 }, exits: [{ side: 'north', width: 3 }] },
+      spawn: { position: [0, 1.7, 5] },
+      objects: [{ type: 'pillar', position: [0, 0, -2] }],
+    })), fallback, { deriveMechanicalGateDiagnostic: true })
+
+    expect(result.diagnostics.provenance).toBe('generated')
+    expect(result.diagnostics.mechanicalGateAvailable).toBe(false)
+  })
+
+  it('deriveMechanicalGateDiagnostic true reports false on fallback paths', () => {
+    for (const input of [RAW_INVALID_JSON, RAW_INVALID_SCHEMA, RAW_UNREPAIRABLE]) {
+      const { room, diagnostics } = assembleRoom(input, fallback, {
+        enrichObjectiveTarget: true,
+        deriveMechanicalGateDiagnostic: true,
+      })
+      expect(room).toBe(fallback)
+      expect(diagnostics.provenance).toBe('fallback')
+      expect(diagnostics.mechanicalGateAvailable).toBe(false)
+    }
   })
 
   it('enrichObjectiveTarget true promotes an eligible object through assembleRoom', () => {

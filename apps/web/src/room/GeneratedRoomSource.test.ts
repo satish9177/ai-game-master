@@ -239,6 +239,40 @@ describe('GeneratedRoomSource', () => {
     expect(typeof entry.context.displayTextSanitized).toBe('boolean')
     expect(typeof entry.context.displayTextSanitizationCount).toBe('number')
     expect(typeof entry.context.skippedObjectReasonCounts).toBe('object')
+    expect(typeof entry.context.mechanicalGateAvailable).toBe('boolean')
+  })
+
+  it('logs mechanical gate availability as a boolean without leaking derived gate details', async () => {
+    const GATED_SPEC = JSON.stringify({
+      ...base,
+      id: 'secret-generated-room',
+      objects: [
+        {
+          type: 'book',
+          id: 'secret-book-id',
+          name: 'Secret Book Name',
+          position: [0, 0, -2],
+        },
+      ],
+    })
+    const { logger, entries } = createSpyLogger()
+
+    await newSource(generatorReturning(GATED_SPEC), 'p', logger, {
+      enrichObjectiveTarget: true,
+      deriveMechanicalGateDiagnostic: true,
+    }).getRoom()
+
+    expect(entries).toHaveLength(1)
+    expect(entries[0]!.context.mechanicalGateAvailable).toBe(true)
+    const dump = JSON.stringify(entries)
+    expect(dump).not.toContain('secret-generated-room')
+    expect(dump).not.toContain('secret-book-id')
+    expect(dump).not.toContain('interaction:secret-book-id')
+    expect(dump).not.toContain('mechanical-gate')
+    expect(dump).not.toContain('locked-exit')
+    expect(dump).not.toContain('unlock-exit')
+    expect(dump).not.toContain('adjacent:')
+    expect(dump).not.toContain('Secret Book Name')
   })
 
   it('logs a repaired/fallback outcome once at warn with safe diagnostics', async () => {

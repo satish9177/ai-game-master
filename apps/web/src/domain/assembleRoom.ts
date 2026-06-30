@@ -12,6 +12,7 @@ import { ensureGeneratedNpcPresence } from './ensureGeneratedNpcPresence'
 import { ensureGeneratedExitNavigation } from './ensureGeneratedExitNavigation'
 import { ensureGeneratedObjectiveTarget } from './generatedRoomObjectiveTarget'
 import { sanitizeGeneratedDisplayText } from './sanitizeGeneratedDisplayText'
+import { buildGeneratedMechanicalGate } from './generatedMechanicalGate'
 import type { GeneratedRoomVisualTheme } from './generatedRoomThemeVocabulary'
 import type { GeneratedStoryThreadKind } from './generatedStoryThread'
 
@@ -157,6 +158,12 @@ export type RoomDiagnostics = {
    * fallback room's load (always all-zero for a well-authored fallback).
    */
   skippedObjectReasonCounts: SkippedObjectReasonCounts
+  /**
+   * Whether a contract-valid, satisfiable mechanical gate can be derived from
+   * the returned generated room. Boolean-only; never carries gate ids, room ids,
+   * object ids, flag keys, exit targets, raw gate JSON, prompts, or generated text.
+   */
+  mechanicalGateAvailable: boolean
 }
 
 export type AssembledRoom = {
@@ -167,6 +174,7 @@ export type AssembledRoom = {
 export type AssembleRoomOptions = {
   requestsNpc?: boolean
   enrichObjectiveTarget?: boolean
+  deriveMechanicalGateDiagnostic?: boolean
   themePack?: GeneratedRoomVisualTheme
   storyKind?: GeneratedStoryThreadKind
 }
@@ -279,6 +287,8 @@ export function assembleRoom(
   const displayTextResult = sanitizeGeneratedDisplayText(objectiveTargetFixed)
   const displayTextFixed = displayTextResult.room
   const { displayTextSanitized, displayTextSanitizationCount } = displayTextResult
+  const mechanicalGateAvailable = options.deriveMechanicalGateDiagnostic === true
+    && buildGeneratedMechanicalGate(displayTextFixed) !== null
 
   // Stage 3 — semantic playability. No fatal issue → accept as generated. Benign
   // normalizations (Stages 2.5–2.9) keep provenance `generated` and show no notice;
@@ -312,6 +322,7 @@ export function assembleRoom(
         displayTextSanitized,
         displayTextSanitizationCount,
         skippedObjectReasonCounts: displayTextFixed.skippedObjectReasonCounts,
+        mechanicalGateAvailable,
       },
     }
   }
@@ -351,6 +362,7 @@ export function assembleRoom(
         displayTextSanitized,
         displayTextSanitizationCount,
         skippedObjectReasonCounts: repaired.skippedObjectReasonCounts,
+        mechanicalGateAvailable: false,
       },
     }
   }
@@ -383,6 +395,7 @@ export function assembleRoom(
       displayTextSanitized: false,
       displayTextSanitizationCount: 0,
       skippedObjectReasonCounts: fallbackRoom.skippedObjectReasonCounts,
+      mechanicalGateAvailable: false,
     },
   }
 }
@@ -418,6 +431,7 @@ function toFallback(
       displayTextSanitized: false,
       displayTextSanitizationCount: 0,
       skippedObjectReasonCounts: fallbackRoom.skippedObjectReasonCounts,
+      mechanicalGateAvailable: false,
     },
   }
 }

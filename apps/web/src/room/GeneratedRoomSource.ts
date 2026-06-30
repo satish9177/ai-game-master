@@ -104,6 +104,7 @@ export class GeneratedRoomSource implements RoomSource {
       displayTextSanitized: diagnostics.displayTextSanitized,
       displayTextSanitizationCount: diagnostics.displayTextSanitizationCount,
       skippedObjectReasonCounts: diagnostics.skippedObjectReasonCounts,
+      mechanicalGateAvailable: diagnostics.mechanicalGateAvailable,
     }
     // A clean generated room is the happy path (info); a repair or fallback is a
     // degraded outcome worth a warn so it stands out in the logs.

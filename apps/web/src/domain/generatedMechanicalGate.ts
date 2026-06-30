@@ -63,8 +63,32 @@ export function isGeneratedGateSatisfiable(
   return hasReachableUnlockFlag(gate, room) && hasExitToRoom(gate.effect.toRoomId, room)
 }
 
+export function buildGeneratedMechanicalGate(room: LoadedRoom): GeneratedMechanicalGate | null {
+  const flag = firstUnlockFlag(room)
+  const toRoomId = firstExitTarget(room)
+  if (flag === undefined || toRoomId === undefined) return null
+
+  const candidate = validateGeneratedMechanicalGate({
+    id: `${room.id}:mechanical-gate`,
+    kind: 'locked-exit',
+    condition: { kind: 'room-flag', roomId: room.id, flag },
+    effect: { kind: 'unlock-exit', toRoomId },
+  })
+  if (candidate === null) return null
+
+  return isGeneratedGateSatisfiable(candidate, room) ? candidate : null
+}
+
 function hasReachableUnlockFlag(gate: GeneratedMechanicalGate, room: LoadedRoom): boolean {
   return room.objects.some((object) => flagWrittenByObject(object) === gate.condition.flag)
+}
+
+function firstUnlockFlag(room: LoadedRoom): string | undefined {
+  for (const object of room.objects) {
+    const flag = flagWrittenByObject(object)
+    if (flag !== undefined) return flag
+  }
+  return undefined
 }
 
 function flagWrittenByObject(object: RoomObject): string | undefined {
@@ -90,6 +114,15 @@ function hasExitToRoom(toRoomId: string, room: LoadedRoom): boolean {
   return room.objects.some(
     (object) => 'interaction' in object && object.interaction?.exit?.toRoomId === toRoomId,
   )
+}
+
+function firstExitTarget(room: LoadedRoom): string | undefined {
+  for (const object of room.objects) {
+    if ('interaction' in object && object.interaction?.exit?.toRoomId !== undefined) {
+      return object.interaction.exit.toRoomId
+    }
+  }
+  return undefined
 }
 
 function assertNever(value: never): never {

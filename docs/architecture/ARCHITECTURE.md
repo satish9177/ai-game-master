@@ -94,7 +94,17 @@ Throughout these docs:
   no generated-room insertion, no objective integration, and no provider/LLM/cost/schema/save-load/
   navigation/renderer/backend changes yet
   ([ADR-0061](./decisions/ADR-0061-generated-mechanical-gate-contract-v0.md)).
-- 🔜 **Planned** — approved slices in progress: none currently.
+- ✅ **Implemented** — Generated Mechanical Gate Fake v0 —
+  deterministic builder + off-by-default diagnostic only. A pure
+  `buildGeneratedMechanicalGate(room)` derives a contract-valid, satisfiable `locked-exit` gate
+  from a generated room's existing inspectable flag-writer (`enrichObjectiveTarget`) and ensured
+  exit (`ensureGeneratedExitNavigation`), gated behind
+  `AssembleRoomOptions.deriveMechanicalGateDiagnostic`
+  (default `false`; `true` only in `buildPromptGeneratedRoomSource`) and surfaced as the boolean
+  `mechanicalGateAvailable` diagnostic only; the room is returned unchanged and the gate is never
+  stored, persisted, or enforced — no room mutation, no schema/save-load/navigation/renderer/
+  provider/cost change
+  ([ADR-0062](./decisions/ADR-0062-generated-mechanical-gate-fake-v0.md)).
 - ❌ **Not built** — future shape only; documented so we don't paint into a corner.
 
 ## Status today (Renderer Foundation v0)
