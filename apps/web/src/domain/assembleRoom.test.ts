@@ -253,6 +253,32 @@ describe('assembleRoom', () => {
     expect(validateRoom(room).ok).toBe(true)
   })
 
+  it('storyKind option changes the focal anchor while preserving generated assembly behavior', () => {
+    const input = raw(validSpec({
+      id: 'story-kind-compose',
+      shell: { dimensions: { width: 18, depth: 18, height: 4 }, exits: [{ side: 'north', width: 3 }] },
+      spawn: { position: [0, 1.7, 4] },
+      objects: [
+        { type: 'throne', position: [0, 0, 0] },
+        { type: 'book', position: [3, 0, 3] },
+      ],
+    }))
+
+    const defaultResult = assembleRoom(input, fallback)
+    const investigateResult = assembleRoom(input, fallback, { storyKind: 'investigate' })
+
+    const defaultThrone = defaultResult.room.objects.find((object) => object.type === 'throne')
+    const investigateBook = investigateResult.room.objects.find((object) => object.type === 'book')
+
+    expect(defaultThrone?.position[0]).toBe(0)
+    expect(defaultThrone?.position[2]).toBeLessThan(0)
+    expect(investigateBook?.position[0]).toBe(0)
+    expect(investigateBook?.position[2]).toBeLessThan(0)
+    expect(investigateResult.diagnostics.provenance).toBe('generated')
+    expect(investigateResult.diagnostics.exitNavigationEnsured).toBe(true)
+    expect(validateRoom(investigateResult.room).ok).toBe(true)
+  })
+
   it('falls back on invalid JSON with failedStage "json"', () => {
     const { room, diagnostics } = assembleRoom(RAW_INVALID_JSON, fallback)
     expect(room).toBe(fallback)

@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs'
+import appSource from './App.tsx?raw'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import {
@@ -664,6 +664,21 @@ describe('App generated-play adjacent room source wiring', () => {
     ],
   })
 
+  const anchorBiasRoom = JSON.stringify({
+    schemaVersion: 1,
+    id: 'anchor-bias-room',
+    name: 'Anchor Bias Room',
+    shell: {
+      dimensions: { width: 18, depth: 18, height: 4 },
+      exits: [{ side: 'north', width: 3 }],
+    },
+    spawn: { position: [0, 1.7, 5] },
+    objects: [
+      { type: 'throne', position: [0, 0, 0] },
+      { type: 'book', position: [3, 0, 3] },
+    ],
+  })
+
   it('enables objective-target enrichment for generated-play adjacent sources only', async () => {
     const generator: RoomGenerator = { generate: async () => markerlessGeneratedRoom }
 
@@ -716,6 +731,51 @@ describe('App generated-play adjacent room source wiring', () => {
     expect(degraded).toBe(`adjacent:${roomId}`)
   })
 
+  it('passes story kind to generated adjacent assembly while first prompt generation stays default', async () => {
+    const roomId = 'generated-room:exit:north'
+    const storyContext = deriveStoryThreadContext(secretWorldBible.openingArc.pattern, roomId)
+    const storyPhrase = storyContext ? storyThreadToSeedPhrase(storyContext) : undefined
+    const generator: RoomGenerator = { generate: async () => anchorBiasRoom }
+    const adjacentSource = new GeneratedRoomSource(
+      generator,
+      buildAdjacentRoomSeed(
+        roomId,
+        worldBibleToAdjacentThemeSeed(secretWorldBible),
+        storyPhrase,
+      ),
+      noopLogger,
+      makeRoom([]),
+      {
+        themePack: secretWorldBible.themePack,
+        enrichObjectiveTarget: true,
+        storyKind: storyContext?.kind,
+      },
+    )
+    const promptSource = buildPromptGeneratedRoomSource({
+      generator,
+      rawUserPrompt: 'investigate this room',
+      generatorSeed: 'safe first-room seed',
+      themePack: secretWorldBible.themePack,
+      logger: noopLogger,
+      fallbackRoom: makeRoom([]),
+    })
+
+    const adjacentResult = await adjacentSource.getRoom()
+    const promptResult = await promptSource.getRoom()
+
+    expect(adjacentResult.ok).toBe(true)
+    expect(promptResult.ok).toBe(true)
+    if (!adjacentResult.ok || !promptResult.ok) return
+
+    const adjacentBook = adjacentResult.room.objects.find((object) => object.type === 'book')
+    const promptThrone = promptResult.room.objects.find((object) => object.type === 'throne')
+
+    expect(adjacentBook?.position[0]).toBe(0)
+    expect(adjacentBook?.position[2]).toBeLessThan(0)
+    expect(promptThrone?.position[0]).toBe(0)
+    expect(promptThrone?.position[2]).toBeLessThan(0)
+  })
+
   it('keeps raw prompt and free-text WorldBible fields out of adjacent story seeds', () => {
     const roomId = 'generated-room:exit:north'
     const adjacentThemeSeed = worldBibleToAdjacentThemeSeed(secretWorldBible)
@@ -745,15 +805,14 @@ describe('App generated-play adjacent room source wiring', () => {
   })
 
   it('App wiring reads only the closed openingArc pattern for story-thread context', () => {
-    const source = readFileSync(new URL('./App.tsx', import.meta.url), 'utf8')
-
-    expect(source).toContain('prepared.worldBible?.openingArc.pattern')
-    expect(source).toContain('deriveStoryThreadContext(storyKind, roomId)')
-    expect(source).toContain('storyThreadToSeedPhrase(storyContext)')
-    expect(source).toContain('buildAdjacentRoomSeed(roomId, adjacentThemeSeed, storyPhrase)')
-    expect(source).not.toContain('prepared.worldBible?.openingArc.hook')
-    expect(source).not.toContain('prepared.worldBible?.openingArc.firstObjective')
-    expect(source).not.toContain('prepared.worldBible?.openingArc.pressure')
+    expect(appSource).toContain('prepared.worldBible?.openingArc.pattern')
+    expect(appSource).toContain('deriveStoryThreadContext(storyKind, roomId)')
+    expect(appSource).toContain('storyThreadToSeedPhrase(storyContext)')
+    expect(appSource).toContain('buildAdjacentRoomSeed(roomId, adjacentThemeSeed, storyPhrase)')
+    expect(appSource).toContain('storyKind: storyContext?.kind')
+    expect(appSource).not.toContain('prepared.worldBible?.openingArc.hook')
+    expect(appSource).not.toContain('prepared.worldBible?.openingArc.firstObjective')
+    expect(appSource).not.toContain('prepared.worldBible?.openingArc.pressure')
   })
 })
 

@@ -3,6 +3,7 @@ import type { PlayableBounds } from './generatedRoomLayout'
 import type { LoadedRoom } from './loadRoomSpec'
 import type { RoomObject } from './roomSpec'
 import type { GeneratedRoomVisualTheme } from './generatedRoomThemeVocabulary'
+import type { GeneratedStoryThreadKind } from './generatedStoryThread'
 
 /**
  * Generated-room composition (generated-room-composition-v0, stage 2.7).
@@ -67,6 +68,7 @@ export type ComposedRoom = {
 
 export type ComposeGeneratedRoomOptions = {
   themePack?: GeneratedRoomVisualTheme
+  storyKind?: GeneratedStoryThreadKind
 }
 
 // ─── constants ─────────────────────────────────────────────────────────────────
@@ -142,6 +144,62 @@ const POST_APOC_STORY_ANCHOR_PRIORITY: Partial<Record<RoomObject['type'], number
   statue: 7,
 }
 
+const INVESTIGATE_STORY_ANCHOR_PRIORITY: Partial<Record<RoomObject['type'], number>> = {
+  book: 0,
+  map: 0,
+  paper: 0,
+  chest: 1,
+  corpse: 2,
+  artifact: 3,
+  machine: 4,
+  table: 5,
+  statue: 6,
+  altar: 7,
+  throne: 8,
+}
+
+const RECOVER_ITEM_STORY_ANCHOR_PRIORITY: Partial<Record<RoomObject['type'], number>> = {
+  chest: 0,
+  artifact: 1,
+  map: 2,
+  book: 3,
+  paper: 3,
+  table: 4,
+  machine: 5,
+  corpse: 6,
+  statue: 7,
+  altar: 8,
+  throne: 9,
+}
+
+const SURVIVE_STORY_ANCHOR_PRIORITY: Partial<Record<RoomObject['type'], number>> = {
+  corpse: 0,
+  machine: 1,
+  artifact: 2,
+  chest: 3,
+  table: 4,
+  map: 4,
+  book: 4,
+  paper: 4,
+  statue: 5,
+  altar: 6,
+  throne: 7,
+}
+
+const RESCUE_STORY_ANCHOR_PRIORITY: Partial<Record<RoomObject['type'], number>> = {
+  statue: 0,
+  throne: 1,
+  altar: 2,
+  corpse: 3,
+  chest: 4,
+  artifact: 5,
+  machine: 6,
+  table: 7,
+  map: 7,
+  book: 7,
+  paper: 7,
+}
+
 // ─── classification ────────────────────────────────────────────────────────────
 
 /**
@@ -201,9 +259,10 @@ export function selectGeneratedStoryAnchorIndex(
   objects: RoomObject[],
   options: ComposeGeneratedRoomOptions = {},
 ): number {
-  const priorityTable = options.themePack === 'post-apoc'
-    ? POST_APOC_STORY_ANCHOR_PRIORITY
-    : STORY_ANCHOR_PRIORITY
+  const priorityTable = storyKindPriority(options.storyKind)
+    ?? (options.themePack === 'post-apoc'
+      ? POST_APOC_STORY_ANCHOR_PRIORITY
+      : STORY_ANCHOR_PRIORITY)
   let bestIndex = -1
   let bestPriority = Infinity
 
@@ -217,6 +276,24 @@ export function selectGeneratedStoryAnchorIndex(
   }
 
   return bestIndex
+}
+
+function storyKindPriority(
+  kind: GeneratedStoryThreadKind | undefined,
+): Partial<Record<RoomObject['type'], number>> | undefined {
+  switch (kind) {
+    case 'investigate':
+      return INVESTIGATE_STORY_ANCHOR_PRIORITY
+    case 'recover-item':
+      return RECOVER_ITEM_STORY_ANCHOR_PRIORITY
+    case 'survive':
+      return SURVIVE_STORY_ANCHOR_PRIORITY
+    case 'rescue':
+      return RESCUE_STORY_ANCHOR_PRIORITY
+    case 'escape':
+    case undefined:
+      return undefined
+  }
 }
 
 // ─── zone info (informational; actual per-object positions use footprint clamp) ──

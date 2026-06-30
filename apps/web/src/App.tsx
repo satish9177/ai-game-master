@@ -403,7 +403,11 @@ function App() {
               buildAdjacentRoomSeed(roomId, adjacentThemeSeed, storyPhrase),
               logger,
               fallbackRoom,
-              { themePack: prepared.worldBible?.themePack, enrichObjectiveTarget: true },
+              {
+                themePack: prepared.worldBible?.themePack,
+                enrichObjectiveTarget: true,
+                storyKind: storyContext?.kind,
+              },
             )
           },
           fallbackRoom,

@@ -102,6 +102,67 @@ describe('selectGeneratedStoryAnchorIndex', () => {
     ], { themePack: 'post-apoc' })).toBe(3)
   })
 
+  it('absent story context preserves default and theme-pack behavior', () => {
+    expect(selectAnchorIndex([
+      { type: 'book', position: [0, 0, 0] },
+      { type: 'throne', position: [1, 0, 0] },
+    ])).toBe(1)
+
+    expect(selectAnchorIndex([
+      { type: 'book', position: [0, 0, 0] },
+      { type: 'machine', position: [1, 0, 0] },
+    ], { themePack: 'post-apoc' })).toBe(1)
+  })
+
+  it('investigate story kind prefers documents over throne', () => {
+    expect(selectAnchorIndex([
+      { type: 'throne', position: [0, 0, 0] },
+      { type: 'book', position: [1, 0, 0] },
+      { type: 'map', position: [2, 0, 0] },
+    ], { storyKind: 'investigate' })).toBe(1)
+  })
+
+  it('recover-item story kind prefers chest over altar', () => {
+    expect(selectAnchorIndex([
+      { type: 'altar', position: [0, 0, 0] },
+      { type: 'chest', position: [1, 0, 0] },
+    ], { storyKind: 'recover-item' })).toBe(1)
+  })
+
+  it('survive story kind prefers corpse over statue', () => {
+    expect(selectAnchorIndex([
+      { type: 'statue', position: [0, 0, 0] },
+      { type: 'corpse', position: [1, 0, 0] },
+    ], { storyKind: 'survive' })).toBe(1)
+  })
+
+  it('rescue story kind prefers statue over documents', () => {
+    expect(selectAnchorIndex([
+      { type: 'book', position: [0, 0, 0] },
+      { type: 'map', position: [1, 0, 0] },
+      { type: 'statue', position: [2, 0, 0] },
+    ], { storyKind: 'rescue' })).toBe(2)
+  })
+
+  it('escape story kind falls back to default or theme-pack priority', () => {
+    expect(selectAnchorIndex([
+      { type: 'book', position: [0, 0, 0] },
+      { type: 'throne', position: [1, 0, 0] },
+    ], { storyKind: 'escape' })).toBe(1)
+
+    expect(selectAnchorIndex([
+      { type: 'book', position: [0, 0, 0] },
+      { type: 'machine', position: [1, 0, 0] },
+    ], { storyKind: 'escape', themePack: 'post-apoc' })).toBe(1)
+  })
+
+  it('story kind takes precedence over theme-pack priority when both are present', () => {
+    expect(selectAnchorIndex([
+      { type: 'machine', position: [0, 0, 0] },
+      { type: 'book', position: [1, 0, 0] },
+    ], { storyKind: 'investigate', themePack: 'post-apoc' })).toBe(1)
+  })
+
   it('prioritizes altar over statue, evidence, devices, cache, and documents', () => {
     expect(selectAnchorIndex([
       { type: 'statue', position: [0, 0, 0] },
@@ -1141,6 +1202,23 @@ describe('story anchor composition integration', () => {
     expect(composed.objects.map((object) => object.type)).toEqual(['throne', 'altar', 'statue', 'corpse'])
     expectFocalAnchor(composed.objects[3]!)
     expect(composed.objects[3]!.type).toBe('corpse')
+  })
+
+  it('investigate story kind makes a document the focal anchor ahead of a throne', () => {
+    const room = makeRoom([
+      { type: 'throne', position: [0, 0, 0] },
+      { type: 'book', position: [3, 0, 3] },
+    ])
+
+    const { room: composed, diagnostics } = composeGeneratedRoom(room, {
+      storyKind: 'investigate',
+    })
+
+    expect(diagnostics.lacksAnchor).toBe(false)
+    expect(composed.objects).toHaveLength(room.objects.length)
+    expect(composed.objects.map((object) => object.type)).toEqual(['throne', 'book'])
+    expectFocalAnchor(composed.objects[1]!)
+    expect(composed.objects[1]!.type).toBe('book')
   })
 
   it('uses altar as the primary anchor when no throne exists', () => {
