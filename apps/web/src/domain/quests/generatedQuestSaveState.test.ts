@@ -1,5 +1,4 @@
-import { readFileSync } from 'node:fs'
-import { fileURLToPath } from 'node:url'
+import generatedQuestSaveStateSource from './generatedQuestSaveState.ts?raw'
 import { describe, expect, it } from 'vitest'
 import { loadRoomSpec, type LoadedRoom } from '../loadRoomSpec'
 import type { RoomSpec } from '../roomSpec'
@@ -300,8 +299,7 @@ describe('loadGeneratedQuestSaveState', () => {
 
 describe('generatedQuestSaveState import boundary', () => {
   it('does not import app, renderer, providers, persistence, backend, world-session, memory, or dialogue modules', () => {
-    const sourcePath = fileURLToPath(new URL('./generatedQuestSaveState.ts', import.meta.url))
-    const source = readFileSync(sourcePath, 'utf8')
+    const source = generatedQuestSaveStateSource
     const forbiddenFragments = [
       '/App',
       '../app',
