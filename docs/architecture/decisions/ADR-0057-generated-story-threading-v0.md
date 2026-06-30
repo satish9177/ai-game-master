@@ -240,9 +240,10 @@ In App.tsx, the same per-adjacent `RoomSourceFactory` closure passes `storyKind`
 1. `domain/generatedStoryThread.ts` is a pure domain file: no I/O, no logger, no React, no
    imports from `world-session`, `interactions`, `encounters`, `dialogue`, `memory`, or any
    application layer.
-2. The module imports only type-level references from `domain/worldBible/worldBibleSeed.ts`
-   (`GeneratedStoryThreadKind` mirrors `openingArc.pattern`'s literal union). It does not import
-   `RoomSpec`, `LoadedRoom`, quest types, or generation-layer types.
+2. The module is intentionally self-contained: `GeneratedStoryThreadKind` must mirror
+   `WorldBibleSeed.openingArc.pattern`'s literal union, but it does not import
+   `domain/worldBible/worldBibleSeed.ts`, `RoomSpec`, `LoadedRoom`, quest types, or
+   generation-layer types.
 3. `deriveStoryThreadContext` accepts only `(kind: GeneratedStoryThreadKind | undefined,
    roomId: string)`. It never receives arc free text, prompt text, generated content, or any
    runtime state variable.

@@ -1,3 +1,4 @@
+// Intentionally self-contained; keep in sync with WorldBibleSeed.openingArc.pattern.
 export type GeneratedStoryThreadKind =
   | 'escape'
   | 'investigate'
