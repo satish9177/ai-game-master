@@ -1,4 +1,5 @@
 import type { WorldEvent } from '../world/events'
+import type { DisplayNameResolver } from './displayNames'
 import type { RoomMemoryDraftInput } from './roomFirewall'
 
 /**
@@ -29,11 +30,20 @@ export const PROMOTION_ROOM_KIND = 'room_observation' as const
 /** Default promotion threshold: importance must be >= this to promote. */
 export const DEFAULT_MIN_IMPORTANCE = 3
 /**
- * Generic, id/name-free room-state memory text. Display-name-bearing text and
- * entity snapshots are deferred to the DisplayNameResolver slice; putting raw
+ * Generic, id/name-free room-state memory text. Used as the FALLBACK whenever no
+ * display name is available (no resolver, or an unknown room id). Putting raw
  * system ids in memory text is disallowed.
  */
 export const ROOM_STATE_MEMORY_TEXT = 'This area changed in a lasting way.'
+
+/**
+ * Readable room-state memory text built from a resolved display name (Slice C2).
+ * Id-free by construction: only the human name reaches the text. The display name
+ * is already bounded by the resolver, so the result stays within the memory cap.
+ */
+export function namedRoomStateText(displayName: string): string {
+  return `The ${displayName} changed in a lasting way.`
+}
 
 /** Neutral context the future orchestrator injects. No WorldSession/WorldStore. */
 export type PromotionContext = {
@@ -41,6 +51,12 @@ export type PromotionContext = {
   worldId: string
   /** Promote only if importance >= this (default `DEFAULT_MIN_IMPORTANCE`). */
   minImportance?: number
+  /**
+   * Optional, neutral resolver (Slice C2). When supplied and it knows the room,
+   * the draft gets readable text + a `{ room }` entity snapshot; otherwise the
+   * generic id-free text is used unchanged. No `WorldSession`/truth path.
+   */
+  displayNames?: DisplayNameResolver
 }
 
 /**
@@ -131,14 +147,21 @@ export function promoteWorldEvent(
   const roomId = roomEvent.payload.roomId.trim()
   if (roomId.length === 0) return null
 
+  // The sole entity of a durable room-state change is the room itself. With a
+  // resolver that knows it, emit readable text + a `{ room }` snapshot; otherwise
+  // keep the generic id-free text and store no snapshot.
+  const roomSnapshot = ctx.displayNames?.resolve('room', roomId) ?? null
+  const text = roomSnapshot ? namedRoomStateText(roomSnapshot.displayName) : ROOM_STATE_MEMORY_TEXT
+
   const input: RoomMemoryDraftInput = {
     worldId,
     sessionId: roomEvent.sessionId,
     roomId,
     kind: PROMOTION_ROOM_KIND,
     source: PROMOTION_SOURCE,
-    text: ROOM_STATE_MEMORY_TEXT,
+    text,
     confidence: PROMOTION_CONFIDENCE,
+    ...(roomSnapshot ? { entitySnapshots: { room: roomSnapshot } } : {}),
   }
 
   return {

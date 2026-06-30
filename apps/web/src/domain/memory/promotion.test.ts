@@ -3,6 +3,8 @@ import { describe, expect, it } from 'vitest'
 import { WorldCommandSchema, WorldEventSchema } from '../world/events'
 import type { WorldEvent } from '../world/events'
 import { WORLD_SCHEMA_VERSION } from '../world/worldState'
+import { createDisplayNameResolver } from './displayNames'
+import { EntitySnapshotsSchema } from './recallMetadata'
 import { validateRoomMemoryDraft } from './roomFirewall'
 import {
   DEFAULT_MIN_IMPORTANCE,
@@ -12,6 +14,7 @@ import {
   ROOM_STATE_MEMORY_TEXT,
   dedupePromotions,
   importanceFor,
+  namedRoomStateText,
   promoteWorldEvent,
   promotionDedupeKey,
 } from './promotion'
@@ -169,6 +172,51 @@ describe('promoteWorldEvent', () => {
     expect(result).not.toBeNull()
     expect(WorldEventSchema.safeParse(result!.input).success).toBe(false)
     expect(WorldCommandSchema.safeParse(result!.input).success).toBe(false)
+  })
+})
+
+describe('promoteWorldEvent — named text + entity snapshots (Slice C2)', () => {
+  const resolver = createDisplayNameResolver({ room: { [ROOM_ID]: 'Old Library' } })
+
+  it('uses display-name text and stores the room snapshot when a name is available', () => {
+    const result = promoteWorldEvent(durableEvent, { worldId: WORLD_ID, displayNames: resolver })
+    expect(result?.input.text).toBe(namedRoomStateText('Old Library'))
+    expect(result?.input.text).toContain('Old Library')
+    expect(result?.input.entitySnapshots).toEqual({
+      room: { id: ROOM_ID, displayName: 'Old Library' },
+    })
+  })
+
+  it('falls back to generic id-free text and omits snapshots when the name is missing', () => {
+    const empty = createDisplayNameResolver({})
+    const result = promoteWorldEvent(durableEvent, { worldId: WORLD_ID, displayNames: empty })
+    expect(result?.input.text).toBe(ROOM_STATE_MEMORY_TEXT)
+    expect('entitySnapshots' in (result?.input ?? {})).toBe(false)
+  })
+
+  it('keeps the existing generic behavior when no resolver is supplied', () => {
+    const result = promoteWorldEvent(durableEvent, { worldId: WORLD_ID })
+    expect(result?.input.text).toBe(ROOM_STATE_MEMORY_TEXT)
+    expect('entitySnapshots' in (result?.input ?? {})).toBe(false)
+  })
+
+  it('never leaks the raw roomId into named memory text', () => {
+    const result = promoteWorldEvent(durableEvent, { worldId: WORLD_ID, displayNames: resolver })
+    expect(result?.input.text).not.toContain(ROOM_ID)
+    expect(result?.input.text.length).toBeLessThanOrEqual(280)
+  })
+
+  it('emits a draft that still validates, with a bounded snapshot', () => {
+    const result = promoteWorldEvent(durableEvent, { worldId: WORLD_ID, displayNames: resolver })
+    expect(result).not.toBeNull()
+    expect(validateRoomMemoryDraft(result!.input).ok).toBe(true)
+    expect(EntitySnapshotsSchema.safeParse(result!.input.entitySnapshots).success).toBe(true)
+  })
+
+  it('is pure with a resolver: stable output, no input mutation', () => {
+    const event = Object.freeze(roomStateChanged({ roomId: ROOM_ID, flags: { opened: true } }))
+    const ctx = Object.freeze({ worldId: WORLD_ID, displayNames: resolver })
+    expect(promoteWorldEvent(event, ctx)).toEqual(promoteWorldEvent(event, ctx))
   })
 })
 
