@@ -19,17 +19,23 @@ import { loadGeneratedQuestSaveState } from './domain/quests/generatedQuestSaveS
 import { restoreGeneratedQuestPlay } from './app/restoreGeneratedQuestPlay'
 import { restoreGeneratedRoomCache } from './app/restoreGeneratedRoomCache'
 import { AdjacentRoomPregenerator } from './app/AdjacentRoomPregenerator'
+import { NavigationService } from './app/NavigationService'
+import { navigateWithExitGate } from './app/gatedNavigation'
+import { navigationResultMessage } from './app/exits'
 import { buildPromptGeneratedRoomSource } from './app/buildPromptGeneratedRoomSource'
 import { buildGeneratedObjectiveAttachment, buildGeneratedObjectiveQuestSpec } from './app/generatedObjective'
 import { FALLBACK_NOTICE } from './app/fallbackNotice'
 import { buildRoomIntroView } from './app/roomIntro'
 import { loadRoomSpec } from './domain/loadRoomSpec'
 import type { LoadedRoom } from './domain/loadRoomSpec'
+import type { Clock } from './domain/ports/Clock'
+import type { IdGenerator } from './domain/ports/IdGenerator'
 import { evaluateQuest } from './domain/quests/evaluateQuest'
 import type { WorldState } from './domain/world/worldState'
 import type { ObjectiveGenerator } from './domain/ports/ObjectiveGenerator'
 import type { RoomGenerator } from './domain/ports/RoomGenerator'
 import type { Logger } from './platform/logger/Logger'
+import type { LogContext } from './platform/logger/Logger'
 import { computeDerivedViews } from './app/derivedViews'
 import { QuestTracker } from './renderer/ui/QuestTracker'
 import { JournalPanel } from './renderer/ui/JournalPanel'
@@ -46,6 +52,10 @@ import { worldBibleToAdjacentThemeSeed } from './domain/worldBible/worldBibleToS
 import { GeneratedRoomSource } from './room/GeneratedRoomSource'
 import { demoQuestSpec } from './domain/examples/demoQuest'
 import { demoJournalSpec } from './domain/examples/demoJournal'
+import { InteractionService } from './interactions/InteractionService'
+import { InMemoryWorldStore } from './world-session/InMemoryWorldStore'
+import { WorldSession } from './world-session/WorldSession'
+import type { RoomResolver } from './app/AdjacentRoomPregenerator'
 
 const noopLogger: Logger = {
   debug() {},
@@ -1910,6 +1920,261 @@ describe('generated room cache save parking — handleSave wiring (ADR-0060, sli
     expect(handleSave).not.toContain('FakeRoomGenerator')
     expect(handleSave).not.toContain('resolveRoom(')
     expect(handleSave).not.toContain('warmAdjacent(')
+  })
+})
+
+describe('App generated mechanical gate runtime wiring', () => {
+  const GENERATED_ROOM_ID = 'generated-room'
+  const CONTROL_OBJECT_ID = 'control-panel'
+  const GOVERNED_ROOM_ID = 'north-room'
+  const SIDE_ROOM_ID = 'side-room'
+  const UNLOCK_FLAG = `interaction:${CONTROL_OBJECT_ID}`
+
+  function generatedGateRoom(): LoadedRoom {
+    return makeRoom([
+      {
+        type: 'machine',
+        id: CONTROL_OBJECT_ID,
+        name: 'SECRET CONTROL PANEL NAME',
+        position: [0, 0, -2],
+        interaction: {
+          key: 'E',
+          prompt: 'Inspect the secret control panel',
+          body: 'SECRET GENERATED DESCRIPTION',
+          effect: { kind: 'inspect' },
+        },
+      },
+      {
+        type: 'arch',
+        id: 'north-arch',
+        name: 'SECRET NORTH ARCH NAME',
+        position: [0, 0, -8],
+        interaction: { key: 'E', prompt: 'Leave north', exit: { toRoomId: GOVERNED_ROOM_ID } },
+      },
+      {
+        type: 'arch',
+        id: 'side-arch',
+        name: 'SECRET SIDE ARCH NAME',
+        position: [5, 0, 0],
+        interaction: { key: 'E', prompt: 'Leave sideways', exit: { toRoomId: SIDE_ROOM_ID } },
+      },
+    ], GENERATED_ROOM_ID, 'SECRET GENERATED ROOM NAME')
+  }
+
+  function targetRoom(id: string): LoadedRoom {
+    return makeRoom([], id, `Target ${id}`)
+  }
+
+  function createGateHarness(room: LoadedRoom = generatedGateRoom()) {
+    const store = new InMemoryWorldStore()
+    let id = 3
+    const ids: IdGenerator = {
+      newId: () => `00000000-0000-4000-8000-${String(id++).padStart(12, '0')}`,
+    }
+    let tick = 0
+    const clock: Clock = {
+      now: () => `2026-07-01T00:00:${String(tick++).padStart(2, '0')}.000Z`,
+    }
+    const logs: Array<{ message: string; context: LogContext }> = []
+    const logger: Logger = {
+      debug: (message, context = {}) => logs.push({ message, context }),
+      info: (message, context = {}) => logs.push({ message, context }),
+      warn: (message, context = {}) => logs.push({ message, context }),
+      error: (message, context = {}) => logs.push({ message, context }),
+      child: () => logger,
+    }
+    const worldSession = new WorldSession(store, clock, ids, logger)
+    const resolver: RoomResolver = {
+      resolveRoom: async (roomId) => ({
+        ok: true,
+        room: targetRoom(roomId),
+        cacheHit: false,
+        source: 'generated',
+        provenance: 'generated',
+      }),
+    }
+    const navigation = new NavigationService(worldSession, resolver, logger)
+    const interaction = new InteractionService(worldSession, logger)
+    const canon = {
+      schemaVersion: 1,
+      worldId: WORLD_ID,
+      name: 'SECRET WORLD NAME',
+      startingRoomId: room.id,
+      initialPlayer: { health: { current: 75, max: 100 }, status: [], inventory: [] },
+    }
+    return { logs, worldSession, navigation, interaction, room, canon }
+  }
+
+  async function startGeneratedHarness(harness: ReturnType<typeof createGateHarness>) {
+    const started = await harness.worldSession.startSession(harness.canon)
+    if (!started.ok) throw new Error(started.error.code)
+    harness.logs.length = 0
+    return started.state
+  }
+
+  function appStyleNavigate(
+    harness: ReturnType<typeof createGateHarness>,
+    sessionId: string,
+    toRoomId: string,
+  ) {
+    return navigateWithExitGate({
+      sessionId,
+      fromRoomId: harness.room.id,
+      toRoomId,
+      demoQuestEnabled: false,
+      getWorldState: (id) => harness.worldSession.getWorldState(id),
+      navigate: () => harness.navigation.navigate({ sessionId, toRoomId }),
+      generatedGateEnabled: true,
+      currentRoom: harness.room,
+    })
+  }
+
+  it('App source passes generated gate options only for generated play', () => {
+    const handleNavigate = appSource.slice(
+      appSource.indexOf('const handleNavigate = useCallback('),
+      appSource.indexOf('if (result.status === \'navigated\')'),
+    )
+
+    expect(handleNavigate).toContain('demoQuestEnabled: activePlay.questSpec != null')
+    expect(handleNavigate).toContain('activePlay.objectivesPerRoom === true')
+    expect(handleNavigate).toContain('generatedGateEnabled: true')
+    expect(handleNavigate).toContain('currentRoom: activePlay.room')
+  })
+
+  it('blocks a generated governed exit before interaction and uses a safe message', async () => {
+    const harness = createGateHarness()
+    const state = await startGeneratedHarness(harness)
+
+    const result = await appStyleNavigate(harness, state.sessionId, GOVERNED_ROOM_ID)
+
+    expect(result).toEqual({ status: 'rejected', reason: 'gate-locked' })
+    const message = navigationResultMessage(result)
+    expect(message).toBe('This way is sealed until you deal with what is in this room.')
+    const unsafeDump = JSON.stringify({ message, logs: harness.logs })
+    expect(unsafeDump).not.toContain(GENERATED_ROOM_ID)
+    expect(unsafeDump).not.toContain(CONTROL_OBJECT_ID)
+    expect(unsafeDump).not.toContain(UNLOCK_FLAG)
+    expect(unsafeDump).not.toContain(GOVERNED_ROOM_ID)
+    expect(unsafeDump).not.toContain('mechanical-gate')
+    expect(unsafeDump).not.toContain('locked-exit')
+    expect(unsafeDump).not.toContain('SECRET GENERATED')
+    expect(unsafeDump).not.toContain(SECRET_RAW_PROMPT)
+  })
+
+  it('interaction sets the existing room flag and the governed exit succeeds afterward', async () => {
+    const harness = createGateHarness()
+    const state = await startGeneratedHarness(harness)
+
+    await expect(appStyleNavigate(harness, state.sessionId, GOVERNED_ROOM_ID))
+      .resolves.toEqual({ status: 'rejected', reason: 'gate-locked' })
+
+    const interaction = await harness.interaction.resolve({
+      sessionId: state.sessionId,
+      effect: { kind: 'inspect' },
+      ref: CONTROL_OBJECT_ID,
+    })
+    expect(interaction.status).toBe('applied')
+    if (interaction.status !== 'applied') throw new Error('expected applied interaction')
+    expect(interaction.state.roomStates[GENERATED_ROOM_ID]?.flags?.[UNLOCK_FLAG]).toBe(true)
+
+    const result = await appStyleNavigate(harness, state.sessionId, GOVERNED_ROOM_ID)
+
+    expect(result.status).toBe('navigated')
+    if (result.status !== 'navigated') throw new Error('expected navigation')
+    expect(result.room.id).toBe(GOVERNED_ROOM_ID)
+    expect(result.state.currentRoomId).toBe(GOVERNED_ROOM_ID)
+  })
+
+  it('leaves non-governed generated exits open', async () => {
+    const harness = createGateHarness()
+    const state = await startGeneratedHarness(harness)
+
+    const result = await appStyleNavigate(harness, state.sessionId, SIDE_ROOM_ID)
+
+    expect(result.status).toBe('navigated')
+    if (result.status !== 'navigated') throw new Error('expected navigation')
+    expect(result.room.id).toBe(SIDE_ROOM_ID)
+  })
+
+  it('fails open when the generated room has no satisfiable gate', async () => {
+    const ungatedRoom = makeRoom([
+      { type: 'pillar', id: 'quiet-pillar', position: [0, 0, -2] },
+      {
+        type: 'arch',
+        id: 'north-arch',
+        position: [0, 0, -8],
+        interaction: { key: 'E', prompt: 'Leave north', exit: { toRoomId: GOVERNED_ROOM_ID } },
+      },
+    ], GENERATED_ROOM_ID, 'Ungated generated room')
+    const harness = createGateHarness(ungatedRoom)
+    const state = await startGeneratedHarness(harness)
+
+    const result = await appStyleNavigate(harness, state.sessionId, GOVERNED_ROOM_ID)
+
+    expect(result.status).toBe('navigated')
+    if (result.status !== 'navigated') throw new Error('expected navigation')
+    expect(result.room.id).toBe(GOVERNED_ROOM_ID)
+  })
+
+  it('fails open when getWorldState is unavailable in the gate seam', async () => {
+    const harness = createGateHarness()
+    const state = await startGeneratedHarness(harness)
+
+    const result = await navigateWithExitGate({
+      sessionId: state.sessionId,
+      fromRoomId: harness.room.id,
+      toRoomId: GOVERNED_ROOM_ID,
+      demoQuestEnabled: false,
+      getWorldState: async () => ({
+        ok: false,
+        error: { code: 'not-found', message: 'Session not found.' },
+      }),
+      navigate: () => harness.navigation.navigate({ sessionId: state.sessionId, toRoomId: GOVERNED_ROOM_ID }),
+      generatedGateEnabled: true,
+      currentRoom: harness.room,
+    })
+
+    expect(result.status).toBe('navigated')
+  })
+
+  it('keeps authored Malik demo gate behavior unchanged', async () => {
+    const harness = createGateHarness()
+    const started = await harness.worldSession.startSession({
+      schemaVersion: 1,
+      worldId: WORLD_ID,
+      name: 'SECRET WORLD NAME',
+      startingRoomId: 'throne-room',
+      initialPlayer: { health: { current: 75, max: 100 }, status: [], inventory: [] },
+    })
+    if (!started.ok) throw new Error(started.error.code)
+
+    const result = await navigateWithExitGate({
+      sessionId: started.state.sessionId,
+      fromRoomId: 'throne-room',
+      toRoomId: 'ruined-safehouse',
+      demoQuestEnabled: true,
+      getWorldState: (id) => harness.worldSession.getWorldState(id),
+      navigate: () => harness.navigation.navigate({ sessionId: started.state.sessionId, toRoomId: 'ruined-safehouse' }),
+    })
+
+    expect(result).toEqual({ status: 'rejected', reason: 'blocked' })
+    expect(navigationResultMessage(result)).toBe('The north arch is barred until you deal with Steward Malik.')
+  })
+
+  it('handleNavigate source does not add provider, cost, save/load, or cache mutation work', () => {
+    const handleNavigateStart = appSource.indexOf('const handleNavigate = useCallback(')
+    const handleNavigate = appSource.slice(
+      handleNavigateStart,
+      appSource.indexOf('return result', handleNavigateStart),
+    )
+
+    expect(handleNavigate).not.toContain('recordAttempt')
+    expect(handleNavigate).not.toContain('objectiveGenerator.generate')
+    expect(handleNavigate).not.toContain('FakeRoomGenerator')
+    expect(handleNavigate).not.toContain('GeneratedRoomSource')
+    expect(handleNavigate).not.toContain('saveGameService')
+    expect(handleNavigate).not.toContain('buildGeneratedRoomCacheSaveJson')
+    expect(handleNavigate).not.toContain('snapshotCachedRooms')
   })
 })
 

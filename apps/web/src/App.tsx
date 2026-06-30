@@ -799,6 +799,12 @@ function App() {
   const handleNavigate = useCallback(async (toRoomId: string): Promise<NavigationResult> => {
     if (!activePlay?.navigation) return { status: 'rejected', reason: 'missing-exit' }
     const navigation = activePlay.navigation
+    const generatedGateOptions = activePlay.objectivesPerRoom === true
+      ? {
+          generatedGateEnabled: true as const,
+          currentRoom: activePlay.room,
+        }
+      : { generatedGateEnabled: false as const }
     const result = await navigateWithExitGate({
       sessionId: activePlay.sessionId,
       fromRoomId: activePlay.room.id,
@@ -809,6 +815,7 @@ function App() {
         sessionId: activePlay.sessionId,
         toRoomId,
       }),
+      ...generatedGateOptions,
     })
     if (result.status === 'navigated') {
       const shouldAttachObjective = shouldStartPerRoomObjectiveAttach({
