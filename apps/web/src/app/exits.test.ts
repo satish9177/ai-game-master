@@ -45,11 +45,27 @@ describe('exit helpers', () => {
       .toBe('The way is blocked.')
     expect(navigationResultMessage({ status: 'rejected', reason: 'blocked' }))
       .toBe('The north arch is barred until you deal with Steward Malik.')
+    expect(navigationResultMessage({ status: 'rejected', reason: 'gate-locked' }))
+      .toBe('This way is sealed until you deal with what is in this room.')
     expect(navigationResultMessage({ status: 'rejected', reason: 'already-here' }))
       .toBe('You are already here.')
     expect(navigationResultMessage({ status: 'failed', reason: 'conflict' }))
       .toBe('The world changed. Try again.')
     expect(navigationResultMessage({ status: 'failed', reason: 'invalid-room' }))
       .toBe('This room could not be entered.')
+  })
+
+  it('keeps the generated gate message generic and free of gate details', () => {
+    const message = navigationResultMessage({ status: 'rejected', reason: 'gate-locked' })!
+
+    expect(message).toBe('This way is sealed until you deal with what is in this room.')
+    expect(message).not.toContain('generated-room')
+    expect(message).not.toContain('control-panel')
+    expect(message).not.toContain('interaction:control-panel')
+    expect(message).not.toContain('north-room')
+    expect(message).not.toContain('mechanical-gate')
+    expect(message).not.toContain('locked-exit')
+    expect(message).not.toContain('raw gate')
+    expect(message).not.toContain('SECRET')
   })
 })

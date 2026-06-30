@@ -13,7 +13,10 @@ export type NavigationResult =
       cacheHit: boolean
       provenance?: RoomProvenance
     }
-  | { status: 'rejected'; reason: 'missing-exit' | 'unknown-room' | 'already-here' | 'blocked' }
+  | {
+      status: 'rejected'
+      reason: 'missing-exit' | 'unknown-room' | 'already-here' | 'blocked' | 'gate-locked'
+    }
   | {
       status: 'failed'
       reason: 'conflict' | 'not-found' | 'invalid-room' | 'unavailable'
