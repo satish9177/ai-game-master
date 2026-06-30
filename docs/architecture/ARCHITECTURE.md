@@ -86,7 +86,12 @@ Throughout these docs:
   gated by `generatedQuestJson`, with no `SaveGame` schema change and no provider
   or cost call on load/cached backtracking
   ([ADR-0060](./decisions/ADR-0060-generated-room-cache-save-load-v0.md)).
-- 🔜 **Planned** — future approved slices, when present, are listed here.
+- 🔜 **Planned** — approved slices in progress:
+  Generated Mechanical Gate Contract v0 — pure domain contract for a locked-exit gate whose
+  state derives from existing `WorldState.roomStates[roomId].flags`; `locked-exit` and
+  `room-flag` are the only v0 kinds; no runtime enforcement, no generated-room insertion, no
+  provider/LLM/prompt/schema/save-load/navigation/renderer/backend changes yet
+  ([ADR-0061](./decisions/ADR-0061-generated-mechanical-gate-contract-v0.md)).
 - ❌ **Not built** — future shape only; documented so we don't paint into a corner.
 
 ## Status today (Renderer Foundation v0)
