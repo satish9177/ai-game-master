@@ -12,6 +12,8 @@ import type {
   RoomMemoryScope,
   RoomMemorySource,
 } from './roomContracts'
+import { validateRecallMetadata } from './recallMetadata'
+import type { EntitySnapshots } from './recallMetadata'
 
 /**
  * The room memory firewall (room-memory-firewall-v0). Pure, total,
@@ -41,6 +43,9 @@ export type RoomMemoryDraftInput = {
   confidence?: RoomMemoryConfidence // default 'medium'
   npcId?: string // which NPC formed/uttered the memory
   turnIndex?: number
+  importance?: number // optional backend-assigned recall metadata (Slice C)
+  dedupeKey?: string
+  entitySnapshots?: EntitySnapshots
 }
 
 export type RoomMemoryDraft = {
@@ -49,6 +54,9 @@ export type RoomMemoryDraft = {
   text: string
   provenance: RoomMemoryProvenance
   confidence: RoomMemoryConfidence
+  importance?: number
+  dedupeKey?: string
+  entitySnapshots?: EntitySnapshots
 }
 
 export type RoomMemoryRejectReason =
@@ -59,6 +67,9 @@ export type RoomMemoryRejectReason =
   | 'text-too-long'
   | 'invalid-confidence'
   | 'invalid-provenance'
+  | 'invalid-importance'
+  | 'invalid-dedupe-key'
+  | 'invalid-entity-snapshots'
 
 export type ValidateRoomMemoryDraftResult =
   | { ok: true; draft: RoomMemoryDraft }
@@ -93,12 +104,16 @@ export function validateRoomMemoryDraft(
   const provenance = validateProvenance(input)
   if (!provenance.ok) return reject('invalid-provenance')
 
+  const metadata = validateRecallMetadata(input)
+  if (!metadata.ok) return reject(metadata.reason)
+
   const draft: RoomMemoryDraft = {
     scope: { worldId, sessionId, roomId },
     kind: input.kind,
     text,
     provenance: { source: input.source, ...provenance.value },
     confidence,
+    ...metadata.value,
   }
   return { ok: true, draft }
 }

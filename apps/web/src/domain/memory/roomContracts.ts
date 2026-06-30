@@ -1,4 +1,9 @@
 import { z } from 'zod'
+import {
+  EntitySnapshotsSchema,
+  MemoryDedupeKeySchema,
+  MemoryImportanceSchema,
+} from './recallMetadata'
 
 /**
  * Room memory contracts (living-world-room-memory-v0, room-memory-firewall-v0).
@@ -71,6 +76,9 @@ export const RoomMemoryRecordSchema = z
     text: z.string().min(1).max(MAX_ROOM_MEMORY_CHARS), // inert recall content — NEVER logged, never code
     provenance: RoomMemoryProvenanceSchema,
     confidence: RoomMemoryConfidenceSchema, // informational only
+    importance: MemoryImportanceSchema.optional(), // optional; ranking uses it when present
+    dedupeKey: MemoryDedupeKeySchema.optional(), // optional idempotency key (Slice C)
+    entitySnapshots: EntitySnapshotsSchema.optional(), // optional readable-name snapshots (Slice C)
     seq: z.number().int().min(1), // per (sessionId, roomId); ordering key
     createdAt: z.string().min(1), // UTC ISO-8601 via Clock
   })

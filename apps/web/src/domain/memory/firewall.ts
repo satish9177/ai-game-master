@@ -12,6 +12,8 @@ import type {
   MemorySource,
   NpcMemoryRecord,
 } from './contracts'
+import { validateRecallMetadata } from './recallMetadata'
+import type { EntitySnapshots } from './recallMetadata'
 
 /**
  * The memory firewall (memory-firewall-v0). Pure, total, deterministic: no I/O,
@@ -38,6 +40,9 @@ export type MemoryDraftInput = {
   confidence?: MemoryConfidence // default 'medium'
   roomId?: string
   turnIndex?: number
+  importance?: number // optional backend-assigned recall metadata (Slice C)
+  dedupeKey?: string
+  entitySnapshots?: EntitySnapshots
 }
 
 export type MemoryDraft = {
@@ -46,6 +51,9 @@ export type MemoryDraft = {
   text: string
   provenance: MemoryProvenance
   confidence: MemoryConfidence
+  importance?: number
+  dedupeKey?: string
+  entitySnapshots?: EntitySnapshots
 }
 
 export type MemoryRejectReason =
@@ -56,6 +64,9 @@ export type MemoryRejectReason =
   | 'text-too-long'
   | 'invalid-confidence'
   | 'invalid-provenance'
+  | 'invalid-importance'
+  | 'invalid-dedupe-key'
+  | 'invalid-entity-snapshots'
 
 export type ValidateMemoryDraftResult =
   | { ok: true; draft: MemoryDraft }
@@ -88,12 +99,16 @@ export function validateMemoryDraft(input: MemoryDraftInput): ValidateMemoryDraf
   const provenance = validateProvenance(input)
   if (!provenance.ok) return reject('invalid-provenance')
 
+  const metadata = validateRecallMetadata(input)
+  if (!metadata.ok) return reject(metadata.reason)
+
   const draft: MemoryDraft = {
     scope: { worldId, sessionId, npcId },
     kind: input.kind,
     text,
     provenance: { source: input.source, ...provenance.value },
     confidence,
+    ...metadata.value,
   }
   return { ok: true, draft }
 }

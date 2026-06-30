@@ -1,4 +1,9 @@
 import { z } from 'zod'
+import {
+  EntitySnapshotsSchema,
+  MemoryDedupeKeySchema,
+  MemoryImportanceSchema,
+} from './recallMetadata'
 
 /**
  * NPC memory contracts (npc-memory-persistence-v0, memory-firewall-v0).
@@ -70,6 +75,9 @@ export const NpcMemoryRecordSchema = z
     text: z.string().min(1).max(MAX_MEMORY_CHARS), // inert recall content — NEVER logged, never code
     provenance: MemoryProvenanceSchema,
     confidence: MemoryConfidenceSchema, // informational only
+    importance: MemoryImportanceSchema.optional(), // optional; ranking uses it when present
+    dedupeKey: MemoryDedupeKeySchema.optional(), // optional idempotency key (Slice C)
+    entitySnapshots: EntitySnapshotsSchema.optional(), // optional readable-name snapshots (Slice C)
     seq: z.number().int().min(1), // per (sessionId, npcId); ordering key
     createdAt: z.string().min(1), // UTC ISO-8601 via Clock
   })

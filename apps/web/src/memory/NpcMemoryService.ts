@@ -63,6 +63,9 @@ export class NpcMemoryService {
       text: draft.text,
       provenance: draft.provenance,
       confidence: draft.confidence,
+      ...(draft.importance !== undefined ? { importance: draft.importance } : {}),
+      ...(draft.dedupeKey !== undefined ? { dedupeKey: draft.dedupeKey } : {}),
+      ...(draft.entitySnapshots !== undefined ? { entitySnapshots: draft.entitySnapshots } : {}),
       createdAt: this.clock.now(),
     }
 
