@@ -14,6 +14,7 @@ import {
   shouldStartPerRoomObjectiveAttach,
 } from './app/App.helpers'
 import { loadGeneratedQuestSaveState } from './domain/quests/generatedQuestSaveState'
+import { restoreGeneratedQuestPlay } from './app/restoreGeneratedQuestPlay'
 import { buildPromptGeneratedRoomSource } from './app/buildPromptGeneratedRoomSource'
 import { buildGeneratedObjectiveAttachment, buildGeneratedObjectiveQuestSpec } from './app/generatedObjective'
 import { FALLBACK_NOTICE } from './app/fallbackNotice'
@@ -1627,12 +1628,244 @@ describe('generated quest save parking — handleSave wiring (ADR-0059, slice 4)
     )
   })
 
-  it('App source wires the blob into the save path and adds no load-restore wiring', () => {
+  it('App source wires the blob into the save path', () => {
     // Save path: build only for generated play and pass it as the third write arg.
     expect(appSource).toContain('buildGeneratedQuestSaveJson(')
     expect(appSource).toContain('generatedQuestJson,')
-    // No load/continue restore wiring is introduced in this slice.
-    expect(appSource).not.toContain('loadGeneratedQuestSaveState')
-    expect(appSource).not.toContain('restoreGeneratedQuestPlay')
+  })
+})
+
+describe('generated quest restore — handleLoad wiring (ADR-0059, slice 5)', () => {
+  const ROOM_ID = 'generated-room'
+  const OBJECT_ID = 'case-file'
+  const FLAG = `interaction:${OBJECT_ID}`
+
+  const genRoom = makeRoom(
+    [
+      {
+        type: 'scroll',
+        id: OBJECT_ID,
+        position: [0, 0, -2],
+        interaction: { key: 'E', prompt: 'Read the case file', effect: { kind: 'inspect' } },
+      },
+    ],
+    ROOM_ID,
+    'Secret Generated Room',
+  )
+
+  const genQuestSpec = {
+    questId: 'generated-room-objective',
+    title: 'Secure the room',
+    anchorRoomId: ROOM_ID,
+    objectives: [
+      {
+        id: 'generated-0',
+        text: 'Investigate the marked feature.',
+        condition: { kind: 'room-flag' as const, roomId: ROOM_ID, flag: FLAG },
+      },
+    ],
+  }
+
+  const genHints = { hint: 'Find the case file.', completionHint: 'You found it.' }
+
+  type SaveInput = Parameters<typeof buildGeneratedQuestSaveJson>[0]
+  type Hints = { hint: string; completionHint: string } | null
+
+  // Mirror the App's handleLoad composition exactly: the save path builds the
+  // parked blob (slice 4), then the load path re-validates it with
+  // loadGeneratedQuestSaveState and rebuilds the generated-play fields with
+  // restoreGeneratedQuestPlay against the already-restored WorldState.
+  function restoreFromSavedBlob(save: SaveInput, hints: Hints, world: WorldState) {
+    const json = buildGeneratedQuestSaveJson(save, hints)
+    expect(json).toBeDefined()
+    const loaded = loadGeneratedQuestSaveState(json!)
+    expect(loaded.ok).toBe(true)
+    if (!loaded.ok) throw new Error('expected a valid parked blob')
+    const restored = restoreGeneratedQuestPlay(loaded.state, world)
+    expect(restored.ok).toBe(true)
+    if (!restored.ok) throw new Error('expected a successful restore')
+    return restored.play
+  }
+
+  // App.refreshDerivedViews builds the generated journal input for restored
+  // generated play (objectivesPerRoom === true) from the restored room + storyKind.
+  function restoredViews(play: ReturnType<typeof restoreFromSavedBlob>, world: WorldState) {
+    const storyContext = play.storyKind !== undefined
+      ? deriveStoryThreadContext(play.storyKind, play.room.id)
+      : undefined
+    const quest = play.questSpec ? evaluateQuest(play.questSpec, world) : null
+    return computeDerivedViews(world, play.questSpec ?? null, null, {
+      state: world,
+      room: play.room,
+      quest,
+      storyContext,
+    })
+  }
+
+  it('restores objective visibility so the quest tracker renders after load', () => {
+    const world = makeState({ currentRoomId: ROOM_ID, roomStates: { [ROOM_ID]: { visited: true } } })
+    const play = restoreFromSavedBlob(
+      { room: genRoom, objectivesPerRoom: true, questSpec: genQuestSpec, storyKind: 'investigate' },
+      genHints,
+      world,
+    )
+
+    const views = restoredViews(play, world)
+    expect(views.quest).not.toBeNull()
+    const html = renderToStaticMarkup(<QuestTracker view={views.quest!} />)
+    expect(html).toContain('Secure the room')
+    expect(html).toContain('Investigate the marked feature.')
+  })
+
+  it('keeps a completed generated objective complete after load (driven by WorldState flags)', () => {
+    const completedWorld = makeState({
+      currentRoomId: ROOM_ID,
+      roomStates: { [ROOM_ID]: { visited: true, flags: { [FLAG]: true } } },
+    })
+    const play = restoreFromSavedBlob(
+      { room: genRoom, objectivesPerRoom: true, questSpec: genQuestSpec, storyKind: 'investigate' },
+      genHints,
+      completedWorld,
+    )
+
+    expect(evaluateQuest(play.questSpec!, completedWorld).status).toBe('complete')
+    expect(restoredViews(play, completedWorld).quest?.status).toBe('complete')
+  })
+
+  it('restores the resolved-object ring set from the restored room + restored flags', () => {
+    const resolvedWorld = makeState({
+      currentRoomId: ROOM_ID,
+      roomStates: { [ROOM_ID]: { visited: true, flags: { [FLAG]: true } } },
+    })
+    const play = restoreFromSavedBlob(
+      { room: genRoom, objectivesPerRoom: true, questSpec: genQuestSpec },
+      genHints,
+      resolvedWorld,
+    )
+
+    expect(play.objectivesPerRoom).toBe(true)
+    expect([...(play.entryResolvedObjectIds ?? [])]).toEqual([OBJECT_ID])
+  })
+
+  it('re-projects the generated consequence journal after load', () => {
+    const world = makeState({
+      currentRoomId: ROOM_ID,
+      roomStates: { [ROOM_ID]: { visited: true, flags: { [FLAG]: true } } },
+    })
+    const play = restoreFromSavedBlob(
+      { room: genRoom, objectivesPerRoom: true, questSpec: genQuestSpec, storyKind: 'investigate' },
+      genHints,
+      world,
+    )
+
+    const views = restoredViews(play, world)
+    expect(views.journal?.journalId).toBe('generated-consequence-journal')
+    expect(views.journal?.entries).toContainEqual({
+      id: 'objective-resolved',
+      text: "You resolved this chamber's objective.",
+    })
+    expect(views.journal?.entries).toContainEqual({
+      id: 'objects-disturbed',
+      text: 'You disturbed 1 feature(s) here.',
+    })
+  })
+
+  it('restores storyKind so the journal carries its story-context entry', () => {
+    const world = makeState({ currentRoomId: ROOM_ID, roomStates: { [ROOM_ID]: { visited: true } } })
+    const play = restoreFromSavedBlob(
+      { room: genRoom, objectivesPerRoom: true, questSpec: genQuestSpec, storyKind: 'investigate' },
+      genHints,
+      world,
+    )
+
+    expect(play.storyKind).toBe('investigate')
+    expect(restoredViews(play, world).journal?.entries.some((entry) => entry.id === 'story-context')).toBe(true)
+  })
+
+  it('restores quest hints when present in the parked blob', () => {
+    const world = makeState({ currentRoomId: ROOM_ID, roomStates: { [ROOM_ID]: { visited: true } } })
+    const play = restoreFromSavedBlob(
+      { room: genRoom, objectivesPerRoom: true, questSpec: genQuestSpec },
+      genHints,
+      world,
+    )
+
+    expect(play.hints).toEqual(genHints)
+  })
+
+  it('degrades safely with no throw for an invalid parked blob (falls through to authored gate)', () => {
+    // The App guards each step: a corrupt or schema-invalid blob makes
+    // loadGeneratedQuestSaveState return { ok: false }, so the restore is skipped
+    // and the load continues on the authored-world path with no error.
+    expect(loadGeneratedQuestSaveState('not json at all').ok).toBe(false)
+    expect(loadGeneratedQuestSaveState(JSON.stringify({ schemaVersion: 9 })).ok).toBe(false)
+    expect(() => loadGeneratedQuestSaveState('{"room":')).not.toThrow()
+  })
+
+  it('App source reads, re-validates, and restores the parked blob via the slice helpers', () => {
+    expect(appSource).toContain('restoreGeneratedPlayFromSlot(')
+    expect(appSource).toContain('loadGeneratedQuestSaveState(generatedQuestJson)')
+    expect(appSource).toContain('restoreGeneratedQuestPlay(loaded.state, worldState)')
+    expect(appSource).toContain('slotResult.generatedQuestJson')
+    // Restored quest spec and hints are routed through the existing view seams.
+    expect(appSource).toContain('setQuestSpecForView(generatedPlayFields.questSpec ?? null)')
+    expect(appSource).toContain('setQuestHintsForView(hints ?? null)')
+  })
+
+  it('keeps the authored-world fallback gate intact for missing/invalid blobs and authored saves', () => {
+    // A missing blob returns null from the helper guard; the else branch is the
+    // pre-feature authored-world path, unchanged.
+    expect(appSource).toContain('if (generatedQuestJson == null) return null')
+    expect(appSource).toContain("stateResult.state.roomStates['throne-room'] != null")
+    expect(appSource).toContain('isAuthoredWorld ? demoQuestSpec : undefined')
+    expect(appSource).toContain('isAuthoredWorld ? demoJournalSpec : undefined')
+  })
+
+  it('makes no generator, objective provider, or cost-meter call on the load path', () => {
+    // The only new room-reconstruction call is restoreGeneratedQuestPlay, which is
+    // proven generator-free by its own suite. handleLoad itself never records a
+    // usage attempt or invokes the objective generator.
+    const handleLoad = appSource.slice(
+      appSource.indexOf('const handleLoad = useCallback('),
+      appSource.indexOf('const handleNavigate = useCallback('),
+    )
+    expect(handleLoad).not.toContain('recordAttempt')
+    expect(handleLoad).not.toContain('objectiveGenerator')
+    expect(handleLoad).not.toContain('buildGeneratedObjectiveAttachment')
+    expect(handleLoad).toContain('restoreGeneratedPlayFromSlot(')
+  })
+
+  it('never logs the parked blob and restores only with a safe enum diagnostic', () => {
+    const restoreHelper = appSource.slice(
+      appSource.indexOf('function restoreGeneratedPlayFromSlot('),
+      appSource.indexOf('type ExampleBootstrapResult'),
+    )
+    // The restore helper must not log at all (the blob is content-bearing data).
+    expect(restoreHelper).not.toContain('logger')
+    // The restored-session log line carries only safe fields: a session id and a
+    // fixed enum — never the blob, room name, quest text, hints, ids, or flags.
+    expect(appSource).toContain('restored: restoredGeneratedPlay != null')
+    // The blob is only ever read for re-validation, never passed to the logger.
+    expect(appSource).not.toContain('logger.info("world session restored", { generatedQuestJson')
+  })
+
+  it('does not surface unsafe parked content through the restored quest/journal views', () => {
+    const world = makeState({
+      currentRoomId: ROOM_ID,
+      roomStates: { [ROOM_ID]: { visited: true, flags: { [FLAG]: true } } },
+    })
+    const play = restoreFromSavedBlob(
+      { room: genRoom, objectivesPerRoom: true, questSpec: genQuestSpec, storyKind: 'investigate' },
+      genHints,
+      world,
+    )
+    const views = restoredViews(play, world)
+    const serialized = JSON.stringify({ quest: views.quest, journal: views.journal })
+
+    expect(serialized).not.toContain('Secret Generated Room')
+    expect(serialized).not.toContain(FLAG)
+    expect(serialized).not.toContain('interaction:')
+    expect(serialized).not.toContain(OBJECT_ID)
+    expect(serialized).not.toContain('Find the case file.')
   })
 })

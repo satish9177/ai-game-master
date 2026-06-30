@@ -11,6 +11,7 @@ import { projectPlayerHud } from './renderer/ui/playerHud'
 import type { PlayerHudView } from './renderer/ui/playerHud'
 import { evaluateQuest, type QuestView } from './domain/quests/evaluateQuest'
 import type { QuestSpec } from './domain/quests/questSpec'
+import { loadGeneratedQuestSaveState } from './domain/quests/generatedQuestSaveState'
 import { demoQuestSpec } from './domain/examples/demoQuest'
 import type { JournalView } from './domain/journal/projectJournal'
 import type { JournalSpec } from './domain/journal/journalSpec'
@@ -34,6 +35,8 @@ import { NavigationService } from './app/NavigationService'
 import type { NavigationResult } from './app/NavigationService'
 import { PromptBar } from './app/PromptBar'
 import { buildRestoredPlay } from './app/buildRestoredPlay'
+import { restoreGeneratedQuestPlay } from './app/restoreGeneratedQuestPlay'
+import type { RestoredGeneratedQuestPlay } from './app/restoreGeneratedQuestPlay'
 import { computeDerivedViews } from './app/derivedViews'
 import { navigateWithExitGate } from './app/gatedNavigation'
 import { LocalStorageSaveSlotStore } from './app/saveSlotStore'
@@ -223,6 +226,27 @@ function buildGeneratedJournalInput(
     ? deriveStoryThreadContext(play.storyKind, play.room.id)
     : undefined
   return { state, room: play.room, quest: questForJournal, storyContext }
+}
+
+/**
+ * Generated-play restore (generated quest save/load v0; ADR-0059). Re-validates
+ * the optional parked blob and rebuilds the generated room/quest view fields
+ * from the already-restored authoritative `WorldState`. Returns `null` when the
+ * blob is absent, fails re-validation, or its parked room fails to reload — the
+ * caller then degrades to the authored-world gate with no error surfaced.
+ *
+ * Pure projection: it makes no generator/provider/LLM call, never touches the
+ * usage meter, and never mutates `WorldState`. The blob is never logged.
+ */
+function restoreGeneratedPlayFromSlot(
+  generatedQuestJson: string | undefined,
+  worldState: WorldState,
+): RestoredGeneratedQuestPlay | null {
+  if (generatedQuestJson == null) return null
+  const loaded = loadGeneratedQuestSaveState(generatedQuestJson)
+  if (!loaded.ok) return null
+  const restored = restoreGeneratedQuestPlay(loaded.state, worldState)
+  return restored.ok ? restored.play : null
 }
 
 type ExampleBootstrapResult = ActivePlay & { initialState: WorldState }
@@ -606,29 +630,58 @@ function App() {
 
       if (resolved.ok) adjacentPregenerator.warmAdjacent(resolved.room)
 
-      // Gate demo quest + journal to the authored example world: only restore
-      // them when the anchor room is present in the saved session's roomStates.
-      const isAuthoredWorld = stateResult.state.roomStates['throne-room'] != null
-      const restoredQuestSpec = isAuthoredWorld ? demoQuestSpec : undefined
-      const restoredJournalSpec = isAuthoredWorld ? demoJournalSpec : undefined
-      setQuestSpecForView(restoredQuestSpec ?? null)
-      setQuestHintsForView(null)
-      journalSpecRef.current = restoredJournalSpec ?? null
+      // Generated-play restore (ADR-0059): re-validate the optional parked blob
+      // and rebuild the generated room/quest view state from the already-restored
+      // authoritative WorldState. Missing or invalid blob → `null` → fall through
+      // to the authored-world gate below with no error surfaced. Onward
+      // navigation still uses the authored fallback wiring (v0 known limitation).
+      const restoredGeneratedPlay = restoreGeneratedPlayFromSlot(
+        slotResult.generatedQuestJson,
+        stateResult.state,
+      )
 
-      enterActivePlay({
-        ...play,
-        navigation: exampleNavigation,
-        adjacentPregenerator,
-        questSpec: restoredQuestSpec,
-        journalSpec: restoredJournalSpec,
-      })
+      if (restoredGeneratedPlay != null) {
+        const { hints, ...generatedPlayFields } = restoredGeneratedPlay
+        setQuestSpecForView(generatedPlayFields.questSpec ?? null)
+        setQuestHintsForView(hints ?? null)
+        journalSpecRef.current = null
+        enterActivePlay({
+          ...generatedPlayFields,
+          sessionId: play.sessionId,
+          navigation: exampleNavigation,
+          adjacentPregenerator,
+        })
+      } else {
+        // Gate demo quest + journal to the authored example world: only restore
+        // them when the anchor room is present in the saved session's roomStates.
+        const isAuthoredWorld = stateResult.state.roomStates['throne-room'] != null
+        const restoredQuestSpec = isAuthoredWorld ? demoQuestSpec : undefined
+        const restoredJournalSpec = isAuthoredWorld ? demoJournalSpec : undefined
+        setQuestSpecForView(restoredQuestSpec ?? null)
+        setQuestHintsForView(null)
+        journalSpecRef.current = restoredJournalSpec ?? null
+
+        enterActivePlay({
+          ...play,
+          navigation: exampleNavigation,
+          adjacentPregenerator,
+          questSpec: restoredQuestSpec,
+          journalSpec: restoredJournalSpec,
+        })
+      }
       refreshDerivedViews(stateResult.state)
       setFatalMessage(null)
-      setNotice(degraded ? FALLBACK_NOTICE : null)
+      // A successful generated restore re-validates the parked room, so it is
+      // faithful and never raises the authored-fallback notice.
+      setNotice(restoredGeneratedPlay == null && degraded ? FALLBACK_NOTICE : null)
       setSaveLoadStatus('idle')
       logger.info('world session restored', {
         sessionId: play.sessionId,
-        restored: degraded ? 'degraded' : 'authored',
+        restored: restoredGeneratedPlay != null
+          ? 'generated'
+          : degraded
+            ? 'degraded'
+            : 'authored',
       })
     })().catch(() => {
       if (version !== requestVersion.current) return
