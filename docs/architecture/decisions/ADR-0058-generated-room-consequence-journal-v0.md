@@ -177,9 +177,10 @@ the authored journal projection remain byte-identical.
 - No visited rooms → exploration entry absent.
 - All absent → `entries: []` → panel shows "Nothing of consequence yet." (unchanged panel
   behavior). Correct for a freshly entered generated room.
-- Restored generated session with no attached `storyKind` (save/load) → same degradation.
-  Journal re-projects from `WorldState`; entries missing story-context phrase still include
-  exploration/object-state counts, which are authoritative from restored `WorldState`.
+- Restored generated session (save/load) → no generated consequence journal in v0.
+  `RestoredPlay` does not persist or rehydrate generated-play markers such as
+  `objectivesPerRoom` / `storyKind`, so no generated journal input is provided and journal stays
+  `null`. This is a safe known limitation and matches `FAILURE-MODES.md` §29.
 
 ### Save/load
 
@@ -218,4 +219,4 @@ App/integration test: prompt-generated session → `JournalPanel` rendered; auth
 - **Reuses `JournalView`/`JournalPanel`/`computeDerivedViews` exactly.** No component or type change for the authored path.
 - **Safe degradation.** Every entry is optional. A session without a world bible, quest, or prior interaction gets an empty journal — displayed correctly as "Nothing of consequence yet."
 - **Authored journal unchanged.** All existing authored behavior and tests remain byte-identical.
-- **Known limitations:** journal is room-entry-projected (reflects current room's resolved count, not a cross-room history). No event-time ordering. No per-room history across rooms. No LLM-authored narrative. No journal-gated progression. Restored generated sessions without `storyKind` lose the story-context entry (acceptable: exploration/object-state counts still restore correctly from `WorldState`). A generic journal engine, multi-step objective journal, and richer cross-session memory integration are not part of this ADR.
+- **Known limitations:** journal is room-entry-projected (reflects current room's resolved count, not a cross-room history). No event-time ordering. No per-room history across rooms. No LLM-authored narrative. No journal-gated progression. Restored generated sessions do not show a generated consequence journal in v0 because `RestoredPlay` does not persist or rehydrate generated-play markers such as `objectivesPerRoom` / `storyKind`; this is safe and matches `FAILURE-MODES.md` §29: no generated journal input → journal stays `null`. A generic journal engine, multi-step objective journal, and richer cross-session memory integration are not part of this ADR.
