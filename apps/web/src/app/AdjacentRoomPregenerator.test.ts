@@ -626,6 +626,9 @@ describe('AdjacentRoomPregenerator.resolveRoom', () => {
     )
 
     pregen.restoreProvenance(new Map([['restored-room', 'repaired']]))
+    expect(pregen.snapshotCachedRooms()).toEqual([
+      { roomId: 'restored-room', room: cached, provenance: 'repaired' },
+    ])
     const hit = await pregen.resolveRoom('restored-room')
 
     expect(hit).toEqual({
@@ -636,6 +639,35 @@ describe('AdjacentRoomPregenerator.resolveRoom', () => {
       provenance: 'repaired',
     })
     expect(factoryCalls).toBe(0)
+  })
+
+  it('restoreProvenance only snapshots restored ids that exist in the cache without generating', () => {
+    const cache = new SessionRoomCache()
+    const cached = makeRoom('restored-room')
+    cache.set('restored-room', cached)
+    const { logger } = createLogger()
+    let factoryCalls = 0
+    const pregen = new AdjacentRoomPregenerator(
+      cache,
+      emptyRegistry,
+      () => {
+        factoryCalls += 1
+        return okSource(makeRoom('generated-room'))
+      },
+      fallbackRoom,
+      logger,
+    )
+
+    pregen.restoreProvenance(new Map([
+      ['restored-room', 'generated'],
+      ['missing-restored-room', 'fallback'],
+    ]))
+
+    expect(pregen.snapshotCachedRooms()).toEqual([
+      { roomId: 'restored-room', room: cached, provenance: 'generated' },
+    ])
+    expect(factoryCalls).toBe(0)
+    expect(cache.has('missing-restored-room')).toBe(false)
   })
 
   it('restoreProvenance copies entries instead of aliasing the caller map', async () => {
@@ -654,6 +686,9 @@ describe('AdjacentRoomPregenerator.resolveRoom', () => {
 
     pregen.restoreProvenance(provenance)
     provenance.set('restored-room', 'generated')
+    expect(pregen.snapshotCachedRooms()).toEqual([
+      { roomId: 'restored-room', room: cached, provenance: 'fallback' },
+    ])
     const hit = await pregen.resolveRoom('restored-room')
 
     expect(hit.ok && hit.provenance).toBe('fallback')

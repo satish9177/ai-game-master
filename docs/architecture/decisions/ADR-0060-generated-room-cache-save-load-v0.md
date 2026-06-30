@@ -181,7 +181,7 @@ In `handleSave` (App.tsx):
    a. Call `worldSession.getWorldState(activePlay.sessionId)` to obtain current `WorldState`.
       If this fails, omit the cache blob silently — the main save proceeds.
    b. Call `activePlay.adjacentPregenerator.snapshotCachedRooms()` — a new read-only accessor
-      that returns all currently cached rooms in insertion order as
+      that returns observed or restored cached rooms in deterministic order as
       `Array<{ roomId: string; room: LoadedRoom; provenance?: RoomProvenance }>`.
    c. Filter to entries where `roomId === activePlay.room.id` (ensures the current room is
       always included) or where `worldState.roomStates[roomId]?.visited === true` (visited
@@ -250,7 +250,7 @@ are already the post-assembly output; `loadRoomSpec` is the correct and sufficie
 |---|---|
 | No `generatedRoomCacheJson` in slot (older save, authored save) | Slot reads fine; field is `undefined`; ADR-0059 current-room restore only; no error |
 | `loadGeneratedRoomCacheSaveState` fails (corrupt, schema mismatch, `schemaVersion !== 1`) | Falls back to ADR-0059 single-room behavior; no error surfaced; unsafe input is never echoed |
-| `restoreGeneratedRoomCache` skips one bad entry | Remaining entries restored; that room regenerates on backtrack; logged as count |
+| `restoreGeneratedRoomCache` skips one bad entry | Remaining entries restored; that room regenerates on backtrack; skipped count is returned internally and not logged |
 | `worldSession.getWorldState` fails during save | Cache blob omitted silently; main save succeeds |
 | Rooms beyond cap visited before save | Only first 16 rooms (current room first) persisted; deeper backtracking regenerates |
 | No `themePack` in blob (older generated save) | `themeVocabulary(undefined)` → default fantasy vocabulary; forward generation slightly less consistent but safe |
@@ -265,9 +265,10 @@ are already the post-assembly output; `loadRoomSpec` is the correct and sufficie
 snapshotCachedRooms(): Array<{ roomId: string; room: LoadedRoom; provenance?: RoomProvenance }>
 ```
 
-Returns all entries in the internal cache `Map` in insertion order. It never throws, never
-modifies cache state, and never triggers generation. Callers perform visited-filtering
-against `WorldState` externally.
+Returns entries whose ids have been observed through resolution or restored through
+`restoreProvenance`, in deterministic insertion order. It never throws, never modifies cache
+state, never triggers generation, and still omits ids that are not present in the actual
+cache. Callers perform visited-filtering against `WorldState` externally.
 
 ### Ordering and cap policy
 

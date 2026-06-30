@@ -183,6 +183,7 @@ export class AdjacentRoomPregenerator implements RoomResolver {
   restoreProvenance(entries: Map<string, RoomProvenance>): void {
     for (const [roomId, provenance] of entries) {
       this.provenanceMap.set(roomId, provenance)
+      this.cachedRoomIds.add(roomId)
     }
   }
 

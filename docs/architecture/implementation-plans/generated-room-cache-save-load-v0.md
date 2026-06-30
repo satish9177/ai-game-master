@@ -36,7 +36,7 @@ and cost-free.
 | Question | Answer |
 |---|---|
 | What existing code is reused? | `RoomSpecSchema` (domain schema); `loadRoomSpec` (boundary); `SessionRoomCache`, `AdjacentRoomPregenerator`, `NavigationService` (composition layer); `themeVocabulary`, `FakeRoomGenerator` (generation); `resolvedObjectIdsForGeneratedPlay`, `PerRoomObjectiveMemo` (App.helpers); `SlotWrapper` optional-string pattern (saveSlotStore); existing `generatedQuestJson` sidecar pattern (ADR-0059) |
-| What new code is actually necessary? | One domain schema + two pure functions (~70 lines); one slot-store field addition (~15 lines); one composition restore helper (~50 lines); one read-only accessor on `AdjacentRoomPregenerator` (~8 lines); targeted additions to `handleSave` and `handleLoad` in `App.tsx` (~40 lines) |
+| What new code is actually necessary? | One domain schema + two pure functions (~70 lines); one slot-store field addition (~15 lines); one composition restore helper (~50 lines); one read-only accessor on `AdjacentRoomPregenerator` (~8 lines); one App helper for save projection; targeted additions to `handleSave` and `handleLoad` in `App.tsx` |
 | What safety boundaries remain unchanged? | `SaveGame` schema + integrity check; world-session authority; event-log append-only rule; all `schemaVersion` fields; `evaluateQuest` + `resolvedObjectIds` call sites; cost/usage guardrail; renderer trust boundary; log discipline; ADR-0059 quest blob path |
 | What targeted tests prove the change? | Round-trip domain tests; slot backward-compat tests; restore-helper unit tests; App navigation/save/load integration tests; safety sentinel assertions; cost-meter regression; no-generator-call assertion; stale-UI regression |
 
@@ -63,6 +63,7 @@ and cost-free.
 | `apps/web/src/app/saveSlotStore.test.ts` | Slice 2 | New backward-compat and round-trip cases |
 | `apps/web/src/app/AdjacentRoomPregenerator.ts` | Slice 3 | Add read-only `snapshotCachedRooms()` accessor |
 | `apps/web/src/app/AdjacentRoomPregenerator.test.ts` | Slice 3 | Cover the new accessor |
+| `apps/web/src/app/App.helpers.ts` | Slice 4 | Add `buildGeneratedRoomCacheSaveJson` save projection helper |
 | `apps/web/src/App.tsx` | Slices 4, 5 | Save wiring (Slice 4); load/navigation wiring (Slice 5) |
 | `apps/web/src/App.test.tsx` | Slices 4, 5 | New save/load/navigation integration coverage |
 | `docs/architecture/ARCHITECTURE.md` | Slice 6 | ✅ status entry for this feature |
@@ -83,7 +84,6 @@ and cost-free.
 - `apps/web/src/domain/interactions/resolvedObjects.ts` — unchanged
 - `apps/web/src/domain/journal/generatedConsequenceJournal.ts` — unchanged
 - `apps/web/src/app/derivedViews.ts` — unchanged
-- `apps/web/src/app/App.helpers.ts` — unchanged (no new helper needed here)
 - `apps/web/src/domain/generatedStoryThread.ts` — unchanged
 - `apps/web/src/room/SessionRoomCache.ts` — unchanged (no new methods needed)
 - `apps/web/src/generation/**` — no generator changes
@@ -477,13 +477,15 @@ Add a single read-only method at the end of the class:
 
 ```ts
 /**
- * Returns all currently cached rooms in insertion order as a snapshot.
+ * Returns observed or restored cached rooms in deterministic order as a snapshot.
  * Used by the save path to capture visited rooms for the cache blob.
  * Never throws, never generates, never modifies state.
  */
 snapshotCachedRooms(): Array<{ roomId: string; room: LoadedRoom; provenance?: RoomProvenance }> {
   const snapshot: Array<{ roomId: string; room: LoadedRoom; provenance?: RoomProvenance }> = []
-  for (const [roomId, room] of this.cache['rooms']) {
+  for (const roomId of this.cachedRoomIds) {
+    const room = this.cache.get(roomId)
+    if (room === undefined) continue
     const provenance = this.provenanceMap.get(roomId)
     snapshot.push({ roomId, room, ...(provenance !== undefined ? { provenance } : {}) })
   }
@@ -491,20 +493,10 @@ snapshotCachedRooms(): Array<{ roomId: string; room: LoadedRoom; provenance?: Ro
 }
 ```
 
-Note: `SessionRoomCache.rooms` is a private `Map`. To avoid exposing the Map directly,
-either:
-- Add a `entries()` method to `SessionRoomCache` that returns `IterableIterator<[string, LoadedRoom]>`,
-  or
-- Access the cache via the existing `has`/`get` API plus a new `keys()` method, or
-- Make the `rooms` Map `readonly` and expose it as a package-internal accessor.
-
-**Preferred approach for MSCR:** add `entries(): IterableIterator<[string, LoadedRoom]>` to
-`SessionRoomCache` so the pregenerator can iterate without exposing the Map. This is a
-two-line addition to `SessionRoomCache.ts` that does not change any existing method.
-
-If `SessionRoomCache.entries()` is added, update `SessionRoomCache.ts` accordingly and add
-a test case for it in the existing `SessionRoomCache` test file (if one exists; otherwise
-cover it via the `AdjacentRoomPregenerator` snapshot test).
+`restoreProvenance` also seeds the observational `cachedRoomIds` set after copying
+provenance entries, so immediately restored cached rooms are visible to a subsequent save
+snapshot. `snapshotCachedRooms` still skips restored ids that are not present in the actual
+cache.
 
 ### `restoreGeneratedRoomCache.ts` specification
 
@@ -526,6 +518,7 @@ export type RestoreGeneratedRoomCacheResult = {
   cache: SessionRoomCache
   provenance: Map<string, RoomProvenance>
   restoredRoomIds: string[]
+  skippedRoomCount: number
 }
 ```
 
@@ -546,11 +539,11 @@ export function restoreGeneratedRoomCache(
       and continue — the function is **total**; one bad parked room never fails the restore.
    b. `cache.set(room.id, room)`.
    c. `provenance.set(room.id, entry.provenance)`.
-3. `cache.set(currentRoom.id, currentRoom)` and
-   `provenance.set(currentRoom.id, provenanceMap.get(currentRoom.id) ?? 'generated')` —
-   idempotent guard ensuring the current room (which is the ADR-0059 restore source) is
-   always present even if it somehow diverges from the blob entries.
-4. Return `{ cache, provenance, restoredRoomIds: [...cache.keys()] }`.
+3. `cache.set(currentRoom.id, currentRoom)` — idempotent guard ensuring the current room
+   (which is the ADR-0059 restore source) is always present even if it somehow diverges
+   from the blob entries.
+4. Return the cache, provenance map, deterministic restored-room id list, and
+   `skippedRoomCount`. The skipped count is returned internally; it is not logged.
 
 No `assembleRoom`, no enrichment stages, no generator, no provider call.
 
@@ -592,7 +585,7 @@ Pure Vitest. No DOM. Inline minimal fixtures for `GeneratedRoomCacheSaveState` a
 
 #### `AdjacentRoomPregenerator.test.ts` additions
 
-10. **`snapshotCachedRooms` returns all cached entries.** Populate cache with two rooms via
+10. **`snapshotCachedRooms` returns observed/restored cached entries.** Populate cache with two rooms via
     `resolveRoom` on a mock source → `snapshotCachedRooms()` returns two entries with
     correct `roomId`, `room`, and `provenance`.
 

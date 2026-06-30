@@ -15,6 +15,7 @@ export const SavedGeneratedRoomEntrySchema = z
 
 export type SavedGeneratedRoomEntry = z.infer<typeof SavedGeneratedRoomEntrySchema>
 
+// Keep this closed enum in sync with GeneratedRoomVisualTheme.
 export const GeneratedRoomThemePackSchema = z.enum(['fantasy-keep', 'post-apoc'])
 
 export const GeneratedRoomCacheSaveStateSchema = z

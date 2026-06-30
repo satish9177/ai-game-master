@@ -1747,6 +1747,63 @@ describe('generated room cache save parking — handleSave wiring (ADR-0060, sli
     ])
   })
 
+  it('preserves restored visited cached rooms across a repeated save/load/save-style projection', () => {
+    const firstJson = buildGeneratedRoomCacheSaveJson({
+      room: currentRoom,
+      objectivesPerRoom: true,
+      cachedRooms: [
+        { roomId: currentRoom.id, room: currentRoom, provenance: 'generated' },
+        { roomId: visitedRoom.id, room: visitedRoom, provenance: 'fallback' },
+      ],
+      worldState: cacheWorld({
+        [currentRoom.id]: { visited: true },
+        [visitedRoom.id]: { visited: true },
+      }),
+    })
+    expect(firstJson).toBeDefined()
+    const loaded = loadGeneratedRoomCacheSaveState(firstJson!)
+    expect(loaded.ok).toBe(true)
+    if (!loaded.ok) return
+
+    const restored = restoreGeneratedRoomCache(loaded.state, currentRoom)
+    let sourceCalls = 0
+    const pregenerator = new AdjacentRoomPregenerator(
+      restored.cache,
+      { has: () => false, resolve: () => ({ ok: false, reason: 'unknown-room' }) },
+      () => {
+        sourceCalls += 1
+        return { getRoom: async () => ({ ok: true, room: warmedRoom }) }
+      },
+      warmedRoom,
+      noopLogger,
+    )
+    pregenerator.restoreProvenance(restored.provenance)
+
+    const secondJson = buildGeneratedRoomCacheSaveJson({
+      room: currentRoom,
+      objectivesPerRoom: true,
+      cachedRooms: pregenerator.snapshotCachedRooms(),
+      worldState: cacheWorld({
+        [currentRoom.id]: { visited: true },
+        [visitedRoom.id]: { visited: true },
+      }),
+    })
+    expect(sourceCalls).toBe(0)
+    expect(secondJson).toBeDefined()
+    const reloaded = loadGeneratedRoomCacheSaveState(secondJson!)
+    expect(reloaded.ok).toBe(true)
+    if (!reloaded.ok) return
+
+    expect(reloaded.state.rooms.map((entry) => entry.room.id)).toEqual([
+      currentRoom.id,
+      visitedRoom.id,
+    ])
+    expect(reloaded.state.rooms.map((entry) => entry.provenance)).toEqual([
+      'generated',
+      'fallback',
+    ])
+  })
+
   it('preserves object ids internally for saved generated rooms', () => {
     const json = buildGeneratedRoomCacheSaveJson({
       room: currentRoom,
