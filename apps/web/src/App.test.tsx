@@ -17,6 +17,8 @@ import {
 import { loadGeneratedRoomCacheSaveState } from './domain/quests/generatedRoomCacheSaveState'
 import { loadGeneratedQuestSaveState } from './domain/quests/generatedQuestSaveState'
 import { restoreGeneratedQuestPlay } from './app/restoreGeneratedQuestPlay'
+import { restoreGeneratedRoomCache } from './app/restoreGeneratedRoomCache'
+import { AdjacentRoomPregenerator } from './app/AdjacentRoomPregenerator'
 import { buildPromptGeneratedRoomSource } from './app/buildPromptGeneratedRoomSource'
 import { buildGeneratedObjectiveAttachment, buildGeneratedObjectiveQuestSpec } from './app/generatedObjective'
 import { FALLBACK_NOTICE } from './app/fallbackNotice'
@@ -1819,7 +1821,7 @@ describe('generated room cache save parking — handleSave wiring (ADR-0060, sli
     expect(json).not.toContain('SENTINEL_WORLDBIBLE_TEXT')
   })
 
-  it('App source wires cache blob creation into save only', () => {
+  it('App source keeps cache blob creation in save and cache blob reading in load', () => {
     const handleSave = appSource.slice(
       appSource.indexOf('const handleSave = useCallback('),
       appSource.indexOf('const handleLoad = useCallback('),
@@ -1833,9 +1835,9 @@ describe('generated room cache save parking — handleSave wiring (ADR-0060, sli
     expect(handleSave).toContain('snapshotCachedRooms()')
     expect(handleSave).toContain('worldSession.getWorldState(activePlay.sessionId)')
     expect(handleSave).toContain('generatedRoomCacheJson,')
-    expect(handleLoad).not.toContain('generatedRoomCacheJson')
-    expect(handleLoad).not.toContain('loadGeneratedRoomCacheSaveState')
-    expect(handleLoad).not.toContain('restoreGeneratedRoomCache')
+    expect(handleLoad).toContain('slotResult.generatedRoomCacheJson')
+    expect(appSource).toContain('loadGeneratedRoomCacheSaveState(generatedRoomCacheJson)')
+    expect(appSource).toContain('restoreGeneratedRoomCache(loaded.state, currentRoom)')
   })
 
   it('cache save path makes no provider, generator, or cost-meter call', () => {
@@ -2012,6 +2014,107 @@ describe('generated quest restore — handleLoad wiring (ADR-0059, slice 5)', ()
     expect(play.hints).toEqual(genHints)
   })
 
+  it('restores cached generated rooms and returns cached backtracking without generation', async () => {
+    const previousRoom = makeRoom(
+      [
+        {
+          type: 'scroll',
+          id: 'previous-object',
+          position: [0, 0, -2],
+          interaction: { key: 'E', prompt: 'Read', effect: { kind: 'inspect' } },
+        },
+      ],
+      'generated-previous',
+      'Generated Previous Room',
+    )
+    const world = makeState({
+      currentRoomId: ROOM_ID,
+      roomStates: {
+        [ROOM_ID]: { visited: true },
+        [previousRoom.id]: { visited: true },
+      },
+    })
+    const json = buildGeneratedRoomCacheSaveJson({
+      room: genRoom,
+      objectivesPerRoom: true,
+      cachedRooms: [
+        { roomId: genRoom.id, room: genRoom, provenance: 'generated' },
+        { roomId: previousRoom.id, room: previousRoom, provenance: 'generated' },
+      ],
+      worldState: world,
+      themePack: 'fantasy-keep',
+    })
+    expect(json).toBeDefined()
+    const loaded = loadGeneratedRoomCacheSaveState(json!)
+    expect(loaded.ok).toBe(true)
+    if (!loaded.ok) throw new Error('expected valid generated room cache')
+
+    const restored = restoreGeneratedRoomCache(loaded.state, genRoom)
+    let sourceCalls = 0
+    const pregenerator = new AdjacentRoomPregenerator(
+      restored.cache,
+      { has: () => false, resolve: () => ({ ok: false, reason: 'unknown-room' }) },
+      () => ({
+        getRoom: async () => {
+          sourceCalls += 1
+          return { ok: true, room: makeRoom([], 'unexpected-generated') }
+        },
+      }),
+      makeRoom([], 'fallback-room'),
+      noopLogger,
+    )
+    pregenerator.restoreProvenance(restored.provenance)
+
+    const resolved = await pregenerator.resolveRoom(previousRoom.id)
+    expect(resolved.ok).toBe(true)
+    if (!resolved.ok) throw new Error('expected restored cache hit')
+    expect(resolved.cacheHit).toBe(true)
+    expect(resolved.source).toBe('cache')
+    expect(resolved.provenance).toBe('generated')
+    expect(resolved.room.objects.some((object) => object.id === 'previous-object')).toBe(true)
+    expect(sourceCalls).toBe(0)
+  })
+
+  it('corrupt generatedRoomCacheJson does not block current-room generated quest restore', () => {
+    const world = makeState({ currentRoomId: ROOM_ID, roomStates: { [ROOM_ID]: { visited: true } } })
+    const play = restoreFromSavedBlob(
+      { room: genRoom, objectivesPerRoom: true, questSpec: genQuestSpec },
+      genHints,
+      world,
+    )
+
+    expect(loadGeneratedRoomCacheSaveState('not json at all').ok).toBe(false)
+    expect(play.room.id).toBe(ROOM_ID)
+    expect(play.questSpec).toEqual(genQuestSpec)
+  })
+
+  it('seeds current quest memo even when hints are absent and non-current cached rooms as null', () => {
+    const currentMemo = new Map([[ROOM_ID, { questSpec: genQuestSpec, hint: '', completionHint: '' }]])
+    const current = readPerRoomObjectiveMemo(currentMemo, ROOM_ID)
+
+    expect(current.cached).toBe(true)
+    expect(current.questSpec).toEqual(genQuestSpec)
+    expect(shouldStartPerRoomObjectiveAttach({
+      objectivesPerRoom: true,
+      provenance: 'generated',
+      memo: currentMemo,
+      roomId: ROOM_ID,
+    })).toBe(false)
+
+    const nonCurrentMemo = new Map([[ROOM_ID, { questSpec: genQuestSpec, hint: '', completionHint: '' }], ['generated-previous', null]])
+    const previous = readPerRoomObjectiveMemo(nonCurrentMemo, 'generated-previous')
+
+    expect(previous.cached).toBe(true)
+    expect(previous.questSpec).toBeNull()
+    expect(previous.questHints).toBeNull()
+    expect(shouldStartPerRoomObjectiveAttach({
+      objectivesPerRoom: true,
+      provenance: 'generated',
+      memo: nonCurrentMemo,
+      roomId: 'generated-previous',
+    })).toBe(false)
+  })
+
   it('degrades safely with no throw for an invalid parked blob (falls through to authored gate)', () => {
     // The App guards each step: a corrupt or schema-invalid blob makes
     // loadGeneratedQuestSaveState return { ok: false }, so the restore is skipped
@@ -2026,9 +2129,25 @@ describe('generated quest restore — handleLoad wiring (ADR-0059, slice 5)', ()
     expect(appSource).toContain('loadGeneratedQuestSaveState(generatedQuestJson)')
     expect(appSource).toContain('restoreGeneratedQuestPlay(loaded.state, worldState)')
     expect(appSource).toContain('slotResult.generatedQuestJson')
+    expect(appSource).toContain('restoreGeneratedRoomCacheFromSlot(')
+    expect(appSource).toContain('loadGeneratedRoomCacheSaveState(generatedRoomCacheJson)')
+    expect(appSource).toContain('restoreGeneratedRoomCache(loaded.state, currentRoom)')
+    expect(appSource).toContain('slotResult.generatedRoomCacheJson')
+    expect(appSource).toContain('restoreProvenance(restored.provenance)')
     // Restored quest spec and hints are routed through the existing view seams.
     expect(appSource).toContain('setQuestSpecForView(generatedPlayFields.questSpec ?? null)')
     expect(appSource).toContain('setQuestHintsForView(hints ?? null)')
+  })
+
+  it('runs generated restore before authored current-room resolution', () => {
+    const handleLoad = appSource.slice(
+      appSource.indexOf('const handleLoad = useCallback('),
+      appSource.indexOf('const handleNavigate = useCallback('),
+    )
+
+    expect(handleLoad.indexOf('restoreGeneratedPlayFromSlot(')).toBeGreaterThanOrEqual(0)
+    expect(handleLoad.indexOf('restoreGeneratedPlayFromSlot('))
+      .toBeLessThan(handleLoad.indexOf('adjacentPregenerator.resolveRoom(stateResult.state.currentRoomId)'))
   })
 
   it('keeps the authored-world fallback gate intact for missing/invalid blobs and authored saves', () => {
@@ -2041,29 +2160,36 @@ describe('generated quest restore — handleLoad wiring (ADR-0059, slice 5)', ()
   })
 
   it('makes no generator, objective provider, or cost-meter call on the load path', () => {
-    // The only new room-reconstruction call is restoreGeneratedQuestPlay, which is
-    // proven generator-free by its own suite. handleLoad itself never records a
-    // usage attempt or invokes the objective generator.
+    // Restoring cached rooms is data-only. handleLoad itself never records a
+    // usage attempt or invokes objective generation, and the generated branch
+    // does not warm rooms while entering the restored play state.
     const handleLoad = appSource.slice(
       appSource.indexOf('const handleLoad = useCallback('),
       appSource.indexOf('const handleNavigate = useCallback('),
     )
+    const generatedBranch = handleLoad.slice(
+      handleLoad.indexOf('if (restoredGeneratedPlay != null) {'),
+      handleLoad.indexOf('} else {'),
+    )
     expect(handleLoad).not.toContain('recordAttempt')
     expect(handleLoad).not.toContain('objectiveGenerator')
     expect(handleLoad).not.toContain('buildGeneratedObjectiveAttachment')
+    expect(handleLoad).not.toContain('FakeRoomGenerator')
+    expect(handleLoad).not.toContain('GeneratedRoomSource')
+    expect(generatedBranch).not.toContain('warmAdjacent')
     expect(handleLoad).toContain('restoreGeneratedPlayFromSlot(')
   })
 
   it('never logs the parked blob and restores only with a safe enum diagnostic', () => {
     const restoreHelper = appSource.slice(
       appSource.indexOf('function restoreGeneratedPlayFromSlot('),
-      appSource.indexOf('type ExampleBootstrapResult'),
+      appSource.indexOf('function restoreGeneratedRoomCacheFromSlot('),
     )
     // The restore helper must not log at all (the blob is content-bearing data).
     expect(restoreHelper).not.toContain('logger')
     // The restored-session log line carries only safe fields: a session id and a
     // fixed enum — never the blob, room name, quest text, hints, ids, or flags.
-    expect(appSource).toContain('restored: restoredGeneratedPlay != null')
+    expect(appSource).toContain('restored: restoredKind')
     // The blob is only ever read for re-validation, never passed to the logger.
     expect(appSource).not.toContain('logger.info("world session restored", { generatedQuestJson')
   })

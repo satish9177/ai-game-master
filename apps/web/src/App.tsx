@@ -12,6 +12,7 @@ import type { PlayerHudView } from './renderer/ui/playerHud'
 import { evaluateQuest, type QuestView } from './domain/quests/evaluateQuest'
 import type { QuestSpec } from './domain/quests/questSpec'
 import { loadGeneratedQuestSaveState } from './domain/quests/generatedQuestSaveState'
+import { loadGeneratedRoomCacheSaveState } from './domain/quests/generatedRoomCacheSaveState'
 import { demoQuestSpec } from './domain/examples/demoQuest'
 import type { JournalView } from './domain/journal/projectJournal'
 import type { JournalSpec } from './domain/journal/journalSpec'
@@ -37,6 +38,7 @@ import { PromptBar } from './app/PromptBar'
 import { buildRestoredPlay } from './app/buildRestoredPlay'
 import { restoreGeneratedQuestPlay } from './app/restoreGeneratedQuestPlay'
 import type { RestoredGeneratedQuestPlay } from './app/restoreGeneratedQuestPlay'
+import { restoreGeneratedRoomCache } from './app/restoreGeneratedRoomCache'
 import { computeDerivedViews } from './app/derivedViews'
 import { navigateWithExitGate } from './app/gatedNavigation'
 import { LocalStorageSaveSlotStore } from './app/saveSlotStore'
@@ -63,6 +65,7 @@ import { prepareGeneratedRoomSeed } from './app/worldBible'
 import { buildPromptGeneratedRoomSource } from './app/buildPromptGeneratedRoomSource'
 import {
   buildGeneratedObjectiveAttachment,
+  type GeneratedObjectiveQuestAttachment,
 } from './app/generatedObjective'
 import {
   attachPerRoomObjectiveOnEnter,
@@ -248,6 +251,76 @@ function restoreGeneratedPlayFromSlot(
   if (!loaded.ok) return null
   const restored = restoreGeneratedQuestPlay(loaded.state, worldState)
   return restored.ok ? restored.play : null
+}
+
+function restoreGeneratedRoomCacheFromSlot(
+  generatedRoomCacheJson: string | undefined,
+  currentRoom: LoadedRoom,
+  storyKind: GeneratedStoryThreadKind | undefined,
+): {
+  roomCache: SessionRoomCache
+  navigation: NavigationService
+  adjacentPregenerator: AdjacentRoomPregenerator
+  restoredRoomIds: string[]
+} | null {
+  if (generatedRoomCacheJson == null) return null
+  const loaded = loadGeneratedRoomCacheSaveState(generatedRoomCacheJson)
+  if (!loaded.ok) return null
+
+  const restored = restoreGeneratedRoomCache(loaded.state, currentRoom)
+  const vocabulary = themeVocabulary(loaded.state.themePack)
+  const generatedAdjacentGenerator = new FakeRoomGenerator(vocabulary)
+  const restoredPregenerator = new AdjacentRoomPregenerator(
+    restored.cache,
+    roomRegistry,
+    (roomId) => {
+      const storyContext = deriveStoryThreadContext(storyKind, roomId)
+      const storyPhrase = storyContext ? storyThreadToSeedPhrase(storyContext) : undefined
+      return new GeneratedRoomSource(
+        generatedAdjacentGenerator,
+        buildAdjacentRoomSeed(roomId, undefined, storyPhrase),
+        logger,
+        fallbackRoom,
+        {
+          themePack: loaded.state.themePack,
+          enrichObjectiveTarget: true,
+          storyKind: storyContext?.kind,
+        },
+      )
+    },
+    fallbackRoom,
+    logger,
+    3,
+    { ensureReturnExits: true },
+  )
+  restoredPregenerator.restoreProvenance(restored.provenance)
+
+  return {
+    roomCache: restored.cache,
+    navigation: new NavigationService(worldSession, restoredPregenerator, logger),
+    adjacentPregenerator: restoredPregenerator,
+    restoredRoomIds: restored.restoredRoomIds,
+  }
+}
+
+function seedRestoredGeneratedObjectiveMemo(
+  memo: PerRoomObjectiveMemo,
+  restoredPlay: RestoredGeneratedQuestPlay,
+  restoredRoomIds: string[],
+): void {
+  const currentAttachment: GeneratedObjectiveQuestAttachment | null =
+    restoredPlay.questSpec !== undefined
+      ? {
+          questSpec: restoredPlay.questSpec,
+          hint: restoredPlay.hints?.hint ?? '',
+          completionHint: restoredPlay.hints?.completionHint ?? '',
+        }
+      : null
+  memo.set(restoredPlay.room.id, currentAttachment)
+
+  for (const roomId of restoredRoomIds) {
+    if (roomId !== restoredPlay.room.id) memo.set(roomId, null)
+  }
 }
 
 type ExampleBootstrapResult = ActivePlay & { initialState: WorldState }
@@ -640,13 +713,6 @@ function App() {
         return
       }
 
-      const resolved = await adjacentPregenerator.resolveRoom(stateResult.state.currentRoomId)
-      if (version !== requestVersion.current) return
-
-      const { play, degraded } = buildRestoredPlay(stateResult.state, resolved, fallbackRoom)
-
-      if (resolved.ok) adjacentPregenerator.warmAdjacent(resolved.room)
-
       // Generated-play restore (ADR-0059): re-validate the optional parked blob
       // and rebuild the generated room/quest view state from the already-restored
       // authoritative WorldState. Missing or invalid blob → `null` → fall through
@@ -656,19 +722,47 @@ function App() {
         slotResult.generatedQuestJson,
         stateResult.state,
       )
+      let restoredKind: 'generated' | 'degraded' | 'authored'
 
       if (restoredGeneratedPlay != null) {
+        restoredKind = 'generated'
         const { hints, ...generatedPlayFields } = restoredGeneratedPlay
+        const restoredCache = restoreGeneratedRoomCacheFromSlot(
+          slotResult.generatedRoomCacheJson,
+          restoredGeneratedPlay.room,
+          restoredGeneratedPlay.storyKind,
+        )
+        seedRestoredGeneratedObjectiveMemo(
+          perRoomObjectiveMemoRef.current,
+          restoredGeneratedPlay,
+          restoredCache?.restoredRoomIds ?? [restoredGeneratedPlay.room.id],
+        )
         setQuestSpecForView(generatedPlayFields.questSpec ?? null)
         setQuestHintsForView(hints ?? null)
         journalSpecRef.current = null
         enterActivePlay({
           ...generatedPlayFields,
-          sessionId: play.sessionId,
-          navigation: exampleNavigation,
-          adjacentPregenerator,
+          sessionId: loadResult.sessionId,
+          ...(restoredCache !== null
+            ? {
+                roomCache: restoredCache.roomCache,
+                navigation: restoredCache.navigation,
+                adjacentPregenerator: restoredCache.adjacentPregenerator,
+              }
+            : {
+                navigation: exampleNavigation,
+                adjacentPregenerator,
+              }),
         })
+        setNotice(null)
       } else {
+        const resolved = await adjacentPregenerator.resolveRoom(stateResult.state.currentRoomId)
+        if (version !== requestVersion.current) return
+
+        const { play, degraded } = buildRestoredPlay(stateResult.state, resolved, fallbackRoom)
+
+        if (resolved.ok) adjacentPregenerator.warmAdjacent(resolved.room)
+
         // Gate demo quest + journal to the authored example world: only restore
         // them when the anchor room is present in the saved session's roomStates.
         const isAuthoredWorld = stateResult.state.roomStates['throne-room'] != null
@@ -685,23 +779,15 @@ function App() {
           questSpec: restoredQuestSpec,
           journalSpec: restoredJournalSpec,
         })
+        restoredKind = degraded ? 'degraded' : 'authored'
+        setNotice(degraded ? FALLBACK_NOTICE : null)
       }
       refreshDerivedViews(stateResult.state)
       setFatalMessage(null)
-      // The fallback notice is driven by buildRestoredPlay's `degraded` flag (the
-      // room resolver had to substitute the trusted fallback room), not directly
-      // by blob validation. Invalid or corrupt generatedQuestJson degrades through
-      // the authored fallback path above; the notice only shows when the room
-      // resolution itself was also degraded — not for every blob validation failure.
-      setNotice(restoredGeneratedPlay == null && degraded ? FALLBACK_NOTICE : null)
       setSaveLoadStatus('idle')
       logger.info('world session restored', {
-        sessionId: play.sessionId,
-        restored: restoredGeneratedPlay != null
-          ? 'generated'
-          : degraded
-            ? 'degraded'
-            : 'authored',
+        sessionId: loadResult.sessionId,
+        restored: restoredKind,
       })
     })().catch(() => {
       if (version !== requestVersion.current) return
