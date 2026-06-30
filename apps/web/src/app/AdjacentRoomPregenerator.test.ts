@@ -538,6 +538,127 @@ describe('AdjacentRoomPregenerator.resolveRoom', () => {
     expect(factoryCalls).toBe(1)
   })
 
+  it('snapshots cached rooms in observed insertion order with provenance', async () => {
+    const cache = new SessionRoomCache()
+    const { logger } = createLogger()
+    const factory: RoomSourceFactory = (roomId) =>
+      okSource(makeRoom(`source-${roomId}`), roomId === 'g1' ? 'generated' : 'fallback')
+    const pregen = new AdjacentRoomPregenerator(cache, emptyRegistry, factory, fallbackRoom, logger)
+
+    await pregen.resolveRoom('g1')
+    await pregen.resolveRoom('g2')
+
+    expect(pregen.snapshotCachedRooms()).toEqual([
+      {
+        roomId: 'g1',
+        room: cache.get('g1'),
+        provenance: 'generated',
+      },
+      {
+        roomId: 'g2',
+        room: cache.get('g2'),
+        provenance: 'fallback',
+      },
+    ])
+  })
+
+  it('snapshotCachedRooms is observational and does not start generation', () => {
+    const cache = new SessionRoomCache()
+    const cached = makeRoom('cached-room')
+    cache.set('cached-room', cached)
+    const { logger } = createLogger()
+    let factoryCalls = 0
+    const pregen = new AdjacentRoomPregenerator(
+      cache,
+      emptyRegistry,
+      () => {
+        factoryCalls += 1
+        return okSource(makeRoom('generated-room'))
+      },
+      fallbackRoom,
+      logger,
+    )
+
+    expect(pregen.snapshotCachedRooms()).toEqual([])
+    expect(factoryCalls).toBe(0)
+    expect(cache.get('cached-room')).toBe(cached)
+  })
+
+  it('tracks externally seeded cached rooms after a cache hit without changing cache-hit behavior', async () => {
+    const cache = new SessionRoomCache()
+    const cached = makeRoom('cached-room')
+    cache.set('cached-room', cached)
+    const { logger } = createLogger()
+    let factoryCalls = 0
+    const pregen = new AdjacentRoomPregenerator(
+      cache,
+      emptyRegistry,
+      () => {
+        factoryCalls += 1
+        return okSource(makeRoom('generated-room'))
+      },
+      fallbackRoom,
+      logger,
+    )
+
+    const hit = await pregen.resolveRoom('cached-room')
+
+    expect(hit).toEqual({ ok: true, room: cached, cacheHit: true, source: 'cache' })
+    expect(factoryCalls).toBe(0)
+    expect(pregen.snapshotCachedRooms()).toEqual([{ roomId: 'cached-room', room: cached }])
+  })
+
+  it('restoreProvenance makes restored cache hits report provenance without generation', async () => {
+    const cache = new SessionRoomCache()
+    const cached = makeRoom('restored-room')
+    cache.set('restored-room', cached)
+    const { logger } = createLogger()
+    let factoryCalls = 0
+    const pregen = new AdjacentRoomPregenerator(
+      cache,
+      emptyRegistry,
+      () => {
+        factoryCalls += 1
+        return okSource(makeRoom('generated-room'))
+      },
+      fallbackRoom,
+      logger,
+    )
+
+    pregen.restoreProvenance(new Map([['restored-room', 'repaired']]))
+    const hit = await pregen.resolveRoom('restored-room')
+
+    expect(hit).toEqual({
+      ok: true,
+      room: cached,
+      cacheHit: true,
+      source: 'cache',
+      provenance: 'repaired',
+    })
+    expect(factoryCalls).toBe(0)
+  })
+
+  it('restoreProvenance copies entries instead of aliasing the caller map', async () => {
+    const cache = new SessionRoomCache()
+    const cached = makeRoom('restored-room')
+    cache.set('restored-room', cached)
+    const { logger } = createLogger()
+    const pregen = new AdjacentRoomPregenerator(
+      cache,
+      emptyRegistry,
+      () => okSource(makeRoom('generated-room')),
+      fallbackRoom,
+      logger,
+    )
+    const provenance = new Map<string, RoomProvenance>([['restored-room', 'fallback']])
+
+    pregen.restoreProvenance(provenance)
+    provenance.set('restored-room', 'generated')
+    const hit = await pregen.resolveRoom('restored-room')
+
+    expect(hit.ok && hit.provenance).toBe('fallback')
+  })
+
   it('joins an in-flight job instead of generating twice', async () => {
     const cache = new SessionRoomCache()
     const { logger } = createLogger()

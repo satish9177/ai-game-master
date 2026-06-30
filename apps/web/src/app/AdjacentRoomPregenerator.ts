@@ -64,6 +64,12 @@ export type AdjacentRoomPregeneratorOptions = {
   ensureReturnExits?: boolean
 }
 
+export type CachedGeneratedRoomSnapshot = {
+  roomId: string
+  room: LoadedRoom
+  provenance?: RoomProvenance
+}
+
 /**
  * A trusted, semantics-preserving copy of a loaded room with its id replaced.
  * `id` is a plain string label that `validateRoom` never reads, so this only
@@ -86,6 +92,7 @@ export class AdjacentRoomPregenerator implements RoomResolver {
   // background warm for the same id collapse to a single job.
   private readonly inFlight = new Map<string, Promise<ResolveRoomResult>>()
   private readonly provenanceMap = new Map<string, RoomProvenance>()
+  private readonly cachedRoomIds = new Set<string>()
 
   constructor(
     cache: SessionRoomCache,
@@ -113,6 +120,7 @@ export class AdjacentRoomPregenerator implements RoomResolver {
   async resolveRoom(roomId: string): Promise<ResolveRoomResult> {
     const cached = this.cache.get(roomId)
     if (cached) {
+      this.cachedRoomIds.add(roomId)
       const provenance = this.provenanceMap.get(roomId)
       return {
         ok: true,
@@ -157,6 +165,27 @@ export class AdjacentRoomPregenerator implements RoomResolver {
     })
   }
 
+  snapshotCachedRooms(): CachedGeneratedRoomSnapshot[] {
+    const snapshot: CachedGeneratedRoomSnapshot[] = []
+    for (const roomId of this.cachedRoomIds) {
+      const room = this.cache.get(roomId)
+      if (room === undefined) continue
+      const provenance = this.provenanceMap.get(roomId)
+      snapshot.push({
+        roomId,
+        room,
+        ...(provenance !== undefined ? { provenance } : {}),
+      })
+    }
+    return snapshot
+  }
+
+  restoreProvenance(entries: Map<string, RoomProvenance>): void {
+    for (const [roomId, provenance] of entries) {
+      this.provenanceMap.set(roomId, provenance)
+    }
+  }
+
   /** Distinct adjacent room ids from the room's exits, in declaration order. */
   private adjacentRoomIds(room: LoadedRoom): string[] {
     const ids: string[] = []
@@ -187,6 +216,7 @@ export class AdjacentRoomPregenerator implements RoomResolver {
       return { ok: false, reason: 'invalid-room' }
     }
     this.cache.set(roomId, resolved.room)
+    this.cachedRoomIds.add(roomId)
     this.log.debug('room resolved', { roomId, source: 'registry', cacheHit: false })
     return { ok: true, room: resolved.room, cacheHit: false, source: 'registry' }
   }
@@ -206,6 +236,7 @@ export class AdjacentRoomPregenerator implements RoomResolver {
     // `generated` for backwards compatibility with RoomSource success results.
     const provenance = result.provenance ?? 'generated'
     this.cache.set(roomId, room)
+    this.cachedRoomIds.add(roomId)
     this.provenanceMap.set(roomId, provenance)
     this.log.debug('room resolved', {
       roomId,
