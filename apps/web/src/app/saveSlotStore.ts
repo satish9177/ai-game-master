@@ -17,10 +17,12 @@ export type SlotMeta = {
 
 type SlotWrapper = SlotMeta & {
   saveGameJson: string
+  /** Optional parked blob; never authoritative. Only carried through, never validated here. */
+  generatedQuestJson?: string
 }
 
 export type SlotReadResult =
-  | { ok: true; saveGameJson: string; meta: SlotMeta }
+  | { ok: true; saveGameJson: string; meta: SlotMeta; generatedQuestJson?: string }
   | { ok: false; reason: 'empty' | 'corrupt' | 'unavailable' }
 
 export type SlotWriteResult =
@@ -34,8 +36,15 @@ export type SlotClearResult =
 export interface SaveSlotStore {
   /** Read the slot. Returns saveGameJson (the only authoritative field) + display-only meta. */
   read(): SlotReadResult
-  /** Write saveGameJson to the slot with optional display-only metadata. */
-  write(saveGameJson: string, meta?: Partial<SlotMeta>): SlotWriteResult
+  /**
+   * Write saveGameJson to the slot with optional display-only metadata and an optional
+   * parked generatedQuestJson blob (carried through verbatim; never authoritative).
+   */
+  write(
+    saveGameJson: string,
+    meta?: Partial<SlotMeta>,
+    generatedQuestJson?: string,
+  ): SlotWriteResult
   /** True when a slot is present (best-effort; false if storage is unavailable). */
   has(): boolean
   /** Remove the slot. */
@@ -57,7 +66,8 @@ function isSlotWrapper(value: unknown): value is SlotWrapper {
   return (
     typeof v.saveGameJson === 'string' &&
     typeof v.label === 'string' &&
-    typeof v.savedAt === 'string'
+    typeof v.savedAt === 'string' &&
+    ('generatedQuestJson' in v ? typeof v.generatedQuestJson === 'string' : true)
   )
 }
 
@@ -94,15 +104,30 @@ function createSaveSlotStoreImpl(kv: KeyValueStore): SaveSlotStore {
         ...(parsed.currentRoomId !== undefined ? { currentRoomId: parsed.currentRoomId } : {}),
       }
       // Only saveGameJson is returned for authoritative loading; meta is display-only.
-      return { ok: true, saveGameJson: parsed.saveGameJson, meta }
+      // generatedQuestJson is parked bytes only — carried through, validated later.
+      return {
+        ok: true,
+        saveGameJson: parsed.saveGameJson,
+        meta,
+        ...(typeof parsed.generatedQuestJson === 'string'
+          ? { generatedQuestJson: parsed.generatedQuestJson }
+          : {}),
+      }
     },
 
-    write(saveGameJson: string, meta: Partial<SlotMeta> = {}): SlotWriteResult {
+    write(
+      saveGameJson: string,
+      meta: Partial<SlotMeta> = {},
+      generatedQuestJson?: string,
+    ): SlotWriteResult {
       const wrapper: SlotWrapper = {
         label: meta.label ?? 'Save',
         savedAt: meta.savedAt ?? new Date().toISOString(),
         ...(meta.currentRoomId !== undefined ? { currentRoomId: meta.currentRoomId } : {}),
         saveGameJson,
+        // Park the blob only when non-empty; authored saves omit the key entirely so their
+        // wrapper stays byte-identical to the older format.
+        ...(generatedQuestJson ? { generatedQuestJson } : {}),
       }
       try {
         kv.set(SLOT_KEY, JSON.stringify(wrapper))
@@ -153,8 +178,8 @@ export class LocalStorageSaveSlotStore implements SaveSlotStore {
     return this.impl.read()
   }
 
-  write(json: string, meta?: Partial<SlotMeta>): SlotWriteResult {
-    return this.impl.write(json, meta)
+  write(json: string, meta?: Partial<SlotMeta>, generatedQuestJson?: string): SlotWriteResult {
+    return this.impl.write(json, meta, generatedQuestJson)
   }
 
   has(): boolean {

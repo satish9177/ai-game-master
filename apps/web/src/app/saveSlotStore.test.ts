@@ -142,6 +142,90 @@ describe('saveSlotStore — metadata ignored for authoritative load', () => {
   })
 })
 
+describe('saveSlotStore — generatedQuestJson parking', () => {
+  const BLOB = '{"schemaVersion":1,"room":{},"objectivesPerRoom":true}'
+
+  it('write with generatedQuestJson → read returns the same string', () => {
+    const { kv } = createMapKv()
+    const slot = createSaveSlotStore(kv)
+    slot.write(FAKE_JSON, { label: 'Gen' }, BLOB)
+    const result = slot.read()
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.generatedQuestJson).toBe(BLOB)
+      // saveGameJson stays authoritative and unchanged.
+      expect(result.saveGameJson).toBe(FAKE_JSON)
+    }
+  })
+
+  it('write without generatedQuestJson → read returns undefined', () => {
+    const { kv } = createMapKv()
+    const slot = createSaveSlotStore(kv)
+    slot.write(FAKE_JSON)
+    const result = slot.read()
+    expect(result.ok).toBe(true)
+    if (result.ok) expect(result.generatedQuestJson).toBeUndefined()
+  })
+
+  it('write with empty string → omitted (treated as absent)', () => {
+    const { kv, store } = createMapKv()
+    const slot = createSaveSlotStore(kv)
+    slot.write(FAKE_JSON, undefined, '')
+    const raw = store.get(SLOT_KEY)
+    expect(raw).not.toBeNull()
+    if (raw) {
+      const parsed = JSON.parse(raw) as Record<string, unknown>
+      expect('generatedQuestJson' in parsed).toBe(false)
+    }
+    const result = slot.read()
+    expect(result.ok).toBe(true)
+    if (result.ok) expect(result.generatedQuestJson).toBeUndefined()
+  })
+
+  it('older wrapper without generatedQuestJson key reads without error', () => {
+    const { kv, store } = createMapKv()
+    store.set(
+      SLOT_KEY,
+      JSON.stringify({ label: 'Old', savedAt: '2026-01-01T00:00:00.000Z', saveGameJson: FAKE_JSON }),
+    )
+    const result = createSaveSlotStore(kv).read()
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.saveGameJson).toBe(FAKE_JSON)
+      expect(result.generatedQuestJson).toBeUndefined()
+    }
+  })
+
+  it('non-string generatedQuestJson is treated as corrupt (not validated, just rejected)', () => {
+    const { kv, store } = createMapKv()
+    store.set(
+      SLOT_KEY,
+      JSON.stringify({
+        label: 'X',
+        savedAt: '2026-01-01T00:00:00.000Z',
+        saveGameJson: FAKE_JSON,
+        generatedQuestJson: 42,
+      }),
+    )
+    const result = createSaveSlotStore(kv).read()
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.reason).toBe('corrupt')
+  })
+
+  it('invalid generatedQuestJson content does not break saveGameJson read', () => {
+    // The blob is parked bytes only — saveSlotStore never parses or validates it.
+    const { kv } = createMapKv()
+    const slot = createSaveSlotStore(kv)
+    slot.write(FAKE_JSON, { label: 'Gen' }, 'NOT VALID JSON{{{')
+    const result = slot.read()
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.saveGameJson).toBe(FAKE_JSON)
+      expect(result.generatedQuestJson).toBe('NOT VALID JSON{{{')
+    }
+  })
+})
+
 describe('saveSlotStore — key namespacing', () => {
   it('uses the aigm.save.slot key', () => {
     const { kv, store } = createMapKv()
