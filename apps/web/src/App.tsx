@@ -63,6 +63,7 @@ import {
 } from './app/generatedObjective'
 import {
   attachPerRoomObjectiveOnEnter,
+  buildGeneratedQuestSaveJson,
   buildQuestStage,
   readPerRoomObjectiveMemo,
   resolvedObjectIdsForGeneratedPlay,
@@ -271,6 +272,10 @@ function App() {
   const [notice, setNotice] = useState<string | null>(null)
   const requestVersion = useRef(0)
   const questSpecRef = useRef<QuestSpec | null>(null)
+  // Mirror the live quest hints into a ref so the stable handleSave closure can
+  // read the current value without a stale-state capture (same pattern as
+  // questSpecRef). Used by the generated-quest save blob (ADR-0059).
+  const questHintsRef = useRef<QuestHintState | null>(null)
   const [questSpecSnapshot, setQuestSpecSnapshot] = useState<QuestSpec | null>(null)
   const journalSpecRef = useRef<JournalSpec | null>(null)
   const perRoomObjectiveMemoRef = useRef<PerRoomObjectiveMemo>(new Map())
@@ -297,6 +302,10 @@ function App() {
   const setQuestSpecForView = useCallback((questSpec: QuestSpec | null) => {
     questSpecRef.current = questSpec
     setQuestSpecSnapshot(questSpec)
+  }, [])
+  const setQuestHintsForView = useCallback((hints: QuestHintState | null) => {
+    questHintsRef.current = hints
+    setQuestHints(hints)
   }, [])
   const [saveLoadStatus, setSaveLoadStatus] = useState<SaveLoadStatus>('idle')
   const [saveLoadError, setSaveLoadError] = useState<string | null>(null)
@@ -331,7 +340,7 @@ function App() {
       if (result) {
         const { initialState, ...play } = result
         setQuestSpecForView(result.questSpec ?? null)
-        setQuestHints(null)
+        setQuestHintsForView(null)
         journalSpecRef.current = result.journalSpec ?? null
         enterActivePlay(play)
         refreshDerivedViews(initialState)
@@ -340,7 +349,7 @@ function App() {
     return () => {
       requestVersion.current += 1
     }
-  }, [enterActivePlay, refreshDerivedViews, setQuestSpecForView])
+  }, [enterActivePlay, refreshDerivedViews, setQuestHintsForView, setQuestSpecForView])
 
   const handlePrompt = useCallback((prompt: string) => {
     // In-flight lock: prevent a second call while one is pending.
@@ -370,7 +379,7 @@ function App() {
     setActivePlay(null)
     setPlayerHud(null)
     setQuest(null)
-    setQuestHints(null)
+    setQuestHintsForView(null)
     setJournal(null)
     setQuestSpecForView(null)
     journalSpecRef.current = null
@@ -459,7 +468,7 @@ function App() {
         if (version !== requestVersion.current) return
         perRoomObjectiveMemoRef.current.set(result.room.id, generatedObjective)
         setQuestSpecForView(generatedObjective?.questSpec ?? null)
-        setQuestHints(generatedObjective
+        setQuestHintsForView(generatedObjective
           ? { hint: generatedObjective.hint, completionHint: generatedObjective.completionHint }
           : null)
         enterActivePlay({
@@ -495,7 +504,7 @@ function App() {
       logger.error('generated room source threw', { code: 'room-source-failed' })
       setFatalMessage(ROOM_UNAVAILABLE)
     })
-  }, [enterActivePlay, refreshDerivedViews, setQuestSpecForView])
+  }, [enterActivePlay, refreshDerivedViews, setQuestHintsForView, setQuestSpecForView])
 
   const handleGenerateAnyway = useCallback(() => {
     confirmGrantedRef.current = true
@@ -522,10 +531,29 @@ function App() {
         setSaveLoadError("Couldn't save your game.")
         return
       }
-      const writeResult = saveSlotStore.write(saveResult.json, {
-        savedAt: new Date().toISOString(),
-        label: 'Save',
-      })
+      // Generated play only: park the restore-model blob alongside the
+      // authoritative save (ADR-0059). `questSpecRef.current` is the canonical
+      // current quest spec (kept in sync by setQuestSpecForView and read by
+      // refreshDerivedViews); `activePlay.questSpec` can lag for navigated
+      // generated rooms whose objective was attached asynchronously. Authored
+      // play yields `undefined`, so the slot wrapper stays byte-identical.
+      const generatedQuestJson = buildGeneratedQuestSaveJson(
+        {
+          room: activePlay.room,
+          objectivesPerRoom: activePlay.objectivesPerRoom,
+          questSpec: questSpecRef.current ?? undefined,
+          storyKind: activePlay.storyKind,
+        },
+        questHintsRef.current,
+      )
+      const writeResult = saveSlotStore.write(
+        saveResult.json,
+        {
+          savedAt: new Date().toISOString(),
+          label: 'Save',
+        },
+        generatedQuestJson,
+      )
       if (!writeResult.ok) {
         setSaveLoadStatus('error')
         setSaveLoadError("Couldn't save your game.")
@@ -584,7 +612,7 @@ function App() {
       const restoredQuestSpec = isAuthoredWorld ? demoQuestSpec : undefined
       const restoredJournalSpec = isAuthoredWorld ? demoJournalSpec : undefined
       setQuestSpecForView(restoredQuestSpec ?? null)
-      setQuestHints(null)
+      setQuestHintsForView(null)
       journalSpecRef.current = restoredJournalSpec ?? null
 
       enterActivePlay({
@@ -607,7 +635,7 @@ function App() {
       setSaveLoadStatus('error')
       setSaveLoadError('This save could not be loaded.')
     })
-  }, [enterActivePlay, refreshDerivedViews, setQuestSpecForView])
+  }, [enterActivePlay, refreshDerivedViews, setQuestHintsForView, setQuestSpecForView])
 
   const handleNavigate = useCallback(async (toRoomId: string): Promise<NavigationResult> => {
     if (!activePlay?.navigation) return { status: 'rejected', reason: 'missing-exit' }
@@ -635,10 +663,10 @@ function App() {
         const perRoomObjective = readPerRoomObjectiveMemo(perRoomObjectiveMemoRef.current, result.room.id)
         nextQuestSpec = perRoomObjective.questSpec ?? undefined
         setQuestSpecForView(perRoomObjective.questSpec)
-        setQuestHints(perRoomObjective.questHints)
+        setQuestHintsForView(perRoomObjective.questHints)
       } else {
         setQuestSpecForView(activePlay.questSpec ?? null)
-        setQuestHints(null)
+        setQuestHintsForView(null)
       }
       const nextPlay: ActivePlay = {
         room: result.room,
@@ -685,7 +713,7 @@ function App() {
           getCurrentPlay: () => activePlayRef.current,
           applyAttachment: (attachment) => {
             setQuestSpecForView(attachment?.questSpec ?? null)
-            setQuestHints(attachment
+            setQuestHintsForView(attachment
               ? { hint: attachment.hint, completionHint: attachment.completionHint }
               : null)
           },
@@ -697,7 +725,7 @@ function App() {
       }
     }
     return result
-  }, [activePlay, guardConfig, refreshDerivedViews, setQuestSpecForView])
+  }, [activePlay, guardConfig, refreshDerivedViews, setQuestHintsForView, setQuestSpecForView])
 
   return (
     <ErrorBoundary logger={logger}>

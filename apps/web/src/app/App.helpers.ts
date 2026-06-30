@@ -2,7 +2,9 @@ import type { LoadedRoom } from '../domain/loadRoomSpec'
 import type { RoomProvenance } from '../domain/assembleRoom'
 import { buildNPCObjectiveContext } from '../domain/dialogue/buildNPCObjectiveContext'
 import type { QuestDialogueContext } from '../domain/dialogue/contracts'
+import type { GeneratedStoryThreadKind } from '../domain/generatedStoryThread'
 import { resolvedObjectIds } from '../domain/interactions/resolvedObjects'
+import { buildGeneratedQuestSaveState } from '../domain/quests/generatedQuestSaveState'
 import type { QuestView } from '../domain/quests/evaluateQuest'
 import type { QuestSpec } from '../domain/quests/questSpec'
 import type { ObjectiveGenerator } from '../domain/ports/ObjectiveGenerator'
@@ -99,6 +101,44 @@ export async function attachPerRoomObjectiveOnEnter(input: {
   input.applyAttachment(attachment)
   input.logger.debug('per-room objective attached', { roomId, attached: attachment != null })
   await input.refreshAfterApply()
+}
+
+/**
+ * Build the parked generated-quest restore blob for the save path (generated
+ * quest save/load v0; ADR-0059).
+ *
+ * Returns a serialized `GeneratedQuestSaveState` string only for generated play
+ * (`objectivesPerRoom === true`). Authored/demo play returns `undefined` so the
+ * save slot wrapper stays byte-identical to the pre-feature format. If the live
+ * safe state fails the schema guard in `buildGeneratedQuestSaveState`, returns
+ * `undefined` and the authoritative save proceeds without the blob.
+ *
+ * This is a pure, side-effect-free projection of already-validated, already-
+ * sanitized live state. It makes no provider/generator/LLM call and never
+ * increments the usage meter. The blob carries only data that is permitted by
+ * ADR-0059 (validated `RoomSpec`, sanitized `QuestSpec`/hints, closed-enum
+ * `storyKind`); it must never be logged.
+ */
+export function buildGeneratedQuestSaveJson(
+  play: {
+    room: LoadedRoom
+    objectivesPerRoom?: boolean
+    questSpec?: QuestSpec
+    storyKind?: GeneratedStoryThreadKind
+  },
+  hints: QuestHintState | null,
+): string | undefined {
+  if (play.objectivesPerRoom !== true) return undefined
+
+  const saveState = buildGeneratedQuestSaveState({
+    room: play.room,
+    objectivesPerRoom: true,
+    ...(play.questSpec !== undefined ? { questSpec: play.questSpec } : {}),
+    ...(play.storyKind !== undefined ? { storyKind: play.storyKind } : {}),
+    ...(hints !== null ? { hints } : {}),
+  })
+
+  return saveState !== null ? JSON.stringify(saveState) : undefined
 }
 
 export function resolvedObjectIdsForRoom(

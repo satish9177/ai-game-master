@@ -6,12 +6,14 @@ import {
 } from './App'
 import {
   attachPerRoomObjectiveOnEnter,
+  buildGeneratedQuestSaveJson,
   buildQuestStage,
   readPerRoomObjectiveMemo,
   resolvedObjectIdsForGeneratedPlay,
   resolvedObjectIdsForRoom,
   shouldStartPerRoomObjectiveAttach,
 } from './app/App.helpers'
+import { loadGeneratedQuestSaveState } from './domain/quests/generatedQuestSaveState'
 import { buildPromptGeneratedRoomSource } from './app/buildPromptGeneratedRoomSource'
 import { buildGeneratedObjectiveAttachment, buildGeneratedObjectiveQuestSpec } from './app/generatedObjective'
 import { FALLBACK_NOTICE } from './app/fallbackNotice'
@@ -1504,5 +1506,133 @@ describe('App generated consequence journal wiring', () => {
     expect(appSource).not.toContain('openingArc.hook')
     expect(appSource).not.toContain('openingArc.firstObjective')
     expect(appSource).not.toContain('openingArc.pressure')
+  })
+})
+
+describe('generated quest save parking — handleSave wiring (ADR-0059, slice 4)', () => {
+  const genRoom = makeRoom(
+    [
+      {
+        type: 'scroll',
+        id: 'case-file',
+        position: [0, 0, -2],
+        interaction: { key: 'E', prompt: 'Read the case file', effect: { kind: 'inspect' } },
+      },
+    ],
+    'generated-room',
+    'Secret Generated Room',
+  )
+
+  const genQuestSpec = {
+    questId: 'generated-room-objective',
+    title: 'Generated title',
+    anchorRoomId: 'generated-room',
+    objectives: [
+      {
+        id: 'generated-0',
+        text: 'Generated objective text',
+        condition: {
+          kind: 'room-flag' as const,
+          roomId: 'generated-room',
+          flag: 'interaction:case-file',
+        },
+      },
+    ],
+  }
+
+  const genHints = { hint: 'Find the case file.', completionHint: 'You found it.' }
+
+  it('generated play → returns a defined, non-empty generatedQuestJson string', () => {
+    const json = buildGeneratedQuestSaveJson(
+      { room: genRoom, objectivesPerRoom: true, questSpec: genQuestSpec, storyKind: 'investigate' },
+      genHints,
+    )
+    expect(typeof json).toBe('string')
+    expect(json).not.toBe('')
+  })
+
+  it('the parked string re-validates through loadGeneratedQuestSaveState', () => {
+    const json = buildGeneratedQuestSaveJson(
+      { room: genRoom, objectivesPerRoom: true, questSpec: genQuestSpec, storyKind: 'investigate' },
+      genHints,
+    )
+    expect(json).toBeDefined()
+    expect(loadGeneratedQuestSaveState(json!).ok).toBe(true)
+  })
+
+  it('parks enough safe restore data: schemaVersion, room (with object ids), objectivesPerRoom, questSpec, storyKind', () => {
+    const json = buildGeneratedQuestSaveJson(
+      { room: genRoom, objectivesPerRoom: true, questSpec: genQuestSpec, storyKind: 'investigate' },
+      genHints,
+    )!
+    const parsed = JSON.parse(json) as {
+      schemaVersion: number
+      objectivesPerRoom: boolean
+      room: { id: string; objects: { id: string }[] }
+      questSpec: { questId: string }
+      storyKind: string
+    }
+    expect(parsed.schemaVersion).toBe(1)
+    expect(parsed.objectivesPerRoom).toBe(true)
+    expect(parsed.room.id).toBe('generated-room')
+    // Object ids must survive so resolvedObjectIds can re-match the saved flags.
+    expect(parsed.room.objects.map((o) => o.id)).toContain('case-file')
+    expect(parsed.questSpec.questId).toBe('generated-room-objective')
+    expect(parsed.storyKind).toBe('investigate')
+  })
+
+  it('omits questSpec, storyKind, and hints when not present', () => {
+    const json = buildGeneratedQuestSaveJson({ room: genRoom, objectivesPerRoom: true }, null)!
+    const parsed = JSON.parse(json) as Record<string, unknown>
+    expect('questSpec' in parsed).toBe(false)
+    expect('storyKind' in parsed).toBe(false)
+    expect('hints' in parsed).toBe(false)
+    expect(parsed.objectivesPerRoom).toBe(true)
+  })
+
+  it('authored/demo play → returns undefined so no blob is parked', () => {
+    expect(
+      buildGeneratedQuestSaveJson({ room: genRoom, questSpec: demoQuestSpec }, null),
+    ).toBeUndefined()
+    expect(
+      buildGeneratedQuestSaveJson({ room: genRoom, objectivesPerRoom: false }, null),
+    ).toBeUndefined()
+  })
+
+  it('returns undefined when the schema guard yields null (save still succeeds without the blob)', () => {
+    // An over-length hint (live path guarantees truncated hints; the schema caps
+    // them at GENERATED_OBJECTIVE_TEXT_MAX_LENGTH) drives buildGeneratedQuestSaveState
+    // to null, so the helper degrades to undefined and the main save proceeds.
+    const overLongHints = { hint: 'x'.repeat(5000), completionHint: 'ok' }
+    expect(
+      buildGeneratedQuestSaveJson({ room: genRoom, objectivesPerRoom: true }, overLongHints),
+    ).toBeUndefined()
+  })
+
+  it('does not include raw prompt, provider output, or world-bible free-text fields', () => {
+    const json = buildGeneratedQuestSaveJson(
+      { room: genRoom, objectivesPerRoom: true, questSpec: genQuestSpec, storyKind: 'investigate' },
+      genHints,
+    )!
+    // The helper takes no worldBible/prompt input, so these are structurally
+    // unreachable — asserted here as a regression sentinel.
+    expect(json).not.toContain(SECRET_RAW_PROMPT)
+    expect(json).not.toContain('SECRET PREMISE')
+    expect(json).not.toContain('SECRET ARC HOOK')
+    expect(json).not.toContain('openingArc')
+    expect(json).not.toContain('worldBible')
+    const parsed = JSON.parse(json) as Record<string, unknown>
+    expect(Object.keys(parsed).sort()).toEqual(
+      ['hints', 'objectivesPerRoom', 'questSpec', 'room', 'schemaVersion', 'storyKind'].sort(),
+    )
+  })
+
+  it('App source wires the blob into the save path and adds no load-restore wiring', () => {
+    // Save path: build only for generated play and pass it as the third write arg.
+    expect(appSource).toContain('buildGeneratedQuestSaveJson(')
+    expect(appSource).toContain('generatedQuestJson,')
+    // No load/continue restore wiring is introduced in this slice.
+    expect(appSource).not.toContain('loadGeneratedQuestSaveState')
+    expect(appSource).not.toContain('restoreGeneratedQuestPlay')
   })
 })
