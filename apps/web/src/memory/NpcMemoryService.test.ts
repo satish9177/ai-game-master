@@ -241,3 +241,33 @@ describe('NpcMemoryService — log safety', () => {
     expect(serialized).toContain('conflict')
   })
 })
+
+describe('NpcMemoryService — carries recall metadata (Slice C)', () => {
+  it('persists importance/dedupeKey/entitySnapshots onto the record and recalls them', async () => {
+    const { service } = harness()
+    const result = await service.remember({
+      ...baseInput,
+      importance: 5,
+      dedupeKey: 'world-1|session-1|room-state-changed|evt-1',
+      entitySnapshots: { room: { id: 'room_library_3a', displayName: 'Old Library' } },
+    })
+    expect(result.status).toBe('recorded')
+    if (result.status !== 'recorded') return
+    expect(result.record.importance).toBe(5)
+    expect(result.record.dedupeKey).toBe('world-1|session-1|room-state-changed|evt-1')
+    expect(result.record.entitySnapshots).toEqual({ room: { id: 'room_library_3a', displayName: 'Old Library' } })
+
+    const recalled = await service.recall(scopeOf(baseInput))
+    expect(recalled.memories[0]?.importance).toBe(5)
+  })
+
+  it('omits metadata fields when not provided (back-compat record shape)', async () => {
+    const { service } = harness()
+    const result = await service.remember(baseInput)
+    expect(result.status).toBe('recorded')
+    if (result.status !== 'recorded') return
+    expect('importance' in result.record).toBe(false)
+    expect('dedupeKey' in result.record).toBe(false)
+    expect('entitySnapshots' in result.record).toBe(false)
+  })
+})

@@ -99,3 +99,35 @@ describe('NpcMemoryRecordSchema', () => {
     expect(NpcMemoryRecordSchema.safeParse(validRecord({ schemaVersion: 2 as never })).success).toBe(false)
   })
 })
+
+describe('NpcMemoryRecordSchema — optional recall metadata (Slice C, schemaVersion stays 1)', () => {
+  it('parses and round-trips a record carrying importance/dedupeKey/entitySnapshots', () => {
+    const record = validRecord({
+      importance: 4,
+      dedupeKey: 'world-1|session-1|room-state-changed|evt-1',
+      entitySnapshots: { room: { id: 'room_library_3a', displayName: 'Old Library' } },
+    })
+    expect(NpcMemoryRecordSchema.parse(record)).toEqual(record)
+  })
+
+  it('still parses a fieldless v1 record (back-compat: no schemaVersion bump)', () => {
+    expect(validRecord().schemaVersion).toBe(1)
+    expect(NpcMemoryRecordSchema.safeParse(validRecord()).success).toBe(true)
+  })
+
+  it('bounds importance to an integer 0..5', () => {
+    expect(NpcMemoryRecordSchema.safeParse(validRecord({ importance: 5 })).success).toBe(true)
+    expect(NpcMemoryRecordSchema.safeParse(validRecord({ importance: 6 })).success).toBe(false)
+    expect(NpcMemoryRecordSchema.safeParse(validRecord({ importance: -1 })).success).toBe(false)
+    expect(NpcMemoryRecordSchema.safeParse(validRecord({ importance: 2.5 })).success).toBe(false)
+  })
+
+  it('bounds dedupeKey/entitySnapshots and .strict still rejects unknown snapshot keys', () => {
+    expect(NpcMemoryRecordSchema.safeParse(validRecord({ dedupeKey: '' })).success).toBe(false)
+    expect(
+      NpcMemoryRecordSchema.safeParse(
+        validRecord({ entitySnapshots: { room: { id: 'r', displayName: 'N', extra: 'x' } } as never }),
+      ).success,
+    ).toBe(false)
+  })
+})

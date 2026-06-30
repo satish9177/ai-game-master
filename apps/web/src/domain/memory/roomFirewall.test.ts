@@ -111,6 +111,40 @@ describe('validateRoomMemoryDraft — reject each reason', () => {
     expect(validateRoomMemoryDraft(draftInput({ turnIndex: -1 }))).toEqual({ ok: false, reason: 'invalid-provenance' })
     expect(validateRoomMemoryDraft(draftInput({ turnIndex: 1.5 }))).toEqual({ ok: false, reason: 'invalid-provenance' })
   })
+
+  it('malformed recall metadata → its reject reason', () => {
+    expect(validateRoomMemoryDraft(draftInput({ importance: 9 }))).toEqual({ ok: false, reason: 'invalid-importance' })
+    expect(validateRoomMemoryDraft(draftInput({ dedupeKey: '' }))).toEqual({ ok: false, reason: 'invalid-dedupe-key' })
+    expect(
+      validateRoomMemoryDraft(draftInput({ entitySnapshots: { room: { id: 'r' } } as never })),
+    ).toEqual({ ok: false, reason: 'invalid-entity-snapshots' })
+  })
+})
+
+describe('validateRoomMemoryDraft — recall metadata passthrough (Slice C)', () => {
+  it('passes valid importance/dedupeKey/entitySnapshots into the draft', () => {
+    const result = validateRoomMemoryDraft(
+      draftInput({
+        importance: 3,
+        dedupeKey: 'world-1|session-1|room-state-changed|evt-1',
+        entitySnapshots: { room: { id: 'room_library_3a', displayName: 'Old Library' } },
+      }),
+    )
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.draft.importance).toBe(3)
+    expect(result.draft.dedupeKey).toBe('world-1|session-1|room-state-changed|evt-1')
+    expect(result.draft.entitySnapshots).toEqual({ room: { id: 'room_library_3a', displayName: 'Old Library' } })
+  })
+
+  it('omits the metadata keys entirely when absent', () => {
+    const result = validateRoomMemoryDraft(draftInput())
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect('importance' in result.draft).toBe(false)
+    expect('dedupeKey' in result.draft).toBe(false)
+    expect('entitySnapshots' in result.draft).toBe(false)
+  })
 })
 
 describe('filterRoomMemoriesForScope', () => {
