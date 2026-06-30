@@ -85,13 +85,16 @@ Throughout these docs:
   restores visited generated rooms for stable cached backtracking after load,
   gated by `generatedQuestJson`, with no `SaveGame` schema change and no provider
   or cost call on load/cached backtracking
-  ([ADR-0060](./decisions/ADR-0060-generated-room-cache-save-load-v0.md)).
-- 🔜 **Planned** — approved slices in progress:
-  Generated Mechanical Gate Contract v0 — pure domain contract for a locked-exit gate whose
-  state derives from existing `WorldState.roomStates[roomId].flags`; `locked-exit` and
-  `room-flag` are the only v0 kinds; no runtime enforcement, no generated-room insertion, no
-  provider/LLM/prompt/schema/save-load/navigation/renderer/backend changes yet
+  ([ADR-0060](./decisions/ADR-0060-generated-room-cache-save-load-v0.md));
+  Generated Mechanical Gate Contract v0 — pure domain contract in
+  `domain/generatedMechanicalGate.ts` plus tests for a `locked-exit` gate whose state derives from
+  existing `WorldState.roomStates[roomId].flags` via `evaluateCondition`; `room-flag` is the only
+  condition kind and `unlock-exit` is a declarative governed-exit effect; satisfiability checks
+  room id, a reachable flag-writing interaction, and a real exit target; no runtime enforcement,
+  no generated-room insertion, no objective integration, and no provider/LLM/cost/schema/save-load/
+  navigation/renderer/backend changes yet
   ([ADR-0061](./decisions/ADR-0061-generated-mechanical-gate-contract-v0.md)).
+- 🔜 **Planned** — approved slices in progress: none currently.
 - ❌ **Not built** — future shape only; documented so we don't paint into a corner.
 
 ## Status today (Renderer Foundation v0)

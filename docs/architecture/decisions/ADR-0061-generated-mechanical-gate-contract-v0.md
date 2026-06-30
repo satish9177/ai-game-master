@@ -1,6 +1,6 @@
 # ADR-0061: Generated Mechanical Gate Contract v0 — pure domain gate contract
 
-- **Status:** Accepted (Slice 1 docs); contract module (Slice 2) pending approval
+- **Status:** Implemented (Slice 2 complete: pure domain contract + tests)
 - **Date:** 2026-06-30
 - **Deciders:** Project owner
 - **Extends:**
@@ -23,11 +23,12 @@
 > Full pre-code design in the implementation plan
 > [`generated-mechanical-gate-contract-v0`](../implementation-plans/generated-mechanical-gate-contract-v0.md).
 
-> v0 is **Option A: a pure domain contract only.** It adds closed types, strict validation, a
-> pure evaluation function, and a pure satisfiability check. It wires into **nothing** — no
-> navigation, no App, no renderer, no generation, no save/load, no schema. Runtime enforcement,
-> generated-room insertion, and objective integration are explicitly later, separately-approved
-> features.
+> v0 is **Option A: a pure domain contract only.** It adds
+> `apps/web/src/domain/generatedMechanicalGate.ts` plus co-located tests with closed types, strict
+> validation, a pure evaluation function, and a pure satisfiability check. It wires into
+> **nothing** — no navigation, no App, no renderer, no generation, no save/load, no schema.
+> Runtime enforcement, generated-room insertion, and objective integration remain explicitly
+> later, separately-approved features.
 
 ---
 
@@ -110,9 +111,11 @@ GeneratedGateState = 'locked' | 'unlocked'          // DERIVED, never stored
 `isGeneratedGateSatisfiable(gate, room)` is a pure check that mirrors `assembleObjective`'s
 satisfiability gate:
 
-1. the gate's unlock `flag` must be derivable from an in-room one-shot effect (an object whose
-   `interaction.effect` would set that flag via `interactionFlagKey`), **and**
-2. the gate's `effect.toRoomId` must match an actual exit present in the room.
+1. `gate.condition.roomId` must match `room.id`,
+2. the gate's unlock `flag` must be reachable from an in-room interaction that writes that room
+   flag today via `interactionFlagKey` (currently plain `inspect` / `take-item` effects, with
+   `use-item` and encounter-owned interactions excluded), **and**
+3. the gate's `effect.toRoomId` must match an actual exit present in the room.
 
 A gate that fails either check is **not satisfiable**. v0 enforces nothing, but the binding rule
 is recorded here: **a future runtime-enforcement slice must pass `isGeneratedGateSatisfiable`
@@ -167,9 +170,8 @@ contract module if not needed; it never reads provider text, flag keys, or ids.
 - Slice 1 — this ADR + the implementation plan + an ARCHITECTURE status note.
 - Slice 2 — `domain/generatedMechanicalGate.ts` with `validateGeneratedMechanicalGate`,
   `evaluateGeneratedGate`, `isGeneratedGateSatisfiable`, the closed types above, and co-located
-  unit tests. Wired into nothing.
-- Slice 3 (optional, still unwired) — `projectGateForRoomView` + a closed hint table + tests, or
-  deferred if not needed.
+  unit tests. Wired into nothing. **Implemented.**
+- Slice 3 (optional, still unwired) — deferred; no view projection was added in v0.
 
 **Out of scope / non-goals (must NOT be built in this feature):**
 
@@ -267,18 +269,17 @@ export function projectGateForRoomView(
 ## Tests (Vitest, co-located, headless — Slice 2)
 
 - **Validation:** valid gate parses; unknown `kind` → `null`; unknown `condition.kind` → `null`;
-  extra keys (`.strict`) → `null`; missing `condition`/`effect`/`id` → `null`; empty
-  `flag`/`roomId`/`toRoomId` → `null`.
+  unknown `effect.kind` → `null`; extra keys (`.strict`) → `null`; missing
+  `condition`/`effect`/`id` → `null`; empty `id`/`flag`/`roomId`/`toRoomId` → `null`.
 - **Evaluation:** condition flag set in the named room → `'unlocked'`; flag unset → `'locked'`;
   missing roomState → `'locked'` (never throws); parity with an objective `room-flag` on the same
   state (shared predicate).
-- **Satisfiability:** in-room one-shot `inspect` effect produces the flag **and** `toRoomId`
-  matches an exit → `true`; no in-room effect produces the flag → `false`; `toRoomId` not an exit
-  in the room → `false`.
+- **Satisfiability:** matching `condition.roomId`, in-room flag-writing interaction, and matching
+  exit target → `true`; mismatched room id, no reachable flag-writing interaction, no matching
+  exit target, `use-item`, or encounter-owned interactions → `false`.
 - **Safe degrade:** `null` from `validateGeneratedMechanicalGate` is the documented "no gate"
   signal.
-- **Projection (if built):** `hint` is from the closed table only; contains no flag key, id,
-  `toRoomId`, or room/object name.
+- **Projection:** not built in v0.
 - **Log-safety:** module emits no logs; returned strings contain no flag keys / ids / JSON.
 - **Authored unchanged:** no `app/**` or runtime file imports the new module (the contract is
   inert in v0).
@@ -291,7 +292,7 @@ export function projectGateForRoomView(
 | --- | --- | --- | --- |
 | Malformed / unknown / extra-key gate data | `validateGeneratedMechanicalGate` strict parse | return `null`; callers treat as "no gate" → exit open | none |
 | `evaluateGeneratedGate` with missing `roomStates[roomId]` | absent room state | return `'locked'` (conservative); never throws | none |
-| Unsatisfiable gate (flag unreachable or `toRoomId` not an exit) | `isGeneratedGateSatisfiable` | returns `false`; a future runtime slice must not block on it | none |
+| Unsatisfiable gate (wrong room, flag unreachable, or `toRoomId` not an exit) | `isGeneratedGateSatisfiable` | returns `false`; a future runtime slice must not block on it | none |
 | Future enforcement attempts to block an unsatisfiable gate | the binding rule above | rejected in design/review; enforcement is gated on satisfiability | n/a |
 | Stale derived state | only matters once wired | state re-derives from flags at evaluation time; no second source of truth | none |
 

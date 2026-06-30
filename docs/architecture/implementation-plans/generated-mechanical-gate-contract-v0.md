@@ -1,8 +1,9 @@
 # Implementation Plan — `feature/generated-mechanical-gate-contract-v0`
 
-> Status: **Slice 1 (docs) in progress.** Maintainer approved Option A (pure domain contract
-> only) on 2026-06-30. Slice 2 (the contract module) is **not** started and requires separate
-> approval. No runtime/source code changes in Slice 1.
+> Status: **Implemented.** Maintainer approved Option A (pure domain contract only) on
+> 2026-06-30. Slice 2 added `apps/web/src/domain/generatedMechanicalGate.ts` and
+> `apps/web/src/domain/generatedMechanicalGate.test.ts`; the contract remains unwired and has no
+> runtime enforcement.
 >
 > **Depends on (implemented and merged):**
 > - Object Interactions v0
@@ -57,11 +58,11 @@ features (Slices 4–6 below) and are out of scope here.
 - The `room-flag` predicate shape from `ObjectiveCondition` (`domain/quests/questSpec.ts`) — the
   gate condition mirrors it so there is one predicate substrate.
 
-**What new code is actually necessary (Slice 2):**
+**What new code was actually necessary (Slice 2):**
 - One pure module `domain/generatedMechanicalGate.ts` (~80–120 lines): closed types, a strict zod
   schema, `validateGeneratedMechanicalGate`, `evaluateGeneratedGate`, `isGeneratedGateSatisfiable`.
 - One co-located test file `domain/generatedMechanicalGate.test.ts`.
-- Optional (Slice 3, may be deferred): `projectGateForRoomView` + a closed hint table + tests.
+- Optional Slice 3 (`projectGateForRoomView` + closed hint table) was deferred.
 
 **Safety boundaries unchanged:**
 - `RoomSpec` / `WorldState` / `WorldEvent` / `SaveGame` / `QuestSpec` schemas — no new field, no
@@ -94,7 +95,7 @@ features (Slices 4–6 below) and are out of scope here.
 
 ---
 
-## The v0 contract (Slice 2 target)
+## The v0 contract (implemented)
 
 ```ts
 // apps/web/src/domain/generatedMechanicalGate.ts
@@ -132,13 +133,16 @@ export type GeneratedGateState = 'locked' | 'unlocked'   // derived, never store
 - Missing `roomStates[roomId]` → `'locked'` (conservative; never throws).
 
 ### `isGeneratedGateSatisfiable(gate, room): boolean`
-- Mirrors `assembleObjective`'s satisfiability gate. Returns `true` iff **both**:
-  1. some object in `room` has a one-shot `interaction.effect` (`inspect` / `take-item`) whose
-     `interactionFlagKey(effect.flag, object.id)` equals `gate.condition.flag`, **and**
-  2. `gate.effect.toRoomId` matches an exit present in the room (an object with
+- Mirrors `assembleObjective`'s satisfiability gate. Returns `true` iff **all**:
+  1. `gate.condition.roomId === room.id`,
+  2. some object in `room` has an interaction effect that currently writes a room flag
+     (`inspect` / `take-item`) whose `interactionFlagKey(...)` equals `gate.condition.flag`, and
+  3. `gate.effect.toRoomId` matches an exit present in the room (an object with
      `interaction.exit.toRoomId === gate.effect.toRoomId`).
-- Pure; reuses `interactionFlagKey`. **No enforcement here** — this is the predicate a future
-  runtime slice must pass before blocking navigation.
+- Pure; reuses `interactionFlagKey`. `use-item` does not satisfy because it does not write room
+  flags today, and encounter-owned interactions are excluded because encounter handling takes
+  precedence over plain effects. **No enforcement here** — this is the predicate a future runtime
+  slice must pass before blocking navigation.
 
 ### `projectGateForRoomView(gate, state): { state, hint }` — OPTIONAL (Slice 3)
 - May be deferred entirely. If built: `hint` comes only from a closed hand-written table
@@ -153,14 +157,14 @@ Each slice is independently testable and separately approved. **This feature cov
 only.** Slices 4–6 are listed for orientation and are explicitly out of scope unless separately
 approved.
 
-1. **Docs-only (this feature, in progress).** ADR-0061 + this plan + an ARCHITECTURE status note.
+1. **Docs-only (complete).** ADR-0061 + this plan + an ARCHITECTURE status note.
    No code. Verify with the smallest relevant check; report any skipped check.
-2. **Pure contract module (this feature, pending approval).**
+2. **Pure contract module (complete).**
    `domain/generatedMechanicalGate.ts` + `domain/generatedMechanicalGate.test.ts`:
    `validateGeneratedMechanicalGate`, `evaluateGeneratedGate`, `isGeneratedGateSatisfiable`.
    Imported by nothing. `npm run test -- generatedMechanicalGate`, `npm run lint`, `npm run build`.
-3. **Optional safe view projection (this feature, may be deferred).**
-   `projectGateForRoomView` + closed hint table + tests. Still unwired. Skip if not needed.
+3. **Optional safe view projection (deferred).**
+   `projectGateForRoomView` + closed hint table + tests. Still unwired. Skipped for v0.
 4. **(Later — separately approved) Deterministic gate insertion.** Attach a validated, satisfiable
    gate to a generated room during assembly/composition (data only). Out of this feature.
 5. **(Later — separately approved) Runtime enforcement.** Consume the contract at the existing
@@ -187,9 +191,10 @@ Pure domain, co-located, headless — no DOM, no world-session wiring beyond con
 - **Evaluation:** flag set in the named room → `'unlocked'`; flag absent → `'locked'`; flag set in
   a *different* room → `'locked'`; missing `roomStates[roomId]` → `'locked'`; parity check — same
   state yields the same result as an `ObjectiveCondition` `room-flag` through `evaluateCondition`.
-- **Satisfiability:** room with a matching one-shot `inspect` object (id derives the flag) **and** a
-  matching exit → `true`; flag unreachable (no in-room effect derives it) → `false`; exit absent
-  (`toRoomId` not present) → `false`; `use-item`-only object (no flag) does not satisfy → `false`.
+- **Satisfiability:** room with matching `condition.roomId`, a matching in-room flag-writing
+  interaction (`inspect` or `take-item` through `interactionFlagKey`), and a matching exit →
+  `true`; wrong room id, flag unreachable, exit absent (`toRoomId` not present), `use-item`, or
+  encounter-owned interactions → `false`.
 - **Safe degrade:** document/assert that `null` is the "no gate" contract value.
 - **Log-safety:** the module exports no logger usage; any returned string (Slice 3 hint) contains
   no flag key, id, `toRoomId`, or room/object name.
@@ -200,10 +205,10 @@ Pure domain, co-located, headless — no DOM, no world-session wiring beyond con
 
 ## Verification commands
 
-- Slice 1 (docs): the smallest relevant check; this is docs-only, so `npm run build`/`test` are
-  not required — report that they were skipped as docs-only per AGENTS.md.
-- Slice 2: `npm run test -- generatedMechanicalGate`, then `npm run lint` and `npm run build` to
-  confirm the import wall and that no unrelated file changed.
+- `npm run test -- generatedMechanicalGate`
+- `npm run lint`
+- `npm run build`
+- `git diff --check`
 
 ---
 
