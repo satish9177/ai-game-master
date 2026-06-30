@@ -226,6 +226,116 @@ describe('saveSlotStore — generatedQuestJson parking', () => {
   })
 })
 
+describe('saveSlotStore — generatedRoomCacheJson parking', () => {
+  const QUEST_BLOB = '{"schemaVersion":1,"room":{},"objectivesPerRoom":true}'
+  const CACHE_BLOB = '{"schemaVersion":1,"rooms":[{"room":{},"provenance":"generated"}]}'
+
+  it('write with generatedRoomCacheJson → read returns the same string', () => {
+    const { kv } = createMapKv()
+    const slot = createSaveSlotStore(kv)
+    slot.write(FAKE_JSON, { label: 'Gen' }, undefined, CACHE_BLOB)
+    const result = slot.read()
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.generatedRoomCacheJson).toBe(CACHE_BLOB)
+      expect(result.generatedQuestJson).toBeUndefined()
+      // saveGameJson stays authoritative and unchanged.
+      expect(result.saveGameJson).toBe(FAKE_JSON)
+    }
+  })
+
+  it('write with both generated blobs → read returns both strings', () => {
+    const { kv } = createMapKv()
+    const slot = createSaveSlotStore(kv)
+    slot.write(FAKE_JSON, { label: 'Gen' }, QUEST_BLOB, CACHE_BLOB)
+    const result = slot.read()
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.generatedQuestJson).toBe(QUEST_BLOB)
+      expect(result.generatedRoomCacheJson).toBe(CACHE_BLOB)
+      expect(result.saveGameJson).toBe(FAKE_JSON)
+    }
+  })
+
+  it('write without generatedRoomCacheJson → read returns undefined', () => {
+    const { kv } = createMapKv()
+    const slot = createSaveSlotStore(kv)
+    slot.write(FAKE_JSON, { label: 'Gen' }, QUEST_BLOB)
+    const result = slot.read()
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.generatedQuestJson).toBe(QUEST_BLOB)
+      expect(result.generatedRoomCacheJson).toBeUndefined()
+    }
+  })
+
+  it('write with empty generatedRoomCacheJson → omitted (treated as absent)', () => {
+    const { kv, store } = createMapKv()
+    const slot = createSaveSlotStore(kv)
+    slot.write(FAKE_JSON, undefined, QUEST_BLOB, '')
+    const raw = store.get(SLOT_KEY)
+    expect(raw).not.toBeNull()
+    if (raw) {
+      const parsed = JSON.parse(raw) as Record<string, unknown>
+      expect(parsed.generatedQuestJson).toBe(QUEST_BLOB)
+      expect('generatedRoomCacheJson' in parsed).toBe(false)
+    }
+    const result = slot.read()
+    expect(result.ok).toBe(true)
+    if (result.ok) expect(result.generatedRoomCacheJson).toBeUndefined()
+  })
+
+  it('older wrapper without generatedRoomCacheJson key reads without error', () => {
+    const { kv, store } = createMapKv()
+    store.set(
+      SLOT_KEY,
+      JSON.stringify({
+        label: 'Old',
+        savedAt: '2026-01-01T00:00:00.000Z',
+        saveGameJson: FAKE_JSON,
+        generatedQuestJson: QUEST_BLOB,
+      }),
+    )
+    const result = createSaveSlotStore(kv).read()
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.saveGameJson).toBe(FAKE_JSON)
+      expect(result.generatedQuestJson).toBe(QUEST_BLOB)
+      expect(result.generatedRoomCacheJson).toBeUndefined()
+    }
+  })
+
+  it('non-string generatedRoomCacheJson is treated as corrupt', () => {
+    const { kv, store } = createMapKv()
+    store.set(
+      SLOT_KEY,
+      JSON.stringify({
+        label: 'X',
+        savedAt: '2026-01-01T00:00:00.000Z',
+        saveGameJson: FAKE_JSON,
+        generatedRoomCacheJson: 42,
+      }),
+    )
+    const result = createSaveSlotStore(kv).read()
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.reason).toBe('corrupt')
+  })
+
+  it('invalid generatedRoomCacheJson content does not break saveGameJson read', () => {
+    // The blob is parked bytes only — saveSlotStore never parses or validates it.
+    const { kv } = createMapKv()
+    const slot = createSaveSlotStore(kv)
+    slot.write(FAKE_JSON, { label: 'Gen' }, QUEST_BLOB, 'NOT VALID JSON{{{')
+    const result = slot.read()
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.saveGameJson).toBe(FAKE_JSON)
+      expect(result.generatedQuestJson).toBe(QUEST_BLOB)
+      expect(result.generatedRoomCacheJson).toBe('NOT VALID JSON{{{')
+    }
+  })
+})
+
 describe('saveSlotStore — key namespacing', () => {
   it('uses the aigm.save.slot key', () => {
     const { kv, store } = createMapKv()

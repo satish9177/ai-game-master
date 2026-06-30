@@ -19,10 +19,18 @@ type SlotWrapper = SlotMeta & {
   saveGameJson: string
   /** Optional parked blob; never authoritative. Only carried through, never validated here. */
   generatedQuestJson?: string
+  /** Optional parked blob; never authoritative. Only carried through, never validated here. */
+  generatedRoomCacheJson?: string
 }
 
 export type SlotReadResult =
-  | { ok: true; saveGameJson: string; meta: SlotMeta; generatedQuestJson?: string }
+  | {
+      ok: true
+      saveGameJson: string
+      meta: SlotMeta
+      generatedQuestJson?: string
+      generatedRoomCacheJson?: string
+    }
   | { ok: false; reason: 'empty' | 'corrupt' | 'unavailable' }
 
 export type SlotWriteResult =
@@ -44,6 +52,7 @@ export interface SaveSlotStore {
     saveGameJson: string,
     meta?: Partial<SlotMeta>,
     generatedQuestJson?: string,
+    generatedRoomCacheJson?: string,
   ): SlotWriteResult
   /** True when a slot is present (best-effort; false if storage is unavailable). */
   has(): boolean
@@ -67,7 +76,8 @@ function isSlotWrapper(value: unknown): value is SlotWrapper {
     typeof v.saveGameJson === 'string' &&
     typeof v.label === 'string' &&
     typeof v.savedAt === 'string' &&
-    ('generatedQuestJson' in v ? typeof v.generatedQuestJson === 'string' : true)
+    ('generatedQuestJson' in v ? typeof v.generatedQuestJson === 'string' : true) &&
+    ('generatedRoomCacheJson' in v ? typeof v.generatedRoomCacheJson === 'string' : true)
   )
 }
 
@@ -112,6 +122,9 @@ function createSaveSlotStoreImpl(kv: KeyValueStore): SaveSlotStore {
         ...(typeof parsed.generatedQuestJson === 'string'
           ? { generatedQuestJson: parsed.generatedQuestJson }
           : {}),
+        ...(typeof parsed.generatedRoomCacheJson === 'string'
+          ? { generatedRoomCacheJson: parsed.generatedRoomCacheJson }
+          : {}),
       }
     },
 
@@ -119,6 +132,7 @@ function createSaveSlotStoreImpl(kv: KeyValueStore): SaveSlotStore {
       saveGameJson: string,
       meta: Partial<SlotMeta> = {},
       generatedQuestJson?: string,
+      generatedRoomCacheJson?: string,
     ): SlotWriteResult {
       const wrapper: SlotWrapper = {
         label: meta.label ?? 'Save',
@@ -128,6 +142,7 @@ function createSaveSlotStoreImpl(kv: KeyValueStore): SaveSlotStore {
         // Park the blob only when non-empty; authored saves omit the key entirely so their
         // wrapper stays byte-identical to the older format.
         ...(generatedQuestJson ? { generatedQuestJson } : {}),
+        ...(generatedRoomCacheJson ? { generatedRoomCacheJson } : {}),
       }
       try {
         kv.set(SLOT_KEY, JSON.stringify(wrapper))
@@ -178,8 +193,13 @@ export class LocalStorageSaveSlotStore implements SaveSlotStore {
     return this.impl.read()
   }
 
-  write(json: string, meta?: Partial<SlotMeta>, generatedQuestJson?: string): SlotWriteResult {
-    return this.impl.write(json, meta, generatedQuestJson)
+  write(
+    json: string,
+    meta?: Partial<SlotMeta>,
+    generatedQuestJson?: string,
+    generatedRoomCacheJson?: string,
+  ): SlotWriteResult {
+    return this.impl.write(json, meta, generatedQuestJson, generatedRoomCacheJson)
   }
 
   has(): boolean {
