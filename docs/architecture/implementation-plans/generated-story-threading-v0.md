@@ -1,7 +1,8 @@
 # Implementation Plan — `feature/generated-story-threading-v0`
 
-> Status: **planned.**
+> Status: **implemented — slices 1–3 complete; docs/status closeout complete.**
 > ADR: [ADR-0057](../decisions/ADR-0057-generated-story-threading-v0.md).
+> Implemented on 2026-06-30.
 >
 > **Depends on (implemented and merged):**
 > - `feature/generated-room-npc-objective-awareness-v1`
@@ -112,7 +113,7 @@ Both degrade silently to today's behavior when no `WorldBibleSeed` is available.
 
 ### Slice 1 — Pure domain contract
 
-**Status:** Planned.
+**Status:** Complete.
 
 **Goal:** Ship the closed types, `deriveStoryThreadContext`, and `storyThreadToSeedPhrase` with
 full unit tests. No wiring, no consumer. Zero runtime behavior change.
@@ -236,7 +237,7 @@ seed wiring lands in the codebase.
 
 ### Slice 2 — Adjacent seed wiring
 
-**Status:** Planned.
+**Status:** Complete.
 
 **Goal:** Wire the story phrase into the adjacent fake generator seed. Behavior change is limited
 to the deterministic fake adjacent seed; no LLM call, no spend.
@@ -330,7 +331,7 @@ npm run lint
 
 ### Slice 3 — Composition anchor bias
 
-**Status:** Planned.
+**Status:** Complete.
 
 **Goal:** Make the thread *visible* in composed rooms by biasing the focal-object selection.
 Touches the shared assembly pipeline; kept as a separate approved slice.
@@ -496,7 +497,7 @@ npm run lint
 
 ### Slice 4 — Docs closeout
 
-**Status:** Planned.
+**Status:** Complete.
 
 **Files:**
 - `docs/architecture/decisions/ADR-0057-generated-story-threading-v0.md` (edit: Status → Implemented)

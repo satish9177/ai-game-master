@@ -52,6 +52,8 @@ Throughout these docs:
   Generated Room Display Sanitization v0 — generated assembly/domain;
   Adjacent Room Theme Continuity v0 — browser composition/domain projection;
   Generated Room Theme Vocabulary v0 — fake/generated assembly + browser composition;
+  Generated Story Threading v0 — generated adjacent rooms only, closed-enum
+  seed phrase + composition anchor bias;
   Generated Room Objective Target Enrichment v0 — generated assembly/domain;
   Real Generated Objective Provider v0 — generation + app composition;
   Generated Objective Per Room v0 — browser/app composition;
@@ -476,6 +478,41 @@ WorldBible themePack
   quest, inventory, or combat change. Diagnostics remain count/boolean/provenance
   only and never log raw prompt, seed strings, room/object names, generated JSON,
   provider output, or interaction body/title text.
+
+## Generated Story Threading v0
+
+✅ **Implemented, generated adjacent rooms only.** Generated Story Threading v0
+uses the closed `WorldBibleSeed.openingArc.pattern` enum plus structural
+adjacent-room depth to make fake adjacent rooms feel connected without adding
+quest state, memory, backend persistence, or provider work
+([ADR-0057](./decisions/ADR-0057-generated-story-threading-v0.md)).
+
+- **Pure domain contract:** `domain/generatedStoryThread.ts` derives a transient
+  `GeneratedStoryRoomContext` from only the closed story kind and structural
+  `roomId` depth. Depth 1 is `threshold`, depths 2-3 are `developing`, and depth
+  4+ is `deeper`; pressure is derived from that role only.
+- **Adjacent seed guidance:** generated-play adjacent seeds may include one
+  bounded, hand-written phrase from a fixed table, ordered after the existing
+  theme seed and before `adjacent:${roomId}`. Missing World Bible or missing
+  pattern degrades to the previous seed exactly.
+- **Composition anchor bias:** adjacent generated-room assembly passes the
+  closed story kind into `composeGeneratedRoom`, which uses fixed priority
+  tables to prefer fitting existing anchor object types. `escape` intentionally
+  falls back to the theme/default anchor priority because escape pressure is
+  expressed through exits and seed variety, not a special focal prop.
+- **Generation guidance only:** story threading is not quest state, objective
+  state, world truth, NPC knowledge, memory, save data, or a RoomSpec field. It
+  never creates, completes, targets, or mutates objectives, flags, objects,
+  dialogue, memory, or world/session state.
+- **Safety boundaries unchanged:** no raw prompt, WorldBible free-text arc
+  fields (`hook`, `firstObjective`, `pressure`, `premise`, `title`,
+  `majorConflict`, `canonNotes`), generated descriptions, provider output,
+  object ids, flag text, objective JSON, or RoomSpec schema change. There is no
+  new LLM call and no new logging surface for story kind, role, pressure, or
+  phrase text.
+- **Scope boundary:** only generated adjacent rooms in prompt-generated play use
+  the thread context. Authored rooms, demo rooms, fallback rooms, restored rooms,
+  and the first prompt-generated room remain unchanged.
 
 ## Room Inspect Summary v0
 

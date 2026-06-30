@@ -1091,6 +1091,29 @@ interactable person to talk to
   inventory, loot, combat, encounter, memory, backend, API, pathfinding, walking,
   or simulation behavior.
 
+## 28. Generated story threading ✅ v0 (generated adjacent guidance only)
+
+Generated Story Threading v0 makes fake generated adjacent rooms feel connected
+by deriving a transient closed context from `WorldBibleSeed.openingArc.pattern`
+and structural adjacent-room depth, then using it as bounded seed guidance and
+composition anchor bias ([ADR-0057](./decisions/ADR-0057-generated-story-threading-v0.md)).
+
+| Situation | Detection | Handling / result | Logging |
+| --- | --- | --- | --- |
+| Missing World Bible or missing `openingArc.pattern` | `prepared.worldBible?.openingArc.pattern` is `undefined` | no `GeneratedStoryRoomContext`, no story phrase, no story anchor bias; generated adjacent rooms use the previous theme/default behavior | none |
+| Neutral or flat adjacent `roomId` depth | depth count from `:exit:` segments is `0` | safe `threshold` role default; phrase remains from the fixed table when a closed kind exists | none |
+| `escape` story kind | fixed story-kind priority table returns no anchor override | intentional fallback to existing theme/default anchor priority; escape pressure stays exit/seed-oriented | none |
+| No matching anchor object exists | selector finds no eligible object in the active priority table | existing no-anchor behavior; no repair, fallback, notice, objective, or state mutation | existing safe booleans only |
+
+- **Generation guidance only.** The context is transient and never becomes quest
+  state, objective state, world truth, NPC knowledge, memory, save data, backend
+  data, or a `RoomSpec` field.
+- **Free text remains excluded.** The feature never reads or stores raw prompt,
+  WorldBible free-text arc fields, generated descriptions, provider output,
+  object ids, flag text, or objective JSON.
+- **No side effects.** There is no new LLM call, no RoomSpec schema change, and
+  no world/memory/objective/NPC mutation.
+
 ---
 
 ## Summary
@@ -1108,6 +1131,7 @@ interactable person to talk to
 | 4f | Generated room composition and story-anchor normalization | role classification + deterministic zones (2.7), plus one derived story-anchor selector over validated `RoomObject.type`; after object legality and before spawn/exit finalizers | existing objects repositioned only; missing anchor/interactable accepted; no gameplay semantics; `provenance: generated`, no notice; authored/static/fallback untouched | ✅ v0 |
 | 4g | Generated room visual vocabulary normalization | trusted vocabulary/builders; generated alias repair; optional transform repair; skipped reason buckets | valid safe concepts render as readable objects; unknown/malformed entries remain mystery markers; benign normalization keeps `provenance: generated` | ✅ v0 |
 | 4h | Generated room theme vocabulary degradation | structured `WorldBibleSeed.themePack` only; missing theme/default path; no prompt or seed parsing | missing/unknown context falls back to default fantasy vocabulary and anchor priority; post-apoc suppresses fantasy-biased fake pools while keeping arch/npc; sci-fi/spaceship deferred to later theme packs | ✅ v0 |
+| 4i | Generated story threading degradation | closed `openingArc.pattern` + structural adjacent `roomId` depth only; escape has no anchor override | missing context/anchor falls back to previous adjacent seed/composition behavior; guidance never becomes quest/world state | ✅ v0 |
 | 5 | Backend/network | validated API requests + typed results | safe API envelope; browser retry state 🔜 | ✅ API edge v0 |
 | 6 | DB / persistence failure | typed results (rooms, conflicts) + fail-fast throws (open/migration/corrupt session) | safe API error; no browser surface yet | ✅ API-backed v0 |
 | 7 | Pre-gen not ready / return exit absent | one `resolveRoom` seam: cache hit / in-flight join / on-demand resolve (capped, depth-1 warming); generated return exit parse + re-validation | instant cached room, or safe on-demand resolve/generate; return-exit parse/validation miss → original valid room with no return exit; never a freeze | ✅ v0 (browser); status lifecycle 🔜 |

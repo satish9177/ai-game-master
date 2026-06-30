@@ -1,7 +1,8 @@
 # ADR-0057: Generated Story Threading v0 — closed-enum thread context for adjacent generated rooms
 
-- **Status:** Planned
+- **Status:** Accepted — implemented
 - **Date:** 2026-06-30
+- **Implemented:** 2026-06-30
 - **Deciders:** Project owner
 - **Extends:**
   [ADR-0043](./ADR-0043-adjacent-room-theme-continuity-v0.md) (Adjacent Room Theme Continuity v0 —
@@ -19,6 +20,10 @@
 
 > Full pre-code design in the implementation plan
 > [`generated-story-threading-v0`](../implementation-plans/generated-story-threading-v0.md).
+
+> Implemented in three source slices plus docs closeout: Slice 1 added the pure
+> `generatedStoryThread` domain contract, Slice 2 wired the bounded adjacent seed
+> phrase, and Slice 3 added closed story-kind composition anchor bias.
 
 ---
 
