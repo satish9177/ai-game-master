@@ -2,7 +2,7 @@
 
 > Feature branch: `feature/generated-quest-save-load-v0`
 > ADR: [ADR-0059](../decisions/ADR-0059-generated-quest-save-load-v0.md)
-> Status: **pending implementation**
+> Status: **implemented — slices 1–5 complete; docs closeout complete**
 
 ## Overview
 

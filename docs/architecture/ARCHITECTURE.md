@@ -75,7 +75,12 @@ Throughout these docs:
   ([ADR-0055](./decisions/ADR-0055-generated-room-entry-intro-polish-v0.md));
   Return Exit Visual Affordance v0 — purple return arches plus pink return rings,
   with forward/authored exits unchanged
-  ([ADR-0053](./decisions/ADR-0053-return-exit-visual-affordance-v0.md)).
+  ([ADR-0053](./decisions/ADR-0053-return-exit-visual-affordance-v0.md));
+  Generated Quest Save/Load v0 — parked `GeneratedQuestSaveState` blob restores
+  generated quest, room, story markers, and resolved-object state across
+  Save/Continue/Load with no `SaveGame` schema change and no LLM call on load;
+  missing or invalid blob degrades safely to authored-world fallback
+  ([ADR-0059](./decisions/ADR-0059-generated-quest-save-load-v0.md)).
 - 🔜 **Planned** — future approved slices, when present, are listed here.
 - ❌ **Not built** — future shape only; documented so we don't paint into a corner.
 
@@ -542,6 +547,46 @@ surface using the existing `JournalView` and unchanged `JournalPanel`
   objective text, raw objective JSON, object ids, objective ids, flag text, or
   WorldBible free text.
 - **No cost impact:** no new LLM, provider, network, or I/O call.
+
+## Generated Quest Save/Load v0
+
+✅ **Implemented, browser/app composition + domain restore-model aid.** Generated
+Quest Save/Load v0 closes the gap recorded in ADR-0058: generated quest state
+(`questSpec`, `storyKind`, `objectivesPerRoom`, `hints`) and the current generated
+room survive a Save/Continue/Load cycle without changing the authoritative `SaveGame`
+schema or calling any LLM or generator on load
+([ADR-0059](./decisions/ADR-0059-generated-quest-save-load-v0.md)).
+
+- **Parked restore-model blob.** `buildGeneratedQuestSaveState` projects the
+  live generated `ActivePlay` fields into a `GeneratedQuestSaveState`
+  (`schemaVersion 1`) and parks it as `generatedQuestJson` alongside `saveGameJson`
+  in the existing `SlotWrapper`. The `SaveGame` schema, `SaveGameService`, and the
+  integrity check are **unchanged**. Authored saves never write the field; their
+  wrapper is byte-identical to today.
+- **Load path.** On Continue/Load, after the authoritative `WorldState` is restored
+  from the event log, `loadGeneratedQuestSaveState` re-validates the blob. If valid,
+  `restoreGeneratedQuestPlay` calls `loadRoomSpec` (not `assembleRoom`, not any
+  generator) to re-validate the parked room, recomputes `resolvedObjectIds` from the
+  restored `WorldState` flags, and returns the `ActivePlay` fields for generated play.
+  The restored room's object ids match the surviving flags so interaction rings
+  correctly reflect pre-save state.
+- **Safe degradation.** Missing or invalid `generatedQuestJson` → authored-world
+  fallback exactly as before. No error is surfaced; a `degraded` notice is shown for
+  non-authored loads (same as today). Older saves, authored saves, and
+  schema-mismatched blobs all degrade silently.
+- **Authority invariants.** The parked blob is never truth. `WorldSession`, the
+  event log, and the projected `WorldState` remain authoritative. `evaluateQuest`
+  and `resolvedObjectIds` semantics are unchanged; the parked room only supplies the
+  correct object ids that match the already-correct flags. No `WorldEvent`,
+  `WorldCommand`, NPC memory, room memory, or cost meter is touched on load.
+- **No schema change.** `SaveGame`, `WorldState`, `RoomSpec`, and `QuestSpec`
+  `schemaVersion` fields all remain `1`.
+- **No cost impact.** `recordAttempt` is not called on load; the usage meter is
+  unchanged.
+- **v0 known limitations.** Only the current room is restored. Generated adjacent
+  room cache, worldBible-seeded `AdjacentRoomPregenerator`, and full generated-world
+  navigation are not restored. After a generated load, onward navigation uses the
+  authored `adjacentPregenerator` — a documented known limitation.
 
 ## Room Inspect Summary v0
 

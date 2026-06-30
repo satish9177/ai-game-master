@@ -1,6 +1,7 @@
 # ADR-0059: Generated Quest Save/Load v0 — safe parked restore-model for generated quest and room state
 
-- **Status:** Accepted — pending implementation
+- **Status:** Accepted — implemented
+- **Implemented:** 2026-06-30
 - **Date:** 2026-06-30
 - **Deciders:** Project owner
 

@@ -1140,6 +1140,40 @@ status, and optional closed story context
   WorldBible free text.
 - **No cost impact.** There is no new LLM/provider/network/I/O call.
 
+## 30. Generated quest save/load v0 ✅ (browser, parked restore-model blob)
+
+A prompt-generated session is saved, the page is reloaded, and the player presses
+Continue. The parked `generatedQuestJson` blob must restore generated quest display
+state or degrade safely
+([ADR-0059](./decisions/ADR-0059-generated-quest-save-load-v0.md)).
+
+| Situation | Detection | Handling / result | Logging |
+| --- | --- | --- | --- |
+| Valid `generatedQuestJson` on load | `loadGeneratedQuestSaveState` → `{ok: true}` | `restoreGeneratedQuestPlay` re-validates parked room via `loadRoomSpec`; restores `questSpec`, `storyKind`, `objectivesPerRoom`, `hints`, `entryResolvedObjectIds`; enters generated play; suppresses old fallback notice because parked room is faithful | `generatedQuestRestored: true` bool only |
+| `generatedQuestJson` absent (older or authored save) | `slotResult.generatedQuestJson === undefined` | fall through to authored-world gate; authored sessions unaffected; no error or notice | none |
+| Blob present but `loadGeneratedQuestSaveState` fails (corrupt / wrong version / schema mismatch) | `loadGeneratedQuestSaveState` → `{ok: false}` | fall through to authored-world fallback; `degraded: true` notice shown (same as today for non-authored loads); no error surfaced | error code only |
+| `loadRoomSpec` throws on parked room | `try/catch` in `restoreGeneratedQuestPlay` → `{ok: false, code: 'room-load-failed'}` | fall through to authored-world fallback; `degraded: true` notice | `code` only |
+| Generated save: no `questSpec` in blob (older generated save) | `state.questSpec === undefined` | restores room + `objectivesPerRoom: true` + `storyKind`; quest tracker absent; generated journal still re-projects | — |
+| Generated save: no `storyKind` in blob | `state.storyKind === undefined` | restores room + `questSpec`; story-context entry absent from journal | — |
+| Authored session: `generatedQuestJson` never written | authored play gate: `objectivesPerRoom` not `true` | `SlotWrapper` byte-identical to today; no generated blob written or read | none |
+
+- **Authority unchanged.** `WorldSession` + event log + `WorldState` remain sole
+  truth. Objective completion is `evaluateQuest(restoredQuestSpec, restoredWorldState)`
+  from the restored event log. The parked blob never overrides `WorldState`.
+- **No LLM/generator call on load.** `loadRoomSpec` is the only room-reconstruction
+  call. `assembleRoom`, enrichment stages, and any `RoomGenerator` or
+  `ObjectiveGenerator` port are not invoked.
+- **No cost meter increment.** `recordAttempt` is not called on load.
+- **`SaveGame` schema unchanged.** Integrity check, `SaveGameSchema`, and all
+  `schemaVersion` fields are untouched.
+- **Log discipline.** Log lines on save or load contain only
+  `generatedQuestSaved`/`generatedQuestRestored` booleans and fixed error codes.
+  Room name, object ids, flag keys, quest title, objective text, hint text, and
+  blob content are never logged.
+- **v0 known limitations.** Generated adjacent room cache, worldBible-seeded
+  `AdjacentRoomPregenerator`, and full generated-world navigation are not restored.
+  Onward navigation after a generated load uses the authored wiring — documented.
+
 ---
 
 ## Summary
@@ -1181,7 +1215,8 @@ status, and optional closed story context
 | 24 | Generated interaction affordances | `affordanceFor` over validated `interaction.exit` / `encounter` / `dialogue` / `effect.kind` and NPC object type; HUD/ring consume derived `Interactable.affordance` | weak prompts mitigated by verb chip; ambiguous defaults to Inspect; ring tint is presentation-only; never repair/fallback/gameplay | ✅ browser |
 | 25 | Generated room object purpose and explore loop | `assignGeneratedObjectPurpose` runs only in generated `assembleRoom` after composition/spawn/exit repair and before final validation; reads validated object type + interaction presence only | allowlisted bare objects get presentation-only `{ key, prompt, title, body }`; pressing E opens the existing panel with safe fixed text; unsupported/existing/fallback paths unchanged; no gameplay/schema/backend/state change | ✅ generated assembly + browser UI |
 | 26 | NPC dialogue room context | `buildRoomDialogueContext` over validated `LoadedRoom`; optional service/provider packet; fake provider room-focus table after prompt/persona precedence | missing/no-focus/unsupported focus → existing generic fallback; prompt/persona lines unchanged; no repair/fallback/load failure or state mutation | ✅ browser/domain/dialogue |
-| 27 | Generated room NPC presence | raw prompt -> boolean `requestsNpc`; `ensureGeneratedNpcPresence` runs in generated `assembleRoom` after object-purpose enrichment and before final validation | requested+absent+safe tile -> one fixed generic TALK NPC; existing NPC preserved; no safe tile/false negative -> no-op; false positive -> harmless generic NPC | implemented generated assembly/domain |
+| 27 | Generated room NPC presence | raw prompt -> boolean `requestsNpc`; `ensureGeneratedNpcPresence` runs in generated `assembleRoom` after object-purpose enrichment and before final validation | requested+absent+safe tile -> one fixed generic TALK NPC; existing NPC preserved; no safe tile/false negative -> no-op; false positive -> harmless generic NPC | ✅ generated assembly/domain |
+| 30 | Generated quest save/load | `loadGeneratedQuestSaveState` re-validates parked blob; `restoreGeneratedQuestPlay` calls `loadRoomSpec` only (no generator); `SlotWrapper.generatedQuestJson` parked alongside `saveGameJson`; authored saves never write the field | valid blob → generated play restored (room, questSpec, storyKind, hints, resolvedObjectIds); missing/invalid blob → authored-world fallback + `degraded` notice; no LLM call, no cost increment, no `SaveGame` schema change | ✅ v0 browser |
 
 The through-line: **validate at the boundary, degrade visibly and safely, log
 the detail, show the user calm.**
