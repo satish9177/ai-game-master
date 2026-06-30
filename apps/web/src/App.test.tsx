@@ -25,6 +25,7 @@ import type { RoomGenerator } from './domain/ports/RoomGenerator'
 import type { Logger } from './platform/logger/Logger'
 import { computeDerivedViews } from './app/derivedViews'
 import { QuestTracker } from './renderer/ui/QuestTracker'
+import { JournalPanel } from './renderer/ui/JournalPanel'
 import { FakeObjectiveGenerator } from './generation/FakeObjectiveGenerator'
 import { FakeRoomGenerator } from './generation/FakeRoomGenerator'
 import { FakeWorldBibleSeeder } from './generation/FakeWorldBibleSeeder'
@@ -37,6 +38,7 @@ import type { WorldBibleSeed } from './domain/worldBible/worldBibleSeed'
 import { worldBibleToAdjacentThemeSeed } from './domain/worldBible/worldBibleToSeed'
 import { GeneratedRoomSource } from './room/GeneratedRoomSource'
 import { demoQuestSpec } from './domain/examples/demoQuest'
+import { demoJournalSpec } from './domain/examples/demoJournal'
 
 const noopLogger: Logger = {
   debug() {},
@@ -1156,7 +1158,7 @@ async function runFakePromptPath(prompt: string) {
   const attachment = result.provenance === 'generated'
     ? await buildGeneratedObjectiveAttachment(result.room, new FakeObjectiveGenerator())
     : null
-  return { result, attachment }
+  return { result, attachment, prepared }
 }
 
 describe('App fake-provider prompt path renders a generated QuestTracker', () => {
@@ -1302,5 +1304,205 @@ describe('App fake-provider prompt path renders a generated QuestTracker', () =>
 
     const views = computeDerivedViews(makeState({ currentRoomId: room.id }), null, null)
     expect(views.quest).toBeNull()
+  })
+})
+
+describe('App generated consequence journal wiring', () => {
+  it('renders the existing JournalPanel for a prompt-generated session', async () => {
+    const { result, attachment, prepared } = await runFakePromptPath('a quiet archive')
+    if (!result.ok) throw new Error('expected a playable room')
+    expect(prepared.worldBible).toBeDefined()
+
+    const state = makeState({
+      currentRoomId: result.room.id,
+      roomStates: { [result.room.id]: { visited: true } },
+    })
+    const storyContext = deriveStoryThreadContext(
+      prepared.worldBible?.openingArc.pattern,
+      result.room.id,
+    )
+    const views = computeDerivedViews(
+      state,
+      attachment?.questSpec ?? null,
+      null,
+      { state, room: result.room, quest: null, storyContext },
+    )
+
+    expect(views.journal).not.toBeNull()
+    expect(views.journal?.journalId).toBe('generated-consequence-journal')
+    const html = renderToStaticMarkup(<JournalPanel view={views.journal!} />)
+    expect(html).toContain('Journal (')
+    expect(html).toContain('journal-panel')
+  })
+
+  it('authored bootstrap continues to use the authored journal only', () => {
+    const state = makeState({
+      currentRoomId: 'throne-room',
+      roomStates: {
+        'throne-room': { visited: true, flags: { 'interaction:offering-coffer': true } },
+      },
+    })
+
+    const views = computeDerivedViews(state, demoQuestSpec, null)
+    const authoredJournal = computeDerivedViews(state, null, {
+      journalId: 'authored-journal',
+      title: 'Authored Journal',
+      anchorRoomId: 'throne-room',
+      entries: [{
+        id: 'authored-entry',
+        text: 'Authored entry text',
+        condition: {
+          kind: 'room-flag',
+          roomId: 'throne-room',
+          flag: 'interaction:offering-coffer',
+        },
+      }],
+    }).journal
+
+    expect(views.quest).not.toBeNull()
+    expect(authoredJournal?.journalId).toBe('authored-journal')
+    expect(authoredJournal?.entries).toEqual([{ id: 'authored-entry', text: 'Authored entry text' }])
+  })
+
+  it('generated and authored journal sources are not combined', async () => {
+    const { result, prepared } = await runFakePromptPath('a quiet archive')
+    if (!result.ok) throw new Error('expected a playable room')
+    const state = makeState({
+      currentRoomId: result.room.id,
+      roomStates: {
+        [result.room.id]: { visited: true },
+        'throne-room': { visited: true, flags: { 'interaction:offering-coffer': true } },
+      },
+    })
+    const storyContext = deriveStoryThreadContext(
+      prepared.worldBible?.openingArc.pattern,
+      result.room.id,
+    )
+
+    const views = computeDerivedViews(
+      state,
+      null,
+      demoJournalSpec,
+      { state, room: result.room, quest: null, storyContext },
+    )
+
+    expect(views.journal?.journalId).toBe('generated-consequence-journal')
+    expect(views.journal?.entries.some((entry) => entry.id === 'claimed-tribute-coin')).toBe(false)
+  })
+
+  it('generated journal view omits unsafe ids and text while preserving QuestTracker behavior', async () => {
+    const { result, attachment, prepared } = await runFakePromptPath('a quiet archive')
+    if (!result.ok) throw new Error('expected a playable room')
+    expect(attachment).not.toBeNull()
+    const condition = attachment!.questSpec.objectives[0]!.condition
+    expect(condition.kind).toBe('room-flag')
+    if (condition.kind !== 'room-flag') return
+
+    const state = makeState({
+      currentRoomId: result.room.id,
+      roomStates: {
+        [result.room.id]: { visited: true, flags: { [condition.flag]: true } },
+      },
+    })
+    const storyContext = deriveStoryThreadContext(
+      prepared.worldBible?.openingArc.pattern,
+      result.room.id,
+    )
+    const quest = evaluateQuest(attachment!.questSpec, state)
+    const views = computeDerivedViews(
+      state,
+      attachment!.questSpec,
+      null,
+      { state, room: result.room, quest, storyContext },
+    )
+
+    expect(views.quest?.status).toBe('complete')
+    expect(views.journal?.entries.some((entry) => entry.id === 'objective-resolved')).toBe(true)
+    const serializedJournal = JSON.stringify(views.journal)
+    expect(serializedJournal).not.toContain(result.room.name)
+    expect(serializedJournal).not.toContain(condition.flag)
+    expect(serializedJournal).not.toContain('interaction:')
+    expect(serializedJournal).not.toContain(attachment!.questSpec.title)
+    expect(serializedJournal).not.toContain(attachment!.questSpec.objectives[0]!.text)
+    expect(serializedJournal).not.toContain(result.room.objects[0]?.id ?? 'unreachable-id')
+  })
+
+  it('generated journal updates after interaction and navigation through refreshed derived views', async () => {
+    const { result, attachment, prepared } = await runFakePromptPath('a quiet archive')
+    if (!result.ok) throw new Error('expected a playable room')
+    expect(attachment).not.toBeNull()
+    const condition = attachment!.questSpec.objectives[0]!.condition
+    expect(condition.kind).toBe('room-flag')
+    if (condition.kind !== 'room-flag') return
+    const storyContext = deriveStoryThreadContext(
+      prepared.worldBible?.openingArc.pattern,
+      result.room.id,
+    )
+    const beforeState = makeState({
+      currentRoomId: result.room.id,
+      roomStates: { [result.room.id]: { visited: true } },
+    })
+    const afterState = makeState({
+      currentRoomId: result.room.id,
+      roomStates: {
+        [result.room.id]: { visited: true, flags: { [condition.flag]: true } },
+        'generated-room:exit:north': { visited: true },
+      },
+    })
+
+    const before = computeDerivedViews(
+      beforeState,
+      null,
+      null,
+      { state: beforeState, room: result.room, quest: null, storyContext },
+    ).journal
+    const after = computeDerivedViews(
+      afterState,
+      null,
+      null,
+      { state: afterState, room: result.room, quest: null, storyContext },
+    ).journal
+
+    expect(before?.entries.some((entry) => entry.id === 'objects-disturbed')).toBe(false)
+    expect(after?.entries).toContainEqual({
+      id: 'rooms-explored',
+      text: 'You have explored 2 chamber(s).',
+    })
+    expect(after?.entries).toContainEqual({
+      id: 'objects-disturbed',
+      text: 'You disturbed 1 feature(s) here.',
+    })
+  })
+
+  it('missing storyKind and missing quest degrade safely', async () => {
+    const { result } = await runFakePromptPath('a quiet archive')
+    if (!result.ok) throw new Error('expected a playable room')
+    const state = makeState({ currentRoomId: result.room.id })
+
+    const views = computeDerivedViews(
+      state,
+      null,
+      null,
+      { state, room: result.room, quest: null, storyContext: undefined },
+    )
+
+    expect(views.quest).toBeNull()
+    expect(views.journal).toEqual({
+      journalId: 'generated-consequence-journal',
+      title: 'Consequences',
+      entries: [],
+    })
+  })
+
+  it('App source stores only storyKind and builds generated journal input at projection time', () => {
+    expect(appSource).toContain('storyKind?: GeneratedStoryThreadKind')
+    expect(appSource).toContain('storyKind: activePlay.storyKind')
+    expect(appSource).toContain('buildGeneratedJournalInput(play, state, questSpecRef.current)')
+    expect(appSource).toContain('deriveStoryThreadContext(play.storyKind, play.room.id)')
+    expect(appSource).toContain('computeDerivedViews(')
+    expect(appSource).toContain('generatedJournalInput')
+    expect(appSource).not.toContain('openingArc.hook')
+    expect(appSource).not.toContain('openingArc.firstObjective')
+    expect(appSource).not.toContain('openingArc.pressure')
   })
 })

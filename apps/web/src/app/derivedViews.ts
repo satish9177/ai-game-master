@@ -6,6 +6,8 @@ import type { QuestSpec } from '../domain/quests/questSpec'
 import { projectJournal } from '../domain/journal/projectJournal'
 import type { JournalView } from '../domain/journal/projectJournal'
 import type { JournalSpec } from '../domain/journal/journalSpec'
+import { buildGeneratedConsequenceJournal } from '../domain/journal/generatedConsequenceJournal'
+import type { GeneratedConsequenceJournalInput } from '../domain/journal/generatedConsequenceJournal'
 import type { WorldState } from '../domain/world/worldState'
 
 /**
@@ -28,10 +30,13 @@ export function computeDerivedViews(
   state: WorldState,
   questSpec: QuestSpec | null,
   journalSpec: JournalSpec | null,
+  generatedJournalInput?: GeneratedConsequenceJournalInput,
 ): DerivedViews {
   return {
     playerHud: projectPlayerHud(state),
     quest: questSpec ? evaluateQuest(questSpec, state) : null,
-    journal: journalSpec ? projectJournal(journalSpec, state) : null,
+    journal: generatedJournalInput !== undefined
+      ? buildGeneratedConsequenceJournal(generatedJournalInput)
+      : journalSpec ? projectJournal(journalSpec, state) : null,
   }
 }

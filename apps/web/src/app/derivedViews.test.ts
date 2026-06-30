@@ -5,6 +5,9 @@ import { evaluateQuest } from '../domain/quests/evaluateQuest'
 import { demoQuestSpec } from '../domain/examples/demoQuest'
 import { projectJournal } from '../domain/journal/projectJournal'
 import { demoJournalSpec } from '../domain/examples/demoJournal'
+import { buildGeneratedConsequenceJournal } from '../domain/journal/generatedConsequenceJournal'
+import type { GeneratedConsequenceJournalInput } from '../domain/journal/generatedConsequenceJournal'
+import { loadRoomSpec, type LoadedRoom } from '../domain/loadRoomSpec'
 import type { WorldState } from '../domain/world/worldState'
 
 const WORLD_ID = '00000000-0000-4000-8000-000000000001'
@@ -22,6 +25,32 @@ function makeState(overrides: Partial<WorldState> = {}): WorldState {
     roomStates: {},
     revision: 1,
     updatedAt: UPDATED_AT,
+    ...overrides,
+  }
+}
+
+function makeRoom(objects: unknown[] = [], id = 'generated-room'): LoadedRoom {
+  return loadRoomSpec({
+    schemaVersion: 1,
+    id,
+    name: 'Generated Room Name Sentinel',
+    shell: {
+      dimensions: { width: 12, depth: 12, height: 4 },
+      exits: [],
+    },
+    spawn: { position: [0, 0, 0], yaw: 0 },
+    objects,
+  })
+}
+
+function generatedJournalInput(
+  state: WorldState,
+  overrides: Partial<GeneratedConsequenceJournalInput> = {},
+): GeneratedConsequenceJournalInput {
+  return {
+    state,
+    room: makeRoom(),
+    quest: null,
     ...overrides,
   }
 }
@@ -111,6 +140,99 @@ describe('computeDerivedViews — journal', () => {
     const view = computeDerivedViews(state, null, demoJournalSpec).journal
     expect(view?.entries.some((e) => e.id === 'claimed-tribute-coin')).toBe(true)
     expect(view?.entries.some((e) => e.id === 'entered-safehouse')).toBe(false)
+  })
+
+  it('uses generated journal input when provided', () => {
+    const state = makeState({
+      currentRoomId: 'generated-room',
+      roomStates: { 'generated-room': { visited: true } },
+    })
+    const input = generatedJournalInput(state, {
+      storyContext: { kind: 'investigate', role: 'threshold', pressure: 'steady' },
+    })
+
+    expect(computeDerivedViews(state, null, null, input).journal).toEqual(
+      buildGeneratedConsequenceJournal(input),
+    )
+  })
+
+  it('keeps authored and generated journals mutually exclusive', () => {
+    const state = makeState({
+      roomStates: {
+        'throne-room': { visited: true, flags: { 'interaction:offering-coffer': true } },
+        'generated-room': { visited: true },
+      },
+    })
+    const input = generatedJournalInput(state)
+
+    const view = computeDerivedViews(state, null, demoJournalSpec, input).journal
+
+    expect(view?.journalId).toBe('generated-consequence-journal')
+    expect(view?.journalId).not.toBe(demoJournalSpec.journalId)
+    expect(view?.entries.some((entry) => entry.id === 'claimed-tribute-coin')).toBe(false)
+    expect(view?.entries.some((entry) => entry.id === 'rooms-explored')).toBe(true)
+  })
+
+  it('generated journal degrades safely without story context or quest', () => {
+    const state = makeState()
+    const view = computeDerivedViews(state, null, null, generatedJournalInput(state)).journal
+
+    expect(view).toEqual({
+      journalId: 'generated-consequence-journal',
+      title: 'Consequences',
+      entries: [],
+    })
+  })
+
+  it('generated journal updates from refreshed WorldState after interaction and navigation', () => {
+    const room = makeRoom([
+      {
+        type: 'scroll',
+        id: 'SECRET_OBJECT_ID',
+        position: [1, 0, 1],
+        interaction: {
+          key: 'E',
+          prompt: 'SECRET PROMPT',
+          effect: { kind: 'inspect' },
+        },
+      },
+    ])
+    const beforeState = makeState({
+      currentRoomId: room.id,
+      roomStates: { [room.id]: { visited: true } },
+    })
+    const afterState = makeState({
+      currentRoomId: room.id,
+      roomStates: {
+        [room.id]: { visited: true, flags: { 'interaction:SECRET_OBJECT_ID': true } },
+        'generated-room:exit:north': { visited: true },
+      },
+    })
+
+    const before = computeDerivedViews(
+      beforeState,
+      null,
+      null,
+      generatedJournalInput(beforeState, { room }),
+    ).journal
+    const after = computeDerivedViews(
+      afterState,
+      null,
+      null,
+      generatedJournalInput(afterState, { room }),
+    ).journal
+
+    expect(before?.entries.some((entry) => entry.id === 'objects-disturbed')).toBe(false)
+    expect(after?.entries).toContainEqual({
+      id: 'objects-disturbed',
+      text: 'You disturbed 1 feature(s) here.',
+    })
+    expect(after?.entries).toContainEqual({
+      id: 'rooms-explored',
+      text: 'You have explored 2 chamber(s).',
+    })
+    expect(JSON.stringify(after)).not.toContain('SECRET_OBJECT_ID')
+    expect(JSON.stringify(after)).not.toContain('SECRET PROMPT')
   })
 })
 

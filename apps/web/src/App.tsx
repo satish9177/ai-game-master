@@ -9,11 +9,12 @@ import { JournalPanel } from './renderer/ui/JournalPanel'
 import { RoomIntroPanel } from './renderer/ui/RoomIntroPanel'
 import { projectPlayerHud } from './renderer/ui/playerHud'
 import type { PlayerHudView } from './renderer/ui/playerHud'
-import type { QuestView } from './domain/quests/evaluateQuest'
+import { evaluateQuest, type QuestView } from './domain/quests/evaluateQuest'
 import type { QuestSpec } from './domain/quests/questSpec'
 import { demoQuestSpec } from './domain/examples/demoQuest'
 import type { JournalView } from './domain/journal/projectJournal'
 import type { JournalSpec } from './domain/journal/journalSpec'
+import type { GeneratedConsequenceJournalInput } from './domain/journal/generatedConsequenceJournal'
 import { demoJournalSpec } from './domain/examples/demoJournal'
 import type { WorldState } from './domain/world/worldState'
 import type { RoomSource } from './domain/ports/RoomSource'
@@ -54,6 +55,7 @@ import type { WorldBibleSeed } from './domain/worldBible/worldBibleSeed'
 import { worldBibleToAdjacentThemeSeed } from './domain/worldBible/worldBibleToSeed'
 import { buildAdjacentRoomSeed } from './app/buildAdjacentRoomSeed'
 import { deriveStoryThreadContext, storyThreadToSeedPhrase } from './domain/generatedStoryThread'
+import type { GeneratedStoryThreadKind } from './domain/generatedStoryThread'
 import { prepareGeneratedRoomSeed } from './app/worldBible'
 import { buildPromptGeneratedRoomSource } from './app/buildPromptGeneratedRoomSource'
 import {
@@ -138,6 +140,7 @@ type ActivePlay = {
   initialPlayer: PlayerHudView
   questSpec?: QuestSpec
   journalSpec?: JournalSpec
+  storyKind?: GeneratedStoryThreadKind
   objectivesPerRoom?: boolean
   entryResolvedObjectIds?: ReadonlySet<string>
 }
@@ -207,6 +210,18 @@ function startRoomSession(room: LoadedRoom): Promise<WorldStateResult> {
       inventory: [],
     },
   })
+}
+
+function buildGeneratedJournalInput(
+  play: ActivePlay,
+  state: WorldState,
+  questSpec: QuestSpec | null,
+): GeneratedConsequenceJournalInput {
+  const questForJournal = questSpec ? evaluateQuest(questSpec, state) : null
+  const storyContext = play.storyKind !== undefined
+    ? deriveStoryThreadContext(play.storyKind, play.room.id)
+    : undefined
+  return { state, room: play.room, quest: questForJournal, storyContext }
 }
 
 type ExampleBootstrapResult = ActivePlay & { initialState: WorldState }
@@ -293,7 +308,17 @@ function App() {
   // interaction/encounter resolve) so the projection logic can never drift
   // between sites. Stable (no deps).
   const refreshDerivedViews = useCallback((state: WorldState) => {
-    const views = computeDerivedViews(state, questSpecRef.current, journalSpecRef.current)
+    const play = activePlayRef.current
+    const generatedJournalInput =
+      play != null && (play.objectivesPerRoom === true || play.storyKind !== undefined)
+        ? buildGeneratedJournalInput(play, state, questSpecRef.current)
+        : undefined
+    const views = computeDerivedViews(
+      state,
+      questSpecRef.current,
+      journalSpecRef.current,
+      generatedJournalInput,
+    )
     setPlayerHud(views.playerHud)
     setQuest(views.quest)
     setJournal(views.journal)
@@ -445,6 +470,7 @@ function App() {
           navigation: generatedNavigation,
           adjacentPregenerator: generatedPregenerator,
           ...(prepared.worldBible ? { worldBible: prepared.worldBible } : {}),
+          ...(storyKind ? { storyKind } : {}),
           initialPlayer,
           ...(generatedObjective ? { questSpec: generatedObjective.questSpec } : {}),
           objectivesPerRoom: true,
@@ -614,34 +640,31 @@ function App() {
         setQuestSpecForView(activePlay.questSpec ?? null)
         setQuestHints(null)
       }
-      setActivePlay((current) => current?.sessionId === activePlay.sessionId
-        ? (() => {
-            const nextPlay = {
-              room: result.room,
-              roomSource: preloadedRoomSource(result.room),
-              sessionId: activePlay.sessionId,
-              roomCache: activePlay.roomCache,
-              navigation: activePlay.navigation,
-              adjacentPregenerator: activePlay.adjacentPregenerator,
-              worldBible: activePlay.worldBible,
-              initialPlayer: activePlay.initialPlayer,
-              ...(nextQuestSpec ? { questSpec: nextQuestSpec } : {}),
-              journalSpec: activePlay.journalSpec,
-              ...(activePlay.objectivesPerRoom === true
-                ? {
-                    objectivesPerRoom: true,
-                    entryResolvedObjectIds: resolvedObjectIdsForGeneratedPlay({
-                      objectivesPerRoom: true,
-                      state: result.state,
-                      room: result.room,
-                    }),
-                  }
-                : {}),
+      const nextPlay: ActivePlay = {
+        room: result.room,
+        roomSource: preloadedRoomSource(result.room),
+        sessionId: activePlay.sessionId,
+        roomCache: activePlay.roomCache,
+        navigation: activePlay.navigation,
+        adjacentPregenerator: activePlay.adjacentPregenerator,
+        ...(activePlay.worldBible ? { worldBible: activePlay.worldBible } : {}),
+        ...(activePlay.storyKind ? { storyKind: activePlay.storyKind } : {}),
+        initialPlayer: activePlay.initialPlayer,
+        ...(nextQuestSpec ? { questSpec: nextQuestSpec } : {}),
+        ...(activePlay.journalSpec ? { journalSpec: activePlay.journalSpec } : {}),
+        ...(activePlay.objectivesPerRoom === true
+          ? {
+              objectivesPerRoom: true,
+              entryResolvedObjectIds: resolvedObjectIdsForGeneratedPlay({
+                objectivesPerRoom: true,
+                state: result.state,
+                room: result.room,
+              }),
             }
-            activePlayRef.current = nextPlay
-            return nextPlay
-          })()
-        : current)
+          : {}),
+      }
+      activePlayRef.current = nextPlay
+      setActivePlay((current) => current?.sessionId === activePlay.sessionId ? nextPlay : current)
       setRoomEntrySeq((seq) => seq + 1)
       // Warm the next frontier from the room we just entered.
       activePlay.adjacentPregenerator?.warmAdjacent(result.room)
