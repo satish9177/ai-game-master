@@ -6,6 +6,7 @@ import {
 } from './App'
 import {
   attachPerRoomObjectiveOnEnter,
+  buildGeneratedRoomCacheSaveJson,
   buildGeneratedQuestSaveJson,
   buildQuestStage,
   readPerRoomObjectiveMemo,
@@ -13,6 +14,7 @@ import {
   resolvedObjectIdsForRoom,
   shouldStartPerRoomObjectiveAttach,
 } from './app/App.helpers'
+import { loadGeneratedRoomCacheSaveState } from './domain/quests/generatedRoomCacheSaveState'
 import { loadGeneratedQuestSaveState } from './domain/quests/generatedQuestSaveState'
 import { restoreGeneratedQuestPlay } from './app/restoreGeneratedQuestPlay'
 import { buildPromptGeneratedRoomSource } from './app/buildPromptGeneratedRoomSource'
@@ -1632,6 +1634,223 @@ describe('generated quest save parking — handleSave wiring (ADR-0059, slice 4)
     // Save path: build only for generated play and pass it as the third write arg.
     expect(appSource).toContain('buildGeneratedQuestSaveJson(')
     expect(appSource).toContain('generatedQuestJson,')
+  })
+})
+
+describe('generated room cache save parking — handleSave wiring (ADR-0060, slice 4)', () => {
+  const currentRoom = makeRoom(
+    [
+      {
+        type: 'scroll',
+        id: 'current-object',
+        position: [0, 0, -2],
+        interaction: { key: 'E', prompt: 'Read current', effect: { kind: 'inspect' } },
+      },
+    ],
+    'current-room',
+    'Current Generated Room',
+  )
+  const visitedRoom = makeRoom(
+    [
+      {
+        type: 'scroll',
+        id: 'visited-object',
+        position: [0, 0, -2],
+        interaction: { key: 'E', prompt: 'Read visited', effect: { kind: 'inspect' } },
+      },
+    ],
+    'visited-room',
+    'Visited Generated Room',
+  )
+  const warmedRoom = makeRoom([], 'warmed-room', 'Warmed Generated Room')
+
+  function cacheWorld(roomStates: WorldState['roomStates']): WorldState {
+    return makeState({ currentRoomId: currentRoom.id, roomStates })
+  }
+
+  it('generated play → returns a defined generatedRoomCacheJson string', () => {
+    const json = buildGeneratedRoomCacheSaveJson({
+      room: currentRoom,
+      objectivesPerRoom: true,
+      cachedRooms: [{ roomId: currentRoom.id, room: currentRoom, provenance: 'generated' }],
+      worldState: cacheWorld({ [currentRoom.id]: { visited: true } }),
+    })
+
+    expect(typeof json).toBe('string')
+    expect(json).not.toBe('')
+  })
+
+  it('the parked cache string re-validates through loadGeneratedRoomCacheSaveState', () => {
+    const json = buildGeneratedRoomCacheSaveJson({
+      room: currentRoom,
+      objectivesPerRoom: true,
+      cachedRooms: [{ roomId: currentRoom.id, room: currentRoom, provenance: 'generated' }],
+      worldState: cacheWorld({ [currentRoom.id]: { visited: true } }),
+    })
+
+    expect(json).toBeDefined()
+    expect(loadGeneratedRoomCacheSaveState(json!).ok).toBe(true)
+  })
+
+  it('forces the current room first regardless of snapshot order', () => {
+    const json = buildGeneratedRoomCacheSaveJson({
+      room: currentRoom,
+      objectivesPerRoom: true,
+      cachedRooms: [
+        { roomId: visitedRoom.id, room: visitedRoom, provenance: 'repaired' },
+        { roomId: currentRoom.id, room: currentRoom, provenance: 'generated' },
+      ],
+      worldState: cacheWorld({
+        [currentRoom.id]: { visited: true },
+        [visitedRoom.id]: { visited: true },
+      }),
+    })
+    const loaded = loadGeneratedRoomCacheSaveState(json!)
+    expect(loaded.ok).toBe(true)
+    if (!loaded.ok) return
+
+    expect(loaded.state.rooms.map((entry) => entry.room.id)).toEqual([
+      currentRoom.id,
+      visitedRoom.id,
+    ])
+  })
+
+  it('includes visited cached rooms and excludes warmed unvisited rooms', () => {
+    const json = buildGeneratedRoomCacheSaveJson({
+      room: currentRoom,
+      objectivesPerRoom: true,
+      cachedRooms: [
+        { roomId: currentRoom.id, room: currentRoom, provenance: 'generated' },
+        { roomId: visitedRoom.id, room: visitedRoom, provenance: 'fallback' },
+        { roomId: warmedRoom.id, room: warmedRoom, provenance: 'generated' },
+      ],
+      worldState: cacheWorld({
+        [currentRoom.id]: { visited: true },
+        [visitedRoom.id]: { visited: true },
+      }),
+      themePack: 'post-apoc',
+    })
+    const loaded = loadGeneratedRoomCacheSaveState(json!)
+    expect(loaded.ok).toBe(true)
+    if (!loaded.ok) return
+
+    expect(loaded.state.themePack).toBe('post-apoc')
+    expect(loaded.state.rooms.map((entry) => entry.room.id)).toEqual([
+      currentRoom.id,
+      visitedRoom.id,
+    ])
+    expect(loaded.state.rooms.map((entry) => entry.provenance)).toEqual([
+      'generated',
+      'fallback',
+    ])
+  })
+
+  it('preserves object ids internally for saved generated rooms', () => {
+    const json = buildGeneratedRoomCacheSaveJson({
+      room: currentRoom,
+      objectivesPerRoom: true,
+      cachedRooms: [{ roomId: currentRoom.id, room: currentRoom, provenance: 'generated' }],
+      worldState: cacheWorld({ [currentRoom.id]: { visited: true } }),
+    })
+    const loaded = loadGeneratedRoomCacheSaveState(json!)
+    expect(loaded.ok).toBe(true)
+    if (!loaded.ok) return
+
+    expect(loaded.state.rooms[0]?.room.objects).toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: 'current-object' })]),
+    )
+  })
+
+  it('authored/non-generated play → returns undefined so no cache blob is parked', () => {
+    expect(
+      buildGeneratedRoomCacheSaveJson({
+        room: currentRoom,
+        cachedRooms: [{ roomId: currentRoom.id, room: currentRoom }],
+        worldState: cacheWorld({ [currentRoom.id]: { visited: true } }),
+      }),
+    ).toBeUndefined()
+    expect(
+      buildGeneratedRoomCacheSaveJson({
+        room: currentRoom,
+        objectivesPerRoom: false,
+        cachedRooms: [{ roomId: currentRoom.id, room: currentRoom }],
+        worldState: cacheWorld({ [currentRoom.id]: { visited: true } }),
+      }),
+    ).toBeUndefined()
+  })
+
+  it('returns undefined when the schema guard yields null', () => {
+    const invalidRoom = {
+      ...currentRoom,
+      shell: { dimensions: { width: 0, depth: 18, height: 4 }, exits: [] },
+    } as unknown as LoadedRoom
+
+    expect(
+      buildGeneratedRoomCacheSaveJson({
+        room: invalidRoom,
+        objectivesPerRoom: true,
+        cachedRooms: [{ roomId: invalidRoom.id, room: invalidRoom }],
+        worldState: cacheWorld({ [invalidRoom.id]: { visited: true } }),
+      }),
+    ).toBeUndefined()
+  })
+
+  it('does not include prompt/provider/seed/worldBible strings supplied outside RoomSpec fields', () => {
+    const json = buildGeneratedRoomCacheSaveJson({
+      room: currentRoom,
+      objectivesPerRoom: true,
+      cachedRooms: [{ roomId: currentRoom.id, room: currentRoom, provenance: 'generated' }],
+      worldState: cacheWorld({
+        [currentRoom.id]: {
+          visited: true,
+          flags: {
+            SENTINEL_RAW_PROMPT: true,
+            SENTINEL_PROVIDER_OUTPUT: true,
+            SENTINEL_ADJACENT_THEME_SEED: true,
+            SENTINEL_WORLDBIBLE_TEXT: true,
+          },
+        },
+      }),
+    })!
+
+    expect(json).not.toContain('SENTINEL_RAW_PROMPT')
+    expect(json).not.toContain('SENTINEL_PROVIDER_OUTPUT')
+    expect(json).not.toContain('SENTINEL_ADJACENT_THEME_SEED')
+    expect(json).not.toContain('SENTINEL_WORLDBIBLE_TEXT')
+  })
+
+  it('App source wires cache blob creation into save only', () => {
+    const handleSave = appSource.slice(
+      appSource.indexOf('const handleSave = useCallback('),
+      appSource.indexOf('const handleLoad = useCallback('),
+    )
+    const handleLoad = appSource.slice(
+      appSource.indexOf('const handleLoad = useCallback('),
+      appSource.indexOf('const handleNavigate = useCallback('),
+    )
+
+    expect(handleSave).toContain('buildGeneratedRoomCacheSaveJson(')
+    expect(handleSave).toContain('snapshotCachedRooms()')
+    expect(handleSave).toContain('worldSession.getWorldState(activePlay.sessionId)')
+    expect(handleSave).toContain('generatedRoomCacheJson,')
+    expect(handleLoad).not.toContain('generatedRoomCacheJson')
+    expect(handleLoad).not.toContain('loadGeneratedRoomCacheSaveState')
+    expect(handleLoad).not.toContain('restoreGeneratedRoomCache')
+  })
+
+  it('cache save path makes no provider, generator, or cost-meter call', () => {
+    const handleSave = appSource.slice(
+      appSource.indexOf('const handleSave = useCallback('),
+      appSource.indexOf('const handleLoad = useCallback('),
+    )
+
+    expect(handleSave).not.toContain('recordAttempt')
+    expect(handleSave).not.toContain('objectiveGenerator')
+    expect(handleSave).not.toContain('buildGeneratedObjectiveAttachment')
+    expect(handleSave).not.toContain('GeneratedRoomSource')
+    expect(handleSave).not.toContain('FakeRoomGenerator')
+    expect(handleSave).not.toContain('resolveRoom(')
+    expect(handleSave).not.toContain('warmAdjacent(')
   })
 })
 

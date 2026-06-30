@@ -3,7 +3,9 @@ import type { RoomProvenance } from '../domain/assembleRoom'
 import { buildNPCObjectiveContext } from '../domain/dialogue/buildNPCObjectiveContext'
 import type { QuestDialogueContext } from '../domain/dialogue/contracts'
 import type { GeneratedStoryThreadKind } from '../domain/generatedStoryThread'
+import type { GeneratedRoomVisualTheme } from '../domain/generatedRoomThemeVocabulary'
 import { resolvedObjectIds } from '../domain/interactions/resolvedObjects'
+import { buildGeneratedRoomCacheSaveState } from '../domain/quests/generatedRoomCacheSaveState'
 import { buildGeneratedQuestSaveState } from '../domain/quests/generatedQuestSaveState'
 import type { QuestView } from '../domain/quests/evaluateQuest'
 import type { QuestSpec } from '../domain/quests/questSpec'
@@ -23,6 +25,12 @@ export type QuestHintState = {
 }
 
 export type PerRoomObjectiveMemo = Map<string, GeneratedObjectiveQuestAttachment | null>
+
+export type GeneratedRoomCacheSnapshotEntry = {
+  roomId: string
+  room: LoadedRoom
+  provenance?: RoomProvenance
+}
 
 export type CurrentPlayIdentity = {
   room: Pick<LoadedRoom, 'id'>
@@ -136,6 +144,36 @@ export function buildGeneratedQuestSaveJson(
     ...(play.questSpec !== undefined ? { questSpec: play.questSpec } : {}),
     ...(play.storyKind !== undefined ? { storyKind: play.storyKind } : {}),
     ...(hints !== null ? { hints } : {}),
+  })
+
+  return saveState !== null ? JSON.stringify(saveState) : undefined
+}
+
+export function buildGeneratedRoomCacheSaveJson(input: {
+  room: LoadedRoom
+  objectivesPerRoom?: boolean
+  cachedRooms: GeneratedRoomCacheSnapshotEntry[]
+  worldState: WorldState
+  themePack?: GeneratedRoomVisualTheme
+}): string | undefined {
+  if (input.objectivesPerRoom !== true) return undefined
+
+  const currentSnapshot = input.cachedRooms.find((entry) => entry.roomId === input.room.id)
+  const currentEntry = {
+    room: input.room,
+    provenance: currentSnapshot?.provenance ?? 'generated',
+  } as const
+  const visitedEntries = input.cachedRooms
+    .filter((entry) => entry.roomId !== input.room.id)
+    .filter((entry) => input.worldState.roomStates[entry.roomId]?.visited === true)
+    .map((entry) => ({
+      room: entry.room,
+      provenance: entry.provenance ?? 'generated',
+    }))
+
+  const saveState = buildGeneratedRoomCacheSaveState({
+    rooms: [currentEntry, ...visitedEntries],
+    ...(input.themePack !== undefined ? { themePack: input.themePack } : {}),
   })
 
   return saveState !== null ? JSON.stringify(saveState) : undefined

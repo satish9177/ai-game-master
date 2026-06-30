@@ -66,6 +66,7 @@ import {
 } from './app/generatedObjective'
 import {
   attachPerRoomObjectiveOnEnter,
+  buildGeneratedRoomCacheSaveJson,
   buildGeneratedQuestSaveJson,
   buildQuestStage,
   readPerRoomObjectiveMemo,
@@ -570,6 +571,21 @@ function App() {
         },
         questHintsRef.current,
       )
+      let generatedRoomCacheJson: string | undefined
+      if (activePlay.objectivesPerRoom === true && activePlay.adjacentPregenerator != null) {
+        const stateForCache = await worldSession.getWorldState(activePlay.sessionId)
+        if (stateForCache.ok) {
+          generatedRoomCacheJson = buildGeneratedRoomCacheSaveJson({
+            room: activePlay.room,
+            objectivesPerRoom: activePlay.objectivesPerRoom,
+            cachedRooms: activePlay.adjacentPregenerator.snapshotCachedRooms(),
+            worldState: stateForCache.state,
+            ...(activePlay.worldBible?.themePack !== undefined
+              ? { themePack: activePlay.worldBible.themePack }
+              : {}),
+          })
+        }
+      }
       const writeResult = saveSlotStore.write(
         saveResult.json,
         {
@@ -577,6 +593,7 @@ function App() {
           label: 'Save',
         },
         generatedQuestJson,
+        generatedRoomCacheJson,
       )
       if (!writeResult.ok) {
         setSaveLoadStatus('error')
