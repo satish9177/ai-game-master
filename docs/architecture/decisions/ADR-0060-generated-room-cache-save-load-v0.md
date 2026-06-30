@@ -1,7 +1,8 @@
 # ADR-0060: Generated Room Cache Save/Load v0 — safe parked visited-room cache for stable backtracking after load
 
-- **Status:** Accepted — pending implementation
+- **Status:** Accepted — implemented
 - **Date:** 2026-06-30
+- **Implemented:** 2026-06-30
 - **Deciders:** Project owner
 
 ## Context
@@ -182,9 +183,9 @@ In `handleSave` (App.tsx):
    b. Call `activePlay.adjacentPregenerator.snapshotCachedRooms()` — a new read-only accessor
       that returns all currently cached rooms in insertion order as
       `Array<{ roomId: string; room: LoadedRoom; provenance?: RoomProvenance }>`.
-   c. Filter to entries where `worldState.roomStates[roomId]` exists (i.e., the room was
-      visited and recorded in the event log) **or** `roomId === activePlay.room.id` (ensures
-      current room is always included even when its `roomState` entry is fresh).
+   c. Filter to entries where `roomId === activePlay.room.id` (ensures the current room is
+      always included) or where `worldState.roomStates[roomId]?.visited === true` (visited
+      generated rooms only).
    d. Reorder: current room first, remaining in snapshot insertion order.
    e. Call `buildGeneratedRoomCacheSaveState({ rooms: filtered, themePack: activePlay.worldBible?.themePack })`.
    f. If non-null, serialize and pass as `generatedRoomCacheJson` to `saveSlotStore.write`.
@@ -207,9 +208,10 @@ In `handleLoad` (App.tsx), after the existing `WorldState` restore and the
    the quest restore blob to seed the story-phrase factory. Use `{ ensureReturnExits: true }`.
 5. Build a `NavigationService` over the generated pregenerator.
 6. Seed `perRoomObjectiveMemoRef.current` for all restored room IDs:
-   - For the **current room**: seed with `{ questSpec, hint, completionHint }` from the quest
-     blob if available, otherwise `null`. This allows re-entering the current room after
-     navigating away and back to show the restored objective.
+   - For the **current room**: seed with the restored `questSpec` when present, even if hints
+     are absent. Missing hints become empty strings in the memo attachment. If there is no
+     quest spec, seed `null`. This allows re-entering the current room after navigating away
+     and back to show the restored objective when ADR-0059 restored one.
    - For **all other restored rooms**: seed `null`. This blocks
      `shouldStartPerRoomObjectiveAttach` (no LLM call, no cost increment) and clears any
      stale current-room quest spec from the UI on navigation to those rooms.
@@ -225,7 +227,7 @@ In `handleLoad` (App.tsx), after the existing `WorldState` restore and the
 **`restoreGeneratedRoomCache`** (composition helper in `app/restoreGeneratedRoomCache.ts`):
 
 Takes `(state: GeneratedRoomCacheSaveState, currentRoom: LoadedRoom)`. Returns:
-`{ cache: SessionRoomCache; provenance: Map<string, RoomProvenance>; restoredRoomIds: string[] }`.
+`{ cache: SessionRoomCache; provenance: Map<string, RoomProvenance>; restoredRoomIds: string[]; skippedRoomCount: number }`.
 
 Steps:
 1. Build a fresh `SessionRoomCache`.
@@ -236,7 +238,8 @@ Steps:
    c. `provenance.set(room.id, entry.provenance)`.
 3. Additionally `cache.set(currentRoom.id, currentRoom)` (idempotent; the current room is
    already in `state.rooms` by save-time ordering, but this guards against schema drift).
-4. Return `{ cache, provenance, restoredRoomIds: [...cache.keys()] }`.
+4. Return the cache, provenance map, deterministic restored-room id list, and skipped-entry
+   count. The current room is always present even when the cache blob is missing it.
 
 No `assembleRoom`, no enrichment stages, no generator, no provider call. The parked objects
 are already the post-assembly output; `loadRoomSpec` is the correct and sufficient boundary.
@@ -246,7 +249,7 @@ are already the post-assembly output; `loadRoomSpec` is the correct and sufficie
 | Situation | Behavior |
 |---|---|
 | No `generatedRoomCacheJson` in slot (older save, authored save) | Slot reads fine; field is `undefined`; ADR-0059 current-room restore only; no error |
-| `loadGeneratedRoomCacheSaveState` fails (corrupt, schema mismatch, `schemaVersion !== 1`) | Falls back to ADR-0059 single-room behavior; fixed code logged; no error surfaced |
+| `loadGeneratedRoomCacheSaveState` fails (corrupt, schema mismatch, `schemaVersion !== 1`) | Falls back to ADR-0059 single-room behavior; no error surfaced; unsafe input is never echoed |
 | `restoreGeneratedRoomCache` skips one bad entry | Remaining entries restored; that room regenerates on backtrack; logged as count |
 | `worldSession.getWorldState` fails during save | Cache blob omitted silently; main save succeeds |
 | Rooms beyond cap visited before save | Only first 16 rooms (current room first) persisted; deeper backtracking regenerates |

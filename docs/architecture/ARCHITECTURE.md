@@ -80,7 +80,12 @@ Throughout these docs:
   generated quest, room, story markers, and resolved-object state across
   Save/Continue/Load with no `SaveGame` schema change and no LLM call on load;
   missing or invalid blob degrades safely to authored-world fallback
-  ([ADR-0059](./decisions/ADR-0059-generated-quest-save-load-v0.md)).
+  ([ADR-0059](./decisions/ADR-0059-generated-quest-save-load-v0.md));
+  Generated Room Cache Save/Load v0 — optional `generatedRoomCacheJson` sidecar
+  restores visited generated rooms for stable cached backtracking after load,
+  gated by `generatedQuestJson`, with no `SaveGame` schema change and no provider
+  or cost call on load/cached backtracking
+  ([ADR-0060](./decisions/ADR-0060-generated-room-cache-save-load-v0.md)).
 - 🔜 **Planned** — future approved slices, when present, are listed here.
 - ❌ **Not built** — future shape only; documented so we don't paint into a corner.
 
@@ -583,10 +588,50 @@ schema or calling any LLM or generator on load
   `schemaVersion` fields all remain `1`.
 - **No cost impact.** `recordAttempt` is not called on load; the usage meter is
   unchanged.
-- **v0 known limitations.** Only the current room is restored. Generated adjacent
-  room cache, worldBible-seeded `AdjacentRoomPregenerator`, and full generated-world
-  navigation are not restored. After a generated load, onward navigation uses the
-  authored `adjacentPregenerator` — a documented known limitation.
+- **Relationship to generated room cache restore.** This blob remains the gate for
+  generated restore. ADR-0060 may additionally restore visited generated rooms from
+  `generatedRoomCacheJson`, but only after this `generatedQuestJson` path succeeds.
+  If the quest blob is missing or corrupt, the cache blob is ignored.
+
+## Generated Room Cache Save/Load v0
+
+✅ **Implemented, browser/app composition + local sidecar.** Generated Room Cache
+Save/Load v0 extends the ADR-0059 sidecar pattern with an optional
+`generatedRoomCacheJson` blob beside `saveGameJson` and `generatedQuestJson`
+([ADR-0060](./decisions/ADR-0060-generated-room-cache-save-load-v0.md)).
+
+- **Non-authoritative byte parking.** `generatedRoomCacheJson` is local
+  `SlotWrapper` sidecar data only. `saveGameJson`, `SaveGameService`,
+  `WorldSession`, the event log, and projected `WorldState` remain authoritative.
+  No `SaveGame`, `WorldState`, `RoomSpec`, or `QuestSpec` schema changes were made.
+- **Gated by ADR-0059.** `generatedQuestJson` remains the gate for generated
+  restore. A valid cache blob is processed only after generated quest restore
+  succeeds; a missing/corrupt quest blob ignores the cache blob and falls through
+  to the authored-world path.
+- **Visited rooms only.** Save includes the current generated room first, then
+  cached generated rooms whose `WorldState.roomStates[roomId]?.visited === true`.
+  Warmed/unvisited adjacent rooms are not persisted. The hard cap is 16.
+- **Deterministic ordering, not MRU.** Ordering is current-room-first plus
+  deterministic snapshot/cache order. It is not true most-recently-used ordering;
+  rooms beyond the cap may regenerate on deep backtracking.
+- **Restore behavior.** Valid cache blobs are re-validated through
+  `loadGeneratedRoomCacheSaveState`, restored via `restoreGeneratedRoomCache`, and
+  served through a generated `AdjacentRoomPregenerator`/`NavigationService` over the
+  rehydrated `SessionRoomCache`. Missing or corrupt cache blobs degrade to the
+  ADR-0059 current-room-only generated restore with no user-facing error.
+- **No provider or cost path.** Load and cached backtracking do not call providers,
+  LLMs, `FakeRoomGenerator.generate`, `GeneratedRoomSource.resolve`, objective
+  generation, `warmAdjacent`, or `recordAttempt`. Cached backtracking resolves from
+  the restored cache.
+- **Objective UI safety.** The restored current room keeps its ADR-0059 quest
+  attachment when `questSpec` exists, even if hints are absent. Restored non-current
+  cached rooms seed `null` objective memo entries, clearing stale current-room
+  objective UI and preventing objective regeneration/cost on backtrack.
+- **Prompt/content exclusion.** `WorldBibleSeed` free text and `adjacentThemeSeed`
+  are not restored. Logs/UI must not expose raw prompt, provider output, raw
+  objective JSON, seeds, WorldBible free text, object IDs, flag text, room names, or
+  object names. Stored `RoomSpec` may contain object IDs internally only so
+  `resolvedObjectIds` can match authoritative flags again.
 
 ## Room Inspect Summary v0
 
@@ -1492,8 +1537,11 @@ hints; only `saveGameJson` crosses the integrity boundary.
   `FALLBACK_NOTICE` shown and `degraded:true`. In every case the player resumes at the correct
   `currentRoomId` with correct inventory/health/status/`roomStates`; only room visuals are
   best-effort for non-authored rooms.
-- **Room cache not restored.** `resolveRoom` naturally populates the resolved current room;
-  neighbours warm on demand as in normal play.
+- **Room cache restoration.** Authored saves still restore through the existing
+  current-room resolver. Generated saves may additionally park optional
+  `generatedQuestJson` and `generatedRoomCacheJson` sidecars; when both validate,
+  visited generated rooms are rehydrated into a generated cache for stable
+  backtracking. These sidecars are local, optional, and never authoritative.
 - **Not changed:** `domain/world/saveGame.ts` · `world-session/saveGame.ts` ·
   `domain/ports/WorldStore.ts` · `world-session/InMemoryWorldStore.ts` · `persistence/**` ·
   `server/**` · `renderer/engine/**` · `renderer/RoomViewer.tsx` · `eslint.config.js` ·

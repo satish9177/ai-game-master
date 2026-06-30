@@ -2,7 +2,7 @@
 
 > Feature branch: `feature/generated-room-cache-save-load-v0`
 > ADR: [ADR-0060](../decisions/ADR-0060-generated-room-cache-save-load-v0.md)
-> Status: **pending implementation**
+> Status: **implemented — slices 1-5 complete; docs closeout complete**
 
 ## Overview
 
@@ -13,6 +13,18 @@ generated `AdjacentRoomPregenerator` and `NavigationService` over it, and seeds 
 objective memo for all restored rooms — with no LLM call, no cost increment, no schema
 change, and no regression to ADR-0059 current-room restore. Older saves and authored
 sessions degrade safely.
+
+**Closeout status (2026-06-30):** implemented. `generatedQuestJson` remains the gate for
+generated restore. `generatedRoomCacheJson` is an optional, local, non-authoritative sidecar:
+valid cache blobs restore the current room plus visited generated rooms only; missing or
+corrupt cache blobs degrade to ADR-0059 current-room-only generated restore. The current room
+is always first, the hard cap is 16, remaining entries follow deterministic snapshot/cache
+order rather than true MRU, and warmed/unvisited adjacent rooms are omitted. `WorldBibleSeed`
+free text, `adjacentThemeSeed`, raw prompts, provider output, seeds, raw objective JSON,
+object IDs, and flag text are not restored to UI/logs. Deep backtracking beyond the cap may
+regenerate. Load and cached backtracking must not call providers, LLMs, objective generation,
+or cost accounting; restored non-current cached rooms seed `null` objective memo entries so
+stale current-room objective UI is cleared and objectives are not regenerated.
 
 **Key architectural fact:** the existing `resolvedObjectIds` and `shouldStartPerRoomObjectiveAttach`
 semantics are unchanged. Restoring the correct object IDs (from the parked `RoomSpec`) plus
@@ -638,10 +650,10 @@ if (activePlay.objectivesPerRoom === true && activePlay.adjacentPregenerator != 
   const stateForCache = await worldSession.getWorldState(activePlay.sessionId)
   if (stateForCache.ok) {
     const allCached = activePlay.adjacentPregenerator.snapshotCachedRooms()
-    // Filter: visited rooms (have roomState entry) + always include current room.
+    // Filter: visited rooms + always include current room.
     const visited = allCached.filter(
       (entry) =>
-        stateForCache.state.roomStates[entry.roomId] != null ||
+        stateForCache.state.roomStates[entry.roomId]?.visited === true ||
         entry.roomId === activePlay.room.id,
     )
     // Reorder: current room first; remaining in snapshot insertion order.
@@ -658,11 +670,6 @@ if (activePlay.objectivesPerRoom === true && activePlay.adjacentPregenerator != 
     })
     if (saveState != null) {
       generatedRoomCacheJson = JSON.stringify(saveState)
-      logger.info('generated room cache saved', {
-        roomCount: saveState.rooms.length,
-        themePack: saveState.themePack ?? 'none',
-        generatedRoomCacheSaved: true,
-      })
     }
     // If null (schema guard), omit silently — main save already succeeded.
   }
@@ -716,8 +723,9 @@ File: `apps/web/src/App.test.tsx` (extend; do not replace existing tests).
 7. **`buildGeneratedRoomCacheSaveState` returning `null` (mocked schema guard) → save
    still completes without cache blob.** Main save unaffected.
 
-8. **Log line on save contains `roomCount` and `themePack` (closed enum) only — no room
-   name, object name, or IDs.** Assert log output for the save path.
+8. **No cache-specific log line on save.** Assert the save path does not log the blob,
+   room IDs, object IDs, flag keys, room/object names, prompt/provider text, seeds, or
+   WorldBible free text.
 
 9. **Existing save tests pass unchanged.** All pre-existing save-related `App.test.tsx`
    and `generatedQuestSaveState` cases remain green.
@@ -817,11 +825,11 @@ if (cacheJson != null) {
     //   prevents stale current-room quest UI showing on those rooms).
     const currentRoomId = restoredGeneratedPlay.room.id
     const currentRoomAttachment =
-      restoredGeneratedPlay.questSpec != null && restoredGeneratedPlay.hints != null
+      restoredGeneratedPlay.questSpec != null
         ? {
             questSpec: restoredGeneratedPlay.questSpec,
-            hint: restoredGeneratedPlay.hints.hint,
-            completionHint: restoredGeneratedPlay.hints.completionHint,
+            hint: restoredGeneratedPlay.hints?.hint ?? '',
+            completionHint: restoredGeneratedPlay.hints?.completionHint ?? '',
           }
         : null
     for (const roomId of restoredRoomIds) {
@@ -831,12 +839,7 @@ if (cacheJson != null) {
       )
     }
 
-    logger.info('generated room cache restored', {
-      roomCount: restoredRoomIds.length,
-      generatedRoomCacheRestored: true,
-    })
   } else {
-    logger.info('generated room cache restore failed', { code: cacheLoaded.code, generatedRoomCacheRestored: false })
     // Fall through: use the ADR-0059 single-room cache + authored wiring.
   }
 }
@@ -917,7 +920,7 @@ File: `apps/web/src/App.test.tsx` (extend).
    Remove `generatedRoomCacheJson` from slot; load → no error; only current room in cache.
 
 10. **Generated session load (corrupt cache blob) → single-room ADR-0059 restore, no crash.**
-    Write `generatedRoomCacheJson: 'not-json'` to slot; load → fixed code logged;
+    Write `generatedRoomCacheJson: 'not-json'` to slot; load → fixed code returned internally;
     single-room cache; no error surfaced.
 
 11. **Generated session load (schema-invalid cache blob) → graceful fallback.**
@@ -986,12 +989,10 @@ below before requesting docs closeout. Await approval before Slice 6.
 - `docs/architecture/FAILURE-MODES.md` — add an entry describing: generated session load
   with valid cache blob → multi-room cache rehydrated; invalid/missing blob → ADR-0059
   single-room restore (no error); rooms beyond cap regenerate on deep backtrack.
-- `docs/architecture/decisions/ADR-0060-generated-room-cache-save-load-v0.md` — update
-  status from `Accepted — pending implementation` to `Accepted — implemented`; add
-  `Implemented: YYYY-MM-DD`.
-- `docs/architecture/implementation-plans/generated-room-cache-save-load-v0.md` — update
-  status from `pending implementation` to `implemented — slices 1–5 complete; docs
-  closeout complete`.
+- `docs/architecture/decisions/ADR-0060-generated-room-cache-save-load-v0.md` — status is
+  `Accepted — implemented` with an implementation date.
+- `docs/architecture/implementation-plans/generated-room-cache-save-load-v0.md` — status is
+  `implemented — slices 1-5 complete; docs closeout complete`.
 
 **Do not touch any runtime file in this slice.**
 

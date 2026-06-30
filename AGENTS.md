@@ -302,6 +302,7 @@ Implemented or shipped areas include:
 * generated-room NPC presence
 * generated-room bidirectional links v0
 * real generated objective provider v0
+* generated room cache save/load v0
 
 Do not paste full shipped-feature tables into this file. Detailed shipped notes should live in ADRs, architecture docs, or a dedicated status file.
 
