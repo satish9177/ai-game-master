@@ -53,6 +53,7 @@ import { FakeNPCDialogueProvider } from './dialogue/FakeNPCDialogueProvider'
 import type { WorldBibleSeed } from './domain/worldBible/worldBibleSeed'
 import { worldBibleToAdjacentThemeSeed } from './domain/worldBible/worldBibleToSeed'
 import { buildAdjacentRoomSeed } from './app/buildAdjacentRoomSeed'
+import { deriveStoryThreadContext, storyThreadToSeedPhrase } from './domain/generatedStoryThread'
 import { prepareGeneratedRoomSeed } from './app/worldBible'
 import { buildPromptGeneratedRoomSource } from './app/buildPromptGeneratedRoomSource'
 import {
@@ -387,18 +388,24 @@ function App() {
         const adjacentThemeSeed = prepared.worldBible
           ? worldBibleToAdjacentThemeSeed(prepared.worldBible)
           : undefined
+        const storyKind = prepared.worldBible?.openingArc.pattern
         const generatedAdjacentGenerator = new FakeRoomGenerator(vocabulary)
         const generatedPregenerator = new AdjacentRoomPregenerator(
           generatedCache,
           roomRegistry,
-          (roomId) =>
-            new GeneratedRoomSource(
+          (roomId) => {
+            const storyContext = deriveStoryThreadContext(storyKind, roomId)
+            const storyPhrase = storyContext
+              ? storyThreadToSeedPhrase(storyContext)
+              : undefined
+            return new GeneratedRoomSource(
               generatedAdjacentGenerator,
-              buildAdjacentRoomSeed(roomId, adjacentThemeSeed),
+              buildAdjacentRoomSeed(roomId, adjacentThemeSeed, storyPhrase),
               logger,
               fallbackRoom,
               { themePack: prepared.worldBible?.themePack, enrichObjectiveTarget: true },
-            ),
+            )
+          },
           fallbackRoom,
           logger,
           3,

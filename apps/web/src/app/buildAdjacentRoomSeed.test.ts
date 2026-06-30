@@ -16,6 +16,36 @@ describe('buildAdjacentRoomSeed', () => {
     expect(buildAdjacentRoomSeed('room-north-1')).toBe('adjacent:room-north-1')
   })
 
+  it('puts the theme and story phrase before the structural salt', () => {
+    expect(
+      buildAdjacentRoomSeed(
+        'room-north-1',
+        'fantasy-keep | mysterious | embers',
+        'investigation | early clues',
+      ),
+    ).toBe(
+      'fantasy-keep | mysterious | embers | investigation | early clues | adjacent:room-north-1',
+    )
+  })
+
+  it('puts the story phrase before the structural salt when no theme seed exists', () => {
+    expect(
+      buildAdjacentRoomSeed('room-north-1', undefined, 'investigation | early clues'),
+    ).toBe('investigation | early clues | adjacent:room-north-1')
+  })
+
+  it('keeps previous theme behavior byte-for-byte when story phrase is absent', () => {
+    expect(buildAdjacentRoomSeed('room-north-1', 'The Ember Crown | fantasy-keep')).toBe(
+      'The Ember Crown | fantasy-keep | adjacent:room-north-1',
+    )
+    expect(buildAdjacentRoomSeed('room-north-1', 'The Ember Crown | fantasy-keep', '')).toBe(
+      'The Ember Crown | fantasy-keep | adjacent:room-north-1',
+    )
+    expect(
+      buildAdjacentRoomSeed('room-north-1', 'The Ember Crown | fantasy-keep', '   \t\n  '),
+    ).toBe('The Ember Crown | fantasy-keep | adjacent:room-north-1')
+  })
+
   it('returns the current structural seed for an empty theme seed', () => {
     expect(buildAdjacentRoomSeed('room-north-1', '')).toBe('adjacent:room-north-1')
   })

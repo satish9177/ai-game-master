@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import {
@@ -31,6 +32,9 @@ import { FakeNPCDialogueProvider } from './dialogue/FakeNPCDialogueProvider'
 import { prepareGeneratedRoomSeed } from './app/worldBible'
 import { themeVocabulary } from './domain/generatedRoomThemeVocabulary'
 import { buildAdjacentRoomSeed } from './app/buildAdjacentRoomSeed'
+import { deriveStoryThreadContext, storyThreadToSeedPhrase } from './domain/generatedStoryThread'
+import type { WorldBibleSeed } from './domain/worldBible/worldBibleSeed'
+import { worldBibleToAdjacentThemeSeed } from './domain/worldBible/worldBibleToSeed'
 import { GeneratedRoomSource } from './room/GeneratedRoomSource'
 import { demoQuestSpec } from './domain/examples/demoQuest'
 
@@ -47,6 +51,37 @@ const noopLogger: Logger = {
 const WORLD_ID = '00000000-0000-4000-8000-000000000001'
 const SESSION_ID = '00000000-0000-4000-8000-000000000002'
 const UPDATED_AT = '2026-01-01T00:00:00.000Z'
+const SECRET_RAW_PROMPT = 'SECRET RAW PROMPT TEXT'
+
+const secretWorldBible: WorldBibleSeed = {
+  schemaVersion: 1,
+  title: SECRET_RAW_PROMPT,
+  themePack: 'fantasy-keep',
+  tone: 'mysterious',
+  premise: 'SECRET PREMISE TEXT',
+  startingLocation: 'SECRET STARTING LOCATION',
+  majorConflict: 'SECRET MAJOR CONFLICT',
+  factions: ['SECRET FACTION'],
+  npcs: [
+    { name: 'SECRET NPC ONE', role: 'Secret role one', disposition: 'ally' },
+    { name: 'SECRET NPC TWO', role: 'Secret role two', disposition: 'neutral' },
+  ],
+  locations: [
+    { label: 'SECRET LOCATION ONE', kind: 'secret kind one' },
+    { label: 'SECRET LOCATION TWO', kind: 'secret kind two' },
+  ],
+  generationHints: {
+    allowedThemePack: 'fantasy-keep',
+    keywords: ['ember', 'ward'],
+  },
+  canonNotes: ['SECRET CANON NOTE'],
+  openingArc: {
+    pattern: 'investigate',
+    hook: 'SECRET ARC HOOK',
+    firstObjective: 'SECRET ARC OBJECTIVE',
+    pressure: 'SECRET ARC PRESSURE',
+  },
+}
 
 function makeRoom(objects: unknown[], id = 'room-a', name = 'ruined investigation room'): LoadedRoom {
   return loadRoomSpec({
@@ -660,6 +695,65 @@ describe('App generated-play adjacent room source wiring', () => {
     const exampleBook = exampleResult.room.objects.find((object) => object.type === 'book')
     expect(exampleBook?.id).toBeUndefined()
     expect(exampleBook && 'interaction' in exampleBook ? exampleBook.interaction?.effect : undefined).toBeUndefined()
+  })
+
+  it('uses a story phrase in adjacent seeds only when a WorldBible pattern exists', () => {
+    const roomId = 'generated-room:exit:north'
+    const adjacentThemeSeed = worldBibleToAdjacentThemeSeed(secretWorldBible)
+    const storyContext = deriveStoryThreadContext(secretWorldBible.openingArc.pattern, roomId)
+    const storyPhrase = storyContext ? storyThreadToSeedPhrase(storyContext) : undefined
+
+    const seeded = buildAdjacentRoomSeed(roomId, adjacentThemeSeed, storyPhrase)
+    const degraded = buildAdjacentRoomSeed(
+      roomId,
+      undefined,
+      undefined,
+    )
+
+    expect(seeded).toBe(
+      `${adjacentThemeSeed} | investigation | early clues | adjacent:${roomId}`,
+    )
+    expect(degraded).toBe(`adjacent:${roomId}`)
+  })
+
+  it('keeps raw prompt and free-text WorldBible fields out of adjacent story seeds', () => {
+    const roomId = 'generated-room:exit:north'
+    const adjacentThemeSeed = worldBibleToAdjacentThemeSeed(secretWorldBible)
+    const storyContext = deriveStoryThreadContext(secretWorldBible.openingArc.pattern, roomId)
+    const storyPhrase = storyContext ? storyThreadToSeedPhrase(storyContext) : undefined
+    const seed = buildAdjacentRoomSeed(roomId, adjacentThemeSeed, storyPhrase)
+
+    expect(seed).toContain('investigation | early clues')
+    expect(seed).not.toContain(SECRET_RAW_PROMPT)
+    for (const secret of [
+      secretWorldBible.title,
+      secretWorldBible.premise,
+      secretWorldBible.startingLocation,
+      secretWorldBible.majorConflict,
+      secretWorldBible.factions[0]!,
+      secretWorldBible.npcs[0]!.name,
+      secretWorldBible.npcs[0]!.role,
+      secretWorldBible.locations[0]!.label,
+      secretWorldBible.locations[0]!.kind,
+      secretWorldBible.canonNotes[0]!,
+      secretWorldBible.openingArc.hook,
+      secretWorldBible.openingArc.firstObjective,
+      secretWorldBible.openingArc.pressure,
+    ]) {
+      expect(seed).not.toContain(secret)
+    }
+  })
+
+  it('App wiring reads only the closed openingArc pattern for story-thread context', () => {
+    const source = readFileSync(new URL('./App.tsx', import.meta.url), 'utf8')
+
+    expect(source).toContain('prepared.worldBible?.openingArc.pattern')
+    expect(source).toContain('deriveStoryThreadContext(storyKind, roomId)')
+    expect(source).toContain('storyThreadToSeedPhrase(storyContext)')
+    expect(source).toContain('buildAdjacentRoomSeed(roomId, adjacentThemeSeed, storyPhrase)')
+    expect(source).not.toContain('prepared.worldBible?.openingArc.hook')
+    expect(source).not.toContain('prepared.worldBible?.openingArc.firstObjective')
+    expect(source).not.toContain('prepared.worldBible?.openingArc.pressure')
   })
 })
 
