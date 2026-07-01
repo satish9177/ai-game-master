@@ -28,6 +28,7 @@ import { FakeWorldBibleSeeder } from './generation/FakeWorldBibleSeeder'
 import { readLlmConfig } from './app/llmConfig'
 import { selectRoomGenerator } from './app/selectRoomGenerator'
 import { selectObjectiveGenerator } from './app/selectObjectiveGenerator'
+import { selectGateGenerator } from './app/selectGateGenerator'
 import { evaluate, recordAttempt, initialUsageState, canAttemptOptional } from './domain/usage/usageGuard'
 import type { UsageGuardConfig } from './domain/usage/usageGuard'
 import { ErrorBoundary } from './app/ErrorBoundary'
@@ -68,6 +69,11 @@ import {
   type GeneratedObjectiveQuestAttachment,
 } from './app/generatedObjective'
 import {
+  buildGeneratedGateAttachment,
+  type ProviderGateStatus,
+} from './app/generatedGate'
+import type { GeneratedMechanicalGate } from './domain/generatedMechanicalGate'
+import {
   attachPerRoomObjectiveOnEnter,
   buildGeneratedRoomCacheSaveJson,
   buildGeneratedQuestSaveJson,
@@ -103,6 +109,8 @@ const adjacentGenerator = new FakeRoomGenerator()
 const { generator: objectiveGenerator, log: objectiveGeneratorSelectionLog } =
   selectObjectiveGenerator(llmConfig)
 logger.info('objective generator selected', objectiveGeneratorSelectionLog)
+const gateGeneratorSelection = selectGateGenerator(llmConfig)
+logger.info('gate generator selected', gateGeneratorSelection.log)
 const worldBibleSeeder = new FakeWorldBibleSeeder()
 const idGenerator = new UuidGenerator()
 const worldStore = new InMemoryWorldStore()
@@ -151,6 +159,8 @@ type ActivePlay = {
   storyKind?: GeneratedStoryThreadKind
   objectivesPerRoom?: boolean
   entryResolvedObjectIds?: ReadonlySet<string>
+  providerGateStatus?: ProviderGateStatus
+  providerGate?: GeneratedMechanicalGate
 }
 
 type AppRoomIntroProps = {
@@ -551,11 +561,20 @@ function App() {
         generatedPregenerator.warmAdjacent(result.room)
         const initialPlayer = projectPlayerHud(started.state)
         let generatedObjective: Awaited<ReturnType<typeof buildGeneratedObjectiveAttachment>> = null
+        let providerGateStatus: ProviderGateStatus | undefined
+        let providerGate: GeneratedMechanicalGate | undefined
         if (result.provenance === 'generated') {
           const objectiveAllowed = canAttemptOptional(
             { count: usageCountRef.current },
             { cap: guardCap, enabled: guardEnabled },
           )
+          if (objectiveAllowed && gateGeneratorSelection.kind === 'real') {
+            const attachment = await buildGeneratedGateAttachment(result.room, gateGeneratorSelection.generator)
+            providerGateStatus = attachment.status
+            providerGate = attachment.status === 'accepted' ? attachment.gate : undefined
+          } else if (gateGeneratorSelection.kind === 'real') {
+            providerGateStatus = 'not-attempted'
+          }
           if (objectiveAllowed) {
             logger.info('optional objective generation allowed', { count: usageCountRef.current, cap: guardCap })
             generatedObjective = await buildGeneratedObjectiveAttachment(result.room, objectiveGenerator)
@@ -581,6 +600,8 @@ function App() {
           initialPlayer,
           ...(generatedObjective ? { questSpec: generatedObjective.questSpec } : {}),
           objectivesPerRoom: true,
+          ...(providerGateStatus !== undefined ? { providerGateStatus } : {}),
+          ...(providerGate !== undefined ? { providerGate } : {}),
           entryResolvedObjectIds: resolvedObjectIdsForGeneratedPlay({
             objectivesPerRoom: true,
             state: started.state,
@@ -803,6 +824,8 @@ function App() {
       ? {
           generatedGateEnabled: true as const,
           currentRoom: activePlay.room,
+          providerGateStatus: activePlay.providerGateStatus,
+          providerGate: activePlay.providerGate,
         }
       : { generatedGateEnabled: false as const }
     const result = await navigateWithExitGate({

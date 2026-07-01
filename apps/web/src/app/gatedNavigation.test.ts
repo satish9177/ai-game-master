@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
+import { validateGeneratedMechanicalGate, type GeneratedMechanicalGate } from '../domain/generatedMechanicalGate'
 import { loadRoomSpec, type LoadedRoom } from '../domain/loadRoomSpec'
 import type { RoomSpec } from '../domain/roomSpec'
 import type { WorldState } from '../domain/world/worldState'
@@ -73,6 +74,22 @@ function generatedState(flags?: Record<string, boolean>): WorldState {
   })
 }
 
+function providerGate(overrides: Partial<GeneratedMechanicalGate> = {}): GeneratedMechanicalGate {
+  const gate = validateGeneratedMechanicalGate({
+    id: 'provider-gate',
+    kind: 'locked-exit',
+    condition: {
+      kind: 'room-flag',
+      roomId: 'generated-room',
+      flag: 'interaction:control-panel',
+    },
+    effect: { kind: 'unlock-exit', toRoomId: 'north-room' },
+    ...overrides,
+  })
+  if (gate === null) throw new Error('invalid test provider gate')
+  return gate
+}
+
 const delegatedResult: NavigationResult = { status: 'rejected', reason: 'unknown-room' }
 
 type RunOverrides = Partial<{
@@ -106,6 +123,8 @@ function runGenerated(overrides: Partial<{
   toRoomId: string
   room: LoadedRoom
   stateResult: WorldStateResult
+  providerGateStatus: 'not-attempted' | 'accepted' | 'rejected'
+  providerGate: GeneratedMechanicalGate
 }>) {
   const navigate = vi.fn<() => Promise<NavigationResult>>()
     .mockResolvedValue(delegatedResult)
@@ -119,6 +138,8 @@ function runGenerated(overrides: Partial<{
     demoQuestEnabled: false,
     generatedGateEnabled: true,
     currentRoom: overrides.room ?? generatedRoom(),
+    providerGateStatus: overrides.providerGateStatus,
+    providerGate: overrides.providerGate,
     getWorldState,
     navigate,
   })
@@ -252,6 +273,23 @@ describe('navigateWithExitGate', () => {
 
     await expect(result).resolves.toEqual({ status: 'rejected', reason: 'blocked' })
     expect(getWorldState).toHaveBeenCalledTimes(1)
+    expect(navigate).not.toHaveBeenCalled()
+  })
+
+  it('forwards rejected provider status so generated navigation fails open without deterministic fallback', async () => {
+    const { navigate, result } = runGenerated({ providerGateStatus: 'rejected' })
+
+    await expect(result).resolves.toBe(delegatedResult)
+    expect(navigate).toHaveBeenCalledTimes(1)
+  })
+
+  it('forwards accepted provider gates to govern the generated exit', async () => {
+    const { navigate, result } = runGenerated({
+      providerGateStatus: 'accepted',
+      providerGate: providerGate(),
+    })
+
+    await expect(result).resolves.toEqual({ status: 'rejected', reason: 'gate-locked' })
     expect(navigate).not.toHaveBeenCalled()
   })
 })

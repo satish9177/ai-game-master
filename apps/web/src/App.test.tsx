@@ -2688,6 +2688,72 @@ describe('generated quest restore — handleLoad wiring (ADR-0059, slice 5)', ()
     expect(handleLoad).toContain('restoreGeneratedPlayFromSlot(')
   })
 
+  it('wires generated gate provider only in the first generated-room prompt path', () => {
+    const handlePrompt = appSource.slice(
+      appSource.indexOf('const handlePrompt = useCallback('),
+      appSource.indexOf('const handleGenerateAnyway = useCallback('),
+    )
+
+    expect(appSource).toContain("import { selectGateGenerator } from './app/selectGateGenerator'")
+    expect(appSource).toContain('const gateGeneratorSelection = selectGateGenerator(llmConfig)')
+    expect(appSource).toContain("logger.info('gate generator selected', gateGeneratorSelection.log)")
+    expect(handlePrompt).toContain("if (result.provenance === 'generated') {")
+    expect(handlePrompt).toContain('const objectiveAllowed = canAttemptOptional(')
+    expect(handlePrompt).toContain("objectiveAllowed && gateGeneratorSelection.kind === 'real'")
+    expect(handlePrompt).toContain('await buildGeneratedGateAttachment(result.room, gateGeneratorSelection.generator)')
+    expect(handlePrompt).toContain('providerGateStatus = attachment.status')
+    expect(handlePrompt).toContain("attachment.status === 'accepted' ? attachment.gate : undefined")
+    expect(handlePrompt).toContain("providerGateStatus = 'not-attempted'")
+  })
+
+  it('parks provider gate fields transiently and passes them only while navigating the current room', () => {
+    const handlePrompt = appSource.slice(
+      appSource.indexOf('const handlePrompt = useCallback('),
+      appSource.indexOf('const handleGenerateAnyway = useCallback('),
+    )
+    const handleNavigate = appSource.slice(
+      appSource.indexOf('const handleNavigate = useCallback('),
+      appSource.indexOf('return (', appSource.indexOf('const handleNavigate = useCallback(')),
+    )
+    const nextPlayBlock = handleNavigate.slice(
+      handleNavigate.indexOf('const nextPlay: ActivePlay = {'),
+      handleNavigate.indexOf('activePlayRef.current = nextPlay'),
+    )
+
+    expect(appSource).toContain('providerGateStatus?: ProviderGateStatus')
+    expect(appSource).toContain('providerGate?: GeneratedMechanicalGate')
+    expect(handlePrompt).toContain('...(providerGateStatus !== undefined ? { providerGateStatus } : {})')
+    expect(handlePrompt).toContain('...(providerGate !== undefined ? { providerGate } : {})')
+    expect(handleNavigate).toContain('providerGateStatus: activePlay.providerGateStatus')
+    expect(handleNavigate).toContain('providerGate: activePlay.providerGate')
+    expect(nextPlayBlock).not.toContain('providerGateStatus')
+    expect(nextPlayBlock).not.toContain('providerGate')
+  })
+
+  it('does not call the gate provider from load, save, or adjacent pregeneration paths', () => {
+    const handleLoad = appSource.slice(
+      appSource.indexOf('const handleLoad = useCallback('),
+      appSource.indexOf('const handleNavigate = useCallback('),
+    )
+    const handleSave = appSource.slice(
+      appSource.indexOf('const handleSave = useCallback('),
+      appSource.indexOf('const handleLoad = useCallback('),
+    )
+    const adjacentSetup = appSource.slice(
+      appSource.indexOf('const adjacentPregenerator = new AdjacentRoomPregenerator('),
+      appSource.indexOf('const exampleNavigation = new NavigationService('),
+    )
+
+    expect(handleLoad).not.toContain('buildGeneratedGateAttachment')
+    expect(handleLoad).not.toContain('gateGeneratorSelection')
+    expect(handleLoad).not.toContain('providerGateStatus')
+    expect(handleLoad).not.toContain('providerGate')
+    expect(handleSave).not.toContain('providerGateStatus')
+    expect(handleSave).not.toContain('providerGate')
+    expect(adjacentSetup).not.toContain('gateGeneratorSelection')
+    expect(adjacentSetup).not.toContain('buildGeneratedGateAttachment')
+  })
+
   it('never logs the parked blob and restores only with a safe enum diagnostic', () => {
     const restoreHelper = appSource.slice(
       appSource.indexOf('function restoreGeneratedPlayFromSlot('),

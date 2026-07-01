@@ -1,13 +1,20 @@
 import type { NavigationResult } from './NavigationService'
 import { evaluateExitGate } from './exitGate'
 import { evaluateGeneratedExitGate } from './generatedExitGate'
+import type { GeneratedMechanicalGate } from '../domain/generatedMechanicalGate'
 import type { LoadedRoom } from '../domain/loadRoomSpec'
 import type { WorldStateResult } from '../world-session/WorldSession'
+import type { ProviderGateStatus } from './generatedGate'
 
 type NavigateDelegate = () => Promise<NavigationResult>
 type GeneratedGateOptions =
   | { generatedGateEnabled?: false; currentRoom?: never }
-  | { generatedGateEnabled: true; currentRoom: LoadedRoom }
+  | {
+      generatedGateEnabled: true
+      currentRoom: LoadedRoom
+      providerGateStatus?: ProviderGateStatus
+      providerGate?: GeneratedMechanicalGate
+    }
 
 export async function navigateWithExitGate(input: {
   sessionId: string
@@ -40,6 +47,8 @@ export async function navigateWithExitGate(input: {
       room: input.currentRoom,
       toRoomId,
       state: stateResult.state,
+      providerGateStatus: input.providerGateStatus,
+      providerGate: input.providerGate,
     })
     if (gate.gated) return { status: 'rejected', reason: 'gate-locked' }
   }
