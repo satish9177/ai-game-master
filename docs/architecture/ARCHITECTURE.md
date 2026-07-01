@@ -60,6 +60,8 @@ Throughout these docs:
   Generated Room Consequence Journal v0 — browser/app composition + pure
   generated journal projector;
   NPC Dialogue Room Context v0 — browser/domain/dialogue;
+  Real NPC Dialogue + Room-Memory Awareness v0 — opt-in real dialogue provider,
+  browser/app composition + generation;
   Generated Room NPC Objective Awareness v1 — browser/domain/dialogue;
   Generated Story Objective Contract v0 — domain/quests/assembly + dialogue/UI;
   Multi-Call Usage Guardrails / Optional Objective Budget v0 — browser/session-local
@@ -123,6 +125,15 @@ Throughout these docs:
   deterministic behavior. No `RoomSpec`/`SaveGame`/`WorldState`/`QuestSpec`, backend, renderer, or
   persistence schema change
   ([ADR-0064](./decisions/ADR-0064-generated-mechanical-gate-provider-v0.md)).
+- ✅ **Implemented** — Real NPC Dialogue + Room-Memory Awareness v0 — an
+  `OpenAICompatibleNPCDialogueProvider` now exists behind the unchanged
+  `NPCDialogueProvider` port, selected only by `selectDialogueProvider` when the
+  existing dev-only/BYOK `LlmConfig` is complete. The deterministic
+  `FakeNPCDialogueProvider` remains the default. Real prompts include recalled
+  room memory as bounded, hedged, non-authoritative BACKGROUND context only;
+  SQLite/current state plus the `WorldEvent` log remain authoritative, dialogue
+  output is text-only display data, and no memory/schema/migration path changed
+  ([ADR-0065](./decisions/ADR-0065-real-npc-dialogue-room-memory-awareness-v0.md)).
 - ❌ **Not built** — future shape only; documented so we don't paint into a corner.
 
 ## Status today (Renderer Foundation v0)
@@ -1212,6 +1223,17 @@ Continue—never free text. Conversation history stays in component state and
 resets on close or room change. Dialogue appends no event, sets no room flag,
 and changes no world state. See
 [ADR-0017](./decisions/ADR-0017-npc-dialogue-foundation-v0.md).
+
+Real NPC dialogue now exists as an opt-in, OpenAI-compatible provider
+([ADR-0065](./decisions/ADR-0065-real-npc-dialogue-room-memory-awareness-v0.md)).
+`selectDialogueProvider` keeps the fake provider as the default and selects the
+real provider only when the existing dev-only/BYOK config is complete. The real
+prompt may include recalled room memory as a capped, hedged, explicitly
+non-authoritative BACKGROUND section; missing memory omits that section. The
+provider returns dialogue text only. `NPCDialogueService` remains read-only,
+`WorldSession`/`WorldEvent`/SQLite state remain authoritative, provider failures
+map through the existing `provider-unavailable` path, and no memory storage,
+schema, migration, or firewall changed.
 
 ## Adjacent-Room Pre-generation v0
 

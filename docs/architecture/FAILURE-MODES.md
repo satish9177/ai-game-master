@@ -729,6 +729,8 @@ intent ([ADR-0017](./decisions/ADR-0017-npc-dialogue-foundation-v0.md)).
 | Id-less or unknown NPC id | lookup skip/miss | `rejected: missing-dialogue`; never key by an id-less object | reason code only |
 | Missing session on read | `getWorldState` → not-found | `failed: not-found`; no append | ids/code only |
 | Provider throws/unavailable | service catch | `failed: provider-unavailable`; calm panel message | ids/code only |
+| Real provider timeout/request/empty response | `OpenAICompatibleNPCDialogueProvider` fixed-code throw (`dialogue-llm-timeout`, `dialogue-llm-request-failed`, or `dialogue-llm-empty-response`) caught by the existing service path | `failed: provider-unavailable`; no event, flag, memory write, or world-state mutation | existing safe service log only; no API key, prompt, memory text, player line, provider body, raw ids, flags, or gate data |
+| Dialogue config incomplete | `selectDialogueProvider` completeness check | fake provider selected; default offline behavior unchanged | `{ provider:'fake', reason:'config-disabled' }` only |
 | Repeated talk | repeatable component action | fresh deterministic reply; no event, flag, or world-state change | ids/turn count only |
 | Generated-room NPC | no authored dialogue marker | existing effect/plain-panel path | reason code only |
 
@@ -737,6 +739,13 @@ replies leave the authoritative event log and projected snapshot unchanged;
 conversation history resets with component state. Dialogue text, NPC names,
 personas, greetings, prompt labels, player lines, item names, and status strings
 never reach logs.
+
+The real dialogue provider is opt-in only ([ADR-0065](./decisions/ADR-0065-real-npc-dialogue-room-memory-awareness-v0.md)).
+Selection performs no network call; the network request happens only when the
+service asks the selected provider for a reply. The provider returns display text
+only, never structured state changes. Prompt BACKGROUND room memory is bounded
+and hedged as non-authoritative context; provider failure cannot mutate gameplay
+state because the service has no append path.
 
 ## 16. NPC memory persistence ✅ v0 (headless)
 
@@ -1243,6 +1252,7 @@ blob can rehydrate visited generated rooms for stable backtracking after
 | 13 | Encounter resolution | pure encounter plan + shared `applyCommands` typed appends | already-resolved/rejection/conflict/partial result; safe panel message; health clamps, no death state | ✅ |
 | 14 | Multi-room navigation | cache/registry resolve before `WorldSession.move` | rejection/failure with no move, or cached room + persistent flags | ✅ |
 | 15 | NPC dialogue resolution | read-only world context + provider reply | typed failure or component-only conversation; no event/state change | ✅ |
+| 15b | Real NPC dialogue provider | config completeness check; fixed-code throw on timeout/request/empty response | incomplete → fake (`config-disabled`); provider failure → existing `provider-unavailable`; no state mutation or unsafe log content | ✅ opt-in v0 (dev-only) |
 | 16 | NPC memory persistence | write firewall + scoped read firewall + FK/UNIQUE/no-update trigger; read-boundary re-validate + JSON-scope re-assert | rejected/failed/empty-recall typed results; corrupt or scope-divergent row skipped; no path to truth | ✅ headless |
 | 17 | Room memory persistence | write firewall + scoped read firewall + FK/UNIQUE/no-update trigger (no FK to `rooms`); read-boundary re-validate + JSON-scope re-assert | rejected/failed/empty-recall typed results; corrupt or scope-divergent row skipped; no path to truth; `roomStates` unchanged | ✅ headless |
 | 18 | Player HUD display | `playerHud === null` guards render; `projectPlayerHud` is pure/silent; `onWorldStateChange` fires only on `applied`/`already-resolved` variants carrying `state` | HUD absent until seeded; empty inventory/status degrade gracefully; health `0/max` renders empty bar; persists across navigation; no write path | ✅ browser |

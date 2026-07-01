@@ -1,6 +1,6 @@
 # ADR-0065: Real NPC Dialogue + Room-Memory Awareness v0
 
-- **Status:** Proposed
+- **Status:** Implemented
 - **Date:** 2026-07-01
 - **Deciders:** Project owner
 - **Extends:**
@@ -49,13 +49,12 @@ Room memory recall into dialogue context already shipped in two slices:
    `MEMORY_AWARENESS_LINES` table (hand-written, finite lines keyed on the closed room-memory
    kind). It never reads `entry.text`.
 
-**The premise "the real provider may receive memory but underuses it" does not hold: no real
-`NPCDialogueProvider` implementation exists.** `App.tsx:129` constructs
-`new FakeNPCDialogueProvider()` unconditionally — there is no `OpenAICompatible*` adapter for
-dialogue, unlike room generation (ADR-0023), objective generation (ADR-0049), or gate proposals
-(ADR-0064). This ADR introduces that adapter and, in the same slice, makes it the first
-component to turn recalled `entry.text` into LLM-visible prompt content — safely, because the
-architecture already guarantees the provider's output cannot become truth.
+At design time, the premise "the real provider may receive memory but underuses it" did not
+hold: no real `NPCDialogueProvider` implementation existed, and `App.tsx` constructed
+`new FakeNPCDialogueProvider()` unconditionally. This ADR introduced the missing
+OpenAI-compatible dialogue adapter and made it the first component to turn recalled `entry.text`
+into LLM-visible prompt content - safely, because the architecture already guarantees the
+provider's output cannot become truth.
 
 Two implementation facts make this safe to build as one slice:
 
@@ -111,8 +110,9 @@ No I/O, no logger import, fully deterministic given `request`.
    safe text from existing quest content).
 4. `PLAYER` — health, `status[]`, inventory **count** (not raw item ids as narrative content).
 5. `RECENT CONVERSATION` — last N `history` turns, bounded (existing `NPCDialogueTurn[]`).
-6. `BACKGROUND (non-authoritative — may be false)` — **present only when `context.memory.entries`
-   is non-empty**; see memory transform below. Always the last section.
+6. `BACKGROUND ROOM MEMORY - NON-AUTHORITATIVE` — **present only when
+   `context.memory.entries` is non-empty**; see memory transform below. Always
+   the last section.
 
 ### Memory transform (the core of this ADR)
 
@@ -129,7 +129,7 @@ const MEMORY_HEDGE_PREFIX: Readonly<Record<string, string>> = {
   room_note: 'A note here says',
   room_summary: 'This place is remembered as',
 }
-const DEFAULT_MEMORY_HEDGE_PREFIX = "It's rumored"
+const DEFAULT_MEMORY_HEDGE_PREFIX = 'It is rumored'
 
 export const MAX_MEMORY_ENTRIES = 3
 export const MAX_MEMORY_LINE_CHARS = 160
@@ -186,16 +186,15 @@ export class OpenAICompatibleNPCDialogueProvider implements NPCDialogueProvider 
 
 ### Selector — `app/selectDialogueProvider.ts`
 
-Mirrors `selectObjectiveGenerator.ts` exactly:
+Mirrors the existing selector pattern, with an explicit `kind` discriminator:
 
 ```ts
 export type RealDialogueSelectionLog = { provider: RealLlmProvider; model: string }
 export type FakeDialogueSelectionLog = { provider: 'fake'; reason: 'config-disabled' }
 
-export type DialogueProviderSelection = {
-  provider: NPCDialogueProvider
-  log: RealDialogueSelectionLog | FakeDialogueSelectionLog
-}
+export type DialogueProviderSelection =
+  | { kind: 'fake'; provider: NPCDialogueProvider; log: FakeDialogueSelectionLog }
+  | { kind: 'real'; provider: NPCDialogueProvider; log: RealDialogueSelectionLog }
 
 export function selectDialogueProvider(config: LlmConfig): DialogueProviderSelection
 ```
@@ -206,21 +205,19 @@ Real when `isRealProviderComplete(config)` (existing helper, no change), else
 
 ### App wiring
 
-`App.tsx:129-130` currently:
+The previous App wiring:
 
 ```ts
 const dialogueProvider = new FakeNPCDialogueProvider()
 const npcDialogueService = new NPCDialogueService(worldSession, dialogueProvider, logger)
 ```
 
-becomes (module-level, same pattern as `objectiveGenerator`/`gateGeneratorSelection` at
-`App.tsx:116-120`):
+became module-level selector wiring:
 
 ```ts
-const { provider: dialogueProvider, log: dialogueProviderSelectionLog } =
-  selectDialogueProvider(llmConfig)
-logger.info('dialogue provider selected', dialogueProviderSelectionLog)
-const npcDialogueService = new NPCDialogueService(worldSession, dialogueProvider, logger)
+const dialogueProviderSelection = selectDialogueProvider(llmConfig)
+logger.info('dialogue provider selected', dialogueProviderSelection.log)
+const npcDialogueService = new NPCDialogueService(worldSession, dialogueProviderSelection.provider, logger)
 ```
 
 No other call site changes: `NPCDialogueService`, `buildDialogueContext`,
@@ -330,10 +327,9 @@ export class OpenAICompatibleNPCDialogueProvider implements NPCDialogueProvider 
 // app/selectDialogueProvider.ts
 export type RealDialogueSelectionLog = { provider: RealLlmProvider; model: string }
 export type FakeDialogueSelectionLog = { provider: 'fake'; reason: 'config-disabled' }
-export type DialogueProviderSelection = {
-  provider: NPCDialogueProvider
-  log: RealDialogueSelectionLog | FakeDialogueSelectionLog
-}
+export type DialogueProviderSelection =
+  | { kind: 'fake'; provider: NPCDialogueProvider; log: FakeDialogueSelectionLog }
+  | { kind: 'real'; provider: NPCDialogueProvider; log: RealDialogueSelectionLog }
 export function selectDialogueProvider(config: LlmConfig): DialogueProviderSelection
 ```
 
@@ -355,7 +351,10 @@ export function selectDialogueProvider(config: LlmConfig): DialogueProviderSelec
 - **Edited (Slice 4):** `apps/web/src/App.tsx` (module-level provider construction only);
   `apps/web/src/App.test.tsx` (selection/regression coverage, if App-level dialogue selection
   is asserted there).
-- **Edited (Slice 5, docs):** `docs/architecture/ARCHITECTURE.md`.
+- **Edited (Slice 5, docs):** `docs/architecture/ARCHITECTURE.md`;
+  `docs/architecture/FAILURE-MODES.md`;
+  `docs/architecture/implementation-plans/real-npc-dialogue-room-memory-awareness-v0.md`;
+  this ADR closeout alignment.
 
 ## Files NOT to change
 

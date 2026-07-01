@@ -1,6 +1,6 @@
 # Implementation Plan — `feature/real-npc-dialogue-room-memory-awareness-v0`
 
-> Status: **design approved (docs-only), not yet implemented.**
+> Status: **implemented (Slices 1-5 complete).**
 > Maintainer approved docs-only planning and the guardrail scope on 2026-07-01, under the
 > existing room/objective/gate precedent: opt-in, dev-only/BYOK, off by default, fake remains
 > default, no server-side hosting, no streaming, no retry loop, no provider router, no state
@@ -49,10 +49,12 @@ memory storage, migration, or firewall changes. Every provider failure degrades 
 
 ## 1. Status
 
-**Design approved, docs-only.** This plan and ADR-0065 are Slice 1. No source file has been
-created or modified. Slices 2-5 (below) are not yet started and require no further design
-approval to begin, per the maintainer's docs-only-then-implement instruction — but each slice
-should still land as its own small, reviewable diff.
+**Implemented.** Slice 1 added this plan and ADR-0065. Slice 2 added the pure
+`buildDialoguePromptMessages` prompt builder. Slice 3 added
+`OpenAICompatibleNPCDialogueProvider`. Slice 4 added `selectDialogueProvider`
+and wired `App.tsx` through the selector. Slice 5 closed out architecture and
+failure-mode docs plus final regression verification. No commit was made by the
+agent.
 
 ---
 
@@ -61,11 +63,11 @@ should still land as its own small, reviewable diff.
 - **`NPCDialogueProvider` port** (`domain/ports/NPCDialogueProvider.ts`): one method
   `reply(request: NPCDialogueRequest): Promise<NPCDialogueResponse>`. Unchanged. The real
   provider implements this identically to the fake.
-- **No real implementation exists today.** `App.tsx:129` —
-  `const dialogueProvider = new FakeNPCDialogueProvider()` — is unconditional. Unlike room
-  (`selectRoomGenerator`), objective (`selectObjectiveGenerator`), and gate
-  (`selectGateGenerator`) generation, there is no `select*` function and no `OpenAICompatible*`
-  adapter for dialogue anywhere in `generation/`.
+- **Real implementation now exists, fake remains default.** `generation/OpenAICompatibleNPCDialogueProvider.ts`
+  implements the unchanged `NPCDialogueProvider` port. `app/selectDialogueProvider.ts` selects
+  the real provider only when `isRealProviderComplete(config)` is true; otherwise it returns
+  `FakeNPCDialogueProvider` with the fixed `config-disabled` reason. `App.tsx` uses the selector
+  instead of hardcoding `new FakeNPCDialogueProvider()`.
 - **`NPCDialogueService.reply`** (`dialogue/NPCDialogueService.ts:45-95`): calls
   `buildDialogueContext(...)` then `this.provider.reply({ context, playerLine })` inside a
   `try/catch`. On any throw (network, timeout, or otherwise) it already returns
@@ -122,7 +124,7 @@ should still land as its own small, reviewable diff.
    Takes the full `NPCDialogueRequest` (context + optional `playerLine`). Produces a static
    system message (role, bans, authority rule) and a structured user digest with six ordered
    sections (`NPC`, `CURRENT ROOM`, `QUEST`, `PLAYER`, `RECENT CONVERSATION`, and — only when
-   non-empty — `BACKGROUND (non-authoritative — may be false)`). The memory transform is
+   non-empty — `BACKGROUND ROOM MEMORY - NON-AUTHORITATIVE`). The memory transform is
    `hedgePrefix(kind) + ': ' + clamp(text, MAX_MEMORY_LINE_CHARS)`, capped at
    `MAX_MEMORY_ENTRIES = 3`. No room/object/NPC free text beyond what `NPCDialogueContext`
    already carries reaches the model; no new field is read from anywhere.
@@ -133,8 +135,9 @@ should still land as its own small, reviewable diff.
    Returns `{ text: content }` on success; throws a fixed-code `Error` on any hard failure.
    Imports no logger, reads no env.
 
-3. **`selectDialogueProvider`** — selector in `app/selectDialogueProvider.ts`. Mirrors
-   `selectObjectiveGenerator`. Returns `{ provider: NPCDialogueProvider; log: ... }`. Real when
+3. **`selectDialogueProvider`** — selector in `app/selectDialogueProvider.ts`. Mirrors the
+   existing selector pattern with an explicit discriminator:
+   `{ kind: 'fake' | 'real'; provider: NPCDialogueProvider; log: ... }`. Real when
    `isRealProviderComplete(config)`, else `new FakeNPCDialogueProvider()` with
    `{ provider: 'fake', reason: 'config-disabled' }`.
 
@@ -199,19 +202,17 @@ adjacent-room or non-active-NPC provider calls · any change to `RoomMemoryDialo
   throws: `dialogue-llm-request-failed`, `dialogue-llm-timeout`, `dialogue-llm-empty-response`.
 - `apps/web/src/generation/OpenAICompatibleNPCDialogueProvider.test.ts`
 - `apps/web/src/app/selectDialogueProvider.ts` — `selectDialogueProvider(config: LlmConfig)`
-  returning `{ provider, log }`.
+  returning `{ kind: 'fake' | 'real', provider, log }`.
 - `apps/web/src/app/selectDialogueProvider.test.ts`
 
 **Modified files:**
 
-- `apps/web/src/App.tsx` — three lines:
-  - Replace `const dialogueProvider = new FakeNPCDialogueProvider()` with
-    `const { provider: dialogueProvider, log: dialogueProviderSelectionLog } = selectDialogueProvider(llmConfig)`
-  - Add `logger.info('dialogue provider selected', dialogueProviderSelectionLog)` on the next
-    line, before `const npcDialogueService = new NPCDialogueService(...)`.
-  - Add the new import for `selectDialogueProvider`; the existing `FakeNPCDialogueProvider`
-    import is retained (still used inside `selectDialogueProvider`, and directly if any existing
-    test constructs it).
+- `apps/web/src/App.tsx` — module-level wiring only:
+  - Add the new import for `selectDialogueProvider`.
+  - Add `const dialogueProviderSelection = selectDialogueProvider(llmConfig)`.
+  - Add `logger.info('dialogue provider selected', dialogueProviderSelection.log)`.
+  - Construct `NPCDialogueService` with `dialogueProviderSelection.provider`.
+  - Remove the direct `FakeNPCDialogueProvider` import and hardcoded construction from `App.tsx`.
 - `docs/architecture/ARCHITECTURE.md` — one status paragraph (Slice 5, docs closeout).
 
 ---
@@ -271,7 +272,7 @@ Tests:
 - Each of the four closed kinds (`player_claim`, `room_observation`, `room_note`,
   `room_summary`) → correct fixed hedge prefix from `MEMORY_HEDGE_PREFIX`.
 - Unrecognized `kind` (arbitrary string) and absent `kind` → `DEFAULT_MEMORY_HEDGE_PREFIX`
-  (`"It's rumored"`).
+  (`'It is rumored'`).
 - The raw `kind` string value never appears verbatim anywhere in the built `ChatMessage[]`
   content (assert via substring search for the raw kind tokens, e.g. `'player_claim'` must not
   appear as a literal substring even when that kind is present — only its mapped prefix should).
@@ -329,7 +330,8 @@ Verification: `npm run test -- OpenAICompatibleNPCDialogueProvider`, `npm run li
 New files: `selectDialogueProvider.ts`, `selectDialogueProvider.test.ts`.
 Modified file: `App.tsx` — swap + log line + import (see §5).
 
-Mirrors `selectObjectiveGenerator`. Returns `{ provider: NPCDialogueProvider, log }`.
+Mirrors the existing selection pattern. Returns
+`{ kind: 'fake' | 'real', provider: NPCDialogueProvider, log }`.
 
 Tests (`selectDialogueProvider.test.ts`):
 - Returns real `OpenAICompatibleNPCDialogueProvider` when `isRealProviderComplete` (provider set,
@@ -341,12 +343,15 @@ Tests (`selectDialogueProvider.test.ts`):
   existing selector).
 
 Tests (App.tsx additions, mirroring the existing `objectiveGenerator` App-level coverage):
-- When `isRealProviderComplete`, `dialogueProvider` is an `OpenAICompatibleNPCDialogueProvider`
-  instance (duck-typed / injected-transport check).
-- When config is incomplete, `dialogueProvider` is a `FakeNPCDialogueProvider` instance
-  (regression: default path unchanged).
-- `logger.info('dialogue provider selected', ...)` is called once at module load with a
-  log-safe object (no key, no memory text).
+- When `isRealProviderComplete`, `selectDialogueProvider` returns
+  `{ kind: 'real', provider: OpenAICompatibleNPCDialogueProvider, log: { provider, model } }`.
+- When config is incomplete, `selectDialogueProvider` returns
+  `{ kind: 'fake', provider: FakeNPCDialogueProvider, log: { provider: 'fake', reason: 'config-disabled' } }`.
+- `App.tsx` imports and calls `selectDialogueProvider(llmConfig)`, logs
+  `dialogueProviderSelection.log`, and passes `dialogueProviderSelection.provider` to
+  `NPCDialogueService` instead of hardcoding `new FakeNPCDialogueProvider()`.
+- The selector log-safe objects contain no key, prompt, memory text, player line, raw ids,
+  flags, gate JSON, or provider body.
 - Existing `FakeNPCDialogueProvider.test.ts` and `NPCDialogueService.test.ts` remain green,
   unmodified.
 
@@ -368,10 +373,15 @@ Tests / checks:
 - Confirm `NPCDialogueService.logResult` output shape is unchanged when exercised against a real
   (mocked-transport) provider double — still only
   `{ sessionId, npcId, roomId, status, reason, turnCount }`.
-- Manual smoke (dev-only, local `.env.local` with a real BYOK key): hold a short dialogue in a
-  generated room that has at least one recalled room memory; confirm (a) the reply is in
-  character and references the room without asserting a memory item as established fact, and
-  (b) no memory text/kind/player line appears in dev console output.
+- Manual smoke checklist (dev-only, local `.env.local` with a real BYOK key):
+  - Incomplete config -> fake dialogue still works.
+  - Complete config -> real provider is selected.
+  - Room memory present -> real prompt includes the BACKGROUND non-authoritative section.
+  - No memory -> no BACKGROUND section.
+  - Provider failure -> existing safe `provider-unavailable` behavior.
+  - Take item -> promote room memory -> recall -> talk to NPC -> NPC can reference room memory.
+  - Logs contain no raw ids, flags, provider body, API key, player line, or prompt content.
+  - Dev console does not include memory text or raw memory kind.
 
 Verification: `npm run test`, `npm run lint`, `npm run build`; manual smoke as above (not part
 of CI, dev-only).
