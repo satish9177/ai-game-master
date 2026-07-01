@@ -220,6 +220,14 @@ body {
   font-size: 1.25rem;
 }
 
+.npc-dialogue-subtitle {
+  margin: 0.2rem 0 0;
+  color: #8b8576;
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
 .panel-close {
   background: none;
   border: none;
@@ -244,6 +252,33 @@ body {
   padding-left: 0;
 }
 
+.npc-dialogue-turns {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.npc-dialogue-turn {
+  display: grid;
+  grid-template-columns: minmax(4.5rem, max-content) 1fr;
+  gap: 0.6rem;
+}
+
+.npc-dialogue-speaker {
+  color: #f3ead2;
+}
+
+.npc-dialogue-text {
+  min-width: 0;
+}
+
+.npc-dialogue-busy {
+  margin: -0.45rem 0 1rem;
+  color: #8ec6ff;
+  font-size: 0.86rem;
+  font-weight: 600;
+}
+
 .panel-choices {
   display: flex;
   flex-wrap: wrap;
@@ -251,10 +286,32 @@ body {
   margin: 0 0 1.2rem;
 }
 
+.npc-dialogue-empty {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.65rem;
+}
+
+.npc-dialogue-empty-copy {
+  flex: 1 1 12rem;
+  margin: 0;
+  color: #8b8576;
+  font-size: 0.86rem;
+  line-height: 1.4;
+}
+
 .panel-result {
   margin: -0.45rem 0 1.2rem;
   color: #f3d58a;
   font-weight: 600;
+}
+
+.npc-dialogue-message {
+  padding: 0.55rem 0.65rem;
+  border: 1px solid #6a5a32;
+  border-radius: 0.4rem;
+  background: rgba(58, 49, 28, 0.5);
 }
 
 .panel-foot {
