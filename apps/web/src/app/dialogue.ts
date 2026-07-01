@@ -11,13 +11,16 @@ export type NPCDialogueTarget = {
 
 export type NPCDialogueLookup = ReadonlyMap<string, NPCDialogueTarget>
 
+const FALLBACK_NPC_NAME = 'Stranger'
+
 export function buildDialogueLookup(room: LoadedRoom): NPCDialogueLookup {
   const lookup = new Map<string, NPCDialogueTarget>()
   for (const object of room.objects) {
     const interaction = 'interaction' in object ? object.interaction : undefined
     if (!object.id || !interaction?.dialogue || lookup.has(object.id)) continue
     const dialogue = interaction.dialogue
-    const npcName = 'name' in object && object.name ? object.name : object.id
+    const safeName = 'name' in object && object.name ? object.name.trim() : ''
+    const npcName = safeName || FALLBACK_NPC_NAME
     lookup.set(object.id, {
       npcId: object.id,
       npcName,
