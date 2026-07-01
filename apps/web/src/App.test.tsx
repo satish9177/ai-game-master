@@ -2690,6 +2690,17 @@ describe('generated quest restore — handleLoad wiring (ADR-0059, slice 5)', ()
     expect(handleLoad).toContain('restoreGeneratedPlayFromSlot(')
   })
 
+  it('wires NPC dialogue provider through the selector instead of hardcoded fake construction', () => {
+    expect(appSource).toContain("import { selectDialogueProvider } from './app/selectDialogueProvider'")
+    expect(appSource).toContain('const dialogueProviderSelection = selectDialogueProvider(llmConfig)')
+    expect(appSource).toContain("logger.info('dialogue provider selected', dialogueProviderSelection.log)")
+    expect(appSource).toContain(
+      'const npcDialogueService = new NPCDialogueService(worldSession, dialogueProviderSelection.provider, logger)',
+    )
+    expect(appSource).not.toContain("import { FakeNPCDialogueProvider } from './dialogue/FakeNPCDialogueProvider'")
+    expect(appSource).not.toContain('const dialogueProvider = new FakeNPCDialogueProvider()')
+  })
+
   it('wires generated gate provider only in the first generated-room prompt path', () => {
     const handlePrompt = appSource.slice(
       appSource.indexOf('const handlePrompt = useCallback('),

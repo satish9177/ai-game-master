@@ -30,6 +30,7 @@ import { readLlmConfig } from './app/llmConfig'
 import { selectRoomGenerator } from './app/selectRoomGenerator'
 import { selectObjectiveGenerator } from './app/selectObjectiveGenerator'
 import { selectGateGenerator } from './app/selectGateGenerator'
+import { selectDialogueProvider } from './app/selectDialogueProvider'
 import { evaluate, recordAttempt, initialUsageState, canAttemptOptional } from './domain/usage/usageGuard'
 import type { UsageGuardConfig } from './domain/usage/usageGuard'
 import { ErrorBoundary } from './app/ErrorBoundary'
@@ -63,7 +64,6 @@ import { loadRoomSpec, type LoadedRoom } from './domain/loadRoomSpec'
 import { fallbackRoom as fallbackRoomSpec } from './domain/examples/fallbackRoom'
 import { FALLBACK_NOTICE, shouldShowFallbackNotice } from './app/fallbackNotice'
 import { buildRoomIntroView } from './app/roomIntro'
-import { FakeNPCDialogueProvider } from './dialogue/FakeNPCDialogueProvider'
 import type { WorldBibleSeed } from './domain/worldBible/worldBibleSeed'
 import { worldBibleToAdjacentThemeSeed } from './domain/worldBible/worldBibleToSeed'
 import { buildAdjacentRoomSeed } from './app/buildAdjacentRoomSeed'
@@ -118,6 +118,8 @@ const { generator: objectiveGenerator, log: objectiveGeneratorSelectionLog } =
 logger.info('objective generator selected', objectiveGeneratorSelectionLog)
 const gateGeneratorSelection = selectGateGenerator(llmConfig)
 logger.info('gate generator selected', gateGeneratorSelection.log)
+const dialogueProviderSelection = selectDialogueProvider(llmConfig)
+logger.info('dialogue provider selected', dialogueProviderSelection.log)
 const worldBibleSeeder = new FakeWorldBibleSeeder()
 const idGenerator = new UuidGenerator()
 const worldStore = new InMemoryWorldStore()
@@ -126,8 +128,7 @@ const saveGameService = new SaveGameService(worldStore, logger)
 const saveSlotStore = new LocalStorageSaveSlotStore()
 const interactionService = new InteractionService(worldSession, logger)
 const encounterService = new EncounterService(worldSession, logger)
-const dialogueProvider = new FakeNPCDialogueProvider()
-const npcDialogueService = new NPCDialogueService(worldSession, dialogueProvider, logger)
+const npcDialogueService = new NPCDialogueService(worldSession, dialogueProviderSelection.provider, logger)
 // The trusted fallback room, validated once at startup. The assembly pipeline
 // returns it (via GeneratedRoomSource) whenever generated content can't be
 // loaded, validated, or repaired, so the renderer always gets a playable room.
