@@ -1,8 +1,9 @@
 # Implementation Plan — `feature/memory-display-name-persistence-v0`
 
-> Status: **C1 implemented & verified** (optional additive fields end-to-end, no DDL,
-> `schemaVersion` kept `1`). **C2** (DisplayNameResolver + named text) and **C3**
-> (migration `0004` + SQLite dedupe) remain **PROPOSED — no code until approved.**
+> Status: **C1 & C2 implemented & verified** (optional additive fields end-to-end +
+> `DisplayNameResolver`/named text/`entitySnapshots`, no DDL, `schemaVersion` kept `1`,
+> no dedupe persistence). **C3** (migration `0004` + SQLite dedupe) remains
+> **PROPOSED — no code until approved.**
 >
 > **This is Slice C** of the reconciled adoption of the external *Memory & DB Design
 > v1* doc: **DisplayNameResolver + named memory text + persisted importance/dedupe.**
