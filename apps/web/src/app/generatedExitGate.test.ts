@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { validateGeneratedMechanicalGate, type GeneratedMechanicalGate } from '../domain/generatedMechanicalGate'
 import { loadRoomSpec, type LoadedRoom } from '../domain/loadRoomSpec'
 import type { RoomSpec } from '../domain/roomSpec'
 import type { WorldState } from '../domain/world/worldState'
@@ -49,7 +50,42 @@ function gateState(flags?: Record<string, boolean>): Pick<WorldState, 'roomState
   }
 }
 
+function providerGate(overrides: Partial<GeneratedMechanicalGate> = {}): GeneratedMechanicalGate {
+  const gate = validateGeneratedMechanicalGate({
+    id: 'provider-gate',
+    kind: 'locked-exit',
+    condition: {
+      kind: 'room-flag',
+      roomId: 'generated-room',
+      flag: 'interaction:control-panel',
+    },
+    effect: { kind: 'unlock-exit', toRoomId: 'north-room' },
+    ...overrides,
+  })
+  if (gate === null) throw new Error('invalid test gate')
+  return gate
+}
+
 describe('evaluateGeneratedExitGate', () => {
+  it('fails open when state is null or undefined for all provider statuses', () => {
+    for (const providerGateStatus of [undefined, 'not-attempted', 'rejected', 'accepted'] as const) {
+      expect(evaluateGeneratedExitGate({
+        room: gatedRoom(),
+        toRoomId: 'north-room',
+        state: null,
+        providerGateStatus,
+        providerGate: providerGate(),
+      })).toEqual({ gated: false })
+      expect(evaluateGeneratedExitGate({
+        room: gatedRoom(),
+        toRoomId: 'north-room',
+        state: undefined,
+        providerGateStatus,
+        providerGate: providerGate(),
+      })).toEqual({ gated: false })
+    }
+  })
+
   it('gates the governed exit when the unlock flag is missing', () => {
     expect(evaluateGeneratedExitGate({
       room: gatedRoom(),
@@ -150,5 +186,91 @@ describe('evaluateGeneratedExitGate', () => {
     expect(JSON.stringify(result)).not.toContain('interaction:control-panel')
     expect(JSON.stringify(result)).not.toContain('north-room')
     expect(JSON.stringify(result)).not.toContain('mechanical-gate')
+  })
+
+  it('provider rejected fails open and does not fall back to deterministic gating', () => {
+    expect(evaluateGeneratedExitGate({
+      room: gatedRoom(),
+      toRoomId: 'north-room',
+      state: gateState(),
+      providerGateStatus: 'rejected',
+    })).toEqual({ gated: false })
+  })
+
+  it('provider accepted gates when satisfiable and the provider flag is missing or false', () => {
+    expect(evaluateGeneratedExitGate({
+      room: gatedRoom(),
+      toRoomId: 'north-room',
+      state: gateState(),
+      providerGateStatus: 'accepted',
+      providerGate: providerGate(),
+    })).toEqual({ gated: true })
+    expect(evaluateGeneratedExitGate({
+      room: gatedRoom(),
+      toRoomId: 'north-room',
+      state: gateState({ 'interaction:control-panel': false }),
+      providerGateStatus: 'accepted',
+      providerGate: providerGate(),
+    })).toEqual({ gated: true })
+  })
+
+  it('provider accepted opens when satisfiable and the provider flag is true', () => {
+    expect(evaluateGeneratedExitGate({
+      room: gatedRoom(),
+      toRoomId: 'north-room',
+      state: gateState({ 'interaction:control-panel': true }),
+      providerGateStatus: 'accepted',
+      providerGate: providerGate(),
+    })).toEqual({ gated: false })
+  })
+
+  it('provider accepted opens for non-governed exits', () => {
+    expect(evaluateGeneratedExitGate({
+      room: gatedRoom(),
+      toRoomId: 'side-room',
+      state: gateState(),
+      providerGateStatus: 'accepted',
+      providerGate: providerGate(),
+    })).toEqual({ gated: false })
+  })
+
+  it('provider accepted with an unsatisfiable gate fails open and does not fall back to deterministic gating', () => {
+    expect(evaluateGeneratedExitGate({
+      room: gatedRoom(),
+      toRoomId: 'north-room',
+      state: gateState(),
+      providerGateStatus: 'accepted',
+      providerGate: providerGate({
+        condition: {
+          kind: 'room-flag',
+          roomId: 'other-room',
+          flag: 'interaction:control-panel',
+        },
+      }),
+    })).toEqual({ gated: false })
+  })
+
+  it('provider accepted with a missing provider gate fails open', () => {
+    expect(evaluateGeneratedExitGate({
+      room: gatedRoom(),
+      toRoomId: 'north-room',
+      state: gateState(),
+      providerGateStatus: 'accepted',
+    })).toEqual({ gated: false })
+  })
+
+  it('provider not-attempted preserves deterministic behavior', () => {
+    expect(evaluateGeneratedExitGate({
+      room: gatedRoom(),
+      toRoomId: 'north-room',
+      state: gateState(),
+      providerGateStatus: 'not-attempted',
+    })).toEqual({ gated: true })
+    expect(evaluateGeneratedExitGate({
+      room: gatedRoom(),
+      toRoomId: 'north-room',
+      state: gateState({ 'interaction:control-panel': true }),
+      providerGateStatus: 'not-attempted',
+    })).toEqual({ gated: false })
   })
 })
