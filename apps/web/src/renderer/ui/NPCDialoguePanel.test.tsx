@@ -35,6 +35,15 @@ const turns: NPCDialogueTurn[] = [
   { speaker: 'npc', text: 'The ward failed before dawn.' },
 ]
 
+const generatedPersonaLabels = [
+  ['generated-room-guide', 'Room Guide'],
+  ['generated-calm-witness', 'Witness'],
+  ['generated-keep-warden', 'Keep Warden'],
+  ['generated-archive-aide', 'Archive Aide'],
+  ['generated-wasteland-scout', 'Wasteland Scout'],
+  ['generated-shelter-watch', 'Shelter Watch'],
+] as const
+
 function props(overrides: Partial<PanelProps> = {}): PanelProps {
   return {
     npcName: 'Stranger',
@@ -102,11 +111,26 @@ describe('NPCDialoguePanel', () => {
     expect(html).not.toContain('friendly-aide')
   })
 
+  it.each(generatedPersonaLabels)('renders generated persona %s as safe label %s', (persona, label) => {
+    const html = markup({ persona })
+
+    expect(html).toContain('class="npc-dialogue-subtitle"')
+    expect(html).toContain(label)
+    expect(html).not.toContain(persona)
+  })
+
   it('does not render an unknown raw persona slug', () => {
     const html = markup({ persona: 'adjacent:gen-1234abcd:exit:north' })
 
     expect(html).not.toContain('npc-dialogue-subtitle')
     expect(html).not.toContain('adjacent:gen-1234abcd:exit:north')
+  })
+
+  it('does not render an unknown generated persona slug', () => {
+    const html = markup({ persona: 'generated-unknown-guide' })
+
+    expect(html).not.toContain('npc-dialogue-subtitle')
+    expect(html).not.toContain('generated-unknown-guide')
   })
 
   it('renders player and NPC turns with labels', () => {

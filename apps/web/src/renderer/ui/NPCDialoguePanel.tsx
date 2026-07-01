@@ -3,7 +3,12 @@ import type { NPCDialoguePrompt, NPCDialogueTurn } from '../../domain/dialogue/c
 
 const PERSONA_ROLE_LABELS: Readonly<Record<string, string>> = {
   'friendly-aide': 'Ally',
-  'generated-room-guide': 'Guide',
+  'generated-room-guide': 'Room Guide',
+  'generated-calm-witness': 'Witness',
+  'generated-keep-warden': 'Keep Warden',
+  'generated-archive-aide': 'Archive Aide',
+  'generated-wasteland-scout': 'Wasteland Scout',
+  'generated-shelter-watch': 'Shelter Watch',
   guide: 'Guide',
   survivor: 'Survivor',
 }
