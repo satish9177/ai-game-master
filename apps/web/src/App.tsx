@@ -57,6 +57,8 @@ import { InMemoryRoomMemoryStore } from './memory/InMemoryRoomMemoryStore'
 import { RoomMemoryService } from './memory/RoomMemoryService'
 import { createDisplayNameResolver } from './domain/memory/displayNames'
 import { promoteInteractionMemories } from './app/promoteInteractionMemories'
+import { recallRoomMemoryContext } from './app/recallRoomMemoryContext'
+import type { RoomMemoryDialogueContext } from './domain/dialogue/contracts'
 import { loadRoomSpec, type LoadedRoom } from './domain/loadRoomSpec'
 import { fallbackRoom as fallbackRoomSpec } from './domain/examples/fallbackRoom'
 import { FALLBACK_NOTICE, shouldShowFallbackNotice } from './app/fallbackNotice'
@@ -401,6 +403,27 @@ function App() {
   const roomMemoryServiceRef = useRef(
     new RoomMemoryService(new InMemoryRoomMemoryStore(), new SystemClock(), idGenerator, logger),
   )
+  // Bounded, non-authoritative room-memory recall context for NPC dialogue
+  // (room-memory-recall-context-v0, Slice F). A monotonic request id discards a
+  // stale recall so a previous room's memories can never linger while a newer
+  // recall is pending: `refreshRoomMemoryContext` clears the value immediately
+  // on every call, then applies its own result only if still the latest.
+  const [roomMemoryContext, setRoomMemoryContext] = useState<RoomMemoryDialogueContext | undefined>(
+    undefined,
+  )
+  const roomMemoryRequestRef = useRef(0)
+  const refreshRoomMemoryContext = useCallback((state: WorldState) => {
+    const requestId = ++roomMemoryRequestRef.current
+    setRoomMemoryContext(undefined)
+    void recallRoomMemoryContext(
+      { worldId: state.worldId, sessionId: state.sessionId, roomId: state.currentRoomId },
+      roomMemoryServiceRef.current,
+      logger,
+    ).then((context) => {
+      if (roomMemoryRequestRef.current !== requestId) return
+      setRoomMemoryContext(context)
+    })
+  }, [])
   // Usage guardrail state (real provider only; fake path stays inert).
   // Refs hold the live values for reading inside stable useCallback closures;
   // the parallel state values trigger re-renders for the UsageMeter display.
@@ -453,7 +476,8 @@ function App() {
     setPlayerHud(views.playerHud)
     setQuest(views.quest)
     setJournal(views.journal)
-  }, [])
+    refreshRoomMemoryContext(state)
+  }, [refreshRoomMemoryContext])
 
   // Memory promotion seam (memory-event-promotion-v0 wiring slice). Runs only
   // after RoomViewer's interaction commit already succeeded — it never appends
@@ -470,14 +494,21 @@ function App() {
             item: { [input.item.itemId]: input.item.name },
           })
         : undefined
+    // Promotion may write a new room memory after the room-load/navigation
+    // recall already ran (`refreshDerivedViews` -> `refreshRoomMemoryContext`),
+    // so re-recall once promotion settles — success or failure — to pick up
+    // anything just promoted. A promotion failure is already swallowed/logged
+    // by `promoteInteractionMemories`/the store; it never blocks gameplay.
     void promoteInteractionMemories(
       input.events,
       input.state.worldId,
       roomMemoryServiceRef.current,
       logger,
       displayNames,
-    ).catch(() => {})
-  }, [])
+    ).catch(() => {}).finally(() => {
+      refreshRoomMemoryContext(input.state)
+    })
+  }, [refreshRoomMemoryContext])
 
   useEffect(() => {
     const version = ++requestVersion.current
@@ -967,6 +998,7 @@ function App() {
           onWorldStateChange={refreshDerivedViews}
           onCommittedInteractionEvents={handleCommittedInteractionEvents}
           questStage={buildQuestStage({ quest, questHints, questSpec: questSpecSnapshot })}
+          roomMemoryContext={roomMemoryContext}
           {...(activePlay.objectivesPerRoom === true
             ? { resolvedObjectIds: activePlay.entryResolvedObjectIds }
             : {})}

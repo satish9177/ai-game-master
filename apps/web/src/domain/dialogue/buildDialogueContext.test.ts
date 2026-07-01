@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import type { WorldState } from '../world/worldState'
-import type { NPCDialogueTurn, QuestDialogueContext, RoomDialogueContext } from './contracts'
+import type {
+  NPCDialogueTurn,
+  QuestDialogueContext,
+  RoomDialogueContext,
+  RoomMemoryDialogueContext,
+} from './contracts'
 import { buildDialogueContext } from './buildDialogueContext'
 
 const state: WorldState = {
@@ -169,6 +174,39 @@ describe('buildDialogueContext', () => {
     expect(context).not.toHaveProperty('quest')
   })
 
+  it('copies memory dialogue context entries through and does not alias the input', () => {
+    const memoryContext: RoomMemoryDialogueContext = {
+      entries: [
+        { text: 'The east door is locked.', kind: 'player_claim' },
+        { text: 'This area changed in a lasting way.', kind: 'room_observation' },
+      ],
+    }
+    const context = buildDialogueContext(
+      state,
+      { npcId: 'aide', npcName: 'Asha', persona: 'friendly-aide' },
+      history,
+      undefined,
+      undefined,
+      memoryContext,
+    )
+
+    expect(context.memory).toEqual(memoryContext)
+    expect(context.memory).not.toBe(memoryContext)
+    expect(context.memory?.entries).not.toBe(memoryContext.entries)
+    expect(context.memory?.entries[0]).not.toBe(memoryContext.entries[0])
+  })
+
+  it('omits memory dialogue context when absent', () => {
+    const context = buildDialogueContext(
+      state,
+      { npcId: 'aide', npcName: 'Asha', persona: 'friendly-aide' },
+      history,
+    )
+
+    expect(context.memory).toBeUndefined()
+    expect(context).not.toHaveProperty('memory')
+  })
+
   it('does not introduce free-text leakage beyond existing dialogue context fields', () => {
     const context = buildDialogueContext(
       state,
@@ -186,5 +224,26 @@ describe('buildDialogueContext', () => {
     expect(roomOnly).not.toContain('friendly-aide')
     expect(roomOnly).not.toContain('Hello.')
     expect(roomOnly).not.toContain('Welcome.')
+  })
+
+  it('does not leak persona or dialogue history into the memory dialogue context', () => {
+    const memoryContext: RoomMemoryDialogueContext = {
+      entries: [{ text: 'The east door is locked.', kind: 'player_claim' }],
+    }
+    const context = buildDialogueContext(
+      state,
+      { npcId: 'aide', npcName: 'Asha', persona: 'friendly-aide' },
+      history,
+      undefined,
+      undefined,
+      memoryContext,
+    )
+    const memoryOnly = JSON.stringify(context.memory)
+
+    expect(memoryOnly).toContain('east door is locked')
+    expect(memoryOnly).not.toContain('Asha')
+    expect(memoryOnly).not.toContain('friendly-aide')
+    expect(memoryOnly).not.toContain('Hello.')
+    expect(memoryOnly).not.toContain('Welcome.')
   })
 })

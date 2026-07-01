@@ -40,6 +40,23 @@ export type QuestDialogueContext = {
   objective?: NPCObjectiveContext
 }
 
+export type RoomMemoryContextEntry = {
+  text: string
+  kind?: string
+}
+
+/**
+ * Bounded, non-authoritative recall context (room-memory-recall-context-v0,
+ * Slice F). Dialogue-local by design: `domain/dialogue` must not import
+ * `domain/memory`, so this is a plain shape rather than a re-export of
+ * `RoomMemoryRecord`. The app-layer orchestrator (`app/recallRoomMemoryContext.ts`)
+ * maps recalled records into this shape. It is recall/context only — never
+ * gameplay truth, never a source of state mutation.
+ */
+export type RoomMemoryDialogueContext = {
+  entries: RoomMemoryContextEntry[]
+}
+
 export type NPCDialogueContext = {
   roomId: string
   npcId: string
@@ -47,6 +64,8 @@ export type NPCDialogueContext = {
   persona?: string
   room?: RoomDialogueContext
   quest?: QuestDialogueContext
+  /** Bounded, non-authoritative room-memory recall context. See `RoomMemoryDialogueContext`. */
+  memory?: RoomMemoryDialogueContext
   player: {
     health: { current: number; max: number }
     status: string[]

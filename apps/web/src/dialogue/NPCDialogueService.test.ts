@@ -2,7 +2,11 @@ import { describe, expect, it } from 'vitest'
 import type { Clock } from '../domain/ports/Clock'
 import type { IdGenerator } from '../domain/ports/IdGenerator'
 import type { NPCDialogueProvider } from '../domain/ports/NPCDialogueProvider'
-import type { NPCDialogueRequest, RoomDialogueContext } from '../domain/dialogue/contracts'
+import type {
+  NPCDialogueRequest,
+  RoomDialogueContext,
+  RoomMemoryDialogueContext,
+} from '../domain/dialogue/contracts'
 import type { Logger, LogContext, LogLevel } from '../platform/logger/Logger'
 import { InMemoryWorldStore } from '../world-session/InMemoryWorldStore'
 import { WorldSession } from '../world-session/WorldSession'
@@ -142,6 +146,61 @@ describe('NPCDialogueService', () => {
     expect(requests[0]?.context.room?.features).not.toBe(roomContext.features)
     expect(requests[0]?.context.room?.affordances).not.toBe(roomContext.affordances)
     expect(roomContext).toEqual(roomContextBefore)
+  })
+
+  it('passes optional memoryContext through to provider context', async () => {
+    const requests: NPCDialogueRequest[] = []
+    const harness = createHarness({
+      reply: async (request) => {
+        requests.push(request)
+        return { text: 'A memory-aware answer.' }
+      },
+    })
+    const state = await start(harness)
+    const memoryContext: RoomMemoryDialogueContext = {
+      entries: [{ text: 'The east door is locked.', kind: 'player_claim' }],
+    }
+    const memoryContextBefore = structuredClone(memoryContext)
+
+    const result = await harness.service.reply({
+      sessionId: state.sessionId,
+      npcId: 'friendly-aide',
+      npcName: 'Asha',
+      dialogue: { persona: 'friendly-aide' },
+      history: [],
+      memoryContext,
+    })
+
+    expect(result).toEqual({
+      status: 'replied',
+      turn: { speaker: 'npc', text: 'A memory-aware answer.' },
+    })
+    expect(requests).toHaveLength(1)
+    expect(requests[0]?.context.memory).toEqual(memoryContext)
+    expect(requests[0]?.context.memory).not.toBe(memoryContext)
+    expect(memoryContext).toEqual(memoryContextBefore)
+  })
+
+  it('omits memoryContext from provider context when absent', async () => {
+    const requests: NPCDialogueRequest[] = []
+    const harness = createHarness({
+      reply: async (request) => {
+        requests.push(request)
+        return { text: 'A plain answer.' }
+      },
+    })
+    const state = await start(harness)
+
+    await harness.service.reply({
+      sessionId: state.sessionId,
+      npcId: 'friendly-aide',
+      npcName: 'Asha',
+      dialogue: { persona: 'friendly-aide' },
+      history: [],
+    })
+
+    expect(requests[0]?.context.memory).toBeUndefined()
+    expect(requests[0]?.context).not.toHaveProperty('memory')
   })
 
   it('rejects missing dialogue before reading the session or provider', async () => {

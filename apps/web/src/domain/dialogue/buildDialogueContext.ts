@@ -1,5 +1,11 @@
 import type { WorldState } from '../world/worldState'
-import type { NPCDialogueContext, NPCDialogueTurn, QuestDialogueContext, RoomDialogueContext } from './contracts'
+import type {
+  NPCDialogueContext,
+  NPCDialogueTurn,
+  QuestDialogueContext,
+  RoomDialogueContext,
+  RoomMemoryDialogueContext,
+} from './contracts'
 
 export type DialogueNPC = {
   npcId: string
@@ -14,6 +20,7 @@ export function buildDialogueContext(
   history: NPCDialogueTurn[],
   roomContext?: RoomDialogueContext,
   questContext?: QuestDialogueContext,
+  memoryContext?: RoomMemoryDialogueContext,
 ): NPCDialogueContext {
   return {
     roomId: state.currentRoomId,
@@ -22,6 +29,7 @@ export function buildDialogueContext(
     ...(npc.persona !== undefined ? { persona: npc.persona } : {}),
     ...(roomContext !== undefined ? { room: copyRoomDialogueContext(roomContext) } : {}),
     ...(questContext !== undefined ? { quest: { ...questContext } } : {}),
+    ...(memoryContext !== undefined ? { memory: copyRoomMemoryDialogueContext(memoryContext) } : {}),
     player: {
       health: { ...state.player.health },
       status: [...state.player.status],
@@ -38,5 +46,11 @@ function copyRoomDialogueContext(room: RoomDialogueContext): RoomDialogueContext
     features: room.features.map((feature) => ({ ...feature })),
     affordances: [...room.affordances],
     npcCount: room.npcCount,
+  }
+}
+
+function copyRoomMemoryDialogueContext(memory: RoomMemoryDialogueContext): RoomMemoryDialogueContext {
+  return {
+    entries: memory.entries.map((entry) => ({ ...entry })),
   }
 }

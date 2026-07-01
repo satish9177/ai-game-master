@@ -121,6 +121,27 @@ describe('buildNPCDialogueReplyInput', () => {
     expect(input.quest).toBeUndefined()
     expect(input).not.toHaveProperty('quest')
   })
+
+  it('includes the memory context when provided', () => {
+    const memoryContext = { entries: [{ text: 'The east door is locked.', kind: 'player_claim' }] }
+    const input = buildNPCDialogueReplyInput({
+      sessionId: 's',
+      target: ashaTarget,
+      history: [],
+      memoryContext,
+    })
+    expect(input.memoryContext).toEqual(memoryContext)
+  })
+
+  it('omits the memory context when not provided', () => {
+    const input = buildNPCDialogueReplyInput({
+      sessionId: 's',
+      target: ashaTarget,
+      history: [],
+    })
+    expect(input.memoryContext).toBeUndefined()
+    expect(input).not.toHaveProperty('memoryContext')
+  })
 })
 
 describe('quest-aware dialogue open path (RoomViewer wiring seam)', () => {

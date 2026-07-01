@@ -9,7 +9,12 @@ import { createConsoleLogger } from '../platform/logger/consoleLogger'
 import { isWebGL2Available } from '../platform/browser/webglSupport'
 import { buildRoomDialogueContext } from '../domain/dialogue/buildRoomDialogueContext'
 import type { EncounterSpec } from '../domain/encounters/encounterSpec'
-import type { NPCDialogueTurn, QuestDialogueContext, RoomDialogueContext } from '../domain/dialogue/contracts'
+import type {
+  NPCDialogueTurn,
+  QuestDialogueContext,
+  RoomDialogueContext,
+  RoomMemoryDialogueContext,
+} from '../domain/dialogue/contracts'
 import type { InteractionService } from '../interactions/InteractionService'
 import type { EncounterService } from '../encounters/EncounterService'
 import type { NPCDialogueService } from '../dialogue/NPCDialogueService'
@@ -64,6 +69,7 @@ type RoomViewerProps = {
   onWorldStateChange?: (state: WorldState) => void
   onCommittedInteractionEvents?: (input: CommittedInteractionEvents) => void
   questStage?: QuestDialogueContext
+  roomMemoryContext?: RoomMemoryDialogueContext
   resolvedObjectIds?: ReadonlySet<string>
 }
 
@@ -77,6 +83,7 @@ export function RoomViewer({
   onWorldStateChange,
   onCommittedInteractionEvents,
   questStage,
+  roomMemoryContext,
   resolvedObjectIds,
 }: RoomViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null)
@@ -92,6 +99,13 @@ export function RoomViewer({
   useEffect(() => {
     questStageRef.current = questStage
   }, [questStage])
+  // Bounded, non-authoritative room-memory recall context (memory-decoupled: this
+  // component only imports the pure `domain/dialogue` contract type, never
+  // `memory/**`; the composition root owns `RoomMemoryService` and recall).
+  const roomMemoryContextRef = useRef<RoomMemoryDialogueContext | undefined>(undefined)
+  useEffect(() => {
+    roomMemoryContextRef.current = roomMemoryContext
+  }, [roomMemoryContext])
   const activeEncounterRef = useRef<{ encounter: EncounterSpec; ref: string | undefined } | null>(
     null,
   )
@@ -224,6 +238,7 @@ export function RoomViewer({
           playerLine: undefined,
           roomContext: roomDialogueContextRef.current,
           questStage: questStageRef.current,
+          memoryContext: roomMemoryContextRef.current,
         })).then((result) => {
           if (cancelled || npcDialogueRequestRef.current !== requestId) return
           npcDialoguePendingRef.current = false
@@ -380,6 +395,7 @@ export function RoomViewer({
         playerLine: prompt?.id,
         roomContext: roomDialogueContextRef.current,
         questStage: questStageRef.current,
+        memoryContext: roomMemoryContextRef.current,
       })).then((result) => {
         if (
           activeNPCDialogueRef.current !== target
