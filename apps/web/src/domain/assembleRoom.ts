@@ -271,6 +271,7 @@ export function assembleRoom(
   // prompt classifier signal. No prompt text enters this domain function.
   const npcPresenceResult = ensureGeneratedNpcPresence(purposeFixed, {
     requested: options.requestsNpc ?? false,
+    themePack: options.themePack,
   })
   const npcPresenceFixed = npcPresenceResult.room
   const { npcInserted } = npcPresenceResult

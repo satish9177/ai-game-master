@@ -34,13 +34,22 @@ const READ_BODY = 'You read over it carefully. Nothing changes yet.'
 const INSPECT_BODY = 'You inspect it carefully, but do not take anything.'
 const CORPSE_BODY = 'You inspect the remains without disturbing them.'
 const EXAMINE_BODY = 'You examine it for meaning or danger. Nothing changes yet.'
-const GENERATED_NPC_PERSONAS = [
+const DEFAULT_GENERATED_NPC_PERSONAS = [
   'generated-room-guide',
   'generated-calm-witness',
+]
+const FANTASY_KEEP_GENERATED_NPC_PERSONAS = [
   'generated-keep-warden',
   'generated-archive-aide',
+]
+const POST_APOC_GENERATED_NPC_PERSONAS = [
   'generated-wasteland-scout',
   'generated-shelter-watch',
+]
+const GENERATED_NPC_PERSONAS = [
+  ...DEFAULT_GENERATED_NPC_PERSONAS,
+  ...FANTASY_KEEP_GENERATED_NPC_PERSONAS,
+  ...POST_APOC_GENERATED_NPC_PERSONAS,
 ]
 
 function interactionFor(object: RoomObject) {
@@ -1052,6 +1061,34 @@ describe('assembleRoom', () => {
     expect(dialogue).toBeDefined()
     expect(GENERATED_NPC_PERSONAS).toContain(dialogue?.persona)
     expect(dialogue?.greeting.trim().length).toBeGreaterThan(0)
+    expect(dialogue?.prompts.map((prompt) => prompt.id)).toEqual(['ask-room', 'ask-help'])
+    expect(validateRoom(result.room).ok).toBe(true)
+  })
+
+  it('requestsNpc true with fantasy-keep theme uses a fantasy generated NPC persona', () => {
+    const result = assembleRoom(raw(validSpec({
+      id: 'fantasy-npc-room',
+      shell: { dimensions: { width: 18, depth: 18, height: 4 }, exits: [{ side: 'north', width: 3 }] },
+    })), fallback, { requestsNpc: true, themePack: 'fantasy-keep' })
+    const npc = result.room.objects.find((object) => object.type === 'npc')
+    const dialogue = npc && 'interaction' in npc ? npc.interaction.dialogue : undefined
+
+    expect(result.diagnostics.npcInserted).toBe(true)
+    expect(FANTASY_KEEP_GENERATED_NPC_PERSONAS).toContain(dialogue?.persona)
+    expect(dialogue?.prompts.map((prompt) => prompt.id)).toEqual(['ask-room', 'ask-help'])
+    expect(validateRoom(result.room).ok).toBe(true)
+  })
+
+  it('requestsNpc true with post-apoc theme uses a post-apoc generated NPC persona', () => {
+    const result = assembleRoom(raw(validSpec({
+      id: 'post-apoc-npc-room',
+      shell: { dimensions: { width: 18, depth: 18, height: 4 }, exits: [{ side: 'north', width: 3 }] },
+    })), fallback, { requestsNpc: true, themePack: 'post-apoc' })
+    const npc = result.room.objects.find((object) => object.type === 'npc')
+    const dialogue = npc && 'interaction' in npc ? npc.interaction.dialogue : undefined
+
+    expect(result.diagnostics.npcInserted).toBe(true)
+    expect(POST_APOC_GENERATED_NPC_PERSONAS).toContain(dialogue?.persona)
     expect(dialogue?.prompts.map((prompt) => prompt.id)).toEqual(['ask-room', 'ask-help'])
     expect(validateRoom(result.room).ok).toBe(true)
   })
