@@ -1,6 +1,8 @@
 # Implementation Plan — `feature/generated-npc-dialogue-seed-variety-v0`
 
-> Status: **planned (Slice 1 — this doc).**
+> Status: **complete — Slices 1-5 all implemented and approved.**
+> See [ADR-0066](../decisions/ADR-0066-generated-npc-dialogue-seed-variety-v0.md) for the
+> closeout decision record.
 > Maintainer approved the design in-chat (this session) under the following locked decisions:
 > deterministic only, no provider/LLM involvement, fix lives entirely inside the existing
 > `ensureGeneratedNpcPresence.ts` pure function, `themePack` is threaded in from `assembleRoom`,
@@ -10,9 +12,9 @@
 > provider, `NPCDialogueService`, `RoomViewer`, `App.tsx`, memory, schema, save/load, renderer,
 > and persistence are all out of scope.
 >
-> An ADR (next number: **ADR-0066**) can be added at closeout if implementation confirms this
-> design holds without deviation — matching the existing convention of one ADR per shipped `-v0`
-> slice (ADR-0001 through ADR-0065 today).
+> Implementation held the design without deviation (only exact wording of the closed tables was
+> finalized at implementation time, as this plan anticipated). ADR-0066 was added at closeout,
+> matching the existing convention of one ADR per shipped `-v0` slice.
 >
 > Companion docs: [ARCHITECTURE](../ARCHITECTURE.md) · [BOUNDARIES](../BOUNDARIES.md) ·
 > [AGENTS.md](../../../AGENTS.md).
@@ -368,7 +370,7 @@ New file: this plan. No source code. Status: **complete** (this document).
 
 ---
 
-**Slice 2 — `ensureGeneratedNpcPresence` deterministic seed variety**
+**Slice 2 — `ensureGeneratedNpcPresence` deterministic seed variety** — **Complete, approved.**
 `feat(domain): generated NPC seed variety — deterministic name/persona/greeting/prompt tables`
 
 Modified: `ensureGeneratedNpcPresence.ts`, `ensureGeneratedNpcPresence.test.ts`.
@@ -405,7 +407,7 @@ Verification: `npm run test -- ensureGeneratedNpcPresence`, `npm run lint`, `npm
 
 ---
 
-**Slice 3 — `assembleRoom` themePack threading**
+**Slice 3 — `assembleRoom` themePack threading** — **Complete, approved.**
 `feat(domain): thread themePack into generated NPC insertion`
 
 Modified: `assembleRoom.ts`, `assembleRoom.test.ts`.
@@ -432,7 +434,7 @@ Verification: `npm run test -- assembleRoom`, `npm run lint`, `npm run build`
 
 ---
 
-**Slice 4 — `NPCDialoguePanel` persona label map (if needed)**
+**Slice 4 — `NPCDialoguePanel` persona label map (if needed)** — **Complete, approved.**
 `feat(ui): add role labels for generated NPC seed variety personas`
 
 Modified: `NPCDialoguePanel.tsx`, `NPCDialoguePanel.test.tsx`.
@@ -453,12 +455,12 @@ Verification: `npm run test -- NPCDialoguePanel`, `npm run lint`, `npm run build
 
 ---
 
-**Slice 5 — Docs closeout + manual smoke**
+**Slice 5 — Docs closeout + manual smoke** — **Complete.**
 `docs: close generated npc dialogue seed variety v0`
 
-No new production files. Update `docs/architecture/ARCHITECTURE.md` with a short "Generated Room
+No new production files. Updated `docs/architecture/ARCHITECTURE.md` with a short "Generated Room
 NPC Dialogue Seed Variety v0" status paragraph mirroring the existing feature-map style, citing
-ADR-0066 if the ADR was added at this point.
+[ADR-0066](../decisions/ADR-0066-generated-npc-dialogue-seed-variety-v0.md).
 
 Tests / checks:
 - Full targeted regression: `dialogue`, `ensureGeneratedNpcPresence`, `assembleRoom`,

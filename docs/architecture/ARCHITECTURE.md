@@ -125,6 +125,13 @@ Throughout these docs:
   deterministic behavior. No `RoomSpec`/`SaveGame`/`WorldState`/`QuestSpec`, backend, renderer, or
   persistence schema change
   ([ADR-0064](./decisions/ADR-0064-generated-mechanical-gate-provider-v0.md)).
+- ✅ **Implemented** — Generated NPC Dialogue Seed Variety v0 — the single NPC
+  `ensureGeneratedNpcPresence` inserts into a prompt-generated room now varies its name, persona,
+  greeting, body line, and starter-prompt labels deterministically by `room.id` hash and the
+  existing `themePack`/story-anchor-type signals, instead of always inserting the fixed
+  `'Mira'` / `'generated-room-guide'` template. Prompt ids stay `ask-room`/`ask-help`; no
+  provider/LLM call, no schema, memory, or persistence change
+  ([ADR-0066](./decisions/ADR-0066-generated-npc-dialogue-seed-variety-v0.md)).
 - ✅ **Implemented** — Real NPC Dialogue + Room-Memory Awareness v0 — an
   `OpenAICompatibleNPCDialogueProvider` now exists behind the unchanged
   `NPCDialogueProvider` port, selected only by `selectDialogueProvider` when the
@@ -857,6 +864,33 @@ the generated-room domain pipeline
 - **Soft cap note:** the inserted NPC is added after the soft generated object cap
   but before hard final validation. This is intentional so an explicitly
   requested NPC is not dropped by soft composition trimming.
+
+## Generated NPC Dialogue Seed Variety v0
+
+✅ **Implemented, generated assembly/domain.** Generated NPC Dialogue Seed Variety v0 replaces
+the single hardcoded NPC template `ensureGeneratedNpcPresence` (above) inserted with a small
+deterministic builder, so the inserted NPC's name/persona/greeting/prompt labels vary instead of
+always resolving to `'Mira'` / `'generated-room-guide'`
+([ADR-0066](./decisions/ADR-0066-generated-npc-dialogue-seed-variety-v0.md)).
+
+- **Structural selection only:** a local `stableIndex(room.id, ...)` hash and the existing
+  `themePack` (`'fantasy-keep' | 'post-apoc' | undefined`) enum select from closed, hand-written
+  `Object.freeze`d tables (`NPC_NAMES`, `NPC_PERSONAS`, `NPC_GREETINGS`, `NPC_BODIES`,
+  `ANCHOR_PROMPTS`, `GENERIC_ROOM_PROMPTS`, `HELP_PROMPTS`). The safe object **type** of the
+  room's existing derived story anchor (via unmodified `selectGeneratedStoryAnchorIndex`) picks
+  the first starter-prompt line. No room/object name, prompt/title/body text, or generated free
+  text is ever read.
+- **Prompt ids unchanged:** `'ask-room'` and `'ask-help'` remain fixed; only `label` text varies,
+  so dialogue routing, `NPCDialogueService`, and `RoomViewer`'s `onSay(prompt.id)` wiring are
+  unaffected.
+- **`assembleRoom` threading:** Stage 2.12 now passes `themePack: options.themePack` into
+  `ensureGeneratedNpcPresence` — the only change to `assembleRoom.ts`.
+- **`NPCDialoguePanel` cosmetic labels:** the existing `PERSONA_ROLE_LABELS` map gained entries
+  for the new persona strings so each bucket's NPC shows a subtitle; unrecognized personas still
+  render none.
+- **No new safety surface:** `ensureGeneratedNpcPresence` stays pure/synchronous with no I/O; no
+  schema, memory, persistence, save/load, or `WorldState` change. Authored/demo NPC dialogue is
+  unaffected (same "no existing NPC" guard as ADR-0040).
 
 ## Generated Story Objective Contract v0
 
