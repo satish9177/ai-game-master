@@ -34,6 +34,14 @@ const READ_BODY = 'You read over it carefully. Nothing changes yet.'
 const INSPECT_BODY = 'You inspect it carefully, but do not take anything.'
 const CORPSE_BODY = 'You inspect the remains without disturbing them.'
 const EXAMINE_BODY = 'You examine it for meaning or danger. Nothing changes yet.'
+const GENERATED_NPC_PERSONAS = [
+  'generated-room-guide',
+  'generated-calm-witness',
+  'generated-keep-warden',
+  'generated-archive-aide',
+  'generated-wasteland-scout',
+  'generated-shelter-watch',
+]
 
 function interactionFor(object: RoomObject) {
   return 'interaction' in object ? object.interaction : undefined
@@ -1038,12 +1046,13 @@ describe('assembleRoom', () => {
       id: 'generated-npc',
       interaction: {
         key: 'F',
-        dialogue: {
-          persona: 'generated-room-guide',
-        },
       },
     })
-    expect(npc && 'interaction' in npc ? npc.interaction.dialogue : undefined).toBeDefined()
+    const dialogue = npc && 'interaction' in npc ? npc.interaction.dialogue : undefined
+    expect(dialogue).toBeDefined()
+    expect(GENERATED_NPC_PERSONAS).toContain(dialogue?.persona)
+    expect(dialogue?.greeting.trim().length).toBeGreaterThan(0)
+    expect(dialogue?.prompts.map((prompt) => prompt.id)).toEqual(['ask-room', 'ask-help'])
     expect(validateRoom(result.room).ok).toBe(true)
   })
 

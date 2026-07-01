@@ -8,6 +8,25 @@ import { validateRoom } from './validateRoom'
 
 const EAST_FLANK: [number, number, number] = [4.050000000000001, 0, 0]
 const WEST_FLANK: [number, number, number] = [-4.050000000000001, 0, 0]
+const DEFAULT_NAMES = ['Nara', 'Oren', 'Lio', 'Tessa']
+const FANTASY_NAMES = ['Elian', 'Seris', 'Tovan', 'Maera']
+const POST_APOC_NAMES = ['Pax', 'Ren', 'Juno', 'Calder']
+const DEFAULT_PERSONAS = ['generated-room-guide', 'generated-calm-witness']
+const FANTASY_PERSONAS = ['generated-keep-warden', 'generated-archive-aide']
+const POST_APOC_PERSONAS = ['generated-wasteland-scout', 'generated-shelter-watch']
+const GENERIC_ROOM_PROMPTS = [
+  'What should I look at first?',
+  'What stands out to you here?',
+  'What feels important in this room?',
+]
+const HELP_PROMPTS = [
+  'Can you guide me?',
+  'What should I do next?',
+  'Can you watch my back?',
+  'How can you help?',
+]
+const ALTAR_PROMPTS = ['What was this altar used for?', 'What kind of ritual happened here?']
+const MACHINE_PROMPTS = ['What is this machine for?', 'Is the machine still dangerous?']
 
 function roomWith(objects: unknown[], overrides: Partial<Parameters<typeof loadRoomSpec>[0]> = {}): LoadedRoom {
   return loadRoomSpec({
@@ -31,10 +50,23 @@ function insertedNpc(room: LoadedRoom): Extract<RoomObject, { type: 'npc' }> {
   return npc
 }
 
-function ensureInserted(room: LoadedRoom): LoadedRoom {
-  const result = ensureGeneratedNpcPresence(room, { requested: true })
+function ensureInserted(
+  room: LoadedRoom,
+  options: Omit<Parameters<typeof ensureGeneratedNpcPresence>[1], 'requested'> = {},
+): LoadedRoom {
+  const result = ensureGeneratedNpcPresence(room, { requested: true, ...options })
   expect(result.npcInserted).toBe(true)
   return result.room
+}
+
+function visibleNpcText(npc: Extract<RoomObject, { type: 'npc' }>): string {
+  return JSON.stringify({
+    name: npc.name,
+    prompt: npc.interaction.prompt,
+    body: npc.interaction.body,
+    greeting: npc.interaction.dialogue?.greeting,
+    prompts: npc.interaction.dialogue?.prompts,
+  })
 }
 
 describe('ensureGeneratedNpcPresence', () => {
@@ -85,26 +117,28 @@ describe('ensureGeneratedNpcPresence', () => {
     expect(npc).toMatchObject({
       type: 'npc',
       id: 'generated-npc',
-      name: 'Mira',
       color: '#597a9b',
       interaction: {
         key: 'F',
-        prompt: 'Press F to talk to Mira',
-        body: 'Mira keeps watch, ready to answer quietly.',
         dialogue: {
-          persona: 'generated-room-guide',
-          greeting: 'Stay close. I am Mira.',
           prompts: [
-            { id: 'ask-room', label: 'What do you notice here?' },
-            { id: 'ask-help', label: 'Can you help me?' },
+            { id: 'ask-room', label: expect.any(String) },
+            { id: 'ask-help', label: expect.any(String) },
           ],
         },
       },
     })
+    expect(DEFAULT_NAMES).toContain(npc.name)
+    expect(npc.interaction.prompt).toBe(`Press F to talk to ${npc.name}`)
+    expect(npc.interaction.body).toContain(npc.name)
+    expect(DEFAULT_PERSONAS).toContain(npc.interaction.dialogue?.persona)
+    expect(npc.interaction.dialogue?.greeting).toContain(npc.name)
+    expect(GENERIC_ROOM_PROMPTS).toContain(npc.interaction.dialogue?.prompts?.[0]?.label)
+    expect(HELP_PROMPTS).toContain(npc.interaction.dialogue?.prompts?.[1]?.label)
     expect(lookup.get('generated-npc')).toEqual({
       npcId: 'generated-npc',
-      npcName: 'Mira',
-      persona: 'generated-room-guide',
+      npcName: npc.name,
+      persona: npc.interaction.dialogue?.persona,
       dialogue: npc.interaction.dialogue,
     })
   })
@@ -174,6 +208,91 @@ describe('ensureGeneratedNpcPresence', () => {
     expect(second).toEqual(first)
   })
 
+  it('same room and same options gives identical generated NPC', () => {
+    const room = roomWith([{ type: 'machine', position: [0, 0, -4] }], { id: 'stable-room' })
+
+    const first = insertedNpc(ensureInserted(room, { themePack: 'post-apoc' }))
+    const second = insertedNpc(ensureInserted(room, { themePack: 'post-apoc' }))
+
+    expect(second).toEqual(first)
+  })
+
+  it('different room ids can produce different names and prompts from the same default pool', () => {
+    const npcs = Array.from({ length: 8 }, (_, index) =>
+      insertedNpc(ensureInserted(roomWith([], { id: `default-room-${index}` }))))
+
+    expect(new Set(npcs.map((npc) => npc.name)).size).toBeGreaterThan(1)
+    expect(new Set(npcs.map((npc) => npc.interaction.dialogue?.prompts?.[1]?.label)).size)
+      .toBeGreaterThan(1)
+    for (const npc of npcs) {
+      expect(DEFAULT_NAMES).toContain(npc.name)
+      expect(GENERIC_ROOM_PROMPTS).toContain(npc.interaction.dialogue?.prompts?.[0]?.label)
+      expect(HELP_PROMPTS).toContain(npc.interaction.dialogue?.prompts?.[1]?.label)
+    }
+  })
+
+  it('undefined theme uses the default pool without always producing Mira', () => {
+    const npc = insertedNpc(ensureInserted(roomWith([], { id: 'default-theme-room' })))
+
+    expect(DEFAULT_NAMES).toContain(npc.name)
+    expect(npc.name).not.toBe('Mira')
+    expect(npc.interaction.dialogue?.greeting).not.toContain('Mira')
+  })
+
+  it('fantasy-keep theme produces fantasy-themed name, persona, and greeting', () => {
+    const npc = insertedNpc(ensureInserted(
+      roomWith([{ type: 'altar', position: [0, 0, -4] }], { id: 'fantasy-room' }),
+      { themePack: 'fantasy-keep' },
+    ))
+
+    expect(FANTASY_NAMES).toContain(npc.name)
+    expect(FANTASY_PERSONAS).toContain(npc.interaction.dialogue?.persona)
+    expect(npc.interaction.dialogue?.greeting).toMatch(/sworn|Tread softly/)
+    expect(ALTAR_PROMPTS).toContain(npc.interaction.dialogue?.prompts?.[0]?.label)
+  })
+
+  it('post-apoc theme produces post-apoc-themed name, persona, and greeting', () => {
+    const npc = insertedNpc(ensureInserted(
+      roomWith([{ type: 'machine', position: [0, 0, -4] }], { id: 'post-apoc-room' }),
+      { themePack: 'post-apoc' },
+    ))
+
+    expect(POST_APOC_NAMES).toContain(npc.name)
+    expect(POST_APOC_PERSONAS).toContain(npc.interaction.dialogue?.persona)
+    expect(npc.interaction.dialogue?.greeting).toMatch(/Stay sharp|Keep low/)
+    expect(MACHINE_PROMPTS).toContain(npc.interaction.dialogue?.prompts?.[0]?.label)
+  })
+
+  it('prompt ids remain ask-room and ask-help', () => {
+    const npc = insertedNpc(ensureInserted(roomWith([{ type: 'altar', position: [0, 0, -4] }])))
+
+    expect(npc.interaction.dialogue?.prompts?.map((prompt) => prompt.id))
+      .toEqual(['ask-room', 'ask-help'])
+  })
+
+  it('story-anchor object type influences prompt-1 label when present', () => {
+    const altarNpc = insertedNpc(ensureInserted(roomWith([
+      { type: 'altar', position: [0, 0, -4] },
+      { type: 'book', position: [2, 0, -2] },
+    ], { id: 'altar-anchor-room' })))
+    const machineNpc = insertedNpc(ensureInserted(
+      roomWith([
+        { type: 'machine', position: [0, 0, -4] },
+        { type: 'paper', position: [2, 0, -2] },
+      ], { id: 'machine-anchor-room' }),
+      { themePack: 'post-apoc' },
+    ))
+
+    expect(ALTAR_PROMPTS).toContain(altarNpc.interaction.dialogue?.prompts?.[0]?.label)
+    expect(MACHINE_PROMPTS).toContain(machineNpc.interaction.dialogue?.prompts?.[0]?.label)
+  })
+
+  it('no-anchor fallback still produces a safe generic prompt', () => {
+    const npc = insertedNpc(ensureInserted(roomWith([{ type: 'pillar', position: [0, 0, -4] }])))
+
+    expect(GENERIC_ROOM_PROMPTS).toContain(npc.interaction.dialogue?.prompts?.[0]?.label)
+  })
+
   it('does not leak generated room or existing object text into inserted NPC strings', () => {
     const room = roomWith([
       {
@@ -188,11 +307,15 @@ describe('ensureGeneratedNpcPresence', () => {
         },
       },
       { type: 'zombie', name: 'ZOMBIE_SECRET_NAME', position: [1, 0, -2] },
-    ])
+    ], {
+      id: 'secret-room-id',
+      name: 'Secret Room Name',
+    })
 
-    const npcJson = JSON.stringify(insertedNpc(ensureInserted(room)))
+    const npcJson = visibleNpcText(insertedNpc(ensureInserted(room)))
 
     for (const forbidden of [
+      'secret-room-id',
       'Secret Room Name',
       'object-secret-id',
       'PROMPT_SECRET_MARKER',
@@ -200,6 +323,7 @@ describe('ensureGeneratedNpcPresence', () => {
       'BODY_SECRET_MARKER',
       'ZOMBIE_SECRET_NAME',
       '{"raw":"json"}',
+      'generated-room-guide',
     ]) {
       expect(npcJson).not.toContain(forbidden)
     }

@@ -1,9 +1,12 @@
 import { computePlayableBounds, objectFootprintRadius } from './generatedRoomLayout'
+import { selectGeneratedStoryAnchorIndex } from './generatedRoomComposition'
+import type { GeneratedRoomVisualTheme } from './generatedRoomThemeVocabulary'
 import type { LoadedRoom } from './loadRoomSpec'
 import type { RoomObject } from './roomSpec'
 
 export type EnsureGeneratedNpcPresenceOptions = {
   requested: boolean
+  themePack?: GeneratedRoomVisualTheme
 }
 
 export type EnsureGeneratedNpcPresenceResult = {
@@ -12,9 +15,9 @@ export type EnsureGeneratedNpcPresenceResult = {
 }
 
 type NpcObject = Extract<RoomObject, { type: 'npc' }>
+type ThemeBucket = GeneratedRoomVisualTheme | 'default'
 
 const GENERATED_NPC_BASE_ID = 'generated-npc'
-const GENERATED_NPC_NAME = 'Mira'
 const GENERATED_NPC_COLOR = '#597a9b'
 const GENERATED_NPC_FOOTPRINT = 0.45
 
@@ -37,26 +40,74 @@ const NPC_BLOCKING_TYPES = new Set<RoomObject['type']>([
   'zombie',
 ])
 
-const NPC_TEMPLATE: Omit<NpcObject, 'id' | 'position'> = {
-  type: 'npc',
-  name: GENERATED_NPC_NAME,
-  color: GENERATED_NPC_COLOR,
-  rotationY: 0,
-  scale: 1,
-  interaction: {
-    key: 'F',
-    prompt: `Press F to talk to ${GENERATED_NPC_NAME}`,
-    body: `${GENERATED_NPC_NAME} keeps watch, ready to answer quietly.`,
-    dialogue: {
-      persona: 'generated-room-guide',
-      greeting: `Stay close. I am ${GENERATED_NPC_NAME}.`,
-      prompts: [
-        { id: 'ask-room', label: 'What do you notice here?' },
-        { id: 'ask-help', label: 'Can you help me?' },
-      ],
-    },
-  },
+const NPC_NAMES: Readonly<Record<ThemeBucket, readonly string[]>> = {
+  default: Object.freeze(['Nara', 'Oren', 'Lio', 'Tessa']),
+  'fantasy-keep': Object.freeze(['Elian', 'Seris', 'Tovan', 'Maera']),
+  'post-apoc': Object.freeze(['Pax', 'Ren', 'Juno', 'Calder']),
 }
+
+const NPC_PERSONAS: Readonly<Record<ThemeBucket, readonly string[]>> = {
+  default: Object.freeze(['generated-room-guide', 'generated-calm-witness']),
+  'fantasy-keep': Object.freeze(['generated-keep-warden', 'generated-archive-aide']),
+  'post-apoc': Object.freeze(['generated-wasteland-scout', 'generated-shelter-watch']),
+}
+
+const NPC_GREETINGS: Readonly<Record<ThemeBucket, readonly string[]>> = {
+  default: Object.freeze([
+    'Stay close. I am {name}.',
+    'Keep your voice low. I am {name}.',
+  ]),
+  'fantasy-keep': Object.freeze([
+    'Hold a moment. I am {name}, sworn to watch these halls.',
+    'Tread softly. I am {name}, and this place still listens.',
+  ]),
+  'post-apoc': Object.freeze([
+    'Stay sharp. I am {name}, and the quiet does not last.',
+    'Keep low. I am {name}; the ruins carry every sound.',
+  ]),
+}
+
+const NPC_BODIES: Readonly<Record<ThemeBucket, readonly string[]>> = {
+  default: Object.freeze([
+    '{name} watches the room, ready to answer quietly.',
+    '{name} studies the surroundings and waits for your question.',
+  ]),
+  'fantasy-keep': Object.freeze([
+    '{name} keeps watch over the chamber, cautious but willing to speak.',
+    '{name} listens for movement beyond the walls before answering.',
+  ]),
+  'post-apoc': Object.freeze([
+    '{name} scans the room for danger, ready to trade a few careful words.',
+    '{name} checks the shadows, then gives you a brief nod.',
+  ]),
+}
+
+const ANCHOR_PROMPTS: Partial<Record<RoomObject['type'], readonly string[]>> = {
+  throne: Object.freeze(['What authority ruled here?', 'What happened around the throne?']),
+  altar: Object.freeze(['What was this altar used for?', 'What kind of ritual happened here?']),
+  statue: Object.freeze(['Who does this statue honor?', 'Why is this statue important?']),
+  corpse: Object.freeze(['What happened to the body?', 'Is there danger near the body?']),
+  machine: Object.freeze(['What is this machine for?', 'Is the machine still dangerous?']),
+  artifact: Object.freeze(['What is this artifact?', 'Why does this artifact matter?']),
+  chest: Object.freeze(['Is that chest worth checking?', 'What might be stored here?']),
+  table: Object.freeze(['What was arranged on the table?', 'Does the table tell us anything?']),
+  map: Object.freeze(['What does the map show?', 'Can the map guide us?']),
+  book: Object.freeze(['What should I look for in the book?', 'Could the book explain this place?']),
+  paper: Object.freeze(['What should I read first?', 'Could these papers matter?']),
+}
+
+const GENERIC_ROOM_PROMPTS = Object.freeze([
+  'What should I look at first?',
+  'What stands out to you here?',
+  'What feels important in this room?',
+])
+
+const HELP_PROMPTS = Object.freeze([
+  'Can you guide me?',
+  'What should I do next?',
+  'Can you watch my back?',
+  'How can you help?',
+])
 
 export function ensureGeneratedNpcPresence(
   room: LoadedRoom,
@@ -71,7 +122,7 @@ export function ensureGeneratedNpcPresence(
   if (position === null) return { room, npcInserted: false }
 
   const npc: NpcObject = {
-    ...NPC_TEMPLATE,
+    ...buildNpcTemplate(room, options),
     id: nextNpcId(room.objects),
     position,
   }
@@ -80,6 +131,68 @@ export function ensureGeneratedNpcPresence(
     room: { ...room, objects: [...room.objects, npc] },
     npcInserted: true,
   }
+}
+
+function buildNpcTemplate(
+  room: LoadedRoom,
+  options: EnsureGeneratedNpcPresenceOptions,
+): Omit<NpcObject, 'id' | 'position'> {
+  const bucket = themeBucket(options.themePack)
+  const name = selectFrom(NPC_NAMES[bucket], room.id, 'name')
+  const persona = selectFrom(NPC_PERSONAS[bucket], room.id, 'persona')
+  const greeting = formatName(selectFrom(NPC_GREETINGS[bucket], room.id, 'greeting'), name)
+  const body = formatName(selectFrom(NPC_BODIES[bucket], room.id, 'body'), name)
+  const askRoomLabel = selectPromptOne(room, options)
+  const askHelpLabel = selectFrom(HELP_PROMPTS, room.id, 'ask-help')
+
+  return {
+    type: 'npc',
+    name,
+    color: GENERATED_NPC_COLOR,
+    rotationY: 0,
+    scale: 1,
+    interaction: {
+      key: 'F',
+      prompt: `Press F to talk to ${name}`,
+      body,
+      dialogue: {
+        persona,
+        greeting,
+        prompts: [
+          { id: 'ask-room', label: askRoomLabel },
+          { id: 'ask-help', label: askHelpLabel },
+        ],
+      },
+    },
+  }
+}
+
+function selectPromptOne(room: LoadedRoom, options: EnsureGeneratedNpcPresenceOptions): string {
+  const anchorIndex = selectGeneratedStoryAnchorIndex(room.objects, { themePack: options.themePack })
+  const anchorType = anchorIndex >= 0 ? room.objects[anchorIndex]?.type : undefined
+  const prompts = anchorType !== undefined ? ANCHOR_PROMPTS[anchorType] : undefined
+  return selectFrom(prompts ?? GENERIC_ROOM_PROMPTS, room.id, `ask-room:${anchorType ?? 'none'}`)
+}
+
+function themeBucket(themePack: GeneratedRoomVisualTheme | undefined): ThemeBucket {
+  return themePack ?? 'default'
+}
+
+function selectFrom<T>(values: readonly T[], roomId: string, salt: string): T {
+  return values[stableIndex(`${salt}:${roomId}`, values.length)]!
+}
+
+function stableIndex(input: string, modulo: number): number {
+  let hash = 2166136261
+  for (let index = 0; index < input.length; index += 1) {
+    hash ^= input.charCodeAt(index)
+    hash = Math.imul(hash, 16777619)
+  }
+  return (hash >>> 0) % modulo
+}
+
+function formatName(template: string, name: string): string {
+  return template.replace('{name}', name)
 }
 
 function nextNpcId(objects: RoomObject[]): string {
