@@ -93,6 +93,43 @@ export const OBJECTIVE_LINES: Readonly<
   },
 }
 
+/**
+ * Lowest-priority, non-authoritative memory-awareness tier (Slice G).
+ *
+ * Keyed by the closed room-memory `kind` (`player_claim` / `room_observation` /
+ * `room_note` / `room_summary`; see `domain/memory/roomContracts.ts`). The
+ * dialogue-local `RoomMemoryContextEntry.kind` is an untrusted `string`, so any
+ * unrecognized/absent value simply misses this table and falls through.
+ *
+ * Lines are hand-written, finite, and epistemically hedged: a claim stays a
+ * claim, an observation is not asserted as truth. They reference remembered
+ * context as atmosphere only — never the recalled `text`, ids, room/object/NPC
+ * names, or the `kind` string itself — and never override current room/NPC/
+ * player state.
+ */
+export const MEMORY_AWARENESS_LINES: Readonly<Record<string, readonly string[]>> = {
+  player_claim: [
+    'Someone passing through swore this place held more than it shows.',
+    'A traveler once made claims about this room. Believe them or not.',
+    'People say things about this place. Take such talk lightly.',
+  ],
+  room_observation: [
+    'This room has been watched before; it does not feel untouched.',
+    'Others have taken note of this place already.',
+    'Eyes have lingered here before yours.',
+  ],
+  room_note: [
+    'There are notes about this place, for whatever they are worth.',
+    'Some record of this room lingers on.',
+    'This room has not gone unremarked.',
+  ],
+  room_summary: [
+    'This room already has a story behind it.',
+    'There is a history to this place, if you care for it.',
+    'This place carries more than what stands in it now.',
+  ],
+}
+
 const ROOM_FOCUS_LINES: Partial<Record<RoomObject['type'], string>> = {
   corpse: 'A body lies here. Watch your step.',
   altar: 'That altar makes this place feel important.',
@@ -136,6 +173,9 @@ export class FakeNPCDialogueProvider implements NPCDialogueProvider {
     const roomGrounded = roomGroundedFallback(request)
     if (roomGrounded) return { text: roomGrounded }
 
+    const memoryAware = memoryAwarenessLine(request)
+    if (memoryAware) return { text: memoryAware }
+
     const lines = FALLBACK_LINES
     const promptOffset = request.playerLine ? stableIndex(request.playerLine, lines.length) : 0
     const identityOffset = stableIndex(key, lines.length)
@@ -160,6 +200,19 @@ function questClueLine(request: NPCDialogueRequest, key: string): string | undef
 function roomGroundedFallback(request: NPCDialogueRequest): string | undefined {
   const focusType = request.context.room?.focus?.type
   return focusType ? ROOM_FOCUS_LINES[focusType] : undefined
+}
+
+function memoryAwarenessLine(request: NPCDialogueRequest): string | undefined {
+  const entries = request.context.memory?.entries
+  if (!entries || entries.length === 0) return undefined
+  for (const entry of entries) {
+    const lines = entry.kind ? MEMORY_AWARENESS_LINES[entry.kind] : undefined
+    if (lines && lines.length > 0) {
+      const index = request.context.history.length % lines.length
+      return lines[index]
+    }
+  }
+  return undefined
 }
 
 function objectiveAwarenessLine(request: NPCDialogueRequest): string | undefined {
