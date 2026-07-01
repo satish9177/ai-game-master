@@ -115,6 +115,14 @@ Throughout these docs:
   restored `LoadedRoom`, and lock state comes from restored `WorldState` flags. Authored/demo gate
   path is byte-identical. No schema, persistence, renderer, or provider/cost change
   ([ADR-0063](./decisions/ADR-0063-generated-mechanical-gate-runtime-v0.md)).
+- ✅ **Implemented** — Generated Mechanical Gate Provider v0 — real provider may propose only
+  structural generated-gate data; the proposal is transient sidecar state. The app derives the full
+  `GeneratedMechanicalGate`, then the frozen gate contract plus satisfiability check remain the trust
+  boundary. `providerGateStatus` is transient only: rejected/unsafe provider gates fail open and do
+  not fall back to the deterministic gate, while disabled/not-attempted preserves ADR-0063
+  deterministic behavior. No `RoomSpec`/`SaveGame`/`WorldState`/`QuestSpec`, backend, renderer, or
+  persistence schema change
+  ([ADR-0064](./decisions/ADR-0064-generated-mechanical-gate-provider-v0.md)).
 - ❌ **Not built** — future shape only; documented so we don't paint into a corner.
 
 ## Status today (Renderer Foundation v0)

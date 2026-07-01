@@ -2420,6 +2420,8 @@ describe('generated quest restore — handleLoad wiring (ADR-0059, slice 5)', ()
     expect(json).not.toContain('"gate"')
     expect(json).not.toContain('"gates"')
     expect(json).not.toContain('"gateId"')
+    expect(json).not.toContain('providerGateStatus')
+    expect(json).not.toContain('providerGate')
   })
 
   it('restores the resolved-object ring set from the restored room + restored flags', () => {
@@ -2731,6 +2733,11 @@ describe('generated quest restore — handleLoad wiring (ADR-0059, slice 5)', ()
   })
 
   it('does not call the gate provider from load, save, or adjacent pregeneration paths', () => {
+    const gateAttachmentCallCount = appSource.match(/buildGeneratedGateAttachment\(/g)?.length ?? 0
+    const handlePrompt = appSource.slice(
+      appSource.indexOf('const handlePrompt = useCallback('),
+      appSource.indexOf('const handleGenerateAnyway = useCallback('),
+    )
     const handleLoad = appSource.slice(
       appSource.indexOf('const handleLoad = useCallback('),
       appSource.indexOf('const handleNavigate = useCallback('),
@@ -2739,19 +2746,22 @@ describe('generated quest restore — handleLoad wiring (ADR-0059, slice 5)', ()
       appSource.indexOf('const handleSave = useCallback('),
       appSource.indexOf('const handleLoad = useCallback('),
     )
-    const adjacentSetup = appSource.slice(
-      appSource.indexOf('const adjacentPregenerator = new AdjacentRoomPregenerator('),
-      appSource.indexOf('const exampleNavigation = new NavigationService('),
+    const generatedPregeneratorSetup = handlePrompt.slice(
+      handlePrompt.indexOf('const generatedPregenerator = new AdjacentRoomPregenerator('),
+      handlePrompt.indexOf('const generatedNavigation = new NavigationService('),
     )
 
+    expect(gateAttachmentCallCount).toBe(1)
+    expect(handlePrompt).toContain('await buildGeneratedGateAttachment(result.room, gateGeneratorSelection.generator)')
     expect(handleLoad).not.toContain('buildGeneratedGateAttachment')
     expect(handleLoad).not.toContain('gateGeneratorSelection')
     expect(handleLoad).not.toContain('providerGateStatus')
     expect(handleLoad).not.toContain('providerGate')
     expect(handleSave).not.toContain('providerGateStatus')
     expect(handleSave).not.toContain('providerGate')
-    expect(adjacentSetup).not.toContain('gateGeneratorSelection')
-    expect(adjacentSetup).not.toContain('buildGeneratedGateAttachment')
+    expect(generatedPregeneratorSetup).toContain('new GeneratedRoomSource(')
+    expect(generatedPregeneratorSetup).not.toContain('gateGeneratorSelection')
+    expect(generatedPregeneratorSetup).not.toContain('buildGeneratedGateAttachment')
   })
 
   it('never logs the parked blob and restores only with a safe enum diagnostic', () => {
