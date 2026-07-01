@@ -36,6 +36,15 @@ const ItemAddedEventSchema = z.object({
   payload: z.object({ item: InventoryItemSchema }).strict(),
 }).strict()
 
+const ItemDiscoveredEventSchema = z.object({
+  ...eventEnvelope,
+  type: z.literal('item-discovered'),
+  payload: z.object({
+    roomId: z.string().min(1),
+    itemId: z.string().min(1),
+  }).strict(),
+}).strict()
+
 const ItemRemovedEventSchema = z.object({
   ...eventEnvelope,
   type: z.literal('item-removed'),
@@ -77,6 +86,7 @@ export const WorldEventSchema = z.discriminatedUnion('type', [
   SessionStartedEventSchema,
   MovedToRoomEventSchema,
   ItemAddedEventSchema,
+  ItemDiscoveredEventSchema,
   ItemRemovedEventSchema,
   HealthChangedEventSchema,
   StatusChangedEventSchema,
@@ -96,6 +106,12 @@ export const WorldCommandSchema = z.discriminatedUnion('type', [
     ...commandEnvelope,
     type: z.literal('item-added'),
     item: InventoryItemSchema,
+  }).strict(),
+  z.object({
+    ...commandEnvelope,
+    type: z.literal('item-discovered'),
+    roomId: z.string().min(1),
+    itemId: z.string().min(1),
   }).strict(),
   z.object({
     ...commandEnvelope,

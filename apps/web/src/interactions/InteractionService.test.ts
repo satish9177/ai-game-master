@@ -73,7 +73,7 @@ describe('InteractionService', () => {
     expect(await harness.store.listEvents(initial.sessionId)).toHaveLength(2)
   })
 
-  it('threads take-item through two existing events and preserves projection integrity', async () => {
+  it('threads take-item through item-added, item-discovered, and flag events', async () => {
     const harness = createHarness()
     const initial = await start(harness)
     const result = await harness.service.resolve({
@@ -92,13 +92,18 @@ describe('InteractionService', () => {
     expect(log.map((event) => event.type)).toEqual([
       'session-started',
       'item-added',
+      'item-discovered',
       'room-state-changed',
     ])
-    expect(result.state.revision).toBe(3)
+    expect(result.state.revision).toBe(4)
     expect(result.state.inventory).toContainEqual({
       itemId: 'bandage',
       name: 'SECRET BANDAGE NAME',
       quantity: 2,
+    })
+    expect(log[2]).toMatchObject({
+      type: 'item-discovered',
+      payload: { roomId: 'safehouse', itemId: 'bandage' },
     })
     expect(projectWorldState(log)).toEqual(snapshot)
 
@@ -111,7 +116,7 @@ describe('InteractionService', () => {
       ref: 'medical-crate',
     })
     expect(repeated.status).toBe('already-resolved')
-    expect(await harness.store.listEvents(initial.sessionId).then((events) => events.length)).toBe(3)
+    expect(await harness.store.listEvents(initial.sessionId).then((events) => events.length)).toBe(4)
   })
 
   it('composes use-item from item removal followed by an optional health change', async () => {

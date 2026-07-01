@@ -15,9 +15,8 @@ import type { RoomMemoryDraftInput } from './roomFirewall'
  * `WorldEvent`-producing function and has no write path to truth (the memory
  * firewall). It imports only domain *types*.
  *
- * v0 promotes ROOM memories from durable room-state changes only. The mechanical
- * event union carries no richer semantics yet; richer events (and an `npc` arm)
- * arrive with a later, coordinated slice. See
+ * v0 promotes ROOM memories from durable room-state changes and item discovery.
+ * Richer events (and an `npc` arm) arrive with a later, coordinated slice. See
  * `docs/architecture/implementation-plans/memory-event-promotion-v0.md`.
  */
 
@@ -35,6 +34,8 @@ export const DEFAULT_MIN_IMPORTANCE = 3
  * system ids in memory text is disallowed.
  */
 export const ROOM_STATE_MEMORY_TEXT = 'This area changed in a lasting way.'
+/** Generic, id/name-free item-discovery memory text. */
+export const ITEM_DISCOVERED_MEMORY_TEXT = 'The player discovered something here.'
 
 /**
  * Readable room-state memory text built from a resolved display name (Slice C2).
@@ -43,6 +44,11 @@ export const ROOM_STATE_MEMORY_TEXT = 'This area changed in a lasting way.'
  */
 export function namedRoomStateText(displayName: string): string {
   return `The ${displayName} changed in a lasting way.`
+}
+
+/** Readable item-discovery memory text built only when both names resolve. */
+export function namedItemDiscoveredText(itemName: string, roomName: string): string {
+  return `The player found the ${itemName} in the ${roomName}.`
 }
 
 /** Neutral context the future orchestrator injects. No WorldSession/WorldStore. */
@@ -73,6 +79,8 @@ export type PromotedMemory = {
 }
 
 type RoomStateChangedEvent = Extract<WorldEvent, { type: 'room-state-changed' }>
+type ItemDiscoveredEvent = Extract<WorldEvent, { type: 'item-discovered' }>
+type PromotableWorldEvent = RoomStateChangedEvent | ItemDiscoveredEvent
 
 /**
  * A `room-state-changed` event that represents a DURABLE consequence — i.e. it
@@ -87,11 +95,20 @@ function durableRoomStateEvent(event: WorldEvent): RoomStateChangedEvent | null 
   return event
 }
 
+function promotableEvent(event: WorldEvent): PromotableWorldEvent | null {
+  const roomEvent = durableRoomStateEvent(event)
+  if (roomEvent !== null) return roomEvent
+  if (event.type === 'item-discovered') return event
+  return null
+}
+
 /** Importance score (0–5) per the plan's promotion table. */
 export function importanceFor(event: WorldEvent): number {
   switch (event.type) {
     case 'room-state-changed':
       return durableRoomStateEvent(event) !== null ? 3 : 1
+    case 'item-discovered':
+      return 3
     case 'moved-to-room':
     case 'item-added':
     case 'item-removed':
@@ -136,31 +153,49 @@ export function promoteWorldEvent(
   const worldId = typeof ctx.worldId === 'string' ? ctx.worldId.trim() : ''
   if (worldId.length === 0) return null
 
-  // v0: only durable room-state changes promote.
-  const roomEvent = durableRoomStateEvent(event)
-  if (roomEvent === null) return null
+  const promotable = promotableEvent(event)
+  if (promotable === null) return null
 
-  const importance = importanceFor(roomEvent)
+  const importance = importanceFor(promotable)
   const minImportance = ctx.minImportance ?? DEFAULT_MIN_IMPORTANCE
   if (importance < minImportance) return null
 
-  const roomId = roomEvent.payload.roomId.trim()
+  const roomId = promotable.payload.roomId.trim()
   if (roomId.length === 0) return null
 
-  // The sole entity of a durable room-state change is the room itself. With a
-  // resolver that knows it, emit readable text + a `{ room }` snapshot; otherwise
-  // keep the generic id-free text and store no snapshot.
-  const roomSnapshot = ctx.displayNames?.resolve('room', roomId) ?? null
-  const text = roomSnapshot ? namedRoomStateText(roomSnapshot.displayName) : ROOM_STATE_MEMORY_TEXT
+  let text = ROOM_STATE_MEMORY_TEXT
+  let entitySnapshots: RoomMemoryDraftInput['entitySnapshots']
 
-  const dedupeKey = promotionDedupeKey(roomEvent, ctx)
+  if (promotable.type === 'room-state-changed') {
+    // The sole entity of a durable room-state change is the room itself. With a
+    // resolver that knows it, emit readable text + a `{ room }` snapshot; otherwise
+    // keep the generic id-free text and store no snapshot.
+    const roomSnapshot = ctx.displayNames?.resolve('room', roomId) ?? null
+    if (roomSnapshot) {
+      text = namedRoomStateText(roomSnapshot.displayName)
+      entitySnapshots = { room: roomSnapshot }
+    }
+  } else {
+    const itemId = promotable.payload.itemId.trim()
+    if (itemId.length === 0) return null
+
+    const roomSnapshot = ctx.displayNames?.resolve('room', roomId) ?? null
+    const itemSnapshot = ctx.displayNames?.resolve('item', itemId) ?? null
+    text = ITEM_DISCOVERED_MEMORY_TEXT
+    if (roomSnapshot && itemSnapshot) {
+      text = namedItemDiscoveredText(itemSnapshot.displayName, roomSnapshot.displayName)
+      entitySnapshots = { room: roomSnapshot, item: itemSnapshot }
+    }
+  }
+
+  const dedupeKey = promotionDedupeKey(promotable, ctx)
 
   // `input` is passed straight to `RoomMemoryService.remember`/`validateRoomMemoryDraft`,
   // so importance/dedupeKey must ride on it (not just the top-level `PromotedMemory`
   // fields below) for persisted importance + store-level dedupe to take effect.
   const input: RoomMemoryDraftInput = {
     worldId,
-    sessionId: roomEvent.sessionId,
+    sessionId: promotable.sessionId,
     roomId,
     kind: PROMOTION_ROOM_KIND,
     source: PROMOTION_SOURCE,
@@ -168,7 +203,7 @@ export function promoteWorldEvent(
     confidence: PROMOTION_CONFIDENCE,
     importance,
     dedupeKey,
-    ...(roomSnapshot ? { entitySnapshots: { room: roomSnapshot } } : {}),
+    ...(entitySnapshots ? { entitySnapshots } : {}),
   }
 
   return {

@@ -100,7 +100,7 @@ describe('planInteraction', () => {
     })).toEqual({ status: 'rejected', reason: 'missing-id' })
   })
 
-  it('plans take-item in item-first then idempotency-flag order', () => {
+  it('plans take-item in item, discovery, then idempotency-flag order', () => {
     const plan = planInteraction({
       effect: {
         kind: 'take-item',
@@ -119,6 +119,12 @@ describe('planInteraction', () => {
         },
         {
           schemaVersion: 1,
+          type: 'item-discovered',
+          roomId: 'safehouse',
+          itemId: 'bandage',
+        },
+        {
+          schemaVersion: 1,
           type: 'room-state-changed',
           roomId: 'safehouse',
           flags: { 'interaction:medical-crate': true },
@@ -128,6 +134,48 @@ describe('planInteraction', () => {
         kind: 'item-taken',
         item: { itemId: 'bandage', name: 'Bandage', quantity: 2 },
       },
+    })
+  })
+
+  it('uses currentRoomId for item-discovered and short-circuits repeated take-item', () => {
+    const effect = {
+      kind: 'take-item',
+      item: { itemId: 'silver-key', name: 'Silver Key', quantity: 1 },
+    } as const
+    const plan = planInteraction({
+      effect,
+      ref: 'desk-drawer',
+      state: baseState({
+        currentRoomId: 'old-library',
+        roomStates: { 'old-library': { visited: true } },
+      }),
+    })
+    expect(plan.status).toBe('apply')
+    if (plan.status === 'apply') {
+      expect(plan.commands.map((command) => command.type)).toEqual([
+        'item-added',
+        'item-discovered',
+        'room-state-changed',
+      ])
+      expect(plan.commands[1]).toMatchObject({
+        type: 'item-discovered',
+        roomId: 'old-library',
+        itemId: 'silver-key',
+      })
+    }
+
+    expect(planInteraction({
+      effect,
+      ref: 'desk-drawer',
+      state: baseState({
+        currentRoomId: 'old-library',
+        roomStates: {
+          'old-library': { visited: true, flags: { 'interaction:desk-drawer': true } },
+        },
+      }),
+    })).toEqual({
+      status: 'already-resolved',
+      outcome: { kind: 'nothing' },
     })
   })
 

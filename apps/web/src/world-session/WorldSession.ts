@@ -247,6 +247,12 @@ function isValidForState(state: WorldState, command: WorldCommand): boolean {
     const held = state.inventory.find((item) => item.itemId === command.itemId)?.quantity ?? 0
     return command.quantity <= held
   }
+  if (command.type === 'item-discovered') {
+    return (
+      command.roomId === state.currentRoomId
+      && state.inventory.some((item) => item.itemId === command.itemId)
+    )
+  }
   if (command.type === 'moved-to-room' && command.fromRoomId !== undefined) {
     return command.fromRoomId === state.currentRoomId
   }
@@ -275,6 +281,13 @@ function buildEvent(
       break
     case 'item-added':
       raw = { ...envelope, type: command.type, payload: { item: command.item } }
+      break
+    case 'item-discovered':
+      raw = {
+        ...envelope,
+        type: command.type,
+        payload: { roomId: command.roomId, itemId: command.itemId },
+      }
       break
     case 'item-removed':
       raw = {

@@ -74,6 +74,12 @@ function planTakeItem(
     status: 'apply',
     commands: [
       WorldCommandSchema.parse({ schemaVersion: 1, type: 'item-added', item }),
+      WorldCommandSchema.parse({
+        schemaVersion: 1,
+        type: 'item-discovered',
+        roomId: state.currentRoomId,
+        itemId: item.itemId,
+      }),
       roomFlagCommand(state.currentRoomId, flagKey),
     ],
     outcome: { kind: 'item-taken', item: { ...item } },

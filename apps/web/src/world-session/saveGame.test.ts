@@ -70,6 +70,32 @@ async function makeSave() {
   return { harness, state: changed.state, json: saved.json }
 }
 
+async function makeDiscoverySave() {
+  const harness = createHarness()
+  const started = await harness.session.startSession(canon)
+  if (!started.ok) throw new Error('session start failed')
+  const added = await harness.session.addItem(
+    started.state.sessionId,
+    { itemId: 'silver-key', name: 'SECRET KEY NAME', quantity: 1 },
+    started.state.revision,
+  )
+  if (!added.ok) throw new Error('item add failed')
+  const discovered = await harness.session.appendEvent(
+    started.state.sessionId,
+    {
+      schemaVersion: 1,
+      type: 'item-discovered',
+      roomId: 'gatehouse',
+      itemId: 'silver-key',
+    },
+    added.state.revision,
+  )
+  if (!discovered.ok) throw new Error('item discovery failed')
+  const saved = await harness.saves.saveSession(started.state.sessionId)
+  if (!saved.ok) throw new Error('save failed')
+  return { harness, state: discovered.state, json: saved.json }
+}
+
 describe('SaveGame boundary', () => {
   it('round-trips seed, authoritative log, and reconstructable snapshot', async () => {
     const saved = await makeSave()
@@ -92,6 +118,40 @@ describe('SaveGame boundary', () => {
     const restoredLog = await restoredHarness.store.listEvents(saved.state.sessionId)
     expect(restoredSnapshot).toEqual(saved.state)
     expect(restoredLog).toHaveLength(2)
+  })
+
+  it('round-trips a log containing item-discovered and preserves integrity', async () => {
+    const saved = await makeDiscoverySave()
+    const loadedDocument = loadSaveGame(saved.json)
+    expect(loadedDocument.ok).toBe(true)
+    if (!loadedDocument.ok) return
+
+    expect(loadedDocument.saveGame.log.map((event) => event.type)).toEqual([
+      'session-started',
+      'item-added',
+      'item-discovered',
+    ])
+    expect(loadedDocument.saveGame.snapshot).toEqual(saved.state)
+
+    const restoredHarness = createHarness()
+    const restored = await restoredHarness.saves.loadSession(saved.json)
+    expect(restored).toEqual({ ok: true, sessionId: saved.state.sessionId })
+    expect(await restoredHarness.store.getSnapshot(saved.state.sessionId)).toEqual(saved.state)
+    expect((await restoredHarness.store.listEvents(saved.state.sessionId)).map((event) => event.type))
+      .toEqual(['session-started', 'item-added', 'item-discovered'])
+  })
+
+  it('loads an old-shaped save with only existing seven event types', async () => {
+    const saved = await makeSave()
+    const loadedDocument = loadSaveGame(saved.json)
+    expect(loadedDocument.ok).toBe(true)
+    if (!loadedDocument.ok) return
+
+    expect(loadedDocument.saveGame.log.map((event) => event.type)).toEqual([
+      'session-started',
+      'health-changed',
+    ])
+    expect(loadedDocument.saveGame.snapshot).toEqual(saved.state)
   })
 
   it('maps invalid JSON, invalid schema, and unsupported versions distinctly', () => {

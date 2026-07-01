@@ -61,6 +61,10 @@ export function applyEvent(state: WorldState | null, event: WorldEvent): WorldSt
       next = { ...state, inventory }
       break
     }
+    case 'item-discovered': {
+      next = { ...state }
+      break
+    }
     case 'item-removed': {
       const inventory = state.inventory.flatMap((item) => {
         if (item.itemId !== event.payload.itemId) return [{ ...item }]

@@ -8,12 +8,14 @@ import { EntitySnapshotsSchema } from './recallMetadata'
 import { validateRoomMemoryDraft } from './roomFirewall'
 import {
   DEFAULT_MIN_IMPORTANCE,
+  ITEM_DISCOVERED_MEMORY_TEXT,
   PROMOTION_CONFIDENCE,
   PROMOTION_ROOM_KIND,
   PROMOTION_SOURCE,
   ROOM_STATE_MEMORY_TEXT,
   dedupePromotions,
   importanceFor,
+  namedItemDiscoveredText,
   namedRoomStateText,
   promoteWorldEvent,
   promotionDedupeKey,
@@ -37,6 +39,21 @@ function roomStateChanged(
     seq: envelope?.seq ?? 1,
     occurredAt: '2026-06-30T00:00:00.000Z',
     type: 'room-state-changed',
+    payload,
+  }
+}
+
+function itemDiscovered(
+  payload: { roomId: string; itemId: string },
+  envelope?: { eventId?: string; sessionId?: string; seq?: number },
+): WorldEvent {
+  return {
+    schemaVersion: WORLD_SCHEMA_VERSION,
+    eventId: envelope?.eventId ?? EVENT_ID,
+    sessionId: envelope?.sessionId ?? SESSION_ID,
+    seq: envelope?.seq ?? 1,
+    occurredAt: '2026-06-30T00:00:00.000Z',
+    type: 'item-discovered',
     payload,
   }
 }
@@ -103,6 +120,27 @@ describe('promoteWorldEvent', () => {
     expect(promoteWorldEvent(eventOfType('item-added'), { worldId: WORLD_ID })).toBeNull()
   })
 
+  it('promotes item-discovered to a room memory with third-person generic text', () => {
+    const event = itemDiscovered({ roomId: ROOM_ID, itemId: 'silver-key' })
+    const result = promoteWorldEvent(event, { worldId: WORLD_ID })
+
+    expect(result).not.toBeNull()
+    expect(result?.target).toBe('room')
+    expect(result?.importance).toBe(3)
+    expect(result?.input).toEqual({
+      worldId: WORLD_ID,
+      sessionId: SESSION_ID,
+      roomId: ROOM_ID,
+      kind: PROMOTION_ROOM_KIND,
+      source: PROMOTION_SOURCE,
+      text: ITEM_DISCOVERED_MEMORY_TEXT,
+      confidence: PROMOTION_CONFIDENCE,
+      importance: 3,
+      dedupeKey: result?.dedupeKey,
+    })
+    expect(validateRoomMemoryDraft(result!.input).ok).toBe(true)
+  })
+
   it('ignores the remaining mechanical / non-promotable event types', () => {
     const ignored: WorldEvent['type'][] = [
       'item-removed',
@@ -156,6 +194,11 @@ describe('promoteWorldEvent', () => {
     expect(promoteWorldEvent(event, { worldId: WORLD_ID })).toBeNull()
   })
 
+  it('returns null when an item-discovered itemId is blank', () => {
+    expect(promoteWorldEvent(itemDiscovered({ roomId: ROOM_ID, itemId: '   ' }), { worldId: WORLD_ID }))
+      .toBeNull()
+  })
+
   it('honours the minImportance gate', () => {
     expect(promoteWorldEvent(durableEvent, { worldId: WORLD_ID, minImportance: 5 })).toBeNull()
     expect(promoteWorldEvent(durableEvent, { worldId: WORLD_ID, minImportance: 3 })).not.toBeNull()
@@ -186,7 +229,10 @@ describe('promoteWorldEvent', () => {
 })
 
 describe('promoteWorldEvent — named text + entity snapshots (Slice C2)', () => {
-  const resolver = createDisplayNameResolver({ room: { [ROOM_ID]: 'Old Library' } })
+  const resolver = createDisplayNameResolver({
+    room: { [ROOM_ID]: 'Old Library' },
+    item: { 'silver-key': 'Silver Key' },
+  })
 
   it('uses display-name text and stores the room snapshot when a name is available', () => {
     const result = promoteWorldEvent(durableEvent, { worldId: WORLD_ID, displayNames: resolver })
@@ -223,6 +269,42 @@ describe('promoteWorldEvent — named text + entity snapshots (Slice C2)', () =>
     expect(EntitySnapshotsSchema.safeParse(result!.input.entitySnapshots).success).toBe(true)
   })
 
+  it('uses item-discovered named text and stores room/item snapshots when both names resolve', () => {
+    const event = itemDiscovered({ roomId: ROOM_ID, itemId: 'silver-key' })
+    const result = promoteWorldEvent(event, { worldId: WORLD_ID, displayNames: resolver })
+
+    expect(result?.input.text).toBe(namedItemDiscoveredText('Silver Key', 'Old Library'))
+    expect(result?.input.text).toBe('The player found the Silver Key in the Old Library.')
+    expect(result?.input.entitySnapshots).toEqual({
+      room: { id: ROOM_ID, displayName: 'Old Library' },
+      item: { id: 'silver-key', displayName: 'Silver Key' },
+    })
+    expect(validateRoomMemoryDraft(result!.input).ok).toBe(true)
+  })
+
+  it('uses the generic item-discovered fallback when either room or item name is missing', () => {
+    const event = itemDiscovered({ roomId: ROOM_ID, itemId: 'silver-key' })
+    const roomOnly = createDisplayNameResolver({ room: { [ROOM_ID]: 'Old Library' } })
+    const itemOnly = createDisplayNameResolver({ item: { 'silver-key': 'Silver Key' } })
+
+    for (const displayNames of [roomOnly, itemOnly, createDisplayNameResolver({})]) {
+      const result = promoteWorldEvent(event, { worldId: WORLD_ID, displayNames })
+      expect(result?.input.text).toBe(ITEM_DISCOVERED_MEMORY_TEXT)
+      expect('entitySnapshots' in (result?.input ?? {})).toBe(false)
+    }
+  })
+
+  it('never leaks raw item or room ids into item-discovered memory text', () => {
+    const event = itemDiscovered({ roomId: ROOM_ID, itemId: 'silver-key' })
+    const result = promoteWorldEvent(event, { worldId: WORLD_ID, displayNames: resolver })
+    const text = result?.input.text ?? ''
+
+    expect(text).not.toContain(ROOM_ID)
+    expect(text).not.toContain('silver-key')
+    expect(text.length).toBeLessThanOrEqual(280)
+    expect(EntitySnapshotsSchema.safeParse(result?.input.entitySnapshots).success).toBe(true)
+  })
+
   it('is pure with a resolver: stable output, no input mutation', () => {
     const event = Object.freeze(roomStateChanged({ roomId: ROOM_ID, flags: { opened: true } }))
     const ctx = Object.freeze({ worldId: WORLD_ID, displayNames: resolver })
@@ -234,6 +316,7 @@ describe('importanceFor', () => {
   it('scores per the promotion table', () => {
     expect(importanceFor(roomStateChanged({ roomId: ROOM_ID, flags: { burned: true } }))).toBe(3)
     expect(importanceFor(roomStateChanged({ roomId: ROOM_ID, visited: true }))).toBe(1)
+    expect(importanceFor(itemDiscovered({ roomId: ROOM_ID, itemId: 'silver-key' }))).toBe(3)
     expect(importanceFor(eventOfType('item-added'))).toBe(1)
     expect(importanceFor(eventOfType('item-removed'))).toBe(1)
     expect(importanceFor(eventOfType('moved-to-room'))).toBe(1)

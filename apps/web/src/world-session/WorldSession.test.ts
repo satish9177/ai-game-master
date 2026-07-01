@@ -140,6 +140,42 @@ describe('WorldSession', () => {
     expect(await harness.store.listEvents(state.sessionId)).toHaveLength(1)
   })
 
+  it('accepts valid item-discovered commands and rejects invalid room or item claims', async () => {
+    const harness = createHarness()
+    const state = await start(harness)
+
+    const valid = await harness.session.appendEvent(
+      state.sessionId,
+      { schemaVersion: 1, type: 'item-discovered', roomId: 'gatehouse', itemId: 'water' },
+      state.revision,
+    )
+    expect(valid.ok).toBe(true)
+    if (!valid.ok) return
+    expect(valid.event).toMatchObject({
+      type: 'item-discovered',
+      payload: { roomId: 'gatehouse', itemId: 'water' },
+    })
+    expect(valid.state.inventory).toEqual(state.inventory)
+    expect(valid.state.revision).toBe(2)
+
+    const roomMismatch = await harness.session.appendEvent(
+      state.sessionId,
+      { schemaVersion: 1, type: 'item-discovered', roomId: 'yard', itemId: 'water' },
+      valid.state.revision,
+    )
+    expect(roomMismatch.ok).toBe(false)
+    if (!roomMismatch.ok) expect(roomMismatch.error.code).toBe('invalid-command')
+
+    const unknownItem = await harness.session.appendEvent(
+      state.sessionId,
+      { schemaVersion: 1, type: 'item-discovered', roomId: 'gatehouse', itemId: 'missing' },
+      valid.state.revision,
+    )
+    expect(unknownItem.ok).toBe(false)
+    if (!unknownItem.ok) expect(unknownItem.error.code).toBe('invalid-command')
+    expect(await harness.store.listEvents(state.sessionId)).toHaveLength(2)
+  })
+
   it('returns typed reads, not-found results, and sinceSeq slices', async () => {
     const harness = createHarness()
     const state = await start(harness)

@@ -84,8 +84,25 @@ describe('world projection', () => {
     expect(log).toEqual(logBefore)
   })
 
+  it('applies item-discovered as a no-op except revision and updatedAt', () => {
+    const before = projectWorldState([
+      start,
+      event(2, 'moved-to-room', { fromRoomId: 'gatehouse', toRoomId: 'yard' }),
+      event(3, 'item-added', { item: { itemId: 'key', name: 'Iron Key', quantity: 1 } }),
+    ])
+    const discovered = event(4, 'item-discovered', { roomId: 'yard', itemId: 'key' })
+
+    expect(applyEvent(before, discovered)).toEqual({
+      ...before,
+      revision: 4,
+      updatedAt: '2026-06-22T10:00:04.000Z',
+    })
+  })
+
   it('rejects reducer programmer errors for inconsistent start placement', () => {
     expect(() => applyEvent(null, event(2, 'health-changed', { delta: -1 }))).toThrow()
+    expect(() => applyEvent(null, event(2, 'item-discovered', { roomId: 'yard', itemId: 'key' })))
+      .toThrow()
     expect(() => applyEvent(applyEvent(null, start), start)).toThrow()
     expect(() => projectWorldState([])).toThrow()
   })

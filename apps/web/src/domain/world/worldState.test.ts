@@ -72,7 +72,7 @@ describe('world schemas', () => {
     }).success).toBe(false)
   })
 
-  it('parses all seven closed event variants and six command variants', () => {
+  it('parses the existing seven event variants plus item-discovered, and matching commands', () => {
     const envelope = {
       schemaVersion: 1,
       eventId: EVENT_ID,
@@ -84,6 +84,7 @@ describe('world schemas', () => {
       startEvent,
       { ...envelope, type: 'moved-to-room', payload: { toRoomId: 'yard' } },
       { ...envelope, type: 'item-added', payload: { item: { itemId: 'x', name: 'X', quantity: 1 } } },
+      { ...envelope, type: 'item-discovered', payload: { roomId: 'yard', itemId: 'x' } },
       { ...envelope, type: 'item-removed', payload: { itemId: 'x', quantity: 1 } },
       { ...envelope, type: 'health-changed', payload: { delta: -1, reason: 'fall' } },
       { ...envelope, type: 'status-changed', payload: { status: 'cold', op: 'add' } },
@@ -99,6 +100,40 @@ describe('world schemas', () => {
     expect(commands.every((command) => WorldCommandSchema.safeParse(command).success)).toBe(true)
     expect(WorldCommandSchema.safeParse({ schemaVersion: 1, type: 'session-started' }).success)
       .toBe(false)
+  })
+
+  it('rejects malformed item-discovered event and command shapes', () => {
+    const envelope = {
+      schemaVersion: 1,
+      eventId: EVENT_ID,
+      sessionId: SESSION_ID,
+      seq: 2,
+      occurredAt: OCCURRED_AT,
+      type: 'item-discovered',
+    }
+
+    expect(WorldEventSchema.safeParse({
+      ...envelope,
+      payload: { roomId: 'yard' },
+    }).success).toBe(false)
+    expect(WorldEventSchema.safeParse({
+      ...envelope,
+      payload: { itemId: 'key' },
+    }).success).toBe(false)
+    expect(WorldEventSchema.safeParse({
+      ...envelope,
+      payload: { roomId: 'yard', itemId: 'key', extra: true },
+    }).success).toBe(false)
+    expect(WorldCommandSchema.safeParse({
+      schemaVersion: 1,
+      type: 'item-discovered',
+      roomId: 'yard',
+    }).success).toBe(false)
+    expect(WorldCommandSchema.safeParse({
+      schemaVersion: 1,
+      type: 'item-discovered',
+      itemId: 'key',
+    }).success).toBe(false)
   })
 
   it('requires schemaVersion 1 on persisted events and snapshots', () => {
