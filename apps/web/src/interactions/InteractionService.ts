@@ -4,6 +4,7 @@ import type {
   InteractionOutcome,
   InteractionRejectionReason,
 } from '../domain/interactions/planInteraction'
+import type { WorldEvent } from '../domain/world/events'
 import type { WorldState } from '../domain/world/worldState'
 import type { Logger } from '../platform/logger/Logger'
 import { applyCommands } from '../world-session/applyCommands'
@@ -12,7 +13,7 @@ import type { WorldSession } from '../world-session/WorldSession'
 export type InteractionSession = Pick<WorldSession, 'getWorldState' | 'appendEvent'>
 
 export type InteractionResult =
-  | { status: 'applied'; outcome: InteractionOutcome; state: WorldState }
+  | { status: 'applied'; outcome: InteractionOutcome; state: WorldState; events: WorldEvent[] }
   | { status: 'already-resolved'; outcome: { kind: 'nothing' }; state: WorldState }
   | { status: 'rejected'; reason: InteractionRejectionReason }
   | { status: 'failed'; reason: 'conflict' | 'not-found' | 'partial' }
@@ -64,7 +65,12 @@ export class InteractionService {
       return { status: 'failed', reason: applied.reason }
     }
 
-    const result = { status: 'applied', outcome: plan.outcome, state: applied.state } as const
+    const result = {
+      status: 'applied',
+      outcome: plan.outcome,
+      state: applied.state,
+      events: applied.events,
+    } as const
     this.logResult(sessionId, result.status, plan.commands.length, undefined, effect.kind)
     return result
   }

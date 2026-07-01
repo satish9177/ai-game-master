@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { RoomViewer } from './renderer/RoomViewer'
+import type { CommittedInteractionEvents } from './renderer/RoomViewer'
 import { StatusHud } from './renderer/ui/StatusHud'
 import { SaveLoadBar } from './renderer/ui/SaveLoadBar'
 import type { SaveLoadStatus } from './renderer/ui/SaveLoadBar'
@@ -52,6 +53,10 @@ import type { WorldStateResult } from './world-session/WorldSession'
 import { SaveGameService } from './world-session/saveGame'
 import { InteractionService } from './interactions/InteractionService'
 import { EncounterService } from './encounters/EncounterService'
+import { InMemoryRoomMemoryStore } from './memory/InMemoryRoomMemoryStore'
+import { RoomMemoryService } from './memory/RoomMemoryService'
+import { createDisplayNameResolver } from './domain/memory/displayNames'
+import { promoteInteractionMemories } from './app/promoteInteractionMemories'
 import { loadRoomSpec, type LoadedRoom } from './domain/loadRoomSpec'
 import { fallbackRoom as fallbackRoomSpec } from './domain/examples/fallbackRoom'
 import { FALLBACK_NOTICE, shouldShowFallbackNotice } from './app/fallbackNotice'
@@ -387,6 +392,15 @@ function App() {
   const [questSpecSnapshot, setQuestSpecSnapshot] = useState<QuestSpec | null>(null)
   const journalSpecRef = useRef<JournalSpec | null>(null)
   const perRoomObjectiveMemoRef = useRef<PerRoomObjectiveMemo>(new Map())
+  // Room memory composition (memory-event-promotion-v0 wiring slice). Held in
+  // a single ref (not module scope) so the store survives re-renders for the
+  // life of this component without being reconstructed on every render; it is
+  // still headless/in-memory only — no backend/API wiring. Built together in
+  // one ref (rather than one ref reading another) so render never accesses an
+  // existing ref's `.current` (react-hooks/refs).
+  const roomMemoryServiceRef = useRef(
+    new RoomMemoryService(new InMemoryRoomMemoryStore(), new SystemClock(), idGenerator, logger),
+  )
   // Usage guardrail state (real provider only; fake path stays inert).
   // Refs hold the live values for reading inside stable useCallback closures;
   // the parallel state values trigger re-renders for the UsageMeter display.
@@ -439,6 +453,30 @@ function App() {
     setPlayerHud(views.playerHud)
     setQuest(views.quest)
     setJournal(views.journal)
+  }, [])
+
+  // Memory promotion seam (memory-event-promotion-v0 wiring slice). Runs only
+  // after RoomViewer's interaction commit already succeeded — it never appends
+  // events and a promotion failure never surfaces here (promoteInteractionMemories
+  // already swallows/logs it). RoomViewer stays decoupled from the memory layer:
+  // it hands back only the committed events plus the raw name hints it already
+  // has on hand; this composition root builds the DisplayNameResolver (only when
+  // BOTH a room name and an item name are known) and owns RoomMemoryService.
+  const handleCommittedInteractionEvents = useCallback((input: CommittedInteractionEvents) => {
+    const displayNames =
+      input.roomName !== undefined && input.item !== undefined
+        ? createDisplayNameResolver({
+            room: { [input.state.currentRoomId]: input.roomName },
+            item: { [input.item.itemId]: input.item.name },
+          })
+        : undefined
+    void promoteInteractionMemories(
+      input.events,
+      input.state.worldId,
+      roomMemoryServiceRef.current,
+      logger,
+      displayNames,
+    ).catch(() => {})
   }, [])
 
   useEffect(() => {
@@ -927,6 +965,7 @@ function App() {
           npcDialogueService={npcDialogueService}
           onNavigate={handleNavigate}
           onWorldStateChange={refreshDerivedViews}
+          onCommittedInteractionEvents={handleCommittedInteractionEvents}
           questStage={buildQuestStage({ quest, questHints, questSpec: questSpecSnapshot })}
           {...(activePlay.objectivesPerRoom === true
             ? { resolvedObjectIds: activePlay.entryResolvedObjectIds }

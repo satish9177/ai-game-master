@@ -1,4 +1,4 @@
-import type { WorldCommand } from '../domain/world/events'
+import type { WorldCommand, WorldEvent } from '../domain/world/events'
 import type { WorldState } from '../domain/world/worldState'
 import type { AppendEventResult, WorldSession } from './WorldSession'
 
@@ -18,7 +18,7 @@ import type { AppendEventResult, WorldSession } from './WorldSession'
  * It never retries.
  */
 export type ApplyCommandsResult =
-  | { ok: true; state: WorldState }
+  | { ok: true; state: WorldState; events: WorldEvent[] }
   | { ok: false; reason: 'conflict' | 'not-found' | 'partial' }
 
 export async function applyCommands(
@@ -29,6 +29,7 @@ export async function applyCommands(
 ): Promise<ApplyCommandsResult> {
   let revision = fromState.revision
   let latest = fromState
+  const events: WorldEvent[] = []
   for (const [index, command] of commands.entries()) {
     const appended = await session.appendEvent(sessionId, command, revision)
     if (!appended.ok) {
@@ -37,8 +38,9 @@ export async function applyCommands(
     }
     revision = appended.state.revision
     latest = appended.state
+    events.push(appended.event)
   }
-  return { ok: true, state: latest }
+  return { ok: true, state: latest, events }
 }
 
 function mapFirstAppendFailure(

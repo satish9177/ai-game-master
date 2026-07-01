@@ -57,14 +57,39 @@ describe('applyCommands', () => {
     }
     const result = await applyCommands(session, 'sid', [command, command, command], state(1))
     expect(seenRevisions).toEqual([1, 2, 3])
-    expect(result).toEqual({ ok: true, state: state(4) })
+    expect(result).toEqual({ ok: true, state: state(4), events: [okEvent, okEvent, okEvent] })
   })
 
   it('returns ok with the unchanged state for an empty command list', async () => {
     const session = {
       appendEvent: () => Promise.reject(new Error('should not be called')),
     }
-    expect(await applyCommands(session, 'sid', [], state(7))).toEqual({ ok: true, state: state(7) })
+    expect(await applyCommands(session, 'sid', [], state(7))).toEqual({
+      ok: true,
+      state: state(7),
+      events: [],
+    })
+  })
+
+  it('preserves command order in the returned events, not just the final state', async () => {
+    const eventFor = (seq: number) =>
+      WorldEventSchema.parse({
+        ...okEvent,
+        eventId: `00000000-0000-4000-8000-00000000009${seq}`,
+        seq,
+      })
+    const session = {
+      appendEvent: (_sessionId: string, _command: unknown, expectedRevision: number) =>
+        Promise.resolve<AppendEventResult>({
+          ok: true,
+          state: state(expectedRevision + 1),
+          event: eventFor(expectedRevision + 1),
+        }),
+    }
+    const result = await applyCommands(session, 'sid', [command, command, command], state(1))
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.events.map((event) => event.seq)).toEqual([2, 3, 4])
   })
 
   it('maps a first-command failure from the append error code', async () => {

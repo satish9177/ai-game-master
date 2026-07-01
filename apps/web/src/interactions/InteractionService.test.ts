@@ -106,6 +106,12 @@ describe('InteractionService', () => {
       payload: { roomId: 'safehouse', itemId: 'bandage' },
     })
     expect(projectWorldState(log)).toEqual(snapshot)
+    expect(result.events.map((event) => event.type)).toEqual([
+      'item-added',
+      'item-discovered',
+      'room-state-changed',
+    ])
+    expect(result.events).toEqual(log.slice(1))
 
     const repeated = await harness.service.resolve({
       sessionId: initial.sessionId,

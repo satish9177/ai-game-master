@@ -14,6 +14,7 @@ import type { InteractionService } from '../interactions/InteractionService'
 import type { EncounterService } from '../encounters/EncounterService'
 import type { NPCDialogueService } from '../dialogue/NPCDialogueService'
 import type { NavigationResult } from '../app/NavigationService'
+import type { WorldEvent } from '../domain/world/events'
 import type { WorldState } from '../domain/world/worldState'
 import { authoredPostUseInteractionBody } from '../app/authoredInteractionBody'
 import { buildNPCDialogueReplyInput } from '../app/npcDialogueReplyInput'
@@ -37,6 +38,22 @@ function describeError(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
 }
 
+/**
+ * Raw, neutral payload for a just-committed interaction (memory-event-promotion-v0
+ * wiring slice). `RoomViewer` surfaces only plain data it already holds for
+ * rendering/dialogue purposes — it does not know about memory promotion or the
+ * `RoomMemoryService`; the composition root (`App.tsx`) owns that decision.
+ * `roomName`/`item` are the raw display-name hints this component already has
+ * on hand (the loaded room's name; the taken item's name for `item-taken`);
+ * either may be absent, in which case the consumer falls back to generic text.
+ */
+export type CommittedInteractionEvents = {
+  events: WorldEvent[]
+  state: WorldState
+  roomName?: string
+  item?: { itemId: string; name: string }
+}
+
 type RoomViewerProps = {
   roomSource: RoomSource
   sessionId: string
@@ -45,6 +62,7 @@ type RoomViewerProps = {
   npcDialogueService: NPCDialogueService
   onNavigate: (toRoomId: string) => Promise<NavigationResult>
   onWorldStateChange?: (state: WorldState) => void
+  onCommittedInteractionEvents?: (input: CommittedInteractionEvents) => void
   questStage?: QuestDialogueContext
   resolvedObjectIds?: ReadonlySet<string>
 }
@@ -57,6 +75,7 @@ export function RoomViewer({
   npcDialogueService,
   onNavigate,
   onWorldStateChange,
+  onCommittedInteractionEvents,
   questStage,
   resolvedObjectIds,
 }: RoomViewerProps) {
@@ -79,6 +98,10 @@ export function RoomViewer({
   const activeNPCDialogueRef = useRef<NPCDialogueTarget | null>(null)
   const npcDialogueRequestRef = useRef(0)
   const npcDialoguePendingRef = useRef(false)
+  // The loaded room's display name only, kept for the onCommittedInteractionEvents
+  // display-name hint (memory-event-promotion-v0 wiring slice). Never anything
+  // beyond a plain name string; RoomViewer has no memory-layer import.
+  const currentRoomNameRef = useRef<string | undefined>(undefined)
   const [active, setActive] = useState<Interactable | null>(null)
   const [dialogue, setDialogue] = useState<Interactable | null>(null)
   const [resultMessage, setResultMessage] = useState<string | undefined>()
@@ -233,6 +256,16 @@ export function RoomViewer({
         if (result.status === 'applied' || result.status === 'already-resolved') {
           onWorldStateChange?.(result.state)
         }
+        if (result.status === 'applied' && result.events.length > 0) {
+          onCommittedInteractionEvents?.({
+            events: result.events,
+            state: result.state,
+            roomName: currentRoomNameRef.current,
+            ...(result.outcome.kind === 'item-taken'
+              ? { item: { itemId: result.outcome.item.itemId, name: result.outcome.item.name } }
+              : {}),
+          })
+        }
         if (result.status === 'already-resolved') {
           const body = authoredPostUseInteractionBody({ objectId: target.id, state: result.state })
           if (body) setDialogue({ ...target, body })
@@ -262,6 +295,7 @@ export function RoomViewer({
       npcDialogueLookupRef.current = buildDialogueLookup(result.room)
       roomDialogueContextRef.current = buildRoomDialogueContext(result.room)
       effectLookupRef.current = buildInteractionEffectLookup(result.room)
+      currentRoomNameRef.current = result.room.name
       try {
         if (resolvedObjectIds !== undefined) {
           engine.setRoom(result.room, { resolvedObjectIds })
@@ -289,6 +323,7 @@ export function RoomViewer({
       exitLookupRef.current = new Map()
       npcDialogueLookupRef.current = new Map()
       roomDialogueContextRef.current = undefined
+      currentRoomNameRef.current = undefined
       activeEncounterRef.current = null
       activeNPCDialogueRef.current = null
       npcDialogueRequestRef.current += 1
@@ -310,6 +345,7 @@ export function RoomViewer({
     npcDialogueService,
     onNavigate,
     onWorldStateChange,
+    onCommittedInteractionEvents,
     resolvedObjectIds,
     roomSource,
     sessionId,
