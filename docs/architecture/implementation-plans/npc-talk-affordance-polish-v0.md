@@ -1,10 +1,15 @@
 # Implementation Plan — `feature/npc-talk-affordance-polish-v0`
 
-> Status: **planned, not implemented.**
+> Status: **Slices 2 and 3 approved and implemented; Slice 4 docs closeout / regression verification.**
 > Maintainer approved docs-only planning on 2026-07-01. Decisions locked at approval:
 > include an optional role subtitle, but only through a closed hand-written persona-to-label
 > map (unknown/absent persona renders no subtitle; the raw persona slug is never rendered); no
 > ADR required for this slice — this implementation plan is the source of truth.
+> Maintainer approved Slice 2 and Slice 3 implementation in follow-up tasks. Slice 2 landed the
+> neutral `npcName` fallback in `app/dialogue.ts`. Slice 3 landed presentational
+> `NPCDialoguePanel` polish and tests. Persona subtitle support now exists in
+> `NPCDialoguePanel`, but is currently inert in gameplay because `RoomViewer` does not pass
+> `persona` yet. Persona wiring remains a future optional polish item unless explicitly requested.
 >
 > Companion docs: [ARCHITECTURE](../ARCHITECTURE.md) · [BOUNDARIES](../BOUNDARIES.md) ·
 > [FAILURE-MODES](../FAILURE-MODES.md) · [CONVENTIONS](../CONVENTIONS.md).
@@ -37,22 +42,20 @@ visible responding/failure/empty state) plus one composition-layer name-fallback
   (`Engine.ts:208-216`), and `RoomViewer`'s handler
   (`renderer/RoomViewer.tsx:217-259`) resolves it against `npcDialogueLookupRef` and opens
   `NPCDialoguePanel`. **No click-to-talk, no raycast selection exists today, and none is added.**
-- **`NPCDialoguePanel`** (`renderer/ui/NPCDialoguePanel.tsx`) is presentational only, already
-  receives neutral props (`npcName`, `turns`, `prompts?`, `message?`, `busy`, `onSay`, `onClose`)
-  from `RoomViewer`, and already closes on Escape/backdrop/Close button
-  (`RoomViewer.tsx:112-259, 370-436, 489-499`). It has no service/provider/memory import today
-  and none is added.
-- **Object-id leak in the name fallback (bug this plan fixes).** `buildDialogueLookup`
-  (`app/dialogue.ts:14-29`) sets `npcName = ('name' in object && object.name) ? object.name :
-  object.id`. A name-less, id-bearing NPC (the common case for a generated room) would render its
-  raw internal object id as the panel title — the only concrete `AGENTS.md` "no object ids in
-  UI" violation found in this code path. (A name-less *and* id-less NPC is already dropped from
-  the lookup map entirely and is out of scope.)
-- **`busy` already exists but is invisible.** `RoomViewer` already tracks
+- **`NPCDialoguePanel`** (`renderer/ui/NPCDialoguePanel.tsx`) is presentational only, receives
+  neutral props (`npcName`, optional `persona`, `turns`, `prompts?`, `message?`, `busy`, `onSay`,
+  `onClose`), and closes on Escape/backdrop/Close button. `RoomViewer` currently passes the
+  existing gameplay props but does not pass `persona`, so subtitle rendering is supported by the
+  panel but inert in gameplay. The panel has no service/provider/memory import.
+- **Object-id leak in the name fallback (fixed in Slice 2).** `buildDialogueLookup`
+  (`app/dialogue.ts`) now uses the fixed neutral fallback `"Stranger"` for missing or blank NPC
+  names. A name-less, id-bearing NPC remains talkable because the lookup key and `npcId` still use
+  the object id, but the UI-facing `npcName` never falls back to that raw internal object id. (A
+  name-less *and* id-less NPC is already dropped from the lookup map entirely and is out of scope.)
+- **`busy` now has visible panel presentation.** `RoomViewer` already tracks
   `npcDialoguePending`/`setNPCDialoguePending` (`RoomViewer.tsx:126, 230-231, 244-245, 253-254,
-  387-388, 404-405, 416-417`) and passes it as `NPCDialoguePanel`'s `busy` prop. Today `busy` only
-  disables the prompt/Continue buttons (`NPCDialoguePanel.tsx:59, 65`) — there is no visible
-  "responding…" indicator and no `aria-busy`.
+  387-388, 404-405, 416-417`) and passes it as `NPCDialoguePanel`'s `busy` prop. Slice 3 made
+  that state visible with a `"responding..."` indicator, disabled controls, and `aria-busy`.
 - **Failure path is already safe, just visually flat.** `dialogueResultMessage`
   (`app/dialogue.ts:31-36`) already maps `NPCDialogueResult` to two calm, fixed strings ("They
   have nothing to say right now." / "This conversation is unavailable.") with no raw
@@ -66,10 +69,10 @@ visible responding/failure/empty state) plus one composition-layer name-fallback
   initial closed set; it does not import from `FakeNPCDialogueProvider` (that module is
   provider-layer, not UI-layer — the map is a small independent hand-written table in the UI
   layer) and does not change that provider file.
-- **No existing test file for the panel.** `renderer/ui/NPCDialoguePanel.tsx` has no
-  `NPCDialoguePanel.test.tsx` today (confirmed: no match found). `DialoguePanel.test.tsx` exists
-  as a sibling and is a reasonable structural reference for panel-test conventions (render,
-  Escape, backdrop, button clicks) but is not imported or reused directly.
+- **Panel test coverage exists after Slice 3.** `renderer/ui/NPCDialoguePanel.test.tsx` covers
+  title rendering, closed persona subtitle mapping, unknown-persona suppression, turn labels,
+  prompt and Continue callbacks, busy state, failure message, close button, Escape close, and raw
+  id/persona non-leakage.
 - **CSS today** (`index.css:126-278`): `.hud`, `.hud-key`, `.hud-affordance`, `.hud--resolved`,
   `.hud-resolved` for the Hud; `.panel-backdrop`, `.panel`, `.panel-head`, `.panel-title`,
   `.panel-close`, `.panel-body`, `.panel-turns`, `.panel-choices`, `.panel-result`, `.panel-foot`,
@@ -88,12 +91,9 @@ visible responding/failure/empty state) plus one composition-layer name-fallback
    string). No object id may reach `npcName` under any input.
 
 2. **`renderer/ui/NPCDialoguePanel.tsx` — presentational polish only.**
-   - Keep the existing prop signature; optionally add one new optional prop for the role
-     subtitle input (either compute the label inside the panel from a new small prop like
-     `persona?: string` passed down from `RoomViewer`, or resolve it in `RoomViewer`/`app/dialogue.ts`
-     and pass a pre-resolved `roleLabel?: string` — final call in Slice 2, default to resolving in
-     `app/dialogue.ts` next to the name fix so the panel stays a pure display component with no
-     lookup logic of its own).
+   - Add one optional `persona?: string` prop for role subtitle support. The panel resolves it
+     through a closed local map. `RoomViewer` does not pass this prop yet, so the gameplay path is
+     unchanged and subtitle support remains inert until a future explicitly requested wiring slice.
    - Add a small closed `PERSONA_ROLE_LABEL: Readonly<Record<string, string>>` map (e.g.
      `{ 'friendly-aide': 'Aide', survivor: 'Survivor' }`) used only to resolve the optional
      subtitle. Unknown, absent, or unrecognized persona → no subtitle rendered. The raw persona
@@ -169,8 +169,7 @@ visible responding/failure/empty state) plus one composition-layer name-fallback
 
 **Modified files:**
 
-- `apps/web/src/app/dialogue.ts` — neutral `npcName` fallback constant; optional role-label
-  resolution if resolved here (see Slice 2).
+- `apps/web/src/app/dialogue.ts` — neutral `npcName` fallback constant.
 - `apps/web/src/app/dialogue.test.ts` — extended coverage for the fallback.
 - `apps/web/src/renderer/ui/NPCDialoguePanel.tsx` — presentational polish described in §2.
 - `apps/web/src/index.css` — new additive classes only.
@@ -215,41 +214,52 @@ No source code. Status: **complete** (this document).
 **Slice 2 — Neutral NPC name fallback**
 `fix(app): neutral NPC name fallback instead of raw object id`
 
+Status: **approved and implemented.**
+
 Modified: `app/dialogue.ts`, `app/dialogue.test.ts`.
 
-Replace the `object.id` fallback in `buildDialogueLookup` with a fixed neutral display string
-(`DEFAULT_NPC_NAME`). Decide and lock in this slice whether the optional role-label resolution
-(persona → closed label) lives in `app/dialogue.ts` (added to `NPCDialogueTarget`) or inside
-`NPCDialoguePanel.tsx` directly; either is acceptable, but pick one so Slice 3 has a fixed
-contract. Recommended: resolve in `app/dialogue.ts` so `NPCDialoguePanel` stays a pure display
-component with no lookup/table logic beyond rendering a given string.
+Replaced the `object.id` fallback in `buildDialogueLookup` with the fixed neutral display string
+`"Stranger"`. Named NPCs keep their safe display name. Name-less and id-bearing NPCs remain
+talkable because the lookup key and `npcId` still use the object id, but the UI-facing `npcName`
+is never the raw object id. Blank/whitespace names also display `"Stranger"`.
+
+Slice 2 did **not** add persona role-label resolution to `app/dialogue.ts`; that decision was
+deferred to Slice 3, where the closed map lives inside `NPCDialoguePanel`.
 
 Tests (`dialogue.test.ts`):
 - A name-less, id-bearing NPC (`{ id: 'aide', /* no name */ }`) resolves to `DEFAULT_NPC_NAME`,
   never `'aide'`.
 - A named NPC keeps its authored name, unchanged from today.
-- (If role-label resolution lands here) a known persona (`'friendly-aide'`) resolves to its
-  fixed label; an unknown/absent persona resolves to `undefined` — never the raw persona string.
+- A blank/whitespace name resolves to the neutral fallback.
 - Existing lookup test (duplicate-id-skip, name-less-and-id-less-drop) remains green, unmodified
   in behavior.
 
-Verification: `npm run test -- dialogue`, `npm run lint`, `npm run build`
+Verification run for Slice 2: `npm.cmd run test -- dialogue`, `npm.cmd run lint`,
+`npx.cmd tsc --noEmit -p .`.
 
 ---
 
 **Slice 3 — `NPCDialoguePanel` presentational polish**
 `feat(ui): NPCDialoguePanel polish — role subtitle, responding state, empty state`
 
+Status: **approved and implemented.**
+
 New file: `renderer/ui/NPCDialoguePanel.test.tsx`.
 Modified: `renderer/ui/NPCDialoguePanel.tsx`, `index.css`.
 
-Implements the presentational changes in §2.2 using the contract locked in Slice 2. No new
-service/provider call; no new `RoomViewer` prop wiring beyond passing through the already-decided
-role-label input.
+Implemented the presentational changes in §2.2. No new service/provider call, no memory/schema
+change, no typed input, no generated starter suggestions, no click-to-talk/raycast selection, and
+no proximity/F-key flow change.
+
+Persona subtitle support exists in `NPCDialoguePanel` through a closed local map:
+known `persona` values render fixed labels, and unknown/absent persona renders no subtitle. The
+raw persona slug is never rendered. This support is currently inert in gameplay because
+`RoomViewer` does not pass `persona` to the panel yet. Keep that wiring as a future optional
+polish item unless explicitly requested.
 
 Tests (`NPCDialoguePanel.test.tsx`):
 - Renders `npcName` as the panel title/heading.
-- Renders each entry in `turns` with the correct speaker label (`You` vs `npcName`), in order.
+- Renders each entry in `turns` with the correct speaker label (`Player` vs `npcName`), in order.
 - `busy=true` shows a visible responding indicator (assert by text/role, not just a CSS class)
   and disables both the prompt buttons and the `Continue` button; `aria-busy` reflects `busy`.
 - `busy=false` hides the responding indicator.
@@ -266,43 +276,40 @@ Tests (`NPCDialoguePanel.test.tsx`):
 - No test asserts on any object id, raw persona slug, or provider/memory text appearing in
   rendered output.
 
-Verification: `npm run test -- NPCDialoguePanel`, `npm run lint`, `npm run build`
+Verification run for Slice 3: `npm.cmd run test -- NPCDialoguePanel`, `npm.cmd run lint`,
+`npx.cmd tsc --noEmit -p .`.
 
 ---
 
 **Slice 4 — Regression sweep and manual smoke**
 `docs: close out NPC talk affordance polish v0`
 
-No new production files. Update `docs/architecture/ARCHITECTURE.md` with a short "NPC Talk
-Affordance Polish v0" status paragraph in the existing feature-map style, noting it is
-presentational-only (UI + one composition-layer fallback) with no provider/service/memory/schema
-change.
+Status: **approved for docs closeout and final regression verification.**
+
+No runtime/source behavior changes in this slice. This closeout updates this implementation plan
+only, plus final verification. It confirms the feature remains presentation/composition polish:
+no click-to-talk, no typed input, no generated starter suggestions, and no provider, memory,
+service, schema, persistence, save/load, renderer engine, `RoomViewer`, or `App.tsx` behavior
+changes.
 
 Checks:
-- Full existing dialogue/panel test suites remain green:
-  `npm run test -- dialogue`, `npm run test -- NPCDialoguePanel`,
-  `npm run test -- NPCDialogueService`, `npm run test -- FakeNPCDialogueProvider`.
-- Grep-level sweep: no new `console.*` call, no new `platform/logger` import, and no raw object
-  id / persona slug literal rendered in `renderer/ui/NPCDialoguePanel.tsx` or `app/dialogue.ts`.
-- Manual smoke checklist (dev, local run):
-  1. Authored demo room: approach the aide NPC → Hud shows `Press F · Talk · …`; press F → panel
-     opens with the real authored name and greeting turn.
-  2. Choose an authored prompt → visible responding indicator appears, buttons disable, reply
-     appends, indicator clears.
-  3. Rapidly reopen/switch NPCs and press Escape mid-response → no stale reply lands in the
-     wrong panel (existing `requestId` guard in `RoomViewer` still holds; unchanged code path).
-  4. NPC with no authored prompts → the empty-state affordance reads as intentional, not a dead
-     end.
-  5. Generated-room NPC with no authored `name` → panel title shows the neutral fallback (e.g.
-     "Stranger"), never a raw object id.
-  6. Force a provider failure (fake path: simulate rejection in a dev harness, or real path with
-     a broken/incomplete config) → calm fallback message shown, panel stays usable, no world
-     state change, no raw error/prompt/memory text in the browser console.
-  7. Fake-provider default end-to-end path (no `.env.local` real config) behaves exactly as
-     before this slice, aside from the presentational changes.
+- Targeted regression suites remain green:
+  `npm.cmd run test -- dialogue NPCDialoguePanel App`.
+- Lint remains green: `npm.cmd run lint`.
+- TypeScript remains green: `npx.cmd tsc --noEmit -p .`.
+- No runtime/source behavior changes are introduced by Slice 4.
 
-Verification: `npm run test`, `npm run lint`, `npm run build`; manual smoke as above (dev-only,
-not part of CI).
+Manual smoke checklist (dev, local run):
+1. Authored NPC: approach NPC; HUD still shows the Talk/F flow.
+2. Press F; panel opens.
+3. Named NPC shows safe name.
+4. Generated/unnamed NPC shows `"Stranger"`, not object id.
+5. Prompt button works.
+6. No-prompts Continue works.
+7. Busy/responding indicator appears while waiting.
+8. Failure message is calm and safe.
+9. Close button and Escape close the panel.
+10. Fake/real provider behavior is unchanged.
 
 ---
 
@@ -310,20 +317,16 @@ not part of CI).
 
 ```bash
 # Slice 2
-npm run test -- dialogue
+npm.cmd run test -- dialogue
 
 # Slice 3
-npm run test -- NPCDialoguePanel
+npm.cmd run test -- NPCDialoguePanel
 
 # Slice 4 — regression
-npm run test -- NPCDialogueService
-npm run test -- FakeNPCDialogueProvider
-npm run lint
-npm run build
-
-# Broader regression before calling the feature done
-npm run test
+npm.cmd run test -- dialogue NPCDialoguePanel App
+npm.cmd run lint
+npx.cmd tsc --noEmit -p .
 ```
 
-Run from `apps/web`. Prefer the targeted test commands per slice; run the full `npm run test`
-only once at final closeout (Slice 4), per `AGENTS.md`'s "prefer targeted verification" rule.
+Run from `apps/web`. Prefer the targeted test commands per slice, per `AGENTS.md`'s
+"prefer targeted verification" rule.
