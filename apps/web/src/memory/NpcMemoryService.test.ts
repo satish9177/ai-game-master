@@ -271,3 +271,25 @@ describe('NpcMemoryService — carries recall metadata (Slice C)', () => {
     expect('entitySnapshots' in result.record).toBe(false)
   })
 })
+
+describe('NpcMemoryService — dedupe (Slice C3)', () => {
+  it('a repeated dedupeKey remembers once, then reports deduplicated with the original record', async () => {
+    const { service } = harness()
+    const first = await service.remember({ ...baseInput, dedupeKey: 'evt-1' })
+    expect(first.status).toBe('recorded')
+    if (first.status !== 'recorded') return
+
+    const second = await service.remember({ ...baseInput, text: 'a different draft', dedupeKey: 'evt-1' })
+    expect(second).toEqual({ status: 'deduplicated', record: first.record })
+  })
+
+  it('does not log memory text on a deduplicated write', async () => {
+    const { service, entries } = harness()
+    const secretText = 'SECRET-DEDUPE-TEXT-xyz'
+    await service.remember({ ...baseInput, text: secretText, dedupeKey: 'evt-1' })
+    await service.remember({ ...baseInput, text: secretText, dedupeKey: 'evt-1' })
+    const serialized = JSON.stringify(entries)
+    expect(serialized).not.toContain(secretText)
+    expect(serialized).toContain('deduplicated')
+  })
+})

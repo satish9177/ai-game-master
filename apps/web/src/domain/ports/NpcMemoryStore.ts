@@ -13,11 +13,16 @@ import type { MemoryScope, NpcMemoryInsert, NpcMemoryRecord } from '../memory/co
 export type NpcMemoryStoreErrorCode = 'session-not-found' | 'conflict'
 
 export type NpcMemoryWriteResult =
-  | { ok: true; record: NpcMemoryRecord } // includes the assigned seq
+  | { ok: true; record: NpcMemoryRecord; deduplicated?: boolean } // includes the assigned seq
   | { ok: false; error: { code: NpcMemoryStoreErrorCode } }
 
 export interface NpcMemoryStore {
-  /** Persist one memory (insert-only). Assigns the next seq for (sessionId, npcId). */
+  /**
+   * Persist one memory (insert-only). Assigns the next seq for (sessionId, npcId).
+   * When `input.dedupeKey` is set and a matching prior record already exists for
+   * the same (sessionId, npcId, dedupeKey), the store returns that existing
+   * record with `deduplicated: true` instead of inserting a new row (Slice C3).
+   */
   record(input: NpcMemoryInsert): Promise<NpcMemoryWriteResult>
   /** Scoped read: exact (worldId, sessionId, npcId), seq desc, bounded by limit. */
   listForNpc(scope: MemoryScope, options?: { limit?: number }): Promise<NpcMemoryRecord[]>

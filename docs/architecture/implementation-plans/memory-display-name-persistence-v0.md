@@ -1,9 +1,14 @@
 # Implementation Plan — `feature/memory-display-name-persistence-v0`
 
-> Status: **C1 & C2 implemented & verified** (optional additive fields end-to-end +
-> `DisplayNameResolver`/named text/`entitySnapshots`, no DDL, `schemaVersion` kept `1`,
-> no dedupe persistence). **C3** (migration `0004` + SQLite dedupe) remains
-> **PROPOSED — no code until approved.**
+> Status: **C1, C2 & C3 implemented & verified.** C1/C2 shipped optional additive fields
+> end-to-end + `DisplayNameResolver`/named text/`entitySnapshots` (no DDL, `schemaVersion`
+> kept `1`). **C3** adds migration `0004` (nullable `dedupe_key` column + non-unique index
+> on both memory tables, `schemaVersion` still `1`) plus a pre-check SQLite/in-memory
+> dedupe path: a repeated `dedupeKey` returns the original record with
+> `deduplicated:true` instead of inserting a new row. The promotion mapper's `input` now
+> carries `importance`/`dedupeKey` (not just the top-level `PromotedMemory` fields), so a
+> promoted draft dedupes end-to-end when passed straight into `remember`/
+> `validateRoomMemoryDraft`.
 >
 > **This is Slice C** of the reconciled adoption of the external *Memory & DB Design
 > v1* doc: **DisplayNameResolver + named memory text + persisted importance/dedupe.**

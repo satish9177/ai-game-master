@@ -44,10 +44,19 @@ export class SqliteNpcMemoryStore implements NpcMemoryStore {
   }
 
   async record(input: NpcMemoryInsert): Promise<NpcMemoryWriteResult> {
-    let record: NpcMemoryRecord
+    let outcome: { record: NpcMemoryRecord; deduplicated: boolean }
     try {
-      record = withTransaction(this.db, () => {
+      outcome = withTransaction(this.db, () => {
         if (!this.sessionExists(input.sessionId)) throw new NotFoundSignal()
+
+        if (input.dedupeKey !== undefined) {
+          const existing = this.findByDedupeKey(input.sessionId, input.npcId, input.dedupeKey, {
+            worldId: input.worldId,
+            sessionId: input.sessionId,
+            npcId: input.npcId,
+          })
+          if (existing !== null) return { record: existing, deduplicated: true }
+        }
 
         const seq = this.nextSeq(input.sessionId, input.npcId)
         const next: NpcMemoryRecord = { ...input, seq }
@@ -59,7 +68,7 @@ export class SqliteNpcMemoryStore implements NpcMemoryStore {
           if (isUniqueViolation(error)) throw new ConflictSignal()
           throw error
         }
-        return next
+        return { record: next, deduplicated: false }
       })
     } catch (error) {
       if (error instanceof NotFoundSignal) return this.fail(input.sessionId, 'session-not-found')
@@ -67,13 +76,14 @@ export class SqliteNpcMemoryStore implements NpcMemoryStore {
       throw error
     }
 
-    this.log.info('npc memory recorded', {
+    const { record, deduplicated } = outcome
+    this.log.info(deduplicated ? 'npc memory deduplicated' : 'npc memory recorded', {
       memoryId: record.memoryId,
       sessionId: record.sessionId,
       npcId: record.npcId,
       seq: record.seq,
     })
-    return { ok: true, record }
+    return deduplicated ? { ok: true, record, deduplicated: true } : { ok: true, record }
   }
 
   async listForNpc(scope: MemoryScope, options: { limit?: number } = {}): Promise<NpcMemoryRecord[]> {
@@ -117,8 +127,8 @@ export class SqliteNpcMemoryStore implements NpcMemoryStore {
     this.db
       .prepare(
         `INSERT INTO npc_memories
-           (memory_id, world_id, session_id, npc_id, kind, seq, schema_version, memory_json, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           (memory_id, world_id, session_id, npc_id, kind, seq, schema_version, memory_json, created_at, dedupe_key)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         record.memoryId,
@@ -130,7 +140,32 @@ export class SqliteNpcMemoryStore implements NpcMemoryStore {
         PERSISTENCE_SCHEMA_VERSION,
         JSON.stringify(record),
         record.createdAt,
+        record.dedupeKey ?? null,
       )
+  }
+
+  /**
+   * Dedupe pre-check (Slice C3): look up an existing row by the non-unique
+   * `(session_id, npc_id, dedupe_key)` index. A hit re-validates the stored JSON
+   * through the same read-boundary parse as `listForNpc`; a corrupt/mismatched
+   * prior row is treated as a miss (insert proceeds normally) rather than a
+   * failure. Never logs `memory_json` or text.
+   */
+  private findByDedupeKey(
+    sessionId: string,
+    npcId: string,
+    dedupeKey: string,
+    scope: MemoryScope,
+  ): NpcMemoryRecord | null {
+    const row = this.db
+      .prepare(
+        `SELECT memory_id, memory_json FROM npc_memories
+           WHERE session_id = ? AND npc_id = ? AND dedupe_key = ?
+           LIMIT 1`,
+      )
+      .get(sessionId, npcId, dedupeKey)
+    if (row === undefined) return null
+    return this.parseStoredMemory(row.memory_id, row.memory_json, scope)
   }
 
   /**

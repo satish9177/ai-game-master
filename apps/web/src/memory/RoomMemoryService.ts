@@ -25,6 +25,7 @@ import type { Logger } from '../platform/logger/Logger'
 
 export type RememberRoomMemoryResult =
   | { status: 'recorded'; record: RoomMemoryRecord }
+  | { status: 'deduplicated'; record: RoomMemoryRecord } // store found a prior dedupeKey match
   | { status: 'rejected'; reason: RoomMemoryRejectReason } // firewall
   | { status: 'failed'; reason: RoomMemoryStoreErrorCode } // store
 
@@ -88,6 +89,18 @@ export class RoomMemoryService {
     }
 
     const { record } = written
+    if (written.deduplicated === true) {
+      this.log.info('room memory deduplicated', {
+        memoryId: record.memoryId,
+        worldId: record.worldId,
+        sessionId: record.sessionId,
+        roomId: record.roomId,
+        kind: record.kind,
+        seq: record.seq,
+      })
+      return { status: 'deduplicated', record }
+    }
+
     this.log.info('room memory recorded', {
       memoryId: record.memoryId,
       worldId: record.worldId,

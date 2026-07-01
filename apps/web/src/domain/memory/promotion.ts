@@ -153,6 +153,11 @@ export function promoteWorldEvent(
   const roomSnapshot = ctx.displayNames?.resolve('room', roomId) ?? null
   const text = roomSnapshot ? namedRoomStateText(roomSnapshot.displayName) : ROOM_STATE_MEMORY_TEXT
 
+  const dedupeKey = promotionDedupeKey(roomEvent, ctx)
+
+  // `input` is passed straight to `RoomMemoryService.remember`/`validateRoomMemoryDraft`,
+  // so importance/dedupeKey must ride on it (not just the top-level `PromotedMemory`
+  // fields below) for persisted importance + store-level dedupe to take effect.
   const input: RoomMemoryDraftInput = {
     worldId,
     sessionId: roomEvent.sessionId,
@@ -161,6 +166,8 @@ export function promoteWorldEvent(
     source: PROMOTION_SOURCE,
     text,
     confidence: PROMOTION_CONFIDENCE,
+    importance,
+    dedupeKey,
     ...(roomSnapshot ? { entitySnapshots: { room: roomSnapshot } } : {}),
   }
 
@@ -168,7 +175,7 @@ export function promoteWorldEvent(
     target: 'room',
     input,
     importance,
-    dedupeKey: promotionDedupeKey(roomEvent, ctx),
+    dedupeKey,
   }
 }
 

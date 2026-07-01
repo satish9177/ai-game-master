@@ -25,6 +25,7 @@ import type { Logger } from '../platform/logger/Logger'
 
 export type RememberResult =
   | { status: 'recorded'; record: NpcMemoryRecord }
+  | { status: 'deduplicated'; record: NpcMemoryRecord } // store found a prior dedupeKey match
   | { status: 'rejected'; reason: MemoryRejectReason } // firewall
   | { status: 'failed'; reason: NpcMemoryStoreErrorCode } // store
 
@@ -84,6 +85,18 @@ export class NpcMemoryService {
     }
 
     const { record } = written
+    if (written.deduplicated === true) {
+      this.log.info('npc memory deduplicated', {
+        memoryId: record.memoryId,
+        worldId: record.worldId,
+        sessionId: record.sessionId,
+        npcId: record.npcId,
+        kind: record.kind,
+        seq: record.seq,
+      })
+      return { status: 'deduplicated', record }
+    }
+
     this.log.info('npc memory recorded', {
       memoryId: record.memoryId,
       worldId: record.worldId,

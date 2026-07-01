@@ -14,6 +14,11 @@ export class InMemoryRoomMemoryStore implements RoomMemoryStore {
   private readonly records: RoomMemoryRecord[] = []
 
   async record(input: RoomMemoryInsert): Promise<RoomMemoryWriteResult> {
+    if (input.dedupeKey !== undefined) {
+      const existing = this.findByDedupeKey(input.sessionId, input.roomId, input.dedupeKey)
+      if (existing !== undefined) return { ok: true, record: clone(existing), deduplicated: true }
+    }
+
     const seq = this.nextSeq(input.sessionId, input.roomId)
     const record: RoomMemoryRecord = clone({ ...input, seq })
     this.records.push(record)
@@ -36,6 +41,17 @@ export class InMemoryRoomMemoryStore implements RoomMemoryStore {
     const limited =
       options?.limit !== undefined ? matched.slice(0, Math.max(0, options.limit)) : matched
     return limited.map((record) => clone(record))
+  }
+
+  private findByDedupeKey(
+    sessionId: string,
+    roomId: string,
+    dedupeKey: string,
+  ): RoomMemoryRecord | undefined {
+    return this.records.find(
+      (record) =>
+        record.sessionId === sessionId && record.roomId === roomId && record.dedupeKey === dedupeKey,
+    )
   }
 
   private nextSeq(sessionId: string, roomId: string): number {

@@ -71,7 +71,17 @@ describe('promoteWorldEvent', () => {
       source: PROMOTION_SOURCE,
       text: ROOM_STATE_MEMORY_TEXT,
       confidence: PROMOTION_CONFIDENCE,
+      importance: 3,
+      dedupeKey: result?.dedupeKey,
     })
+  })
+
+  it('carries importance and dedupeKey onto input itself (Slice C3)', () => {
+    const result = promoteWorldEvent(durableEvent, { worldId: WORLD_ID })
+    expect(result).not.toBeNull()
+    expect(result?.input.importance).toBe(result?.importance)
+    expect(result?.input.dedupeKey).toBe(result?.dedupeKey)
+    expect(result?.input.dedupeKey).toBe(promotionDedupeKey(durableEvent, { worldId: WORLD_ID }))
   })
 
   it('promotes when visited is set alongside non-empty flags', () => {

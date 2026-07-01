@@ -48,10 +48,19 @@ export class SqliteRoomMemoryStore implements RoomMemoryStore {
   }
 
   async record(input: RoomMemoryInsert): Promise<RoomMemoryWriteResult> {
-    let record: RoomMemoryRecord
+    let outcome: { record: RoomMemoryRecord; deduplicated: boolean }
     try {
-      record = withTransaction(this.db, () => {
+      outcome = withTransaction(this.db, () => {
         if (!this.sessionExists(input.sessionId)) throw new NotFoundSignal()
+
+        if (input.dedupeKey !== undefined) {
+          const existing = this.findByDedupeKey(input.sessionId, input.roomId, input.dedupeKey, {
+            worldId: input.worldId,
+            sessionId: input.sessionId,
+            roomId: input.roomId,
+          })
+          if (existing !== null) return { record: existing, deduplicated: true }
+        }
 
         const seq = this.nextSeq(input.sessionId, input.roomId)
         const next: RoomMemoryRecord = { ...input, seq }
@@ -63,7 +72,7 @@ export class SqliteRoomMemoryStore implements RoomMemoryStore {
           if (isUniqueViolation(error)) throw new ConflictSignal()
           throw error
         }
-        return next
+        return { record: next, deduplicated: false }
       })
     } catch (error) {
       if (error instanceof NotFoundSignal) return this.fail(input.sessionId, 'session-not-found')
@@ -71,13 +80,14 @@ export class SqliteRoomMemoryStore implements RoomMemoryStore {
       throw error
     }
 
-    this.log.info('room memory recorded', {
+    const { record, deduplicated } = outcome
+    this.log.info(deduplicated ? 'room memory deduplicated' : 'room memory recorded', {
       memoryId: record.memoryId,
       sessionId: record.sessionId,
       roomId: record.roomId,
       seq: record.seq,
     })
-    return { ok: true, record }
+    return deduplicated ? { ok: true, record, deduplicated: true } : { ok: true, record }
   }
 
   async listForRoom(
@@ -124,8 +134,8 @@ export class SqliteRoomMemoryStore implements RoomMemoryStore {
     this.db
       .prepare(
         `INSERT INTO room_memories
-           (memory_id, world_id, session_id, room_id, kind, seq, schema_version, memory_json, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           (memory_id, world_id, session_id, room_id, kind, seq, schema_version, memory_json, created_at, dedupe_key)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         record.memoryId,
@@ -137,7 +147,32 @@ export class SqliteRoomMemoryStore implements RoomMemoryStore {
         PERSISTENCE_SCHEMA_VERSION,
         JSON.stringify(record),
         record.createdAt,
+        record.dedupeKey ?? null,
       )
+  }
+
+  /**
+   * Dedupe pre-check (Slice C3): look up an existing row by the non-unique
+   * `(session_id, room_id, dedupe_key)` index. A hit re-validates the stored
+   * JSON through the same read-boundary parse as `listForRoom`; a corrupt/
+   * mismatched prior row is treated as a miss (insert proceeds normally) rather
+   * than a failure. Never logs `memory_json` or text.
+   */
+  private findByDedupeKey(
+    sessionId: string,
+    roomId: string,
+    dedupeKey: string,
+    scope: RoomMemoryScope,
+  ): RoomMemoryRecord | null {
+    const row = this.db
+      .prepare(
+        `SELECT memory_id, memory_json FROM room_memories
+           WHERE session_id = ? AND room_id = ? AND dedupe_key = ?
+           LIMIT 1`,
+      )
+      .get(sessionId, roomId, dedupeKey)
+    if (row === undefined) return null
+    return this.parseStoredMemory(row.memory_id, row.memory_json, scope)
   }
 
   /**

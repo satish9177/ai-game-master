@@ -79,3 +79,37 @@ describe('InMemoryNpcMemoryStore.listForNpc', () => {
     expect(second[0]!.text).toBe('original')
   })
 })
+
+describe('InMemoryNpcMemoryStore — dedupe (Slice C3)', () => {
+  it('a repeated dedupeKey returns the original record with deduplicated:true, no second row', async () => {
+    const store = new InMemoryNpcMemoryStore()
+    const first = await store.record(insert({ memoryId: 'a', dedupeKey: 'evt-1' }))
+    expect(first.ok).toBe(true)
+    if (!first.ok) return
+
+    const second = await store.record(insert({ memoryId: 'b', dedupeKey: 'evt-1' }))
+    expect(second).toEqual({ ok: true, record: first.record, deduplicated: true })
+
+    const got = await store.listForNpc({ worldId: 'world-1', sessionId: 'session-1', npcId: 'npc-1' })
+    expect(got).toHaveLength(1)
+  })
+
+  it('different dedupeKeys each insert their own row', async () => {
+    const store = new InMemoryNpcMemoryStore()
+    const a = await store.record(insert({ memoryId: 'a', dedupeKey: 'evt-1' }))
+    const b = await store.record(insert({ memoryId: 'b', dedupeKey: 'evt-2' }))
+    expect(a.ok && a.record.seq).toBe(1)
+    expect(b.ok && 'deduplicated' in b).toBe(false)
+    expect(b.ok && b.record.seq).toBe(2)
+  })
+
+  it('an absent dedupeKey preserves today’s behavior (no pre-check, two rows)', async () => {
+    const store = new InMemoryNpcMemoryStore()
+    const a = await store.record(insert({ memoryId: 'a' }))
+    const b = await store.record(insert({ memoryId: 'b' }))
+    expect(a.ok && 'deduplicated' in a).toBe(false)
+    expect(b.ok && 'deduplicated' in b).toBe(false)
+    const got = await store.listForNpc({ worldId: 'world-1', sessionId: 'session-1', npcId: 'npc-1' })
+    expect(got).toHaveLength(2)
+  })
+})

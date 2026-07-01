@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { promoteWorldEvent } from '../domain/memory/promotion'
 import { RoomMemoryRecordSchema } from '../domain/memory/roomContracts'
 import type { RoomMemoryRecord, RoomMemoryScope } from '../domain/memory/roomContracts'
 import type { RoomMemoryDraftInput } from '../domain/memory/roomFirewall'
@@ -10,6 +11,8 @@ import type {
   RoomMemoryWriteResult,
 } from '../domain/ports/RoomMemoryStore'
 import { WorldCommandSchema, WorldEventSchema } from '../domain/world/events'
+import type { WorldEvent } from '../domain/world/events'
+import { WORLD_SCHEMA_VERSION } from '../domain/world/worldState'
 import type { Logger, LogContext, LogLevel } from '../platform/logger/Logger'
 import { InMemoryRoomMemoryStore } from './InMemoryRoomMemoryStore'
 import { RoomMemoryService } from './RoomMemoryService'
@@ -290,5 +293,56 @@ describe('RoomMemoryService — carries recall metadata (Slice C)', () => {
     expect('importance' in result.record).toBe(false)
     expect('dedupeKey' in result.record).toBe(false)
     expect('entitySnapshots' in result.record).toBe(false)
+  })
+})
+
+describe('RoomMemoryService — dedupe (Slice C3)', () => {
+  it('a repeated dedupeKey remembers once, then reports deduplicated with the original record', async () => {
+    const { service } = harness()
+    const first = await service.remember({ ...baseInput, dedupeKey: 'evt-1' })
+    expect(first.status).toBe('recorded')
+    if (first.status !== 'recorded') return
+
+    const second = await service.remember({ ...baseInput, text: 'a different draft', dedupeKey: 'evt-1' })
+    expect(second).toEqual({ status: 'deduplicated', record: first.record })
+  })
+
+  it('does not log memory text on a deduplicated write', async () => {
+    const { service, entries } = harness()
+    const secretText = 'SECRET-ROOM-DEDUPE-TEXT-xyz'
+    await service.remember({ ...baseInput, text: secretText, dedupeKey: 'evt-1' })
+    await service.remember({ ...baseInput, text: secretText, dedupeKey: 'evt-1' })
+    const serialized = JSON.stringify(entries)
+    expect(serialized).not.toContain(secretText)
+    expect(serialized).toContain('deduplicated')
+  })
+
+  it('a promoted draft (promoteWorldEvent) dedupes end-to-end through remember', async () => {
+    const { service } = harness()
+    const event: WorldEvent = {
+      schemaVersion: WORLD_SCHEMA_VERSION,
+      eventId: '11111111-1111-4111-8111-111111111111',
+      sessionId: 'session-1',
+      seq: 1,
+      occurredAt: '2026-06-30T00:00:00.000Z',
+      type: 'room-state-changed',
+      payload: { roomId: 'room-1', flags: { burned: true } },
+    }
+    const promoted = promoteWorldEvent(event, { worldId: 'world-1' })
+    expect(promoted).not.toBeNull()
+    expect(promoted?.input.dedupeKey).toBeDefined()
+    expect(promoted?.input.importance).toBe(promoted?.importance)
+
+    // Simulate the same committed event being promoted/remembered twice
+    // (e.g. an orchestrator replay) — the second call must dedupe, not double-write.
+    const first = await service.remember(promoted!.input)
+    const second = await service.remember(promoted!.input)
+    expect(first.status).toBe('recorded')
+    expect(second.status).toBe('deduplicated')
+    if (first.status !== 'recorded' || second.status !== 'deduplicated') return
+    expect(second.record.memoryId).toBe(first.record.memoryId)
+
+    const recalled = await service.recall(scopeOf(promoted!.input))
+    expect(recalled.memories).toHaveLength(1)
   })
 })

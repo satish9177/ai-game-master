@@ -257,6 +257,113 @@ describe('SqliteRoomMemoryStore — scope isolation', () => {
   })
 })
 
+describe('SqliteRoomMemoryStore — dedupe (Slice C3)', () => {
+  it('a repeated dedupeKey returns the original record with deduplicated:true, no second row', async () => {
+    const { db, close } = createMemoryDb()
+    try {
+      seedSession(db, 'session-1')
+      const store = new SqliteRoomMemoryStore(db, silentLogger())
+      const first = await store.record(insert({ memoryId: 'm1', text: 'first', dedupeKey: 'evt-1' }))
+      expect(first.ok).toBe(true)
+      if (!first.ok) return
+
+      const second = await store.record(
+        insert({ memoryId: 'm2', text: 'second, should be dropped', dedupeKey: 'evt-1' }),
+      )
+      expect(second).toEqual({ ok: true, record: first.record, deduplicated: true })
+
+      const count = db.prepare('SELECT COUNT(*) AS n FROM room_memories').get()
+      expect(Number(count?.n)).toBe(1)
+    } finally {
+      close()
+    }
+  })
+
+  it('different dedupeKeys each insert their own row', async () => {
+    const { db, close } = createMemoryDb()
+    try {
+      seedSession(db, 'session-1')
+      const store = new SqliteRoomMemoryStore(db, silentLogger())
+      const a = await store.record(insert({ memoryId: 'm1', dedupeKey: 'evt-1' }))
+      const b = await store.record(insert({ memoryId: 'm2', dedupeKey: 'evt-2' }))
+      expect(a.ok && a.record.seq).toBe(1)
+      expect(b.ok && 'deduplicated' in b).toBe(false)
+      expect(b.ok && b.record.seq).toBe(2)
+    } finally {
+      close()
+    }
+  })
+
+  it('an absent dedupeKey preserves today’s behavior (no pre-check, two rows)', async () => {
+    const { db, close } = createMemoryDb()
+    try {
+      seedSession(db, 'session-1')
+      const store = new SqliteRoomMemoryStore(db, silentLogger())
+      const a = await store.record(insert({ memoryId: 'm1' }))
+      const b = await store.record(insert({ memoryId: 'm2' }))
+      expect(a.ok && 'deduplicated' in a).toBe(false)
+      expect(b.ok && 'deduplicated' in b).toBe(false)
+      const count = db.prepare('SELECT COUNT(*) AS n FROM room_memories').get()
+      expect(Number(count?.n)).toBe(2)
+    } finally {
+      close()
+    }
+  })
+
+  it('persists dedupe_key in its own column', async () => {
+    const { db, close } = createMemoryDb()
+    try {
+      seedSession(db, 'session-1')
+      const store = new SqliteRoomMemoryStore(db, silentLogger())
+      await store.record(insert({ memoryId: 'm1', dedupeKey: 'evt-1' }))
+      const row = db.prepare('SELECT dedupe_key FROM room_memories WHERE memory_id = ?').get('m1')
+      expect(row?.dedupe_key).toBe('evt-1')
+    } finally {
+      close()
+    }
+  })
+
+  it('importance and entitySnapshots survive a write -> read round trip', async () => {
+    const { db, close } = createMemoryDb()
+    try {
+      seedSession(db, 'session-1')
+      const store = new SqliteRoomMemoryStore(db, silentLogger())
+      await store.record(
+        insert({
+          memoryId: 'm1',
+          importance: 3,
+          entitySnapshots: { room: { id: 'room-1', displayName: 'Old Library' } },
+        }),
+      )
+      const got = await store.listForRoom({ worldId: 'world-1', sessionId: 'session-1', roomId: 'room-1' })
+      expect(got[0]?.importance).toBe(3)
+      expect(got[0]?.entitySnapshots).toEqual({ room: { id: 'room-1', displayName: 'Old Library' } })
+    } finally {
+      close()
+    }
+  })
+
+  it('a corrupt prior dedupeKey row is treated as a miss (inserts normally)', async () => {
+    const { db, close } = createMemoryDb()
+    try {
+      seedSession(db, 'session-1')
+      // Insert a corrupt row directly with the dedupe key already set.
+      db.prepare(
+        `INSERT INTO room_memories
+           (memory_id, world_id, session_id, room_id, kind, seq, schema_version, memory_json, created_at, dedupe_key)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run('broken', 'world-1', 'session-1', 'room-1', 'room_observation', 1, 1, '{ not valid json', '2026-06-23T10:00:00.000Z', 'evt-1')
+
+      const store = new SqliteRoomMemoryStore(db, silentLogger())
+      const result = await store.record(insert({ memoryId: 'm1', text: 'valid', dedupeKey: 'evt-1' }))
+      expect(result.ok).toBe(true)
+      expect(result.ok && 'deduplicated' in result).toBe(false)
+    } finally {
+      close()
+    }
+  })
+})
+
 describe('SqliteRoomMemoryStore — log safety', () => {
   it('logs ids/seq/codes only — never memory text', async () => {
     const { db, close } = createMemoryDb()

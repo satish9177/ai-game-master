@@ -14,6 +14,11 @@ export class InMemoryNpcMemoryStore implements NpcMemoryStore {
   private readonly records: NpcMemoryRecord[] = []
 
   async record(input: NpcMemoryInsert): Promise<NpcMemoryWriteResult> {
+    if (input.dedupeKey !== undefined) {
+      const existing = this.findByDedupeKey(input.sessionId, input.npcId, input.dedupeKey)
+      if (existing !== undefined) return { ok: true, record: clone(existing), deduplicated: true }
+    }
+
     const seq = this.nextSeq(input.sessionId, input.npcId)
     const record: NpcMemoryRecord = clone({ ...input, seq })
     this.records.push(record)
@@ -32,6 +37,17 @@ export class InMemoryNpcMemoryStore implements NpcMemoryStore {
 
     const limited = options?.limit !== undefined ? matched.slice(0, Math.max(0, options.limit)) : matched
     return limited.map((record) => clone(record))
+  }
+
+  private findByDedupeKey(
+    sessionId: string,
+    npcId: string,
+    dedupeKey: string,
+  ): NpcMemoryRecord | undefined {
+    return this.records.find(
+      (record) =>
+        record.sessionId === sessionId && record.npcId === npcId && record.dedupeKey === dedupeKey,
+    )
   }
 
   private nextSeq(sessionId: string, npcId: string): number {
