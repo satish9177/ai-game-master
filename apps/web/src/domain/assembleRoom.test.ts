@@ -418,6 +418,7 @@ describe('assembleRoom', () => {
       'objectTransformsRepaired',
       'purposesAssigned',
       'npcInserted',
+      'npcDialogueNormalizedCount',
       'objectiveTargetEnriched',
       'displayTextSanitized',
       'displayTextSanitizationCount',
@@ -452,6 +453,7 @@ describe('assembleRoom', () => {
       expect(typeof diagnostics.objectTransformsRepaired).toBe('number')
       expect(typeof diagnostics.purposesAssigned).toBe('number')
       expect(typeof diagnostics.npcInserted).toBe('boolean')
+      expect(typeof diagnostics.npcDialogueNormalizedCount).toBe('number')
       expect(typeof diagnostics.objectiveTargetEnriched).toBe('boolean')
       expect(typeof diagnostics.displayTextSanitized).toBe('boolean')
       expect(typeof diagnostics.displayTextSanitizationCount).toBe('number')
@@ -1121,6 +1123,143 @@ describe('assembleRoom', () => {
     ]) {
       expect(diagnosticsJson).not.toContain(forbidden)
     }
+  })
+
+  // --- generated-room NPC dialogue spec normalization (generated-npc-dialogue-spec-v0 Slice 3) ---
+  //
+  // Stage 2.12.2 runs unconditionally (not gated by requestsNpc) right after
+  // Stage 2.12 NPC presence and before objective enrichment, so any generated-room
+  // NPC that has an interaction but no interaction.dialogue becomes talkable: it
+  // gets a collision-safe id (if absent) plus a deterministic dialogue spec.
+
+  it('generator NPC with no id and no dialogue gets an id and a dialogue spec', () => {
+    const result = assembleRoom(raw(validSpec({
+      shell: { dimensions: { width: 18, depth: 18, height: 4 }, exits: [{ side: 'north', width: 3 }] },
+      spawn: { position: [0, 1.7, 5] },
+      objects: [{
+        type: 'npc',
+        name: 'Guide',
+        position: [-4, 0, 0],
+        interaction: { key: 'F', prompt: 'Press F to speak with Guide', body: 'Guide nods quietly.' },
+      }],
+    })), fallback)
+
+    const npc = result.room.objects.find((object) => object.type === 'npc')
+    const dialogue = npc && 'interaction' in npc ? npc.interaction.dialogue : undefined
+
+    expect(npc?.id).toBeTruthy()
+    expect(dialogue).toBeDefined()
+    expect(dialogue?.prompts.map((prompt) => prompt.id)).toEqual(['ask-room', 'ask-help'])
+    expect(result.diagnostics.npcDialogueNormalizedCount).toBeGreaterThanOrEqual(1)
+    expect(validateRoom(result.room).ok).toBe(true)
+  })
+
+  it('generator NPC with an existing id but no dialogue keeps its id and gains a dialogue spec', () => {
+    const result = assembleRoom(raw(validSpec({
+      shell: { dimensions: { width: 18, depth: 18, height: 4 }, exits: [{ side: 'north', width: 3 }] },
+      spawn: { position: [0, 1.7, 5] },
+      objects: [{
+        type: 'npc',
+        id: 'raw-npc-id',
+        name: 'Guide',
+        position: [-4, 0, 0],
+        interaction: { key: 'F', prompt: 'Press F to speak with Guide', body: 'Guide nods quietly.' },
+      }],
+    })), fallback)
+
+    const npc = result.room.objects.find((object) => object.type === 'npc')
+    const dialogue = npc && 'interaction' in npc ? npc.interaction.dialogue : undefined
+
+    expect(npc?.id).toBe('raw-npc-id')
+    expect(dialogue).toBeDefined()
+    expect(result.diagnostics.npcDialogueNormalizedCount).toBe(1)
+    expect(validateRoom(result.room).ok).toBe(true)
+  })
+
+  it('generator NPC with dialogue but no id is assigned an id and keeps its dialogue, not counted', () => {
+    const existingDialogue = { greeting: 'I have already arrived.' }
+    const result = assembleRoom(raw(validSpec({
+      shell: { dimensions: { width: 18, depth: 18, height: 4 }, exits: [{ side: 'north', width: 3 }] },
+      spawn: { position: [0, 1.7, 5] },
+      objects: [{
+        type: 'npc',
+        name: 'Guide',
+        position: [-4, 0, 0],
+        interaction: {
+          key: 'F',
+          prompt: 'Press F to speak with Guide',
+          body: 'Guide nods quietly.',
+          dialogue: existingDialogue,
+        },
+      }],
+    })), fallback)
+
+    const npc = result.room.objects.find((object) => object.type === 'npc')
+    const dialogue = npc && 'interaction' in npc ? npc.interaction.dialogue : undefined
+
+    expect(npc?.id).toBeTruthy()
+    expect(dialogue).toEqual(existingDialogue)
+    expect(result.diagnostics.npcDialogueNormalizedCount).toBe(0)
+    expect(validateRoom(result.room).ok).toBe(true)
+  })
+
+  it('normalizes a dialogue-less generator NPC even without requestsNpc (adjacent-style path)', () => {
+    const result = assembleRoom(raw(validSpec({
+      shell: { dimensions: { width: 18, depth: 18, height: 4 }, exits: [{ side: 'north', width: 3 }] },
+      spawn: { position: [0, 1.7, 5] },
+      objects: [{
+        type: 'npc',
+        name: 'Guide',
+        position: [-4, 0, 0],
+        interaction: { key: 'F', prompt: 'Press F to speak with Guide', body: 'Guide nods quietly.' },
+      }],
+    })), fallback, {})
+
+    const npc = result.room.objects.find((object) => object.type === 'npc')
+    const dialogue = npc && 'interaction' in npc ? npc.interaction.dialogue : undefined
+
+    expect(npc?.id).toBeTruthy()
+    expect(dialogue).toBeDefined()
+    expect(result.diagnostics.npcDialogueNormalizedCount).toBeGreaterThanOrEqual(1)
+  })
+
+  it('leaves an NPC with existing id and dialogue byte-identical', () => {
+    const npcObject = {
+      type: 'npc',
+      id: 'existing-npc',
+      name: 'Existing Guide',
+      position: [-4, 0, 0],
+      interaction: {
+        key: 'F',
+        prompt: 'Talk',
+        body: 'Existing safe body.',
+        dialogue: { greeting: 'Hello.' },
+      },
+    }
+    const result = assembleRoom(raw(validSpec({
+      shell: { dimensions: { width: 18, depth: 18, height: 4 }, exits: [{ side: 'north', width: 3 }] },
+      spawn: { position: [0, 1.7, 5] },
+      objects: [npcObject],
+    })), fallback)
+
+    const npc = result.room.objects.find((object) => object.type === 'npc')
+    expect(npc).toMatchObject(npcObject)
+    expect(result.diagnostics.npcDialogueNormalizedCount).toBe(0)
+  })
+
+  it('npcDialogueNormalizedCount is 0 for all fallback paths', () => {
+    const paths = [RAW_INVALID_JSON, RAW_INVALID_SCHEMA, RAW_UNREPAIRABLE, RAW_REPAIR_THEN_FAIL]
+    for (const input of paths) {
+      const { diagnostics } = assembleRoom(input, fallback)
+      expect(diagnostics.npcDialogueNormalizedCount).toBe(0)
+    }
+  })
+
+  it('ensureGeneratedNpcPresence-inserted NPC already has dialogue, so normalization does not double-count', () => {
+    const result = assembleRoom(RAW_VALID, fallback, { requestsNpc: true })
+    expect(result.diagnostics.npcInserted).toBe(true)
+    expect(result.diagnostics.npcDialogueNormalizedCount).toBe(0)
+    expect(validateRoom(result.room).ok).toBe(true)
   })
 
   // --- generated-room display text sanitization (Slice B) ---

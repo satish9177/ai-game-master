@@ -8,7 +8,7 @@ import { composeGeneratedRoom } from './generatedRoomComposition'
 import { repairGeneratedAliases } from './generatedRoomAliases'
 import { repairGeneratedObjectTransforms } from './generatedRoomObjectTransforms'
 import { assignGeneratedObjectPurpose } from './generatedRoomObjectPurpose'
-import { ensureGeneratedNpcPresence } from './ensureGeneratedNpcPresence'
+import { ensureGeneratedNpcPresence, ensureGeneratedNpcDialogue } from './ensureGeneratedNpcPresence'
 import { ensureGeneratedExitNavigation } from './ensureGeneratedExitNavigation'
 import { ensureGeneratedObjectiveTarget } from './generatedRoomObjectiveTarget'
 import { sanitizeGeneratedDisplayText } from './sanitizeGeneratedDisplayText'
@@ -136,6 +136,12 @@ export type RoomDiagnostics = {
   purposesAssigned: number
   /** Whether one safe generated NPC was inserted from an explicit boolean request. */
   npcInserted: boolean
+  /**
+   * Number of existing generated-room NPCs that were given a safe deterministic
+   * dialogue spec (and, where absent, a collision-safe id). Count-only: never
+   * carries NPC names, ids, room names, or generated text. 0 on all fallback paths.
+   */
+  npcDialogueNormalizedCount: number
   /**
    * Whether one existing generated object was promoted to objective-ready.
    * Boolean-only; never carries object ids, text, names, or generated content.
@@ -276,11 +282,20 @@ export function assembleRoom(
   const npcPresenceFixed = npcPresenceResult.room
   const { npcInserted } = npcPresenceResult
 
+  // Stage 2.12.2 - unconditionally normalize dialogue onto any generated-room NPC
+  // (inserted above or already present in the generator's raw output) that lacks
+  // `interaction.dialogue`, assigning a collision-safe id first where absent.
+  const npcDialogueResult = ensureGeneratedNpcDialogue(npcPresenceFixed, {
+    themePack: options.themePack,
+  })
+  const npcDialogueFixed = npcDialogueResult.room
+  const { npcDialogueNormalizedCount } = npcDialogueResult
+
   // Stage 2.12.5 - optionally promote one existing eligible generated object to
   // objective-ready. Gated off by default; adds only an inspect effect.
   const objectiveTargetResult = options.enrichObjectiveTarget === true
-    ? ensureGeneratedObjectiveTarget(npcPresenceFixed)
-    : { room: npcPresenceFixed, objectiveTargetEnriched: false }
+    ? ensureGeneratedObjectiveTarget(npcDialogueFixed)
+    : { room: npcDialogueFixed, objectiveTargetEnriched: false }
   const objectiveTargetFixed = objectiveTargetResult.room
   const { objectiveTargetEnriched } = objectiveTargetResult
 
@@ -319,6 +334,7 @@ export function assembleRoom(
         objectTransformsRepaired,
         purposesAssigned,
         npcInserted,
+        npcDialogueNormalizedCount,
         objectiveTargetEnriched,
         displayTextSanitized,
         displayTextSanitizationCount,
@@ -359,6 +375,7 @@ export function assembleRoom(
         objectTransformsRepaired,
         purposesAssigned,
         npcInserted,
+        npcDialogueNormalizedCount,
         objectiveTargetEnriched,
         displayTextSanitized,
         displayTextSanitizationCount,
@@ -392,6 +409,7 @@ export function assembleRoom(
       objectTransformsRepaired: 0,
       purposesAssigned: 0,
       npcInserted: false,
+      npcDialogueNormalizedCount: 0,
       objectiveTargetEnriched: false,
       displayTextSanitized: false,
       displayTextSanitizationCount: 0,
@@ -428,6 +446,7 @@ function toFallback(
       objectTransformsRepaired: 0,
       purposesAssigned: 0,
       npcInserted: false,
+      npcDialogueNormalizedCount: 0,
       objectiveTargetEnriched: false,
       displayTextSanitized: false,
       displayTextSanitizationCount: 0,
