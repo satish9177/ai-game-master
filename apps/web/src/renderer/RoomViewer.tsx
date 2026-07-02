@@ -227,34 +227,6 @@ export function RoomViewer({
           ? [{ speaker: 'npc', text: dialogueTarget.dialogue.greeting }]
           : []
         setNPCDialogueTurns(seed)
-        npcDialoguePendingRef.current = true
-        setNPCDialoguePending(true)
-        const requestId = npcDialogueRequestRef.current
-
-        void npcDialogueService.reply(buildNPCDialogueReplyInput({
-          sessionId,
-          target: dialogueTarget,
-          history: [],
-          playerLine: undefined,
-          roomContext: roomDialogueContextRef.current,
-          questStage: questStageRef.current,
-          memoryContext: roomMemoryContextRef.current,
-        })).then((result) => {
-          if (cancelled || npcDialogueRequestRef.current !== requestId) return
-          npcDialoguePendingRef.current = false
-          setNPCDialoguePending(false)
-          if (result.status === 'replied') {
-            setNPCDialogueTurns((current) => [...current, result.turn])
-          } else {
-            setNPCDialogueMessage(dialogueResultMessage(result))
-          }
-        }).catch(() => {
-          if (cancelled || npcDialogueRequestRef.current !== requestId) return
-          npcDialoguePendingRef.current = false
-          setNPCDialoguePending(false)
-          logger.error('npc dialogue resolution threw', { code: 'dialogue-failed' })
-          setNPCDialogueMessage('They have nothing to say right now.')
-        })
         return
       }
 
@@ -357,7 +329,6 @@ export function RoomViewer({
   }, [
     encounterService,
     interactionService,
-    npcDialogueService,
     onNavigate,
     onWorldStateChange,
     onCommittedInteractionEvents,
