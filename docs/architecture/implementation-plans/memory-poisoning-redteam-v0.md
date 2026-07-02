@@ -1,9 +1,9 @@
 # Implementation Plan — `feature/memory-poisoning-redteam-v0`
 
-> Status: **Draft — design for maintainer review. No code written.**
-> ADR: **required at closeout** (not drafted yet; the ADR will double as the
-> findings record — any *confirmed gap* found by these tests becomes its own
-> separately-approved fix feature, not an in-place patch).
+> Status: **Implemented - Slices 2-4 test-only closeout complete.**
+> ADR: **[ADR-0072](../decisions/ADR-0072-memory-poisoning-redteam-v0.md)** is
+> the findings record. Any future *confirmed gap* found by these tests becomes
+> its own separately-approved fix feature, not an in-place patch.
 > Companion docs: [ARCHITECTURE](../ARCHITECTURE.md) · [BOUNDARIES](../BOUNDARIES.md) ·
 > [AGENTS.md](../../../AGENTS.md).
 > Direct precedents:
@@ -216,6 +216,23 @@ The suite defined in §3/§6 is the deliverable. Exit criteria:
   closeout ADR as a confirmed gap with a proposed follow-up feature (no silent
   weakening of assertions to make them pass).
 - Full `npm run test`, `npm run lint`, `npm run build` green at closeout.
+
+### Closeout verification
+
+- `npm.cmd run test -- redteam promptContext fakeProvider dialogueAuthority memorySidecar feedback logLeak`
+  - Passed: 8 files, 52 tests.
+- `npm.cmd run test -- memoryFeedback roomMemorySaveState FakeNPCDialogueProvider NPCDialogueService llmDialoguePrompt`
+  - Passed: 6 files, 117 tests.
+- `npm.cmd run lint`
+  - Passed.
+- `npx.cmd tsc --noEmit -p tsconfig.app.json`
+  - Failed only on pre-existing non-redteam errors in `assembleRoom.test.ts`,
+    `ensureGeneratedNpcPresence.ts`, and
+    `OpenAICompatibleNPCDialogueProvider.test.ts`. No error referenced changed
+    redteam files.
+
+No production/runtime source behavior changed. No confirmed runtime gap was
+found in Slices 2-4.
 
 ## 11. Manual smoke checklist
 
