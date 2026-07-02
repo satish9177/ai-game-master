@@ -133,6 +133,19 @@ describe('buildNPCDialogueReplyInput', () => {
     expect(input.memoryContext).toEqual(memoryContext)
   })
 
+  it('passes promptId and playerLine independently', () => {
+    const input = buildNPCDialogueReplyInput({
+      sessionId: 's',
+      target: ashaTarget,
+      history: [],
+      promptId: 'ask-hall',
+      playerLine: 'What happened to the court?',
+    })
+
+    expect(input.promptId).toBe('ask-hall')
+    expect(input.playerLine).toBe('What happened to the court?')
+  })
+
   it('omits the memory context when not provided', () => {
     const input = buildNPCDialogueReplyInput({
       sessionId: 's',

@@ -32,6 +32,12 @@ const altarRoomContext: RoomDialogueContext = {
   npcCount: 0,
 }
 
+const friendlyPersonaLines = [
+  'The hall has seen quieter days, but you are welcome here.',
+  'The north arch leads to a shelter beyond the ruined quarter.',
+  'Keep your courage close. These rooms remember every visitor.',
+] as const
+
 function objectiveQuest(objective: NPCObjectiveContext): QuestDialogueContext {
   return {
     activeObjectiveId: 'unknown-generated-objective',
@@ -97,6 +103,100 @@ describe('FakeNPCDialogueProvider', () => {
     })
 
     expect(response).toEqual({ text: 'The court scattered when the roads fell silent.' })
+  })
+
+  it('keeps existing playerLine prompt-id routing for backward compatibility', async () => {
+    const provider = new FakeNPCDialogueProvider()
+
+    await expect(provider.reply({ ...request(), playerLine: 'ask-hall' })).resolves.toEqual({
+      text: 'The court scattered when the roads fell silent.',
+    })
+    await expect(provider.reply({ ...request(), playerLine: 'ask-exit' })).resolves.toEqual({
+      text: 'Beyond the north arch is a safehouse, battered but standing.',
+    })
+  })
+
+  it('routes promptId before player-facing playerLine text', async () => {
+    const provider = new FakeNPCDialogueProvider()
+
+    await expect(provider.reply({
+      ...request(),
+      promptId: 'ask-hall',
+      playerLine: 'What should I look at first?',
+    })).resolves.toEqual({
+      text: 'The court scattered when the roads fell silent.',
+    })
+    await expect(provider.reply({
+      ...request(),
+      promptId: 'ask-exit',
+      playerLine: 'Can you guide me?',
+    })).resolves.toEqual({
+      text: 'Beyond the north arch is a safehouse, battered but standing.',
+    })
+  })
+
+  it('routes generated promptIds independently of player-facing playerLine text', async () => {
+    const provider = new FakeNPCDialogueProvider()
+
+    const legacyAskRoom = await provider.reply({ ...request(), playerLine: 'ask-room' })
+    const promptIdAskRoom = await provider.reply({
+      ...request(),
+      promptId: 'ask-room',
+      playerLine: 'What should I look at first?',
+    })
+    const legacyAskHelp = await provider.reply({ ...request(), playerLine: 'ask-help' })
+    const promptIdAskHelp = await provider.reply({
+      ...request(),
+      promptId: 'ask-help',
+      playerLine: 'Can you guide me?',
+    })
+
+    expect(promptIdAskRoom).toEqual(legacyAskRoom)
+    expect(promptIdAskHelp).toEqual(legacyAskHelp)
+  })
+
+  it.each(['constructor', 'toString', 'hasOwnProperty', '__proto__'])(
+    'falls through safely for prototype-key playerLine %s',
+    async (playerLine) => {
+      const response = await new FakeNPCDialogueProvider().reply({
+        ...request(),
+        playerLine,
+      })
+
+      expect(typeof response.text).toBe('string')
+      expect(friendlyPersonaLines).toContain(response.text)
+      expect(response.text).not.toContain('[object')
+      expect(response.text).not.toContain('function')
+      expect(response.text).not.toContain(playerLine)
+    },
+  )
+
+  it.each(['constructor', 'toString', 'hasOwnProperty', '__proto__'])(
+    'falls through safely for prototype-key promptId %s',
+    async (promptId) => {
+      const response = await new FakeNPCDialogueProvider().reply({
+        ...request(),
+        promptId,
+        playerLine: 'Player-facing text.',
+      })
+
+      expect(typeof response.text).toBe('string')
+      expect(friendlyPersonaLines).toContain(response.text)
+      expect(response.text).not.toContain('[object')
+      expect(response.text).not.toContain('function')
+      expect(response.text).not.toContain(promptId)
+    },
+  )
+
+  it('falls through safely for an unknown promptId', async () => {
+    const response = await new FakeNPCDialogueProvider().reply({
+      ...request(),
+      promptId: 'unknown-prompt-id',
+      playerLine: 'Player-facing text.',
+    })
+
+    expect(friendlyPersonaLines).toContain(response.text)
+    expect(response.text).not.toContain('unknown-prompt-id')
   })
 
   it('keeps persona responses ahead of room-grounded fallback', async () => {

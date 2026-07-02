@@ -15,6 +15,7 @@ import type {
   RoomDialogueContext,
   RoomMemoryDialogueContext,
 } from '../domain/dialogue/contracts'
+import { normalizePlayerFreeText } from '../domain/dialogue/playerFreeText'
 import type { InteractionService } from '../interactions/InteractionService'
 import type { EncounterService } from '../encounters/EncounterService'
 import type { NPCDialogueService } from '../dialogue/NPCDialogueService'
@@ -341,26 +342,31 @@ export function RoomViewer({
   ])
 
   const handleNPCSay = useCallback(
-    (promptId: string | undefined) => {
+    (promptId: string | undefined, freeText?: string) => {
       const target = activeNPCDialogueRef.current
       if (!target || npcDialoguePendingRef.current) return
       const prompt = promptId
         ? target.dialogue.prompts?.find((candidate) => candidate.id === promptId)
         : undefined
       if (promptId && !prompt) return
+      const playerLine = prompt?.label ?? (
+        freeText === undefined ? undefined : normalizePlayerFreeText(freeText) ?? undefined
+      )
+      if (freeText !== undefined && playerLine === undefined) return
 
       if (!(requestDialogueAttempt?.() ?? true)) {
         setNPCDialogueMessage(DIALOGUE_AT_CAP_MESSAGE)
         return
       }
 
-      const playerTurn: NPCDialogueTurn | undefined = prompt
-        ? { speaker: 'player', text: prompt.label }
+      const playerTurn: NPCDialogueTurn | undefined = playerLine !== undefined
+        ? { speaker: 'player', text: playerLine }
         : undefined
-      const history = playerTurn
-        ? [...npcDialogueTurns, playerTurn]
-        : [...npcDialogueTurns]
-      setNPCDialogueTurns(history)
+      const previousTurns = [...npcDialogueTurns]
+      const visibleTurns = playerTurn
+        ? [...previousTurns, playerTurn]
+        : previousTurns
+      setNPCDialogueTurns(visibleTurns)
       setNPCDialogueMessage(undefined)
       npcDialoguePendingRef.current = true
       setNPCDialoguePending(true)
@@ -369,8 +375,9 @@ export function RoomViewer({
       void npcDialogueService.reply(buildNPCDialogueReplyInput({
         sessionId,
         target,
-        history,
-        playerLine: prompt?.id,
+        history: previousTurns,
+        promptId: prompt?.id,
+        playerLine,
         roomContext: roomDialogueContextRef.current,
         questStage: questStageRef.current,
         memoryContext: roomMemoryContextRef.current,

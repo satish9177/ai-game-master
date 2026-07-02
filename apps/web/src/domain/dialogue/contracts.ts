@@ -77,6 +77,7 @@ export type NPCDialogueContext = {
 
 export type NPCDialogueRequest = {
   context: NPCDialogueContext
+  promptId?: string
   playerLine?: string
 }
 

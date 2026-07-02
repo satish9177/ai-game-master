@@ -2,6 +2,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it, vi } from 'vitest'
 import { NPCDialoguePanel } from './NPCDialoguePanel'
 import type { NPCDialoguePrompt, NPCDialogueTurn } from '../../domain/dialogue/contracts'
+import { MAX_PLAYER_FREE_TEXT_CHARS } from '../../domain/dialogue/playerFreeText'
 
 const reactMock = vi.hoisted(() => ({
   effect: undefined as undefined | (() => void | (() => void)),
@@ -95,6 +96,32 @@ function buttonByText(tree: unknown, label: string): ElementLike {
   return button
 }
 
+function firstElementByType(tree: unknown, type: string): ElementLike {
+  const element = findElements(tree, (node) => node.type === type)[0]
+  if (element === undefined) throw new Error(`missing ${type}`)
+  return element
+}
+
+function callHandler(handler: unknown, event?: unknown): void {
+  if (typeof handler !== 'function') throw new Error('missing handler')
+  handler(event)
+}
+
+function submitText(form: ElementLike, value: string) {
+  const reset = vi.fn()
+  const preventDefault = vi.fn()
+  callHandler(form.props.onSubmit, {
+    preventDefault,
+    currentTarget: {
+      reset,
+      elements: {
+        namedItem: (name: string) => (name === 'playerLine' ? { value } : null),
+      },
+    },
+  })
+  return { preventDefault, reset }
+}
+
 describe('NPCDialoguePanel', () => {
   it('renders NPC name', () => {
     const html = markup({ npcName: 'Mira' })
@@ -146,9 +173,59 @@ describe('NPCDialoguePanel', () => {
     const onSay = vi.fn()
     const tree = panelTree({ onSay })
 
-    buttonByText(tree, 'Ask about the room').props.onClick?.()
+    callHandler(buttonByText(tree, 'Ask about the room').props.onClick)
 
     expect(onSay).toHaveBeenCalledWith('ask-room')
+  })
+
+  it('renders a free-text input and Send button', () => {
+    const html = markup()
+
+    expect(html).toContain('name="playerLine"')
+    expect(html).toContain('aria-label="Say something"')
+    expect(html).toContain('Send')
+  })
+
+  it('empty or whitespace free-text send does nothing', () => {
+    const onSay = vi.fn()
+    const tree = panelTree({ onSay })
+    const form = firstElementByType(tree, 'form')
+    const { preventDefault, reset } = submitText(form, '   \n\t   ')
+
+    expect(preventDefault).toHaveBeenCalledTimes(1)
+    expect(onSay).not.toHaveBeenCalled()
+    expect(reset).not.toHaveBeenCalled()
+  })
+
+  it('free-text Send normalizes text before calling onSay', () => {
+    const onSay = vi.fn()
+    const tree = panelTree({ onSay })
+    const form = firstElementByType(tree, 'form')
+    const { reset } = submitText(form, '  Look\tat \n the   altar  ')
+
+    expect(onSay).toHaveBeenCalledWith(undefined, 'Look at the altar')
+    expect(reset).toHaveBeenCalledTimes(1)
+  })
+
+  it('free-text Send clamps normalized text to 240 characters', () => {
+    const onSay = vi.fn()
+    const tree = panelTree({ onSay })
+    const form = firstElementByType(tree, 'form')
+    const longText = `${'x'.repeat(MAX_PLAYER_FREE_TEXT_CHARS)}SECRET_AFTER_CLAMP`
+
+    submitText(form, longText)
+
+    expect(onSay).toHaveBeenCalledWith(undefined, 'x'.repeat(MAX_PLAYER_FREE_TEXT_CHARS))
+  })
+
+  it('Enter submits through the single-line free-text form', () => {
+    const onSay = vi.fn()
+    const tree = panelTree({ onSay })
+    const form = firstElementByType(tree, 'form')
+
+    submitText(form, 'Can you help?')
+
+    expect(onSay).toHaveBeenCalledWith(undefined, 'Can you help?')
   })
 
   it('no-prompts case renders Continue affordance and onSay(undefined) fires', () => {
@@ -158,16 +235,21 @@ describe('NPCDialoguePanel', () => {
 
     expect(html).toContain('No authored prompts remain. Continue the conversation.')
     expect(html).toContain('Continue')
-    buttonByText(tree, 'Continue').props.onClick?.()
+    callHandler(buttonByText(tree, 'Continue').props.onClick)
     expect(onSay).toHaveBeenCalledWith(undefined)
   })
 
   it('busy shows responding indicator and disables controls', () => {
     const html = markup({ busy: true })
+    const tree = panelTree({ busy: true })
+    const input = firstElementByType(tree, 'input')
+    const sendButton = buttonByText(tree, 'Send')
 
     expect(html).toContain('aria-busy="true"')
     expect(html).toContain('responding...')
     expect(html).toContain('disabled=""')
+    expect(input.props.disabled).toBe(true)
+    expect(sendButton.props.disabled).toBe(true)
   })
 
   it('failure message renders clearly', () => {
@@ -185,7 +267,7 @@ describe('NPCDialoguePanel', () => {
       (node) => node.type === 'button' && node.props['aria-label'] === 'Close',
     )[0]
 
-    closeButton?.props.onClick?.()
+    callHandler(closeButton?.props.onClick)
 
     expect(onClose).toHaveBeenCalledTimes(1)
   })
@@ -208,6 +290,37 @@ describe('NPCDialoguePanel', () => {
     reactMock.effect?.()
     listeners['keydown']?.({ code: 'Escape' } as KeyboardEvent)
 
+    expect(onClose).toHaveBeenCalledTimes(1)
+    Object.defineProperty(globalThis, 'window', {
+      configurable: true,
+      value: originalWindow,
+    })
+  })
+
+  it('Escape from the focused text input bubbles to the window close listener', () => {
+    const onClose = vi.fn()
+    const listeners: Record<string, (event: globalThis.KeyboardEvent) => void> = {}
+    const originalWindow = globalThis.window
+    Object.defineProperty(globalThis, 'window', {
+      configurable: true,
+      value: {
+        addEventListener: (type: string, listener: (event: globalThis.KeyboardEvent) => void) => {
+          listeners[type] = listener
+        },
+        removeEventListener: vi.fn(),
+      },
+    })
+    const tree = panelTree({ onClose })
+    reactMock.effect?.()
+    const input = firstElementByType(tree, 'input')
+    const stopPropagation = vi.fn()
+
+    callHandler(input.props.onKeyDown, { code: 'Escape', stopPropagation })
+    if (stopPropagation.mock.calls.length === 0) {
+      listeners['keydown']?.({ code: 'Escape' } as globalThis.KeyboardEvent)
+    }
+
+    expect(stopPropagation).not.toHaveBeenCalled()
     expect(onClose).toHaveBeenCalledTimes(1)
     Object.defineProperty(globalThis, 'window', {
       configurable: true,

@@ -11,6 +11,7 @@ export function buildNPCDialogueReplyInput({
   sessionId,
   target,
   history,
+  promptId,
   playerLine,
   roomContext,
   questStage,
@@ -19,6 +20,7 @@ export function buildNPCDialogueReplyInput({
   sessionId: string
   target: NPCDialogueTarget
   history: NPCDialogueTurn[]
+  promptId?: string
   playerLine?: string
   roomContext?: RoomDialogueContext
   questStage?: QuestDialogueContext
@@ -31,6 +33,7 @@ export function buildNPCDialogueReplyInput({
     dialogue: target.dialogue,
     persona: target.persona,
     history,
+    promptId,
     playerLine,
     ...(roomContext !== undefined ? { roomContext } : {}),
     ...(questStage !== undefined ? { quest: questStage } : {}),
