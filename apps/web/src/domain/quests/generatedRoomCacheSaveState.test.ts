@@ -6,8 +6,11 @@ import {
   GENERATED_ROOM_CACHE_MAX,
   buildGeneratedRoomCacheSaveState,
   loadGeneratedRoomCacheSaveState,
+  objectiveMatchesRoom,
+  type SavedGeneratedRoomObjective,
   type GeneratedRoomCacheSaveInput,
 } from './generatedRoomCacheSaveState'
+import type { QuestSpec } from './questSpec'
 
 function makeRoom(id = 'generated-room', overrides: Partial<RoomSpec> = {}): LoadedRoom {
   return loadRoomSpec({
@@ -43,6 +46,70 @@ function makeInput(overrides: Partial<GeneratedRoomCacheSaveInput> = {}): Genera
     rooms: [{ room: makeRoom(), provenance: 'generated' }],
     ...overrides,
   }
+}
+
+function makeObjective(
+  room: LoadedRoom,
+  condition: QuestSpec['objectives'][number]['condition'] = {
+    kind: 'room-flag',
+    roomId: room.id,
+    flag: `interaction:${room.id}-case-file`,
+  },
+): SavedGeneratedRoomObjective {
+  return {
+    questSpec: {
+      questId: `${room.id}-objective`,
+      title: 'Find the clue',
+      anchorRoomId: room.id,
+      objectives: [{ id: 'generated-0', text: 'Inspect the clue.', condition }],
+    },
+    hint: 'Look for a marked clue.',
+    completionHint: 'The clue is resolved.',
+  }
+}
+
+function makeEncounterRoom(id = 'encounter-room'): LoadedRoom {
+  return makeRoom(id, {
+    objects: [
+      {
+        type: 'scroll',
+        id: `${id}-case-file`,
+        position: [0, 0, -2],
+        interaction: { key: 'E', prompt: 'Read', effect: { kind: 'inspect' } },
+      },
+      {
+        type: 'statue',
+        id: `${id}-sentinel`,
+        position: [2, 0, -2],
+        interaction: {
+          key: 'F',
+          prompt: 'Face',
+          encounter: {
+            id: `${id}-encounter`,
+            title: 'Sentinel',
+            description: 'A sentinel blocks the way.',
+            choices: [
+              {
+                id: 'steady',
+                action: 'negotiate',
+                label: 'Stand firm',
+                outcome: {
+                  resultText: 'The sentinel yields.',
+                  effects: [{ kind: 'add-status', status: 'sentinel-resolved' }],
+                },
+              },
+            ],
+          },
+        },
+      },
+      {
+        type: 'arch',
+        id: `${id}-north-arch`,
+        position: [0, 0, -8],
+        interaction: { key: 'E', prompt: 'Leave', exit: { toRoomId: `${id}-north` } },
+      },
+    ],
+  })
 }
 
 function expectInvalidSchema(json: string): void {
@@ -83,6 +150,182 @@ describe('buildGeneratedRoomCacheSaveState', () => {
     const loaded = loadGeneratedRoomCacheSaveState(JSON.stringify(state))
 
     expect(loaded).toEqual({ ok: true, state })
+  })
+
+  it('old save without objective still parses', () => {
+    const state = buildGeneratedRoomCacheSaveState(makeInput())
+    expect(state).not.toBeNull()
+
+    const loaded = loadGeneratedRoomCacheSaveState(JSON.stringify(state))
+
+    expect(loaded.ok).toBe(true)
+    expect(loaded.ok ? loaded.state.rooms[0]?.objective : 'missing').toBeUndefined()
+  })
+
+  it('round-trips with a valid objective', () => {
+    const room = makeRoom()
+    const objective = makeObjective(room)
+    const state = buildGeneratedRoomCacheSaveState(
+      makeInput({ rooms: [{ room, provenance: 'generated', objective }] }),
+    )
+
+    const loaded = loadGeneratedRoomCacheSaveState(JSON.stringify(state))
+
+    expect(state?.rooms[0]?.objective).toEqual(objective)
+    expect(loaded).toEqual({ ok: true, state })
+  })
+
+  it('malformed objective does not invalidate the room or cache', () => {
+    const room = makeRoom()
+    const state = buildGeneratedRoomCacheSaveState(makeInput())
+    expect(state).not.toBeNull()
+
+    const loaded = loadGeneratedRoomCacheSaveState(
+      JSON.stringify({
+        ...state,
+        rooms: [{ ...state!.rooms[0], objective: { questSpec: 'bad' } }],
+      }),
+    )
+
+    expect(loaded.ok).toBe(true)
+    expect(loaded.ok ? loaded.state.rooms[0]?.room.id : null).toBe(room.id)
+    expect(loaded.ok ? loaded.state.rooms[0]?.objective : 'missing').toBeUndefined()
+  })
+
+  it('does not emit invalid, empty, or overlong hint objectives', () => {
+    const room = makeRoom()
+    const valid = makeObjective(room)
+
+    const emptyHint = buildGeneratedRoomCacheSaveState(
+      makeInput({ rooms: [{ room, provenance: 'generated', objective: { ...valid, hint: '' } }] }),
+    )
+    const overlongHint = buildGeneratedRoomCacheSaveState(
+      makeInput({
+        rooms: [
+          {
+            room,
+            provenance: 'generated',
+            objective: { ...valid, hint: 'x'.repeat(161) },
+          },
+        ],
+      }),
+    )
+
+    expect(emptyHint?.rooms[0]?.objective).toBeUndefined()
+    expect(overlongHint?.rooms[0]?.objective).toBeUndefined()
+  })
+
+  it('schema-valid but semantically mismatched objective restores as absent', () => {
+    const room = makeRoom()
+    const mismatched = makeObjective(room, {
+      kind: 'room-flag',
+      roomId: room.id,
+      flag: 'interaction:missing-object',
+    })
+
+    const state = buildGeneratedRoomCacheSaveState(
+      makeInput({ rooms: [{ room, provenance: 'generated', objective: mismatched }] }),
+    )
+
+    expect(state?.rooms[0]?.objective).toBeUndefined()
+  })
+
+  it('interaction objective round-trips', () => {
+    const room = makeRoom()
+    const objective = makeObjective(room, {
+      kind: 'room-flag',
+      roomId: room.id,
+      flag: `interaction:${room.id}-case-file`,
+    })
+
+    const state = buildGeneratedRoomCacheSaveState(
+      makeInput({ rooms: [{ room, provenance: 'generated', objective }] }),
+    )
+
+    expect(loadGeneratedRoomCacheSaveState(JSON.stringify(state))).toEqual({ ok: true, state })
+    expect(state?.rooms[0]?.objective).toEqual(objective)
+  })
+
+  it('encounter objective round-trips', () => {
+    const room = makeEncounterRoom()
+    const objective = makeObjective(room, {
+      kind: 'room-flag',
+      roomId: room.id,
+      flag: `encounter:${room.id}-encounter`,
+    })
+
+    const state = buildGeneratedRoomCacheSaveState(
+      makeInput({ rooms: [{ room, provenance: 'generated', objective }] }),
+    )
+
+    expect(loadGeneratedRoomCacheSaveState(JSON.stringify(state))).toEqual({ ok: true, state })
+    expect(state?.rooms[0]?.objective).toEqual(objective)
+  })
+
+  it('room-visited self round-trips', () => {
+    const room = makeRoom()
+    const objective = makeObjective(room, { kind: 'room-visited', roomId: room.id })
+
+    const state = buildGeneratedRoomCacheSaveState(
+      makeInput({ rooms: [{ room, provenance: 'generated', objective }] }),
+    )
+
+    expect(loadGeneratedRoomCacheSaveState(JSON.stringify(state))).toEqual({ ok: true, state })
+    expect(state?.rooms[0]?.objective).toEqual(objective)
+  })
+
+  it('room-visited adjacent exit round-trips', () => {
+    const room = makeRoom()
+    const objective = makeObjective(room, { kind: 'room-visited', roomId: `${room.id}-north` })
+
+    const state = buildGeneratedRoomCacheSaveState(
+      makeInput({ rooms: [{ room, provenance: 'generated', objective }] }),
+    )
+
+    expect(loadGeneratedRoomCacheSaveState(JSON.stringify(state))).toEqual({ ok: true, state })
+    expect(state?.rooms[0]?.objective).toEqual(objective)
+  })
+
+  it('room-visited non-adjacent mismatch restores as absent', () => {
+    const room = makeRoom()
+    const objective = makeObjective(room, { kind: 'room-visited', roomId: 'not-adjacent' })
+
+    const state = buildGeneratedRoomCacheSaveState(
+      makeInput({ rooms: [{ room, provenance: 'generated', objective }] }),
+    )
+
+    expect(state?.rooms[0]?.objective).toBeUndefined()
+  })
+
+  it('multi-objective tamper restores as absent', () => {
+    const state = buildGeneratedRoomCacheSaveState(makeInput())
+    expect(state).not.toBeNull()
+    const room = makeRoom()
+    const objective = makeObjective(room)
+
+    const loaded = loadGeneratedRoomCacheSaveState(
+      JSON.stringify({
+        ...state,
+        rooms: [
+          {
+            ...state!.rooms[0],
+            objective: {
+              ...objective,
+              questSpec: {
+                ...objective.questSpec,
+                objectives: [
+                  objective.questSpec.objectives[0],
+                  { ...objective.questSpec.objectives[0], id: 'generated-1' },
+                ],
+              },
+            },
+          },
+        ],
+      }),
+    )
+
+    expect(loaded.ok).toBe(true)
+    expect(loaded.ok ? loaded.state.rooms[0]?.objective : 'missing').toBeUndefined()
   })
 
   it('preserves room ids and object ids internally', () => {
@@ -189,6 +432,24 @@ describe('buildGeneratedRoomCacheSaveState', () => {
     expect(state?.rooms.map((entry) => entry.room.id)).toEqual(
       rooms.slice(0, GENERATED_ROOM_CACHE_MAX).map((entry) => entry.room.id),
     )
+  })
+
+  it('cap and eviction drop the room and objective together', () => {
+    const rooms = Array.from({ length: GENERATED_ROOM_CACHE_MAX + 1 }, (_, index) => {
+      const room = makeRoom(`room-${index}`)
+      return {
+        room,
+        provenance: 'generated' as const,
+        objective: makeObjective(room),
+      }
+    })
+
+    const state = buildGeneratedRoomCacheSaveState(makeInput({ rooms }))
+
+    expect(state?.rooms).toHaveLength(GENERATED_ROOM_CACHE_MAX)
+    expect(state?.rooms.every((entry) => entry.objective != null)).toBe(true)
+    expect(state?.rooms.some((entry) => entry.room.id === `room-${GENERATED_ROOM_CACHE_MAX}`)).toBe(false)
+    expect(JSON.stringify(state)).not.toContain(`room-${GENERATED_ROOM_CACHE_MAX}-objective`)
   })
 
   it('preserves caller order and current-room-first ordering up to the cap', () => {
@@ -351,6 +612,47 @@ describe('loadGeneratedRoomCacheSaveState', () => {
     expect(JSON.stringify(result)).not.toContain('secret-object')
     expect(JSON.stringify(result)).not.toContain('flag:secret')
     expect(JSON.stringify(result)).not.toContain('Generated Room')
+  })
+})
+
+describe('objectiveMatchesRoom', () => {
+  it('requires anchor room, exactly one objective, and a supported matching condition', () => {
+    const room = makeRoom()
+    const objective = makeObjective(room)
+
+    expect(objectiveMatchesRoom(objective.questSpec, room)).toBe(true)
+    expect(objectiveMatchesRoom({ ...objective.questSpec, anchorRoomId: 'other-room' }, room)).toBe(false)
+    expect(objectiveMatchesRoom({ ...objective.questSpec, objectives: [] }, room)).toBe(false)
+    expect(
+      objectiveMatchesRoom(
+        {
+          ...objective.questSpec,
+          objectives: [
+            objective.questSpec.objectives[0]!,
+            { ...objective.questSpec.objectives[0]!, id: 'generated-1' },
+          ],
+        },
+        room,
+      ),
+    ).toBe(false)
+    expect(
+      objectiveMatchesRoom(
+        makeObjective(room, { kind: 'has-status', status: 'secret' }).questSpec,
+        room,
+      ),
+    ).toBe(false)
+  })
+
+  it('does not treat a plain object-id flag as a valid interaction objective', () => {
+    const room = makeRoom()
+
+    expect(
+      objectiveMatchesRoom(
+        makeObjective(room, { kind: 'room-flag', roomId: room.id, flag: `${room.id}-case-file` })
+          .questSpec,
+        room,
+      ),
+    ).toBe(false)
   })
 })
 
