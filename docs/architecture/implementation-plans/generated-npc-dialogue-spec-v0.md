@@ -1,14 +1,15 @@
 # Implementation Plan — `feature/generated-npc-dialogue-spec-v0`
 
-> Status: **Slice 1 complete (docs only). Slices 2–5 pending.**
-> ADR: to be written at closeout.
+> Status: **Slice 1 complete/approved. Slice 2 complete/approved. Slice 3
+> complete/approved. Slice 4 skipped/not needed. Slice 5 complete/pending review.**
+> ADR: [ADR-0067](../decisions/ADR-0067-generated-npc-dialogue-spec-v0.md).
 > Maintainer approved the design in-chat. Locked decisions:
 > deterministic/closed-tables only; sibling normalizer `ensureGeneratedNpcDialogue`
 > co-located in `ensureGeneratedNpcPresence.ts`; new Stage 2.12.2 in `assembleRoom`,
 > unconditional (not gated by `requestsNpc`); both `id` assignment and `dialogue`
 > addition in scope (id-less NPCs are not talkable without it); nameless greeting
 > templates only; prompt ids `ask-room`/`ask-help` fixed; count-only diagnostic
-> `npcDialoguesNormalized`; no provider/LLM, no schema change, no `RoomViewer`/
+> `npcDialogueNormalizedCount`; no provider/LLM, no schema change, no `RoomViewer`/
 > `App`/`NPCDialoguePanel`/memory/save-load/persistence change.
 >
 > Companion docs: [ARCHITECTURE](../ARCHITECTURE.md) · [BOUNDARIES](../BOUNDARIES.md) ·
@@ -126,7 +127,7 @@ pressing F opens `NPCDialoguePanel` with a greeting and two prompt buttons.
 
 2. **`apps/web/src/domain/assembleRoom.ts`** — new Stage 2.12.2 immediately after
    Stage 2.12 (`ensureGeneratedNpcPresence`) and before Stage 2.12.5 (objective
-   enrichment). Add `npcDialoguesNormalized: number` to `RoomDiagnostics`
+   enrichment). Add `npcDialogueNormalizedCount: number` to `RoomDiagnostics`
    (count-only; 0 on every fallback branch).
 
 3. **`apps/web/src/domain/ensureGeneratedNpcDialogue.test.ts`** (new file, or
@@ -164,7 +165,7 @@ export type EnsureGeneratedNpcDialogueOptions = {
 
 export type EnsureGeneratedNpcDialogueResult = {
   room: LoadedRoom
-  npcDialoguesNormalized: number
+  npcDialogueNormalizedCount: number
 }
 
 export function ensureGeneratedNpcDialogue(
@@ -178,20 +179,23 @@ export function ensureGeneratedNpcDialogue(
 For each object in `room.objects` in order:
 
 1. Skip if `object.type !== 'npc'`.
-2. Skip if `object.interaction == null` (no interaction at all — not a talkable NPC).
-3. Skip if `object.interaction.dialogue != null` (already has dialogue — not counted).
-4. Assign a collision-safe `id` if `object.id` is absent or blank:
+2. Skip if `object.interaction.dialogue != null` (already has dialogue — not counted).
+   `interaction` itself is required by the validated generated-room `RoomSpec` NPC
+   schema, so this normalizer operates on already-validated rooms and reads
+   `object.interaction.dialogue` directly — it does not guard against a missing
+   `interaction`.
+3. Assign a collision-safe `id` if `object.id` is absent or blank:
    - Collect all existing structural ids (from `room.objects` and `room.skipped` raw
      entries) plus ids already assigned earlier in this pass.
    - Candidate base: `'generated-npc'` (matching `GENERATED_NPC_BASE_ID`).
    - Suffix with `-2`, `-3`, … until no collision.
-5. Add `interaction.dialogue` with deterministic closed-table content:
+4. Add `interaction.dialogue` with deterministic closed-table content:
    - **persona:** `selectFrom(NPC_PERSONAS[bucket], room.id, 'npc-dialogue-persona:' + id)`
    - **greeting:** `selectFrom(NPC_DIALOGUE_GREETINGS[bucket], room.id, 'npc-dialogue-greeting:' + id)` — **nameless, no `{name}` interpolation**
    - **prompts:** `[{ id:'ask-room', label: selectPromptOne(room, options) }, { id:'ask-help', label: selectFrom(HELP_PROMPTS, room.id, 'npc-dialogue-help:' + id) }]`
-6. Increment the count.
+5. Increment the count.
 
-Return `{ room: <new room with normalizations applied>, npcDialoguesNormalized: count }`.
+Return `{ room: <new room with normalizations applied>, npcDialogueNormalizedCount: count }`.
 
 The function is pure, synchronous, no I/O, no logger, no mutation of input.
 
@@ -248,7 +252,7 @@ into `ensureGeneratedNpcDialogue`. `RoomDiagnostics` gains one new field:
  * dialogue spec (and, where absent, a collision-safe id). Count-only; never
  * carries NPC names, ids, room names, or generated text. 0 on all fallback paths.
  */
-npcDialoguesNormalized: number
+npcDialogueNormalizedCount: number
 ```
 
 All three result branches (`generated`, `repaired`, fallback) and the two
@@ -307,10 +311,10 @@ the cases are identical either way).
 
 | Test | What it asserts |
 |---|---|
-| Generator NPC (no id, no dialogue) → gets `id` + `dialogue` | `npcDialoguesNormalized === 1`; NPC has non-empty `id`; `interaction.dialogue` present |
-| NPC has a non-empty `id` but no `interaction.dialogue` | `dialogue` is added; existing `id` string is byte-identical to input; `npcDialoguesNormalized === 1` |
+| Generator NPC (no id, no dialogue) → gets `id` + `dialogue` | `npcDialogueNormalizedCount === 1`; NPC has non-empty `id`; `interaction.dialogue` present |
+| NPC has a non-empty `id` but no `interaction.dialogue` | `dialogue` is added; existing `id` string is byte-identical to input; `npcDialogueNormalizedCount === 1` |
 | **Product invariant** | `buildDialogueLookup(result.room).size >= 1` after normalizing a room with one dialogue-less NPC |
-| Existing `dialogue` untouched | byte-identical; not counted in `npcDialoguesNormalized` |
+| Existing `dialogue` untouched | byte-identical; not counted in `npcDialogueNormalizedCount` |
 | Existing `id` preserved | same string after normalize |
 | Multiple id-less NPCs → distinct ids | two NPCs in one room each get a different `id`; no collision |
 | Prompt ids exactly `ask-room` and `ask-help` | in all buckets and anchor-present/absent cases |
@@ -321,16 +325,15 @@ the cases are identical either way).
 | Purity / no mutation | `room` reference unchanged; input room's objects array not mutated |
 | No-leak | normalized NPC's JSON contains no `room.name`, no other object's `name`/`prompt`/`title`/`body`, no raw ids, no gate/flag text |
 | Non-NPC objects untouched | every non-`npc` object byte-identical after normalize |
-| NPC with `interaction === null` or no `interaction` | skipped; not counted |
 
 ### Extended: `assembleRoom.test.ts`
 
 | Test | What it asserts |
 |---|---|
-| Raw generated JSON with id-less, dialogue-less NPC | assembled NPC has non-empty `id` and `interaction.dialogue`; `diagnostics.npcDialoguesNormalized >= 1` |
-| Adjacent-style path (no `requestsNpc`, no `themePack`) | generator NPC is still normalized; `npcDialoguesNormalized >= 1` |
-| Fallback paths (json/schema/semantic failures) | `diagnostics.npcDialoguesNormalized === 0` |
-| `npcDialoguesNormalized` type | present on all three result shapes (`generated`, `repaired`, fallback) |
+| Raw generated JSON with id-less, dialogue-less NPC | assembled NPC has non-empty `id` and `interaction.dialogue`; `diagnostics.npcDialogueNormalizedCount >= 1` |
+| Adjacent-style path (no `requestsNpc`, no `themePack`) | generator NPC is still normalized; `npcDialogueNormalizedCount >= 1` |
+| Fallback paths (json/schema/semantic failures) | `diagnostics.npcDialogueNormalizedCount === 0` |
+| `npcDialogueNormalizedCount` type | present on all three result shapes (`generated`, `repaired`, fallback) |
 
 ---
 
@@ -341,8 +344,8 @@ the cases are identical either way).
 | File | Change |
 |---|---|
 | `apps/web/src/domain/ensureGeneratedNpcPresence.ts` | Add `ensureGeneratedNpcDialogue`, `NPC_DIALOGUE_GREETINGS`, `collectNpcStructuralIds`, `nextNpcDialogueId`. No change to existing code. |
-| `apps/web/src/domain/assembleRoom.ts` | Stage 2.12.2 call; `npcDialoguesNormalized` in `RoomDiagnostics` and all result literals. |
-| `apps/web/src/domain/assembleRoom.test.ts` | Two new pipeline cases; `npcDialoguesNormalized` in existing diagnostic assertions. |
+| `apps/web/src/domain/assembleRoom.ts` | Stage 2.12.2 call; `npcDialogueNormalizedCount` in `RoomDiagnostics` and all result literals. |
+| `apps/web/src/domain/assembleRoom.test.ts` | Two new pipeline cases; `npcDialogueNormalizedCount` in existing diagnostic assertions. |
 
 ### New
 
@@ -369,7 +372,7 @@ present) · `domain/generatedRoomThemeVocabulary.ts` (type import, unchanged) ·
 
 **Slice 1 — Docs (this plan)**
 `docs: add implementation plan for generated npc dialogue spec v0`
-No source code. Status: **complete.**
+No source code. Status: **complete/approved.**
 
 ---
 
@@ -377,17 +380,11 @@ No source code. Status: **complete.**
 `feat(domain): ensure generated NPC dialogue spec — normalizer + tests`
 
 Modified: `ensureGeneratedNpcPresence.ts`
-New: `ensureGeneratedNpcDialogue.test.ts`
+New: dialogue-normalizer test cases co-located in `ensureGeneratedNpcPresence.test.ts`.
 
-Implements `ensureGeneratedNpcDialogue`, `NPC_DIALOGUE_GREETINGS`, and
-`collectNpcStructuralIds`/`nextNpcDialogueId` per §4. All tests in §7 (normalizer
-section) must pass. The function is called directly in tests; `assembleRoom` is not
-yet wired (that is Slice 3).
-
-> **Before implementing id assignment:** verify the existing generated NPC id base
-> constant name (e.g. `GENERATED_NPC_BASE_ID` or equivalent) and the `nextNpcId`-style
-> helper name used in the repo. Names in this plan are drafts; the source-of-truth
-> names may differ.
+Implements `ensureGeneratedNpcDialogue`, `NPC_DIALOGUE_GREETINGS`, and the
+`nextNpcIdFromIds`/`isNonBlankString` id-collision helpers per §4. All tests in §7
+(normalizer section) pass. Status: **complete/approved.**
 
 Verification:
 ```bash
@@ -404,9 +401,9 @@ npm run build
 
 Modified: `assembleRoom.ts`, `assembleRoom.test.ts`
 
-Adds Stage 2.12.2 and `npcDialoguesNormalized` diagnostic per §5. All tests in §7
-(assembleRoom section) must pass. Full `assembleRoom.test.ts` suite re-runs with
-the new diagnostic field present on every result shape.
+Adds Stage 2.12.2 and the `npcDialogueNormalizedCount` diagnostic per §5. All tests
+in §7 (assembleRoom section) pass. Full `assembleRoom.test.ts` suite re-runs with
+the new diagnostic field present on every result shape. Status: **complete/approved.**
 
 Verification:
 ```bash
@@ -418,27 +415,21 @@ npm run build
 ---
 
 **Slice 4 — Fake-provider coherence check**
-No code change expected. `FakeNPCDialogueProvider` already falls through safely for
-any unrecognized persona (ADR-0066 §2 confirmed this). This slice is a targeted
-regression run to confirm the existing dialogue test suite stays green after Slices
-2–3.
-
-Verification:
-```bash
-npm run test -- dialogue
-npm run test -- ensureGeneratedNpcPresence
-npm run test -- ensureGeneratedNpcDialogue
-npm run test -- assembleRoom
-```
-
-If any dialogue test regresses, diagnose and fix before Slice 5.
+**Skipped/not needed.** `FakeNPCDialogueProvider` already falls through safely for
+any unrecognized persona (ADR-0066 §2 confirmed this), and this feature's goal is
+making generated NPCs enter `NPCDialoguePanel` — not changing reply content — so
+there is no new persona/content surface for the provider to react to. The Slice 2/3
+targeted test runs (`dialogue`, `ensureGeneratedNpcPresence`, `ensureGeneratedNpcDialogue`,
+`assembleRoom`) already exercised this regression surface with no failures; no
+additional code change or separate verification pass was required.
 
 ---
 
 **Slice 5 — Docs closeout + ADR + manual smoke**
 `docs: close generated npc dialogue spec v0`
+Status: **complete/pending review.**
 
-New: `docs/architecture/decisions/ADR-00xx-generated-npc-dialogue-spec-v0.md`
+New: `docs/architecture/decisions/ADR-0067-generated-npc-dialogue-spec-v0.md`
 Modified: `docs/architecture/ARCHITECTURE.md` (status paragraph, citing ADR)
 
 Manual smoke checklist (§10) must pass before this slice is merged.
@@ -491,3 +482,25 @@ npm run build
 
 Run from `apps/web`. Use targeted commands per slice; run full `npm run test` only
 at Slice 5 closeout.
+
+---
+
+## 12. Slice 5 closeout notes
+
+Commands actually run for this closeout (from `apps/web`):
+
+```bash
+npm.cmd run test -- ensureGeneratedNpcDialogue ensureGeneratedNpcPresence assembleRoom dialogue
+npm.cmd run lint
+npx.cmd tsc --noEmit -p .
+```
+
+Results: all 15 matched test files / 294 tests passed; lint clean; `tsc --noEmit`
+clean. The full unscoped `npm run test`/`npm run build` and the optional
+`npx.cmd vitest run` were not run for this docs-only closeout, per the targeted-verification
+guidance in `AGENTS.md`.
+
+The manual smoke checklist (§10) requires driving the running app in a browser and
+is **pending maintainer verification** — it was not executed as part of this
+docs-only closeout pass. Slice 5 status is therefore **complete/pending review**
+until the maintainer confirms the manual smoke checklist.

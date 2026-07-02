@@ -142,6 +142,14 @@ Throughout these docs:
   SQLite/current state plus the `WorldEvent` log remain authoritative, dialogue
   output is text-only display data, and no memory/schema/migration path changed
   ([ADR-0065](./decisions/ADR-0065-real-npc-dialogue-room-memory-awareness-v0.md)).
+- ✅ **Implemented** — Generated NPC Dialogue Spec v0 — a new sibling normalizer,
+  `ensureGeneratedNpcDialogue`, runs unconditionally in `assembleRoom` Stage 2.12.2 and
+  assigns a collision-safe `id` and/or a deterministic closed-table `interaction.dialogue`
+  to any generated-room NPC missing either, so generated NPCs open `NPCDialoguePanel`
+  (greeting + two prompt buttons) instead of falling through to the plain `DialoguePanel`.
+  Prompt ids stay `ask-room`/`ask-help`; count-only diagnostic `npcDialogueNormalizedCount`;
+  no provider/LLM call, no schema, memory, or persistence change
+  ([ADR-0067](./decisions/ADR-0067-generated-npc-dialogue-spec-v0.md)).
 - ❌ **Not built** — future shape only; documented so we don't paint into a corner.
 
 ## Status today (Renderer Foundation v0)
@@ -892,6 +900,38 @@ always resolving to `'Mira'` / `'generated-room-guide'`
 - **No new safety surface:** `ensureGeneratedNpcPresence` stays pure/synchronous with no I/O; no
   schema, memory, persistence, save/load, or `WorldState` change. Authored/demo NPC dialogue is
   unaffected (same "no existing NPC" guard as ADR-0040).
+
+## Generated NPC Dialogue Spec v0
+
+✅ **Implemented, generated assembly/domain.** A generator-emitted NPC can carry
+`interaction.body` but no `interaction.dialogue`, and can carry no `id` at all — both of
+which made `buildDialogueLookup`/`RoomViewer` fall through to the plain `body`/`Close`
+`DialoguePanel` instead of `NPCDialoguePanel`. Generated NPC Dialogue Spec v0 closes this
+gap with a new pure sibling normalizer, co-located with the ADR-0066 tables it reuses
+([ADR-0067](./decisions/ADR-0067-generated-npc-dialogue-spec-v0.md)).
+
+- **`ensureGeneratedNpcDialogue`:** a new pure, synchronous function in
+  `ensureGeneratedNpcPresence.ts` that assigns a collision-safe `id` (mirroring the
+  `nextObjectiveTargetId`-style pattern) where absent/blank, and a deterministic
+  `interaction.dialogue` — built from the existing closed ADR-0066 persona/prompt tables
+  plus one new nameless, per-theme-bucket `NPC_DIALOGUE_GREETINGS` table — where
+  `interaction.dialogue` is absent. The validated generated-room `RoomSpec` NPC schema
+  requires `interaction`, so `ensureGeneratedNpcDialogue` reads `object.interaction.dialogue`
+  directly; an NPC with both `id` and `dialogue` already present is untouched.
+- **Unconditional Stage 2.12.2:** runs in `assembleRoom` immediately after Stage 2.12
+  (`ensureGeneratedNpcPresence`) and before Stage 2.12.5 (objective target enrichment), on
+  every generated room — including adjacent-style rooms generated without a `requestsNpc`
+  signal, since generator-emitted NPCs are not gated by that flag.
+- **Count-only diagnostic:** `RoomDiagnostics.npcDialogueNormalizedCount` counts only NPCs
+  that received a **new dialogue spec**, not id-only fixes; it is `0` on every fallback
+  branch and present on all three result shapes (`generated`/`repaired`/`fallback`).
+- **Prompt ids unchanged:** `'ask-room'` / `'ask-help'` stay fixed, so `NPCDialogueService`,
+  `FakeNPCDialogueProvider` reply routing, and `RoomViewer`'s `onSay(prompt.id)` wiring are
+  unaffected.
+- **No new safety surface:** deterministic/closed-table only, no provider/LLM, no free-text
+  input, no click-to-talk, no `WorldState` mutation, no memory writes, no schema/save-load/
+  persistence change, and no `RoomViewer`/`App.tsx`/`NPCDialoguePanel` change — those
+  consumers already worked correctly once an NPC has both `id` and `interaction.dialogue`.
 
 ## Generated Story Objective Contract v0
 
