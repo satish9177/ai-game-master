@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { ROOM_MEMORY_SCHEMA_VERSION } from '../domain/memory/roomContracts'
-import type { RoomMemoryInsert } from '../domain/memory/roomContracts'
+import type { RoomMemoryInsert, RoomMemoryRecord } from '../domain/memory/roomContracts'
 import { InMemoryRoomMemoryStore } from './InMemoryRoomMemoryStore'
 
 function insert(overrides: Partial<RoomMemoryInsert> = {}): RoomMemoryInsert {
@@ -17,6 +17,10 @@ function insert(overrides: Partial<RoomMemoryInsert> = {}): RoomMemoryInsert {
     createdAt: '2026-06-23T10:00:00.000Z',
     ...overrides,
   }
+}
+
+function record(overrides: Partial<RoomMemoryRecord> = {}): RoomMemoryRecord {
+  return { ...insert(), seq: 1, ...overrides }
 }
 
 describe('InMemoryRoomMemoryStore.record', () => {
@@ -111,5 +115,111 @@ describe('InMemoryRoomMemoryStore — dedupe (Slice C3)', () => {
     expect(b.ok && 'deduplicated' in b).toBe(false)
     const got = await store.listForRoom({ worldId: 'world-1', sessionId: 'session-1', roomId: 'room-1' })
     expect(got).toHaveLength(2)
+  })
+})
+
+describe('InMemoryRoomMemoryStore.snapshotAll (Slice 4)', () => {
+  it('returns every record in deterministic order regardless of insertion order', async () => {
+    const store = new InMemoryRoomMemoryStore()
+    await store.record(insert({ memoryId: 'b', roomId: 'room-2', worldId: 'world-1' }))
+    await store.record(insert({ memoryId: 'a', roomId: 'room-1', worldId: 'world-1' }))
+    await store.record(insert({ memoryId: 'c', roomId: 'room-1', worldId: 'world-0' }))
+
+    const snapshot = store.snapshotAll()
+    expect(snapshot.map((r) => r.memoryId)).toEqual(['c', 'a', 'b'])
+  })
+
+  it('is stable across repeated calls (order does not depend on call order)', async () => {
+    const store = new InMemoryRoomMemoryStore()
+    await store.record(insert({ memoryId: 'a' }))
+    await store.record(insert({ memoryId: 'b' }))
+    expect(store.snapshotAll()).toEqual(store.snapshotAll())
+  })
+
+  it('returns copies — mutating a returned record does not affect the store', async () => {
+    const store = new InMemoryRoomMemoryStore()
+    await store.record(insert({ memoryId: 'a', text: 'original' }))
+    const snapshot = store.snapshotAll()
+    snapshot[0]!.text = 'mutated'
+    expect(store.snapshotAll()[0]!.text).toBe('original')
+  })
+
+  it('returns [] for an empty store', () => {
+    const store = new InMemoryRoomMemoryStore()
+    expect(store.snapshotAll()).toEqual([])
+  })
+})
+
+describe('InMemoryRoomMemoryStore.restoreAll (Slice 4)', () => {
+  it('replaces existing records', async () => {
+    const store = new InMemoryRoomMemoryStore()
+    await store.record(insert({ memoryId: 'old' }))
+
+    store.restoreAll([record({ memoryId: 'restored', seq: 1 })])
+
+    const got = await store.listForRoom({ worldId: 'world-1', sessionId: 'session-1', roomId: 'room-1' })
+    expect(got.map((r) => r.memoryId)).toEqual(['restored'])
+  })
+
+  it('clears the store when restoring an empty list', async () => {
+    const store = new InMemoryRoomMemoryStore()
+    await store.record(insert({ memoryId: 'old' }))
+
+    store.restoreAll([])
+
+    const got = await store.listForRoom({ worldId: 'world-1', sessionId: 'session-1', roomId: 'room-1' })
+    expect(got).toEqual([])
+    expect(store.snapshotAll()).toEqual([])
+  })
+
+  it('copies input records — caller mutation after restore does not affect the store', () => {
+    const store = new InMemoryRoomMemoryStore()
+    const source = record({ memoryId: 'a', text: 'original' })
+
+    store.restoreAll([source])
+    source.text = 'mutated'
+
+    expect(store.snapshotAll()[0]!.text).toBe('original')
+  })
+
+  it('listForRoom returns correctly scoped, seq-ordered records after restore', async () => {
+    const store = new InMemoryRoomMemoryStore()
+    store.restoreAll([
+      record({ memoryId: 'a', roomId: 'room-1', seq: 1 }),
+      record({ memoryId: 'b', roomId: 'room-1', seq: 2 }),
+      record({ memoryId: 'other-room', roomId: 'room-2', seq: 1 }),
+    ])
+
+    const got = await store.listForRoom({ worldId: 'world-1', sessionId: 'session-1', roomId: 'room-1' })
+    expect(got.map((r) => r.memoryId)).toEqual(['b', 'a'])
+  })
+
+  it('recording an already-restored dedupe key deduplicates instead of duplicating', async () => {
+    const store = new InMemoryRoomMemoryStore()
+    store.restoreAll([record({ memoryId: 'a', seq: 1, dedupeKey: 'evt-1' })])
+
+    const second = await store.record(insert({ memoryId: 'b', dedupeKey: 'evt-1' }))
+    expect(second.ok && 'deduplicated' in second && second.deduplicated).toBe(true)
+
+    const got = await store.listForRoom({ worldId: 'world-1', sessionId: 'session-1', roomId: 'room-1' })
+    expect(got).toHaveLength(1)
+    expect(got[0]!.memoryId).toBe('a')
+  })
+
+  it('continues seq assignment correctly after restore', async () => {
+    const store = new InMemoryRoomMemoryStore()
+    store.restoreAll([record({ memoryId: 'a', seq: 5 })])
+
+    const next = await store.record(insert({ memoryId: 'b' }))
+    expect(next.ok && next.record.seq).toBe(6)
+  })
+
+  it('silently drops a record that fails schema re-validation', () => {
+    const store = new InMemoryRoomMemoryStore()
+    const invalid = { ...record({ memoryId: 'bad' }), kind: 'not-a-real-kind' } as unknown as RoomMemoryRecord
+
+    store.restoreAll([record({ memoryId: 'good' }), invalid])
+
+    expect(store.snapshotAll().map((r) => r.memoryId)).toEqual(['good'])
   })
 })
