@@ -14,7 +14,7 @@ export const markers = {
   playerText: 'XATTACK-PLAYER-TEXT-7Q',
   memoryText: 'XATTACK-MEMORY-TEXT-8R',
   providerBody: 'XATTACK-PROVIDER-BODY-9S',
-  apiKey: 'sk-XATTACK-API-KEY-0T',
+  apiKey: 'XATTACK_FAKE_API_TOKEN_NOT_A_SECRET',
   objectId: 'XATTACK-OBJECT-ID-1A',
   itemId: 'XATTACK-ITEM-ID-2B',
   flagKey: 'XATTACK-FLAG-KEY-3C',
