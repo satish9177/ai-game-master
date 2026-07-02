@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { loadRoomSpec, type LoadedRoom } from '../domain/loadRoomSpec'
 import {
   buildGeneratedRoomCacheSaveState,
+  type SavedGeneratedRoomObjective,
   type GeneratedRoomCacheSaveState,
 } from '../domain/quests/generatedRoomCacheSaveState'
 import type { RoomSpec } from '../domain/roomSpec'
@@ -31,7 +32,36 @@ function makeRoom(id: string, overrides: Partial<RoomSpec> = {}): LoadedRoom {
   })
 }
 
-function makeState(rooms: Array<{ room: LoadedRoom; provenance: 'generated' | 'repaired' | 'fallback' }>): GeneratedRoomCacheSaveState {
+function makeObjective(room: LoadedRoom): SavedGeneratedRoomObjective {
+  return {
+    questSpec: {
+      questId: `${room.id}-objective`,
+      title: 'Secure the restored room',
+      anchorRoomId: room.id,
+      objectives: [
+        {
+          id: 'generated-0',
+          text: 'Inspect the restored feature.',
+          condition: {
+            kind: 'room-flag',
+            roomId: room.id,
+            flag: `interaction:${room.id}-object`,
+          },
+        },
+      ],
+    },
+    hint: 'Check the restored feature.',
+    completionHint: 'The restored feature is resolved.',
+  }
+}
+
+function makeState(
+  rooms: Array<{
+    room: LoadedRoom
+    provenance: 'generated' | 'repaired' | 'fallback'
+    objective?: SavedGeneratedRoomObjective
+  }>,
+): GeneratedRoomCacheSaveState {
   const state = buildGeneratedRoomCacheSaveState({ rooms, themePack: 'fantasy-keep' })
   if (state == null) throw new Error('fixture build failed')
   return state
@@ -88,6 +118,23 @@ describe('restoreGeneratedRoomCache', () => {
     ])
   })
 
+  it('returns objectives only for successfully restored rooms', () => {
+    const current = makeRoom('current-room')
+    const previous = makeRoom('previous-room')
+    const objective = makeObjective(previous)
+
+    const result = restoreGeneratedRoomCache(
+      makeState([
+        { room: current, provenance: 'generated' },
+        { room: previous, provenance: 'generated', objective },
+      ]),
+      current,
+    )
+
+    expect(result.objectives.get('previous-room')).toEqual(objective)
+    expect(result.objectives.has('current-room')).toBe(false)
+  })
+
   it('includes the current room idempotently when it is already in the state', () => {
     const current = makeRoom('current-room')
 
@@ -130,6 +177,7 @@ describe('restoreGeneratedRoomCache', () => {
             objects: [],
           },
           provenance: 'generated',
+          objective: makeObjective(makeRoom('SECRET-LEAK-ID')),
         },
         {
           room: {
@@ -151,6 +199,7 @@ describe('restoreGeneratedRoomCache', () => {
     expect(result.skippedRoomCount).toBe(1)
     expect(result.cache.get('valid-room')?.id).toBe('valid-room')
     expect(result.cache.get('SECRET-LEAK-ID')).toBeUndefined()
+    expect(result.objectives.has('SECRET-LEAK-ID')).toBe(false)
     expect(result.restoredRoomIds).toEqual(['valid-room', 'current-room'])
   })
 

@@ -300,6 +300,7 @@ function restoreGeneratedRoomCacheFromSlot(
   roomCache: SessionRoomCache
   navigation: NavigationService
   adjacentPregenerator: AdjacentRoomPregenerator
+  restoredObjectives: ReadonlyMap<string, GeneratedObjectiveQuestAttachment>
   restoredRoomIds: string[]
 } | null {
   if (generatedRoomCacheJson == null) return null
@@ -338,6 +339,7 @@ function restoreGeneratedRoomCacheFromSlot(
     roomCache: restored.cache,
     navigation: new NavigationService(worldSession, restoredPregenerator, logger),
     adjacentPregenerator: restoredPregenerator,
+    restoredObjectives: restored.objectives,
     restoredRoomIds: restored.restoredRoomIds,
   }
 }
@@ -346,6 +348,7 @@ function seedRestoredGeneratedObjectiveMemo(
   memo: PerRoomObjectiveMemo,
   restoredPlay: RestoredGeneratedQuestPlay,
   restoredRoomIds: string[],
+  restoredObjectives: ReadonlyMap<string, GeneratedObjectiveQuestAttachment> = new Map(),
 ): void {
   const currentAttachment: GeneratedObjectiveQuestAttachment | null =
     restoredPlay.questSpec !== undefined
@@ -358,7 +361,9 @@ function seedRestoredGeneratedObjectiveMemo(
   memo.set(restoredPlay.room.id, currentAttachment)
 
   for (const roomId of restoredRoomIds) {
-    if (roomId !== restoredPlay.room.id) memo.set(roomId, null)
+    if (roomId !== restoredPlay.room.id) {
+      memo.set(roomId, restoredObjectives.get(roomId) ?? null)
+    }
   }
 }
 
@@ -837,6 +842,7 @@ function App() {
             objectivesPerRoom: activePlay.objectivesPerRoom,
             cachedRooms: activePlay.adjacentPregenerator.snapshotCachedRooms(),
             worldState: stateForSidecars.state,
+            objectives: perRoomObjectiveMemoRef.current,
             ...(activePlay.worldBible?.themePack !== undefined
               ? { themePack: activePlay.worldBible.themePack }
               : {}),
@@ -947,6 +953,7 @@ function App() {
           perRoomObjectiveMemoRef.current,
           restoredGeneratedPlay,
           restoredCache?.restoredRoomIds ?? [restoredGeneratedPlay.room.id],
+          restoredCache?.restoredObjectives,
         )
         setQuestSpecForView(generatedPlayFields.questSpec ?? null)
         setQuestHintsForView(hints ?? null)

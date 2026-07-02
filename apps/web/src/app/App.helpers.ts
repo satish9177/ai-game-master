@@ -188,6 +188,7 @@ export function buildGeneratedRoomCacheSaveJson(input: {
   cachedRooms: GeneratedRoomCacheSnapshotEntry[]
   worldState: WorldState
   themePack?: GeneratedRoomVisualTheme
+  objectives?: ReadonlyMap<string, unknown>
 }): string | undefined {
   if (input.objectivesPerRoom !== true) return undefined
 
@@ -199,10 +200,14 @@ export function buildGeneratedRoomCacheSaveJson(input: {
   const visitedEntries = input.cachedRooms
     .filter((entry) => entry.roomId !== input.room.id)
     .filter((entry) => input.worldState.roomStates[entry.roomId]?.visited === true)
-    .map((entry) => ({
-      room: entry.room,
-      provenance: entry.provenance ?? 'generated',
-    }))
+    .map((entry) => {
+      const objective = input.objectives?.get(entry.roomId)
+      return {
+        room: entry.room,
+        provenance: entry.provenance ?? 'generated',
+        ...(objective != null ? { objective } : {}),
+      }
+    })
 
   const saveState = buildGeneratedRoomCacheSaveState({
     rooms: [currentEntry, ...visitedEntries],

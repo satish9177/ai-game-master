@@ -1,11 +1,15 @@
 import type { RoomProvenance } from '../domain/assembleRoom'
 import { loadRoomSpec, type LoadedRoom } from '../domain/loadRoomSpec'
-import type { GeneratedRoomCacheSaveState } from '../domain/quests/generatedRoomCacheSaveState'
+import type {
+  GeneratedRoomCacheSaveState,
+  SavedGeneratedRoomObjective,
+} from '../domain/quests/generatedRoomCacheSaveState'
 import { SessionRoomCache } from '../room/SessionRoomCache'
 
 export type RestoreGeneratedRoomCacheResult = {
   cache: SessionRoomCache
   provenance: Map<string, RoomProvenance>
+  objectives: Map<string, SavedGeneratedRoomObjective>
   restoredRoomIds: string[]
   skippedRoomCount: number
 }
@@ -16,6 +20,7 @@ export function restoreGeneratedRoomCache(
 ): RestoreGeneratedRoomCacheResult {
   const cache = new SessionRoomCache()
   const provenance = new Map<string, RoomProvenance>()
+  const objectives = new Map<string, SavedGeneratedRoomObjective>()
   const restoredRoomIds: string[] = []
   let skippedRoomCount = 0
 
@@ -30,11 +35,14 @@ export function restoreGeneratedRoomCache(
 
     cache.set(room.id, room)
     provenance.set(room.id, entry.provenance)
+    if (entry.objective !== undefined && room.id !== currentRoom.id) {
+      objectives.set(room.id, entry.objective)
+    }
     if (!restoredRoomIds.includes(room.id)) restoredRoomIds.push(room.id)
   }
 
   cache.set(currentRoom.id, currentRoom)
   if (!restoredRoomIds.includes(currentRoom.id)) restoredRoomIds.push(currentRoom.id)
 
-  return { cache, provenance, restoredRoomIds, skippedRoomCount }
+  return { cache, provenance, objectives, restoredRoomIds, skippedRoomCount }
 }

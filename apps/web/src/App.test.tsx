@@ -27,7 +27,10 @@ import {
   MEMORY_RECALLED_MESSAGE,
   type PromotionSummary,
 } from './app/memoryFeedback'
-import { loadGeneratedRoomCacheSaveState } from './domain/quests/generatedRoomCacheSaveState'
+import {
+  GENERATED_ROOM_CACHE_MAX,
+  loadGeneratedRoomCacheSaveState,
+} from './domain/quests/generatedRoomCacheSaveState'
 import { loadGeneratedQuestSaveState } from './domain/quests/generatedQuestSaveState'
 import { restoreGeneratedQuestPlay } from './app/restoreGeneratedQuestPlay'
 import { restoreGeneratedRoomCache } from './app/restoreGeneratedRoomCache'
@@ -36,7 +39,11 @@ import { NavigationService } from './app/NavigationService'
 import { navigateWithExitGate } from './app/gatedNavigation'
 import { navigationResultMessage } from './app/exits'
 import { buildPromptGeneratedRoomSource } from './app/buildPromptGeneratedRoomSource'
-import { buildGeneratedObjectiveAttachment, buildGeneratedObjectiveQuestSpec } from './app/generatedObjective'
+import {
+  buildGeneratedObjectiveAttachment,
+  buildGeneratedObjectiveQuestSpec,
+  type GeneratedObjectiveQuestAttachment,
+} from './app/generatedObjective'
 import { FALLBACK_NOTICE } from './app/fallbackNotice'
 import { buildRoomIntroView } from './app/roomIntro'
 import { loadRoomSpec } from './domain/loadRoomSpec'
@@ -1714,6 +1721,29 @@ describe('generated room cache save parking — handleSave wiring (ADR-0060, sli
     return makeState({ currentRoomId: currentRoom.id, roomStates })
   }
 
+  function objectiveFor(room: LoadedRoom, objectId: string) {
+    return {
+      questSpec: {
+        questId: `${room.id}-objective`,
+        title: 'Secure the room',
+        anchorRoomId: room.id,
+        objectives: [
+          {
+            id: 'generated-0',
+            text: 'Inspect the marked feature.',
+            condition: {
+              kind: 'room-flag' as const,
+              roomId: room.id,
+              flag: `interaction:${objectId}`,
+            },
+          },
+        ],
+      },
+      hint: 'Look for the marked feature.',
+      completionHint: 'The feature is resolved.',
+    }
+  }
+
   it('generated play → returns a defined generatedRoomCacheJson string', () => {
     const json = buildGeneratedRoomCacheSaveJson({
       room: currentRoom,
@@ -1736,6 +1766,147 @@ describe('generated room cache save parking — handleSave wiring (ADR-0060, sli
 
     expect(json).toBeDefined()
     expect(loadGeneratedRoomCacheSaveState(json!).ok).toBe(true)
+  })
+
+  it('includes an objective for a non-current visited cached room with a memo attachment', () => {
+    const objective = objectiveFor(visitedRoom, 'visited-object')
+    const json = buildGeneratedRoomCacheSaveJson({
+      room: currentRoom,
+      objectivesPerRoom: true,
+      cachedRooms: [
+        { roomId: currentRoom.id, room: currentRoom, provenance: 'generated' },
+        { roomId: visitedRoom.id, room: visitedRoom, provenance: 'generated' },
+      ],
+      worldState: cacheWorld({
+        [currentRoom.id]: { visited: true },
+        [visitedRoom.id]: { visited: true },
+      }),
+      objectives: new Map([[visitedRoom.id, objective]]),
+    })
+    const loaded = loadGeneratedRoomCacheSaveState(json!)
+    expect(loaded.ok).toBe(true)
+    if (!loaded.ok) return
+
+    expect(loaded.state.rooms.find((entry) => entry.room.id === visitedRoom.id)?.objective)
+      .toEqual(objective)
+  })
+
+  it('does not include an objective for the current room even when the memo has one', () => {
+    const currentObjective = objectiveFor(currentRoom, 'current-object')
+    const visitedObjective = objectiveFor(visitedRoom, 'visited-object')
+    const json = buildGeneratedRoomCacheSaveJson({
+      room: currentRoom,
+      objectivesPerRoom: true,
+      cachedRooms: [
+        { roomId: currentRoom.id, room: currentRoom, provenance: 'generated' },
+        { roomId: visitedRoom.id, room: visitedRoom, provenance: 'generated' },
+      ],
+      worldState: cacheWorld({
+        [currentRoom.id]: { visited: true },
+        [visitedRoom.id]: { visited: true },
+      }),
+      objectives: new Map([
+        [currentRoom.id, currentObjective],
+        [visitedRoom.id, visitedObjective],
+      ]),
+    })
+    const loaded = loadGeneratedRoomCacheSaveState(json!)
+    expect(loaded.ok).toBe(true)
+    if (!loaded.ok) return
+
+    expect(loaded.state.rooms[0]?.room.id).toBe(currentRoom.id)
+    expect(loaded.state.rooms[0]?.objective).toBeUndefined()
+    expect(loaded.state.rooms.find((entry) => entry.room.id === visitedRoom.id)?.objective)
+      .toEqual(visitedObjective)
+  })
+
+  it('omits invalid or semantically mismatched cached objectives', () => {
+    const mismatched = objectiveFor(visitedRoom, 'visited-object')
+    const json = buildGeneratedRoomCacheSaveJson({
+      room: currentRoom,
+      objectivesPerRoom: true,
+      cachedRooms: [
+        { roomId: currentRoom.id, room: currentRoom, provenance: 'generated' },
+        { roomId: visitedRoom.id, room: visitedRoom, provenance: 'generated' },
+      ],
+      worldState: cacheWorld({
+        [currentRoom.id]: { visited: true },
+        [visitedRoom.id]: { visited: true },
+      }),
+      objectives: new Map([
+        [
+          visitedRoom.id,
+          {
+            ...mismatched,
+            questSpec: { ...mismatched.questSpec, anchorRoomId: currentRoom.id },
+          },
+        ],
+      ]),
+    })
+    const invalidJson = buildGeneratedRoomCacheSaveJson({
+      room: currentRoom,
+      objectivesPerRoom: true,
+      cachedRooms: [
+        { roomId: currentRoom.id, room: currentRoom, provenance: 'generated' },
+        { roomId: visitedRoom.id, room: visitedRoom, provenance: 'generated' },
+      ],
+      worldState: cacheWorld({
+        [currentRoom.id]: { visited: true },
+        [visitedRoom.id]: { visited: true },
+      }),
+      objectives: new Map([[visitedRoom.id, { ...mismatched, hint: '' }]]),
+    })
+
+    for (const saved of [json, invalidJson]) {
+      const loaded = loadGeneratedRoomCacheSaveState(saved!)
+      expect(loaded.ok).toBe(true)
+      if (loaded.ok) {
+        expect(loaded.state.rooms.find((entry) => entry.room.id === visitedRoom.id)?.objective)
+          .toBeUndefined()
+      }
+    }
+  })
+
+  it('cap and eviction drop non-current cached objectives with their rooms', () => {
+    const visitedRooms = Array.from({ length: GENERATED_ROOM_CACHE_MAX }, (_, index) => {
+      const room = makeRoom(
+        [
+          {
+            type: 'scroll',
+            id: `visited-object-${index}`,
+            position: [0, 0, -2],
+            interaction: { key: 'E', prompt: 'Read visited', effect: { kind: 'inspect' } },
+          },
+        ],
+        `visited-room-${index}`,
+        `Visited Generated Room ${index}`,
+      )
+      return room
+    })
+    const objectives = new Map(
+      visitedRooms.map((room, index) => [room.id, objectiveFor(room, `visited-object-${index}`)]),
+    )
+    const evictedRoom = visitedRooms[GENERATED_ROOM_CACHE_MAX - 1]!
+    const json = buildGeneratedRoomCacheSaveJson({
+      room: currentRoom,
+      objectivesPerRoom: true,
+      cachedRooms: [
+        { roomId: currentRoom.id, room: currentRoom, provenance: 'generated' },
+        ...visitedRooms.map((room) => ({ roomId: room.id, room, provenance: 'generated' as const })),
+      ],
+      worldState: cacheWorld({
+        [currentRoom.id]: { visited: true },
+        ...Object.fromEntries(visitedRooms.map((room) => [room.id, { visited: true }])),
+      }),
+      objectives,
+    })
+    const loaded = loadGeneratedRoomCacheSaveState(json!)
+    expect(loaded.ok).toBe(true)
+    if (!loaded.ok) return
+
+    expect(loaded.state.rooms).toHaveLength(GENERATED_ROOM_CACHE_MAX)
+    expect(loaded.state.rooms.some((entry) => entry.room.id === evictedRoom.id)).toBe(false)
+    expect(JSON.stringify(loaded.state)).not.toContain(`${evictedRoom.id}-objective`)
   })
 
   it('forces the current room first regardless of snapshot order', () => {
@@ -1935,6 +2106,7 @@ describe('generated room cache save parking — handleSave wiring (ADR-0060, sli
     expect(handleSave).toContain('buildGeneratedRoomCacheSaveJson(')
     expect(handleSave).toContain('snapshotCachedRooms()')
     expect(handleSave).toContain('worldSession.getWorldState(activePlay.sessionId)')
+    expect(handleSave).toContain('objectives: perRoomObjectiveMemoRef.current')
     expect(handleSave).toContain('generatedRoomCacheJson,')
     expect(handleLoad).toContain('slotResult.generatedRoomCacheJson')
     expect(appSource).toContain('loadGeneratedRoomCacheSaveState(generatedRoomCacheJson)')
@@ -2249,6 +2421,42 @@ describe('generated quest restore — handleLoad wiring (ADR-0059, slice 5)', ()
   }
 
   const genHints = { hint: 'Find the case file.', completionHint: 'You found it.' }
+
+  function cachedObjectiveFor(room: LoadedRoom, objectId: string): GeneratedObjectiveQuestAttachment {
+    return {
+      questSpec: {
+        questId: `${room.id}-objective`,
+        title: 'Secure the cached room',
+        anchorRoomId: room.id,
+        objectives: [
+          {
+            id: 'generated-0',
+            text: 'Inspect the cached feature.',
+            condition: {
+              kind: 'room-flag' as const,
+              roomId: room.id,
+              flag: `interaction:${objectId}`,
+            },
+          },
+        ],
+      },
+      hint: 'Check the cached feature.',
+      completionHint: 'The cached feature is resolved.',
+    }
+  }
+
+  function seedMemoLikeApp(input: {
+    restoredRoomIds: string[]
+    restoredObjectives: ReadonlyMap<string, GeneratedObjectiveQuestAttachment>
+  }) {
+    const memo = new Map<string, GeneratedObjectiveQuestAttachment | null>([
+      [ROOM_ID, { questSpec: genQuestSpec, ...genHints }],
+    ])
+    for (const roomId of input.restoredRoomIds) {
+      if (roomId !== ROOM_ID) memo.set(roomId, input.restoredObjectives.get(roomId) ?? null)
+    }
+    return memo
+  }
 
   const gateRoom = makeRoom(
     [
@@ -2580,6 +2788,219 @@ describe('generated quest restore — handleLoad wiring (ADR-0059, slice 5)', ()
     expect(sourceCalls).toBe(0)
   })
 
+  it('restored non-current cached room gets objective memo re-seeded for backtracking', async () => {
+    const previousRoom = makeRoom(
+      [
+        {
+          type: 'scroll',
+          id: 'previous-objective-object',
+          position: [0, 0, -2],
+          interaction: { key: 'E', prompt: 'Read previous', effect: { kind: 'inspect' } },
+        },
+      ],
+      'generated-previous-objective',
+      'Generated Previous Objective Room',
+    )
+    const previousObjective = cachedObjectiveFor(previousRoom, 'previous-objective-object')
+    const world = makeState({
+      currentRoomId: ROOM_ID,
+      roomStates: {
+        [ROOM_ID]: { visited: true },
+        [previousRoom.id]: { visited: true },
+      },
+    })
+    const json = buildGeneratedRoomCacheSaveJson({
+      room: genRoom,
+      objectivesPerRoom: true,
+      cachedRooms: [
+        { roomId: genRoom.id, room: genRoom, provenance: 'generated' },
+        { roomId: previousRoom.id, room: previousRoom, provenance: 'generated' },
+      ],
+      worldState: world,
+      objectives: new Map([[previousRoom.id, previousObjective]]),
+    })
+    const loaded = loadGeneratedRoomCacheSaveState(json!)
+    expect(loaded.ok).toBe(true)
+    if (!loaded.ok) throw new Error('expected valid generated room cache')
+    const restored = restoreGeneratedRoomCache(loaded.state, genRoom)
+    expect(restored.objectives.has(ROOM_ID)).toBe(false)
+    const memo = seedMemoLikeApp({
+      restoredRoomIds: restored.restoredRoomIds,
+      restoredObjectives: restored.objectives,
+    })
+
+    const pregenerator = new AdjacentRoomPregenerator(
+      restored.cache,
+      { has: () => false, resolve: () => ({ ok: false, reason: 'unknown-room' }) },
+      () => ({ getRoom: async () => ({ ok: true, room: makeRoom([], 'unexpected-generated') }) }),
+      makeRoom([], 'fallback-room'),
+      noopLogger,
+    )
+    pregenerator.restoreProvenance(restored.provenance)
+    const resolved = await pregenerator.resolveRoom(previousRoom.id)
+    expect(resolved.ok).toBe(true)
+    if (!resolved.ok) throw new Error('expected restored cache hit')
+
+    const restoredObjective = readPerRoomObjectiveMemo(memo, previousRoom.id)
+    expect(restoredObjective.cached).toBe(true)
+    expect(restoredObjective.questSpec).toEqual(previousObjective.questSpec)
+    expect(restoredObjective.questHints).toEqual({
+      hint: previousObjective.hint,
+      completionHint: previousObjective.completionHint,
+    })
+  })
+
+  it('current-room objective comes from generatedQuestJson and tampered cache objective is ignored', () => {
+    const tamperedCurrentObjective = {
+      ...cachedObjectiveFor(genRoom, OBJECT_ID),
+      questSpec: {
+        ...cachedObjectiveFor(genRoom, OBJECT_ID).questSpec,
+        questId: 'tampered-current-cache-objective',
+        title: 'Tampered cache objective',
+      },
+    }
+    const state = {
+      schemaVersion: 1,
+      rooms: [
+        {
+          room: {
+            schemaVersion: genRoom.schemaVersion,
+            id: genRoom.id,
+            name: genRoom.name,
+            shell: genRoom.shell,
+            spawn: genRoom.spawn,
+            lighting: genRoom.lighting,
+            objects: genRoom.objects,
+          },
+          provenance: 'generated',
+          objective: tamperedCurrentObjective,
+        },
+      ],
+    }
+    const loaded = loadGeneratedRoomCacheSaveState(JSON.stringify(state))
+    expect(loaded.ok).toBe(true)
+    if (!loaded.ok) throw new Error('expected valid generated room cache')
+    const restored = restoreGeneratedRoomCache(loaded.state, genRoom)
+    const memo = seedMemoLikeApp({
+      restoredRoomIds: restored.restoredRoomIds,
+      restoredObjectives: restored.objectives,
+    })
+
+    const current = readPerRoomObjectiveMemo(memo, ROOM_ID)
+    expect(current.questSpec).toEqual(genQuestSpec)
+    expect(current.questSpec?.questId).not.toBe('tampered-current-cache-objective')
+  })
+
+  it('malformed or semantically mismatched cached objective restores room but seeds null', () => {
+    const previousRoom = makeRoom(
+      [
+        {
+          type: 'scroll',
+          id: 'previous-object',
+          position: [0, 0, -2],
+          interaction: { key: 'E', prompt: 'Read previous', effect: { kind: 'inspect' } },
+        },
+      ],
+      'generated-previous-null-objective',
+      'Generated Previous Null Objective Room',
+    )
+    const baseState = {
+      schemaVersion: 1,
+      rooms: [
+        {
+          room: {
+            schemaVersion: previousRoom.schemaVersion,
+            id: previousRoom.id,
+            name: previousRoom.name,
+            shell: previousRoom.shell,
+            spawn: previousRoom.spawn,
+            lighting: previousRoom.lighting,
+            objects: previousRoom.objects,
+          },
+          provenance: 'generated',
+        },
+      ],
+    }
+    const mismatched = {
+      ...cachedObjectiveFor(previousRoom, 'previous-object'),
+      questSpec: {
+        ...cachedObjectiveFor(previousRoom, 'previous-object').questSpec,
+        anchorRoomId: ROOM_ID,
+      },
+    }
+
+    for (const objective of [{ questSpec: 'bad' }, mismatched]) {
+      const loaded = loadGeneratedRoomCacheSaveState(
+        JSON.stringify({
+          ...baseState,
+          rooms: [{ ...baseState.rooms[0], objective }],
+        }),
+      )
+      expect(loaded.ok).toBe(true)
+      if (!loaded.ok) throw new Error('expected valid generated room cache')
+      const restored = restoreGeneratedRoomCache(loaded.state, genRoom)
+      const memo = seedMemoLikeApp({
+        restoredRoomIds: restored.restoredRoomIds,
+        restoredObjectives: restored.objectives,
+      })
+
+      expect(restored.cache.get(previousRoom.id)?.id).toBe(previousRoom.id)
+      expect(readPerRoomObjectiveMemo(memo, previousRoom.id)).toEqual({
+        cached: true,
+        questSpec: null,
+        questHints: null,
+      })
+    }
+  })
+
+  it('cached objective completion is re-derived from restored WorldState flags', () => {
+    const previousRoom = makeRoom(
+      [
+        {
+          type: 'scroll',
+          id: 'previous-complete-object',
+          position: [0, 0, -2],
+          interaction: { key: 'E', prompt: 'Read previous', effect: { kind: 'inspect' } },
+        },
+      ],
+      'generated-previous-complete',
+      'Generated Previous Complete Room',
+    )
+    const previousObjective = cachedObjectiveFor(previousRoom, 'previous-complete-object')
+    const world = makeState({
+      currentRoomId: ROOM_ID,
+      roomStates: {
+        [ROOM_ID]: { visited: true },
+        [previousRoom.id]: {
+          visited: true,
+          flags: { 'interaction:previous-complete-object': true },
+        },
+      },
+    })
+    const json = buildGeneratedRoomCacheSaveJson({
+      room: genRoom,
+      objectivesPerRoom: true,
+      cachedRooms: [
+        { roomId: genRoom.id, room: genRoom, provenance: 'generated' },
+        { roomId: previousRoom.id, room: previousRoom, provenance: 'generated' },
+      ],
+      worldState: world,
+      objectives: new Map([[previousRoom.id, previousObjective]]),
+    })
+    const loaded = loadGeneratedRoomCacheSaveState(json!)
+    expect(loaded.ok).toBe(true)
+    if (!loaded.ok) throw new Error('expected valid generated room cache')
+    const restored = restoreGeneratedRoomCache(loaded.state, genRoom)
+    const memo = seedMemoLikeApp({
+      restoredRoomIds: restored.restoredRoomIds,
+      restoredObjectives: restored.objectives,
+    })
+    const restoredObjective = readPerRoomObjectiveMemo(memo, previousRoom.id)
+
+    expect(JSON.stringify(restoredObjective)).not.toContain('"done"')
+    expect(evaluateQuest(restoredObjective.questSpec!, world).status).toBe('complete')
+  })
+
   it('corrupt generatedRoomCacheJson does not block current-room generated quest restore', () => {
     const world = makeState({ currentRoomId: ROOM_ID, roomStates: { [ROOM_ID]: { visited: true } } })
     const play = restoreFromSavedBlob(
@@ -2678,6 +3099,10 @@ describe('generated quest restore — handleLoad wiring (ADR-0059, slice 5)', ()
     expect(appSource).toContain('restoreGeneratedRoomCache(loaded.state, currentRoom)')
     expect(appSource).toContain('slotResult.generatedRoomCacheJson')
     expect(appSource).toContain('restoreProvenance(restored.provenance)')
+    expect(appSource).toContain('restoredObjectives: restored.objectives')
+    expect(appSource).toContain('restoredCache?.restoredObjectives')
+    expect(appSource).toContain('restoredObjectives.get(roomId) ?? null')
+    expect(appSource).toContain('if (roomId !== restoredPlay.room.id)')
     // Restored quest spec and hints are routed through the existing view seams.
     expect(appSource).toContain('setQuestSpecForView(generatedPlayFields.questSpec ?? null)')
     expect(appSource).toContain('setQuestHintsForView(hints ?? null)')
@@ -2867,6 +3292,8 @@ describe('generated quest restore — handleLoad wiring (ADR-0059, slice 5)', ()
     expect(appSource).toContain('restored: restoredKind')
     // The blob is only ever read for re-validation, never passed to the logger.
     expect(appSource).not.toContain('logger.info("world session restored", { generatedQuestJson')
+    expect(appSource).not.toContain('logger.info("world session restored", { generatedRoomCacheJson')
+    expect(appSource).not.toContain('logger.warn("generated room cache')
   })
 
   it('does not surface unsafe parked content through the restored quest/journal views', () => {
