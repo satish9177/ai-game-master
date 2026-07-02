@@ -1,7 +1,8 @@
 # Implementation Plan — `feature/dialogue-usage-guardrails-v0`
 
-> Status: **Slice 1 in progress (this doc + ADR draft). Slices 2–4 not started.**
-> ADR: [ADR-0068](../decisions/ADR-0068-dialogue-usage-guardrails-v0.md) (draft).
+> Status: **Slices 1–3 complete/approved. Slice 4 (this closeout) complete;
+> manual smoke (§12) pending maintainer verification.**
+> ADR: [ADR-0068](../decisions/ADR-0068-dialogue-usage-guardrails-v0.md) (Implemented).
 > Maintainer approved the design in-chat. Locked decisions (verbatim):
 > (1) remove NPC provider auto-call on dialogue open; (2) opening NPC dialogue
 > seeds/shows only the static greeting; (3) prompt buttons and Continue remain
@@ -308,7 +309,7 @@ seam proves unworkable — not expected.
 
 **Slice 1 — Docs (this plan + ADR draft).**
 `docs: add implementation plan and ADR draft for dialogue usage guardrails v0`
-No source code. Status: **in progress.**
+No source code. Status: **complete/approved.**
 
 ---
 
@@ -328,6 +329,10 @@ npm run test -- RoomViewer
 npm run lint
 npm run build
 ```
+
+Status: **complete/approved.** Shipped in `50528a3` (`fix: stop dialogue
+provider call on open`); diff scope matches this slice exactly
+(`RoomViewer.tsx`, `RoomViewer.test.ts`).
 
 ---
 
@@ -351,6 +356,10 @@ npm run lint
 npm run build
 ```
 
+Status: **complete/approved.** Shipped in `d35326d` (`feat: guard real NPC
+dialogue usage`); diff scope matches this slice exactly (`App.tsx`,
+`RoomViewer.tsx`, `app/dialogue.ts`, and their tests).
+
 ---
 
 **Slice 4 — Docs closeout + final verification + manual smoke.**
@@ -365,6 +374,13 @@ npm run test
 npm run lint
 npm run build
 ```
+
+Status: **complete/pending manual smoke.** Docs updated in this pass. Targeted
+verification run from `apps/web` (see §15 for exact commands/results): targeted
+tests (`RoomViewer dialogue App usageGuard`) pass, `npm run lint` clean,
+`npx tsc --noEmit -p .` clean. Full `npm run test` / `npm run build` and the
+§12 manual smoke checklist are **pending maintainer verification** before
+merge — this closeout does not claim they were run.
 
 ---
 
@@ -460,3 +476,26 @@ maintainer verification** at closeout.
   identical; logging stays counts/enums-only.
 - **Targeted tests prove it:** open-makes-no-call, gate allow/block, fake-no-count,
   real-increments/blocks, and the ADR-0067 regression, all listed in §11.
+
+---
+
+## 15. Slice 4 closeout verification (run from `apps/web`)
+
+| Command | Result |
+|---|---|
+| `npm run test -- RoomViewer dialogue App usageGuard` | ✅ 44 test files / 658 tests passed |
+| `npm run lint` | ✅ clean, no findings |
+| `npx tsc --noEmit -p .` | ✅ clean, no output |
+| `npm run test` (full suite) | not run this pass — targeted run above covers every file this
+  feature touched; optional per plan, deferred to maintainer discretion |
+| `npm run build` | not run this pass — deferred to maintainer discretion alongside the
+  full suite |
+| §12 manual smoke checklist | not run this pass — requires driving the running app in a
+  browser; **pending maintainer verification** |
+
+Source-state check for Slices 2–3 (done as part of this closeout, not new code): confirmed
+against `git log` / `git show --stat` that commit `50528a3` (`fix: stop dialogue provider
+call on open`) touches exactly `RoomViewer.tsx` + `RoomViewer.test.ts`, and commit `d35326d`
+(`feat: guard real NPC dialogue usage`) touches exactly `App.tsx`, `RoomViewer.tsx`,
+`app/dialogue.ts`, and their three test files — matching §7's file-level plan with no
+scope drift.

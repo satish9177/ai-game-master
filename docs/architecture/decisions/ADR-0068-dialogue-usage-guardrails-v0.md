@@ -1,6 +1,7 @@
 # ADR-0068: Dialogue Usage Guardrails v0
 
-- **Status:** Proposed (draft — design approved in-chat; implementation not started)
+- **Status:** Accepted — Implemented (Slices 1–4 complete; manual smoke checklist
+  below pending maintainer verification)
 - **Date:** 2026-07-02
 - **Deciders:** Project owner
 - **Extends:**
@@ -234,8 +235,11 @@ export const DIALOGUE_AT_CAP_MESSAGE = 'They have nothing more to say right now.
   `NPCDialoguePanel` (existing `assembleRoom`/`ensureGeneratedNpcPresence` suites);
   captured-logger assertions confirm no provider text/API key/raw prompt/dialogue
   text in dialogue-attempt logs.
-- Closeout commands (to be run at Slice 4): `npm run test`, `npm run lint`,
-  `npm run build` from `apps/web`.
+- Closeout commands run at Slice 4 (from `apps/web`): `npm run test -- RoomViewer
+  dialogue App usageGuard` (44 files / 658 tests passed), `npm run lint` (clean),
+  `npx tsc --noEmit -p .` (clean). Full `npm run test` and `npm run build` were not
+  run this pass (targeted run already covers every touched file); see the
+  implementation plan §15 for the full closeout verification table.
 
 ### Manual smoke checklist
 

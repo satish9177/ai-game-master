@@ -150,6 +150,16 @@ Throughout these docs:
   Prompt ids stay `ask-room`/`ask-help`; count-only diagnostic `npcDialogueNormalizedCount`;
   no provider/LLM call, no schema, memory, or persistence change
   ([ADR-0067](./decisions/ADR-0067-generated-npc-dialogue-spec-v0.md)).
+- ✅ **Implemented** — Dialogue Usage Guardrails v0 — opening an NPC dialogue now
+  shows only the static greeting and makes no provider call; the surviving
+  user-triggered calls (prompt buttons, Continue) route through an `App`-owned
+  `requestDialogueAttempt` gate. Fake-provider dialogue stays zero-cost and
+  uncounted; real-provider dialogue shares the existing session usage
+  meter/cap from ADR-0030/ADR-0050 and records usage before the provider call;
+  at cap the provider is not called and a calm in-panel `DIALOGUE_AT_CAP_MESSAGE`
+  shows instead. No `NPCDialogueService`/provider, schema, save-load,
+  persistence, memory, or `WorldState` change
+  ([ADR-0068](./decisions/ADR-0068-dialogue-usage-guardrails-v0.md)).
 - ❌ **Not built** — future shape only; documented so we don't paint into a corner.
 
 ## Status today (Renderer Foundation v0)
@@ -1858,6 +1868,57 @@ selected, the entire guard is **inert** — no count, no warning, no block, no U
 - **Not changed:** the room-generation safety pipeline (`GeneratedRoomSource → assembleRoom →
   repair/fallback`); `OpenAICompatibleRoomGenerator`; adjacent pregeneration;
   `eslint.config.js`; `package.json`. No new lint block, no new layer.
+
+## Dialogue Usage Guardrails v0
+
+✅ **Implemented, browser/app composition.** With a complete real-provider config,
+opening an NPC dialogue used to auto-fire a provider reply before the player said
+anything, and every dialogue `reply` call (open plus each prompt/Continue click)
+bypassed the Cost/Usage Guardrails v0 session meter entirely — the meter could claim
+the player was under cap while real dialogue spend accrued. Dialogue Usage
+Guardrails v0 closes both gaps by removing the open-time call and metering the
+surviving user-triggered calls against the existing meter
+([ADR-0068](./decisions/ADR-0068-dialogue-usage-guardrails-v0.md)).
+
+- **Greeting-only on open, no provider call.** `RoomViewer`'s
+  `onRequestOpenInteraction` NPC-dialogue branch seeds only the static
+  authored/generated `dialogue.greeting` turn and sets the target — no
+  `npcDialogueService.reply` call and no pending state from opening alone, for
+  either provider.
+- **`App`-owned `requestDialogueAttempt` gate.** `App` exposes one stable
+  `requestDialogueAttempt?: () => boolean` callback to `RoomViewer`, reusing the
+  unchanged `domain/usage/usageGuard.ts` (`canAttemptOptional`/`recordAttempt`) and
+  the existing `usageCountRef`/`setUsageCount`/`guardCap` (`= llmConfig.sessionCap`)
+  from ADR-0030/ADR-0050 — no new usage-state store. `dialogueGuardEnabled =
+  dialogueProviderSelection.kind === 'real'`.
+- **Fake dialogue is zero-cost.** When the fake provider is selected, the gate
+  always returns `true` and records nothing — dialogue stays fully playable and
+  uncounted, matching `FakeNPCDialogueProvider`'s existing zero-cost/no-I/O
+  contract.
+- **Real dialogue shares the session meter.** Below cap, the gate records the
+  attempt (increments the shared `usageCountRef`/`UsageMeter` count) *before*
+  `RoomViewer` calls the provider, then allows the call. Dialogue shares the same
+  single per-session ceiling as room/objective/gate generation — a deliberate v0
+  tradeoff (one honest budget, not a separate dialogue cap).
+- **At-cap block, no bypass.** At cap, `canAttemptOptional` returns `false`: the
+  gate returns `false`, `RoomViewer` does not call the provider, and shows the
+  fixed calm constant `DIALOGUE_AT_CAP_MESSAGE = 'They have nothing more to say
+  right now.'` (new export in `app/dialogue.ts`, co-located with
+  `dialogueResultMessage`) via the existing `setNPCDialogueMessage` message slot.
+  Greeting, prompt buttons, and Close/Esc remain usable. There is no "continue
+  anyway" override for dialogue in v0 (unlike the room-generation at-cap path).
+  Because no provider call happened, the blocked prompt is never appended as a
+  player turn.
+- **Regression-safe.** generated-npc-dialogue-spec-v0 (ADR-0067) is unaffected:
+  generated NPCs still open `NPCDialoguePanel` with a greeting and two prompt
+  buttons. The `providerGateStatus`/`providerGate` carry bugfix (ADR-0064 area)
+  is intentionally out of scope and shipped separately.
+- **No new safety surface.** No `WorldState` mutation, no memory write, no
+  schema/save-load/persistence change, and no `NPCDialogueService` or provider
+  change — `FakeNPCDialogueProvider` and `OpenAICompatibleNPCDialogueProvider`
+  stay byte-identical. Dialogue-attempt logs carry only a safe `{ count, cap,
+  status }` shape, matching the existing usage-log discipline; no provider
+  name/content, API key, prompt, or dialogue text is logged.
 
 ## Layered architecture
 
