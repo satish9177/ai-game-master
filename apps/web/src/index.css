@@ -122,6 +122,27 @@ body {
   color: #fff;
 }
 
+/* ---------- memory feedback (room-memory-visible-feedback-v0) ---------- */
+.memory-feedback {
+  position: fixed;
+  top: 9.6rem; /* clear of the prompt bar, notice, and room-intro panel */
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 8;
+  width: min(420px, 90vw);
+  padding: 0.4rem 0.75rem;
+  border-radius: 0.5rem;
+  background: rgba(20, 24, 22, 0.85);
+  border: 1px solid #3a4a3f;
+  color: #dce8df;
+  font-size: 0.88rem;
+  text-align: center;
+}
+
+.memory-feedback-text {
+  display: block;
+}
+
 /* ---------- HUD prompt ---------- */
 .hud {
   position: absolute;

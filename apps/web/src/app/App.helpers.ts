@@ -25,6 +25,12 @@ import {
   buildGeneratedObjectiveAttachment,
   type GeneratedObjectiveQuestAttachment,
 } from './generatedObjective'
+import {
+  decideMemoryFeedback,
+  EMPTY_PROMOTION_SUMMARY,
+  type MemoryFeedbackMessage,
+  type PromotionSummary,
+} from './memoryFeedback'
 
 export type QuestHintState = {
   hint: string
@@ -281,6 +287,57 @@ export function buildQuestStage(input: {
     ...(questHints ? { hint: questHints.hint, completionHint: questHints.completionHint } : {}),
     ...(objectiveContext !== undefined ? { objective: objectiveContext } : {}),
   }
+}
+
+/**
+ * App-owned memory feedback state (room-memory-visible-feedback-v0, Slice 4).
+ *
+ * Wraps the pure `decideMemoryFeedback` gate so the composition root can fold
+ * promotion/recall outcomes into a single feedback slot without duplicating
+ * the precedence/anti-spam rules. `shownForRoomEntrySeq` is the anti-spam key
+ * (never reset except by advancing to a new room entry); `message` is the
+ * currently visible line, cleared separately on room entry so a still-valid
+ * `shownForRoomEntrySeq` keeps suppressing repeat recall feedback within the
+ * same entry per the approved plan.
+ */
+export type MemoryFeedbackState = Readonly<{
+  message: MemoryFeedbackMessage | null
+  shownForRoomEntrySeq: number | null
+}>
+
+export const INITIAL_MEMORY_FEEDBACK_STATE: MemoryFeedbackState = {
+  message: null,
+  shownForRoomEntrySeq: null,
+}
+
+export function memoryFeedbackAfterPromotion(
+  state: MemoryFeedbackState,
+  input: { promotionSummary: PromotionSummary; roomEntrySeq: number },
+): MemoryFeedbackState {
+  const message = decideMemoryFeedback({
+    promotionSummary: input.promotionSummary,
+    hasRecalledMemory: false,
+    roomEntrySeq: input.roomEntrySeq,
+    shownForRoomEntrySeq: state.shownForRoomEntrySeq,
+  })
+  return message === null ? state : { message, shownForRoomEntrySeq: input.roomEntrySeq }
+}
+
+export function memoryFeedbackAfterRecall(
+  state: MemoryFeedbackState,
+  input: { hasRecalledMemory: boolean; roomEntrySeq: number },
+): MemoryFeedbackState {
+  const message = decideMemoryFeedback({
+    promotionSummary: EMPTY_PROMOTION_SUMMARY,
+    hasRecalledMemory: input.hasRecalledMemory,
+    roomEntrySeq: input.roomEntrySeq,
+    shownForRoomEntrySeq: state.shownForRoomEntrySeq,
+  })
+  return message === null ? state : { message, shownForRoomEntrySeq: input.roomEntrySeq }
+}
+
+export function memoryFeedbackOnRoomEntry(state: MemoryFeedbackState): MemoryFeedbackState {
+  return state.message === null ? state : { ...state, message: null }
 }
 
 function objectiveForQuestStage(quest: QuestView, questSpec: QuestSpec | null) {

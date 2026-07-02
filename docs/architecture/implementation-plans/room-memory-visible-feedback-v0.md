@@ -1,7 +1,7 @@
 # Implementation Plan — `feature/room-memory-visible-feedback-v0`
 
-> Status: **Draft — design for maintainer review. No code written.**
-> ADR: **required at closeout** (not drafted yet).
+> Status: **Implemented — manual smoke pending maintainer verification.**
+> ADR: [ADR-0071](../decisions/ADR-0071-room-memory-visible-feedback-v0.md).
 > Companion docs: [ARCHITECTURE](../ARCHITECTURE.md) · [BOUNDARIES](../BOUNDARIES.md) ·
 > [AGENTS.md](../../../AGENTS.md).
 > Direct precedents:
@@ -10,7 +10,8 @@
 > memory-event-promotion-v0 — the promotion path whose outcomes this feature
 > surfaces; [ADR-0035](../decisions/ADR-0035-room-inspect-summary-v0.md) — the
 > precedent for a small dismissible/transient `role="status"` overlay driven by
-> closed, hand-written text.
+> closed, hand-written text; [ADR-0070](../decisions/ADR-0070-runtime-room-memory-persistence-v0.md)
+> — the hard dependency this feature sequences after.
 
 ## Summary
 
@@ -26,6 +27,10 @@
 - **What it intentionally does not do.** No raw memory text, no ids/flag keys,
   no provider output, no implication that memory is authoritative, no memory
   browser/journal UI, no new memory writes or reads beyond what already runs.
+- **Closeout status.** Implemented on branch
+  `feature/room-memory-visible-feedback-v0`; manual smoke is pending maintainer
+  verification. Feedback remains a read-only projection — no memory write,
+  `WorldState` mutation, schema, save-load, or provider change.
 
 ---
 
@@ -176,6 +181,11 @@ None. No prompt, provider, or usage-meter change. (Recall feedback keys off
 
 ## 11. Manual smoke checklist
 
+**Status: pending maintainer verification.** Automated coverage exists for the
+decision logic, `PromotionSummary` counts, the presentational component, and
+App-level wiring/state transitions (see §13a); the live browser experience
+below has not yet been exercised by the maintainer.
+
 1. Demo world, no key: take the tribute coin → "The room remembers this."
    appears briefly, then fades; no spam on further interactions with no durable
    effect.
@@ -187,6 +197,9 @@ None. No prompt, provider, or usage-meter change. (Recall feedback keys off
 5. Screen reader (or DOM inspection): line is `role="status"`,
    `aria-live="polite"`.
 6. No memory text, ids, or counts in the UI or console.
+7. Visual z-order/overlap pass on a fresh generated-room entry: confirm
+   `MemoryFeedback` does not visually collide with `RoomIntroPanel`, the
+   fallback/repair notice, or the HUD when more than one can appear at once.
 
 ## 12. Rollback notes
 
@@ -197,11 +210,45 @@ migration.
 
 ## 13. Implementation slices
 
-1. **Docs (this plan)** — review checkpoint.
-2. **Pure logic:** `memoryFeedback.ts` + `PromotionSummary` return (+tests).
-3. **UI + wiring:** `MemoryFeedback.tsx` + App state/hooks (+tests).
-4. **Closeout:** docs (`ARCHITECTURE.md` entry), **ADR** (records the closed
-   wording table), manual smoke.
+1. **Docs (this plan)** — complete in `3eeebea` (planning commit on `main`,
+   shared with `runtime-room-memory-persistence-v0`).
+2. **Pure logic** — complete in `81545ec` (`feat: add room memory feedback
+   decisions`): `apps/web/src/app/memoryFeedback.ts` adds
+   `MEMORY_CREATED_MESSAGE`, `MEMORY_RECALLED_MESSAGE`,
+   `MEMORY_FEEDBACK_AUTO_DISMISS_MS`, `PromotionSummary`/
+   `EMPTY_PROMOTION_SUMMARY`, and the pure `decideMemoryFeedback` gate.
+3. **`PromotionSummary` return** — complete in `49fc014` (`feat: summarize room
+   memory promotion results`): `promoteInteractionMemories` now returns
+   `Promise<PromotionSummary>` (recorded/deduplicated/rejected/failed counts);
+   the swallow-and-log behavior for a per-event `remember` failure/throw is
+   unchanged.
+4. **UI + wiring** — complete in `f9d087d` (`feat: show room memory
+   feedback`): `apps/web/src/renderer/ui/MemoryFeedback.tsx` (presentational,
+   React-only import) plus App state/hooks. The App-side precedence/anti-spam
+   wrapper (`MemoryFeedbackState`, `memoryFeedbackAfterPromotion`,
+   `memoryFeedbackAfterRecall`, `memoryFeedbackOnRoomEntry`) landed in the
+   existing `apps/web/src/app/App.helpers.ts` composition-root helper module
+   rather than inline in `App.tsx`, reusing the file already holding sibling
+   save/restore/objective helpers (Minimum Safe Change Rule — smaller `App.tsx`
+   diff, no new file). `App.tsx` owns only the `useState`/`useRef`/`useEffect`
+   wiring and the auto-dismiss timer.
+5. **Docs closeout** — this update: `ARCHITECTURE.md` status entry, ADR-0071,
+   verification results, and manual smoke checklist. Manual smoke remains
+   pending maintainer verification.
+
+## 13a. Verification results
+
+- `npm.cmd run test -- MemoryFeedback App memoryFeedback promoteInteractionMemories memory`
+  - Passed: 49 files, 819 tests.
+- `npm.cmd run lint`
+  - Passed.
+- `npx.cmd tsc --noEmit -p tsconfig.app.json`
+  - Failed only in unrelated baseline locations:
+    `src/domain/assembleRoom.test.ts`, `src/domain/ensureGeneratedNpcPresence.ts`,
+    and `src/generation/OpenAICompatibleNPCDialogueProvider.test.ts`. No
+    failures referenced any Slice 2–4 changed file.
+- `git diff --check`
+  - Passed, no whitespace errors.
 
 ## 14. Dependencies on earlier/later features
 
@@ -212,14 +259,47 @@ migration.
 
 ## 15. Open questions / risks
 
-- **Exact wording** of the two constants needs maintainer sign-off (recorded in
-  the ADR); candidates above are placeholders in spirit.
+- **Exact wording** of the two constants shipped as originally drafted
+  (`MEMORY_CREATED_MESSAGE`, `MEMORY_RECALLED_MESSAGE`); recorded as the
+  closed table in ADR-0071. No maintainer wording change requested during
+  implementation.
 - **Recall-feedback fatigue:** if every remembered room triggers a line, dense
   play may still feel noisy despite once-per-entry gating. Fallback lever:
   show recall feedback only when `entries.length` crosses a small threshold, or
-  only on the first entry per session per room — decide during review.
-- **Placement/z-order** with `RoomIntroPanel` + fallback notice + HUD needs a
-  quick visual pass; all three can appear on a fresh generated room entry.
-- Auto-dismiss timer in React StrictMode/test environments needs the usual
-  cleanup discipline (single `useEffect`, cleared on unmount) — noted so the
-  slice includes a test for no dangling timer.
+  only on the first entry per session per room — left as a future tuning
+  option, not implemented in v0.
+- **Placement/z-order** with `RoomIntroPanel` + fallback notice + HUD: accepted
+  non-blocking for v0. `MemoryFeedback` renders after `AppRoomEntryOverlay`
+  (intro/fallback notice) and before `PromptBar`/`UsageMeter` in `App.tsx`'s
+  render tree; a live visual pass is part of the manual smoke checklist below
+  rather than a blocking closeout item.
+- Auto-dismiss timer in React StrictMode/test environments follows the
+  existing `QuestTracker` cleanup idiom (single `useEffect`, timer cleared on
+  every re-run and on unmount) — no dangling-timer behavior observed in the
+  App test suite.
+
+## 16. Accepted non-blocking v0 notes
+
+- **Creation feedback uses a captured `roomEntrySeq`.** `handleCommittedInteractionEvents`
+  reads `roomEntrySeqRef.current` once at the start of the promotion call and
+  passes that captured value into `memoryFeedbackAfterPromotion` after the
+  promotion promise settles. If the player navigates to a new room while a
+  promotion is still in flight, the created-message decision is keyed to the
+  room entry active *when the interaction was committed*, not whichever entry
+  is current when the promise resolves — this is intentional (matches the
+  gameplay action that caused it) but means a same-tick race with navigation
+  is not separately covered by an App-level test beyond the existing
+  stale-recall guard.
+- **Recall has a stale-request guard.** `refreshRoomMemoryContext` discards a
+  recall result whose `roomMemoryRequestRef` no longer matches the latest
+  request before applying either `roomMemoryContext` or the recall feedback
+  decision, so a slow recall from a since-abandoned room entry cannot surface
+  a recall message for the wrong room.
+- **`MemoryFeedback.test.tsx` imports app-layer constants** (`MEMORY_CREATED_MESSAGE`,
+  `MEMORY_RECALLED_MESSAGE` from `app/memoryFeedback`) for readable assertions.
+  The component itself (`renderer/ui/MemoryFeedback.tsx`) imports nothing
+  beyond React — the runtime UI/app-layer import boundary stays clean; only the
+  test file crosses it for readability.
+- **Manual smoke should check z-order/overlap** with `RoomIntroPanel`, the
+  fallback notice, and the HUD on a fresh generated-room entry — see item 7 in
+  the checklist above (§11).

@@ -3,6 +3,7 @@ import { promoteWorldEvent } from '../domain/memory/promotion'
 import type { WorldEvent } from '../domain/world/events'
 import type { RoomMemoryService } from '../memory/RoomMemoryService'
 import type { Logger } from '../platform/logger/Logger'
+import { EMPTY_PROMOTION_SUMMARY, type PromotionSummary } from './memoryFeedback'
 
 /**
  * Composition-root orchestrator (memory-event-promotion-v0, wiring slice).
@@ -18,7 +19,8 @@ import type { Logger } from '../platform/logger/Logger'
  * `WorldState`. A `remember` failure (rejected/failed status, or an
  * unexpected throw from the store) is caught and logged as a safe code only;
  * it never propagates, so a memory-layer problem can never roll back or
- * block gameplay.
+ * block gameplay. The returned `PromotionSummary` carries only safe counts
+ * (never memory text, ids, or names) so callers can decide on feedback.
  */
 export async function promoteInteractionMemories(
   events: readonly WorldEvent[],
@@ -26,18 +28,44 @@ export async function promoteInteractionMemories(
   roomMemory: RoomMemoryService,
   logger: Logger,
   displayNames?: DisplayNameResolver,
-): Promise<void> {
+): Promise<PromotionSummary> {
+  let recorded = 0
+  let deduplicated = 0
+  let rejected = 0
+  let failed = 0
+
   for (const event of events) {
     const promoted = promoteWorldEvent(event, { worldId, displayNames })
     if (promoted === null) continue
 
     try {
-      await roomMemory.remember(promoted.input)
+      const result = await roomMemory.remember(promoted.input)
+      switch (result.status) {
+        case 'recorded':
+          recorded++
+          break
+        case 'deduplicated':
+          deduplicated++
+          break
+        case 'rejected':
+          rejected++
+          break
+        case 'failed':
+          failed++
+          break
+      }
     } catch {
+      failed++
       logger.warn('interaction memory promotion threw', {
         eventType: event.type,
         code: 'promotion-threw',
       })
     }
   }
+
+  if (recorded === 0 && deduplicated === 0 && rejected === 0 && failed === 0) {
+    return EMPTY_PROMOTION_SUMMARY
+  }
+
+  return { recorded, deduplicated, rejected, failed }
 }

@@ -10,12 +10,23 @@ import {
   buildGeneratedRoomCacheSaveJson,
   buildGeneratedQuestSaveJson,
   buildQuestStage,
+  INITIAL_MEMORY_FEEDBACK_STATE,
+  memoryFeedbackAfterPromotion,
+  memoryFeedbackAfterRecall,
+  memoryFeedbackOnRoomEntry,
   readPerRoomObjectiveMemo,
   resolvedObjectIdsForGeneratedPlay,
   resolvedObjectIdsForRoom,
   restoreRuntimeRoomMemoryFromSlot,
   shouldStartPerRoomObjectiveAttach,
+  type MemoryFeedbackState,
 } from './app/App.helpers'
+import {
+  EMPTY_PROMOTION_SUMMARY,
+  MEMORY_CREATED_MESSAGE,
+  MEMORY_RECALLED_MESSAGE,
+  type PromotionSummary,
+} from './app/memoryFeedback'
 import { loadGeneratedRoomCacheSaveState } from './domain/quests/generatedRoomCacheSaveState'
 import { loadGeneratedQuestSaveState } from './domain/quests/generatedQuestSaveState'
 import { restoreGeneratedQuestPlay } from './app/restoreGeneratedQuestPlay'
@@ -3071,5 +3082,172 @@ describe('runtime room memory save/load parking - Slice 5', () => {
       handleLoad.indexOf('refreshDerivedViews(stateResult.state)'),
     )
     expect(appSource).not.toContain('logger.info("world session restored", { roomMemoryJson')
+  })
+})
+
+describe('memory feedback state wiring - Slice 4', () => {
+  const ZERO_SUMMARY: PromotionSummary = { recorded: 0, deduplicated: 0, rejected: 0, failed: 0 }
+
+  function summary(overrides: Partial<PromotionSummary> = {}): PromotionSummary {
+    return { ...ZERO_SUMMARY, ...overrides }
+  }
+
+  it('shows created feedback after a recorded promotion', () => {
+    const next = memoryFeedbackAfterPromotion(INITIAL_MEMORY_FEEDBACK_STATE, {
+      promotionSummary: summary({ recorded: 1 }),
+      roomEntrySeq: 1,
+    })
+
+    expect(next).toEqual({ message: MEMORY_CREATED_MESSAGE, shownForRoomEntrySeq: 1 })
+  })
+
+  it('does not show feedback for deduplicated-, rejected-, or failed-only promotions', () => {
+    for (const overrides of [{ deduplicated: 1 }, { rejected: 1 }, { failed: 1 }]) {
+      const next = memoryFeedbackAfterPromotion(INITIAL_MEMORY_FEEDBACK_STATE, {
+        promotionSummary: summary(overrides),
+        roomEntrySeq: 1,
+      })
+      expect(next).toEqual(INITIAL_MEMORY_FEEDBACK_STATE)
+    }
+  })
+
+  it('a wholesale-rejected promotion (EMPTY_PROMOTION_SUMMARY) shows nothing and never throws', () => {
+    expect(() => {
+      const next = memoryFeedbackAfterPromotion(INITIAL_MEMORY_FEEDBACK_STATE, {
+        promotionSummary: EMPTY_PROMOTION_SUMMARY,
+        roomEntrySeq: 1,
+      })
+      expect(next).toEqual(INITIAL_MEMORY_FEEDBACK_STATE)
+    }).not.toThrow()
+  })
+
+  it('shows recalled feedback when memory exists and none has been shown for this room entry', () => {
+    const next = memoryFeedbackAfterRecall(INITIAL_MEMORY_FEEDBACK_STATE, {
+      hasRecalledMemory: true,
+      roomEntrySeq: 2,
+    })
+
+    expect(next).toEqual({ message: MEMORY_RECALLED_MESSAGE, shownForRoomEntrySeq: 2 })
+  })
+
+  it('does not show recalled feedback when no memory was recalled', () => {
+    const next = memoryFeedbackAfterRecall(INITIAL_MEMORY_FEEDBACK_STATE, {
+      hasRecalledMemory: false,
+      roomEntrySeq: 2,
+    })
+
+    expect(next).toEqual(INITIAL_MEMORY_FEEDBACK_STATE)
+  })
+
+  it('creation feedback suppresses a later recall refresh in the same room entry', () => {
+    const roomEntrySeq = 5
+    const afterCreation = memoryFeedbackAfterPromotion(INITIAL_MEMORY_FEEDBACK_STATE, {
+      promotionSummary: summary({ recorded: 1 }),
+      roomEntrySeq,
+    })
+    expect(afterCreation.message).toBe(MEMORY_CREATED_MESSAGE)
+
+    const afterRecall = memoryFeedbackAfterRecall(afterCreation, {
+      hasRecalledMemory: true,
+      roomEntrySeq,
+    })
+
+    expect(afterRecall).toEqual(afterCreation)
+    expect(afterRecall.message).toBe(MEMORY_CREATED_MESSAGE)
+  })
+
+  it('a new room entry clears the visible message but allows feedback again', () => {
+    const roomEntrySeq = 5
+    const shown = memoryFeedbackAfterPromotion(INITIAL_MEMORY_FEEDBACK_STATE, {
+      promotionSummary: summary({ recorded: 1 }),
+      roomEntrySeq,
+    })
+
+    const clearedOnEntry = memoryFeedbackOnRoomEntry(shown)
+    expect(clearedOnEntry.message).toBeNull()
+
+    const nextRoomEntrySeq = roomEntrySeq + 1
+    const recalledAgain = memoryFeedbackAfterRecall(clearedOnEntry, {
+      hasRecalledMemory: true,
+      roomEntrySeq: nextRoomEntrySeq,
+    })
+
+    expect(recalledAgain).toEqual({ message: MEMORY_RECALLED_MESSAGE, shownForRoomEntrySeq: nextRoomEntrySeq })
+  })
+
+  it('clearing on room entry is a no-op when nothing is showing (stable reference)', () => {
+    expect(memoryFeedbackOnRoomEntry(INITIAL_MEMORY_FEEDBACK_STATE)).toBe(INITIAL_MEMORY_FEEDBACK_STATE)
+  })
+
+  it('never derives a message other than the two closed constants or null', () => {
+    const state: MemoryFeedbackState[] = [
+      memoryFeedbackAfterPromotion(INITIAL_MEMORY_FEEDBACK_STATE, {
+        promotionSummary: summary({ recorded: 1 }),
+        roomEntrySeq: 1,
+      }),
+      memoryFeedbackAfterPromotion(INITIAL_MEMORY_FEEDBACK_STATE, {
+        promotionSummary: summary({ deduplicated: 1, rejected: 1, failed: 1 }),
+        roomEntrySeq: 1,
+      }),
+      memoryFeedbackAfterRecall(INITIAL_MEMORY_FEEDBACK_STATE, { hasRecalledMemory: true, roomEntrySeq: 1 }),
+      memoryFeedbackAfterRecall(INITIAL_MEMORY_FEEDBACK_STATE, { hasRecalledMemory: false, roomEntrySeq: 1 }),
+    ]
+
+    for (const entry of state) {
+      expect([null, MEMORY_CREATED_MESSAGE, MEMORY_RECALLED_MESSAGE]).toContain(entry.message)
+    }
+  })
+
+  it('App wires creation feedback from the PromotionSummary, falling back to EMPTY_PROMOTION_SUMMARY on rejection', () => {
+    const handleCommittedInteractionEvents = appSource.slice(
+      appSource.indexOf('const handleCommittedInteractionEvents = useCallback('),
+      appSource.indexOf('useEffect(() => {\n    if (memoryFeedbackState.message === null) return'),
+    )
+
+    expect(handleCommittedInteractionEvents).toContain('promoteInteractionMemories(')
+    expect(handleCommittedInteractionEvents).toContain('.catch(() => EMPTY_PROMOTION_SUMMARY)')
+    expect(handleCommittedInteractionEvents).toContain('memoryFeedbackAfterPromotion(current, { promotionSummary, roomEntrySeq })')
+    expect(handleCommittedInteractionEvents).toContain('refreshRoomMemoryContext(input.state)')
+  })
+
+  it('App wires recall feedback from the recall context entry count, preserving stale-request protection', () => {
+    const refreshRoomMemoryContext = appSource.slice(
+      appSource.indexOf('const refreshRoomMemoryContext = useCallback('),
+      appSource.indexOf('const enterActivePlay = useCallback('),
+    )
+
+    expect(refreshRoomMemoryContext).toContain('if (roomMemoryRequestRef.current !== requestId) return')
+    expect(refreshRoomMemoryContext).toContain('memoryFeedbackAfterRecall(current, {')
+    expect(refreshRoomMemoryContext).toContain('hasRecalledMemory: context.entries.length > 0')
+  })
+
+  it('App clears memory feedback on every new room entry (enterActivePlay and handleNavigate)', () => {
+    const enterActivePlay = appSource.slice(
+      appSource.indexOf('const enterActivePlay = useCallback('),
+      appSource.indexOf('const setQuestSpecForView = useCallback('),
+    )
+    expect(enterActivePlay).toContain('setMemoryFeedbackState(memoryFeedbackOnRoomEntry)')
+
+    const handleNavigateSetters = appSource.slice(
+      appSource.indexOf('activePlayRef.current = nextPlay'),
+      appSource.indexOf('activePlay.adjacentPregenerator?.warmAdjacent(result.room)'),
+    )
+    expect(handleNavigateSetters).toContain('setMemoryFeedbackState(memoryFeedbackOnRoomEntry)')
+  })
+
+  it('App auto-dismisses feedback on a timer and cleans it up on message change/unmount', () => {
+    const autoDismissEffect = appSource.slice(
+      appSource.indexOf('if (memoryFeedbackState.message === null) return'),
+      appSource.indexOf("}, [memoryFeedbackState.message])"),
+    )
+
+    expect(autoDismissEffect).toContain(`window.setTimeout(() => {`)
+    expect(autoDismissEffect).toContain('MEMORY_FEEDBACK_AUTO_DISMISS_MS')
+    expect(autoDismissEffect).toContain('return () => window.clearTimeout(timeoutId)')
+  })
+
+  it('App renders MemoryFeedback with only the closed message field, never memory record data', () => {
+    expect(appSource).toContain('<MemoryFeedback message={memoryFeedbackState.message} />')
+    expect(appSource).not.toContain('MemoryFeedback message={roomMemoryContext')
   })
 })

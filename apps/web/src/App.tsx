@@ -8,6 +8,7 @@ import { UsageMeter } from './renderer/ui/UsageMeter'
 import { QuestTracker } from './renderer/ui/QuestTracker'
 import { JournalPanel } from './renderer/ui/JournalPanel'
 import { RoomIntroPanel } from './renderer/ui/RoomIntroPanel'
+import { MemoryFeedback } from './renderer/ui/MemoryFeedback'
 import { projectPlayerHud } from './renderer/ui/playerHud'
 import type { PlayerHudView } from './renderer/ui/playerHud'
 import { evaluateQuest, type QuestView } from './domain/quests/evaluateQuest'
@@ -86,13 +87,19 @@ import {
   buildGeneratedRoomCacheSaveJson,
   buildGeneratedQuestSaveJson,
   buildQuestStage,
+  INITIAL_MEMORY_FEEDBACK_STATE,
+  memoryFeedbackAfterPromotion,
+  memoryFeedbackAfterRecall,
+  memoryFeedbackOnRoomEntry,
   readPerRoomObjectiveMemo,
   resolvedObjectIdsForGeneratedPlay,
   restoreRuntimeRoomMemoryFromSlot,
   shouldStartPerRoomObjectiveAttach,
+  type MemoryFeedbackState,
   type PerRoomObjectiveMemo,
   type QuestHintState,
 } from './app/App.helpers'
+import { EMPTY_PROMOTION_SUMMARY, MEMORY_FEEDBACK_AUTO_DISMISS_MS } from './app/memoryFeedback'
 import { themeVocabulary } from './domain/generatedRoomThemeVocabulary'
 
 import { NPCDialogueService } from './dialogue/NPCDialogueService'
@@ -394,6 +401,12 @@ function App() {
   const [activePlay, setActivePlay] = useState<ActivePlay | null>(null)
   const activePlayRef = useRef<ActivePlay | null>(null)
   const [roomEntrySeq, setRoomEntrySeq] = useState(0)
+  // Mirrors `roomEntrySeq` synchronously (room-memory-visible-feedback-v0,
+  // Slice 4): the memory-feedback callbacks below fire inside the same tick
+  // that advances the room entry (before React flushes the `roomEntrySeq`
+  // state update), so they read this ref rather than the possibly-stale
+  // closed-over state value. Same pattern as `activePlayRef`/`questSpecRef`.
+  const roomEntrySeqRef = useRef(0)
   const [playerHud, setPlayerHud] = useState<PlayerHudView | null>(null)
   const [quest, setQuest] = useState<QuestView | null>(null)
   const [questHints, setQuestHints] = useState<QuestHintState | null>(null)
@@ -425,6 +438,13 @@ function App() {
     undefined,
   )
   const roomMemoryRequestRef = useRef(0)
+  // Single memory-feedback slot (room-memory-visible-feedback-v0, Slice 4).
+  // `memoryFeedbackAfterPromotion`/`memoryFeedbackAfterRecall` wrap the pure
+  // `decideMemoryFeedback` gate so precedence/anti-spam logic lives in one
+  // tested place; this state only tracks what the UI currently shows and
+  // which room entry has already surfaced feedback.
+  const [memoryFeedbackState, setMemoryFeedbackState] =
+    useState<MemoryFeedbackState>(INITIAL_MEMORY_FEEDBACK_STATE)
   const refreshRoomMemoryContext = useCallback((state: WorldState) => {
     const requestId = ++roomMemoryRequestRef.current
     setRoomMemoryContext(undefined)
@@ -435,6 +455,12 @@ function App() {
     ).then((context) => {
       if (roomMemoryRequestRef.current !== requestId) return
       setRoomMemoryContext(context)
+      setMemoryFeedbackState((current) =>
+        memoryFeedbackAfterRecall(current, {
+          hasRecalledMemory: context.entries.length > 0,
+          roomEntrySeq: roomEntrySeqRef.current,
+        }),
+      )
     })
   }, [])
   // Usage guardrail state (real provider only; fake path stays inert).
@@ -475,7 +501,9 @@ function App() {
   const enterActivePlay = useCallback((play: ActivePlay) => {
     activePlayRef.current = play
     setActivePlay(play)
-    setRoomEntrySeq((seq) => seq + 1)
+    roomEntrySeqRef.current += 1
+    setRoomEntrySeq(roomEntrySeqRef.current)
+    setMemoryFeedbackState(memoryFeedbackOnRoomEntry)
   }, [])
   const setQuestSpecForView = useCallback((questSpec: QuestSpec | null) => {
     questSpecRef.current = questSpec
@@ -527,21 +555,46 @@ function App() {
             item: { [input.item.itemId]: input.item.name },
           })
         : undefined
+    const roomEntrySeq = roomEntrySeqRef.current
     // Promotion may write a new room memory after the room-load/navigation
     // recall already ran (`refreshDerivedViews` -> `refreshRoomMemoryContext`),
     // so re-recall once promotion settles — success or failure — to pick up
     // anything just promoted. A promotion failure is already swallowed/logged
-    // by `promoteInteractionMemories`/the store; it never blocks gameplay.
+    // by `promoteInteractionMemories`/the store; it never blocks gameplay. A
+    // wholesale rejection of the promotion promise itself (not a per-event
+    // `remember` failure, which `promoteInteractionMemories` already catches)
+    // falls back to `EMPTY_PROMOTION_SUMMARY` so creation feedback never throws.
     void promoteInteractionMemories(
       input.events,
       input.state.worldId,
       roomMemoryRuntimeRef.current.service,
       logger,
       displayNames,
-    ).catch(() => {}).finally(() => {
-      refreshRoomMemoryContext(input.state)
-    })
+    )
+      .catch(() => EMPTY_PROMOTION_SUMMARY)
+      .then((promotionSummary) => {
+        setMemoryFeedbackState((current) =>
+          memoryFeedbackAfterPromotion(current, { promotionSummary, roomEntrySeq }),
+        )
+      })
+      .finally(() => {
+        refreshRoomMemoryContext(input.state)
+      })
   }, [refreshRoomMemoryContext])
+
+  // Auto-dismiss the visible memory feedback line after a fixed delay (same
+  // effect-cleanup idiom as `QuestTracker`'s recently-completed timer): the
+  // timer resets whenever the message changes and is always cleared on
+  // unmount or before the next timer starts.
+  useEffect(() => {
+    if (memoryFeedbackState.message === null) return
+    const timeoutId = window.setTimeout(() => {
+      setMemoryFeedbackState((current) =>
+        current.message === null ? current : { ...current, message: null },
+      )
+    }, MEMORY_FEEDBACK_AUTO_DISMISS_MS)
+    return () => window.clearTimeout(timeoutId)
+  }, [memoryFeedbackState.message])
 
   useEffect(() => {
     const version = ++requestVersion.current
@@ -1019,7 +1072,9 @@ function App() {
       }
       activePlayRef.current = nextPlay
       setActivePlay((current) => current?.sessionId === activePlay.sessionId ? nextPlay : current)
-      setRoomEntrySeq((seq) => seq + 1)
+      roomEntrySeqRef.current += 1
+      setRoomEntrySeq(roomEntrySeqRef.current)
+      setMemoryFeedbackState(memoryFeedbackOnRoomEntry)
       // Warm the next frontier from the room we just entered.
       activePlay.adjacentPregenerator?.warmAdjacent(result.room)
       // Re-project derived views from the post-move WorldState so objective 3
@@ -1087,6 +1142,7 @@ function App() {
         notice={notice}
         onDismissNotice={() => setNotice(null)}
       />
+      <MemoryFeedback message={memoryFeedbackState.message} />
       <PromptBar onSubmit={handlePrompt} disabled={inFlight} />
       {guardEnabled && (
         <UsageMeter
