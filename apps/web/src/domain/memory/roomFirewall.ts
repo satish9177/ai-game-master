@@ -33,6 +33,54 @@ export const DEFAULT_ROOM_RECALL_MAX_CHARS = 600
 
 const DEFAULT_CONFIDENCE: RoomMemoryConfidence = 'medium'
 
+/**
+ * A character that must never survive into stored memory `text` or the real
+ * provider's prompt: any ASCII control character (including `\t`, `\n`, `\r`),
+ * DEL (0x7F), or a Unicode line/paragraph separator (0x2028/0x2029). These are
+ * the characters that could turn one inert memory line into multiple lines and
+ * fabricate a prompt section header. Detected by char code (not a control-char
+ * regex) so the linter's `no-control-regex` rule stays satisfied.
+ */
+function isControlOrLineChar(code: number): boolean {
+  return code <= 0x1f || code === 0x7f || code === 0x2028 || code === 0x2029
+}
+
+/**
+ * True when `text` contains any control/newline/line-separator character. Used
+ * on the restore path (defense in depth): a tampered sidecar record whose text
+ * still carries such a character is DROPPED rather than normalized.
+ */
+export function hasRoomMemoryControlCharacters(text: string): boolean {
+  for (let i = 0; i < text.length; i += 1) {
+    if (isControlOrLineChar(text.charCodeAt(i))) return true
+  }
+  return false
+}
+
+/**
+ * Collapse `text` to a single safe line: every control/newline/line-separator
+ * character becomes a space, runs of whitespace collapse to one space, and the
+ * result is trimmed. Pure; does not enforce any length bound (the caller keeps
+ * the existing `MAX_ROOM_MEMORY_CHARS` check).
+ */
+export function toSingleLineRoomMemoryText(text: string): string {
+  let mapped = ''
+  for (let i = 0; i < text.length; i += 1) {
+    mapped += isControlOrLineChar(text.charCodeAt(i)) ? ' ' : text.charAt(i)
+  }
+  return mapped.replace(/\s+/g, ' ').trim()
+}
+
+/**
+ * Write-path text normalization: coerce to a single safe line before storage so
+ * newline/control characters (which room/item display names sourced from
+ * generated `RoomSpec` data can carry) never reach the store or the prompt. A
+ * non-string input degrades to `''`, which the firewall rejects as `empty-text`.
+ */
+export function normalizeRoomMemoryTextForWrite(text: string): string {
+  return toSingleLineRoomMemoryText(typeof text === 'string' ? text : '')
+}
+
 export type RoomMemoryDraftInput = {
   worldId: string
   sessionId: string
@@ -94,7 +142,10 @@ export function validateRoomMemoryDraft(
   if (!RoomMemoryKindSchema.safeParse(input.kind).success) return reject('invalid-kind')
   if (!RoomMemorySourceSchema.safeParse(input.source).success) return reject('invalid-source')
 
-  const text = typeof input.text === 'string' ? input.text.trim() : ''
+  // Normalize to one safe line (control/newline chars → space, collapse, trim)
+  // BEFORE the existing bounds are applied. Empty-after-normalization reuses the
+  // existing `empty-text` reason; the `MAX_ROOM_MEMORY_CHARS` bound is unchanged.
+  const text = normalizeRoomMemoryTextForWrite(typeof input.text === 'string' ? input.text : '')
   if (text.length === 0) return reject('empty-text')
   if (text.length > MAX_ROOM_MEMORY_CHARS) return reject('text-too-long')
 

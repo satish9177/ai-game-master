@@ -113,7 +113,11 @@ function buildMemorySection(entries: RoomMemoryContextEntry[] | undefined): stri
   if (entries === undefined || entries.length === 0) return undefined
 
   const lines = entries.slice(0, MAX_MEMORY_ENTRIES).map((entry) => {
-    return `${hedgePrefix(entry.kind)}: ${clampText(entry.text, MAX_MEMORY_LINE_CHARS)}`
+    // Defense in depth: force each memory entry onto a single line BEFORE
+    // clamping, so unsafe text reaching recall through any future path that
+    // bypasses the write firewall can never fabricate a second section header
+    // (e.g. a "CURRENT ROOM" line) inside this block.
+    return `${hedgePrefix(entry.kind)}: ${clampText(toSingleLine(entry.text), MAX_MEMORY_LINE_CHARS)}`
   })
 
   return ['BACKGROUND ROOM MEMORY - NON-AUTHORITATIVE', ...lines].join('\n')
@@ -126,4 +130,21 @@ function hedgePrefix(kind: string | undefined): string {
 
 function clampText(text: string, maxChars: number): string {
   return text.length > maxChars ? text.slice(0, maxChars) : text
+}
+
+/**
+ * Collapse `text` to a single line: any ASCII control character (incl. `\n`,
+ * `\r`, `\t`), DEL, or a Unicode line/paragraph separator becomes a space, runs
+ * of whitespace collapse to one, and the result is trimmed. Kept local to the
+ * prompt builder so this defense-in-depth holds even if the memory firewall is
+ * bypassed. Char-code based so `no-control-regex` stays satisfied.
+ */
+function toSingleLine(text: string): string {
+  let mapped = ''
+  for (let i = 0; i < text.length; i += 1) {
+    const code = text.charCodeAt(i)
+    const isControlOrLine = code <= 0x1f || code === 0x7f || code === 0x2028 || code === 0x2029
+    mapped += isControlOrLine ? ' ' : text.charAt(i)
+  }
+  return mapped.replace(/\s+/g, ' ').trim()
 }

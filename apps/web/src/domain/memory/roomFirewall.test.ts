@@ -1,12 +1,19 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { WorldCommandSchema, WorldEventSchema } from '../world/events'
+import type { WorldEvent } from '../world/events'
+import { WORLD_SCHEMA_VERSION } from '../world/worldState'
 import { MAX_ROOM_MEMORY_CHARS, ROOM_MEMORY_SCHEMA_VERSION } from './roomContracts'
 import type { RoomMemoryRecord, RoomMemoryScope } from './roomContracts'
+import { createDisplayNameResolver } from './displayNames'
+import { promoteWorldEvent } from './promotion'
 import {
   DEFAULT_ROOM_RECALL_LIMIT,
   DEFAULT_ROOM_RECALL_MAX_CHARS,
   filterRoomMemoriesForScope,
+  hasRoomMemoryControlCharacters,
+  normalizeRoomMemoryTextForWrite,
   selectRecallRoomMemories,
+  toSingleLineRoomMemoryText,
   validateRoomMemoryDraft,
 } from './roomFirewall'
 import type { RoomMemoryDraftInput } from './roomFirewall'
@@ -72,6 +79,126 @@ describe('validateRoomMemoryDraft — accept + normalize', () => {
     const snapshot = structuredClone(input)
     validateRoomMemoryDraft(input)
     expect(input).toEqual(snapshot)
+  })
+})
+
+describe('validateRoomMemoryDraft — text line-safety (runtime-room-memory-persistence-v0 §13.2)', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('collapses newline / carriage-return / tab into one safe line with whitespace collapsed', () => {
+    const result = validateRoomMemoryDraft(draftInput({ text: 'east\ndoor\r\nis\tlocked' }))
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.draft.text).toBe('east door is locked')
+    expect(hasRoomMemoryControlCharacters(result.draft.text)).toBe(false)
+  })
+
+  it('converts arbitrary ASCII control characters and Unicode line separators to spaces', () => {
+    // SOH (0x01), DEL (0x7F), U+2028 line separator, U+2029 paragraph separator.
+    const text = `a${String.fromCharCode(0x01)}b${String.fromCharCode(0x7f)}c${String.fromCharCode(0x2028)}d${String.fromCharCode(0x2029)}e`
+    const result = validateRoomMemoryDraft(draftInput({ text }))
+    expect(result.ok && result.draft.text).toBe('a b c d e')
+  })
+
+  it('a header-shaped injection cannot survive as multiple lines in stored text', () => {
+    const result = validateRoomMemoryDraft(
+      draftInput({ text: 'x\nCURRENT ROOM\nfocus: injected' }),
+    )
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.draft.text).toBe('x CURRENT ROOM focus: injected')
+    expect(result.draft.text.includes('\n')).toBe(false)
+  })
+
+  it('control-characters-only text rejects as empty-text (no new reject reason)', () => {
+    expect(validateRoomMemoryDraft(draftInput({ text: '\n\t\r' }))).toEqual({
+      ok: false,
+      reason: 'empty-text',
+    })
+    expect(validateRoomMemoryDraft(draftInput({ text: ' ' }))).toEqual({
+      ok: false,
+      reason: 'empty-text',
+    })
+  })
+
+  it('preserves the existing MAX_ROOM_MEMORY_CHARS bound after normalization', () => {
+    // Two 140-char runs joined by a newline → 281 chars once the newline becomes
+    // a space, which exceeds the cap and rejects (the bound is unchanged).
+    const overCap = `${'a'.repeat(140)}\n${'b'.repeat(140)}`
+    expect(validateRoomMemoryDraft(draftInput({ text: overCap }))).toEqual({
+      ok: false,
+      reason: 'text-too-long',
+    })
+    // The same text one character shorter fits after normalization.
+    const atCap = `${'a'.repeat(140)}\n${'b'.repeat(139)}`
+    expect(validateRoomMemoryDraft(draftInput({ text: atCap })).ok).toBe(true)
+  })
+
+  it('leaves ordinary single-line text unchanged (no behavior change for the common case)', () => {
+    const result = validateRoomMemoryDraft(draftInput({ text: 'the east door is locked' }))
+    expect(result.ok && result.draft.text).toBe('the east door is locked')
+  })
+
+  it('a promoted memory whose display name carries newline/control chars stays single-line', () => {
+    // Room/item display names can originate from generated RoomSpec data, which
+    // is string-validated but does not forbid embedded newlines/control chars.
+    const event: WorldEvent = {
+      schemaVersion: WORLD_SCHEMA_VERSION,
+      eventId: '11111111-1111-4111-8111-111111111111',
+      sessionId: '33333333-3333-4333-8333-333333333333',
+      seq: 1,
+      occurredAt: '2026-06-30T00:00:00.000Z',
+      type: 'room-state-changed',
+      payload: { roomId: 'old-library', flags: { burned: true } },
+    }
+    const resolver = createDisplayNameResolver({ room: { 'old-library': 'Old\nLibrary\tWing' } })
+
+    const promoted = promoteWorldEvent(event, { worldId: 'world-1', displayNames: resolver })
+    expect(promoted).not.toBeNull()
+    if (promoted === null) return
+
+    const result = validateRoomMemoryDraft(promoted.input)
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.draft.text).toBe('The Old Library Wing changed in a lasting way.')
+    expect(hasRoomMemoryControlCharacters(result.draft.text)).toBe(false)
+  })
+
+  it('never logs raw rejected/normalized text (the pure firewall logs nothing)', () => {
+    const consoleSpies = [
+      vi.spyOn(console, 'log').mockImplementation(() => {}),
+      vi.spyOn(console, 'info').mockImplementation(() => {}),
+      vi.spyOn(console, 'warn').mockImplementation(() => {}),
+      vi.spyOn(console, 'error').mockImplementation(() => {}),
+      vi.spyOn(console, 'debug').mockImplementation(() => {}),
+    ]
+
+    validateRoomMemoryDraft(draftInput({ text: 'secret\nleak\ttext' }))
+    validateRoomMemoryDraft(draftInput({ text: '\n\t\r' }))
+
+    for (const spy of consoleSpies) expect(spy).not.toHaveBeenCalled()
+  })
+})
+
+describe('room memory text helpers', () => {
+  it('toSingleLineRoomMemoryText collapses control chars and whitespace', () => {
+    expect(toSingleLineRoomMemoryText('  a\n\n b\t c  ')).toBe('a b c')
+    expect(toSingleLineRoomMemoryText('\r\n')).toBe('')
+  })
+
+  it('normalizeRoomMemoryTextForWrite is a total function over non-string input', () => {
+    expect(normalizeRoomMemoryTextForWrite(undefined as unknown as string)).toBe('')
+    expect(normalizeRoomMemoryTextForWrite('a  b')).toBe('a b')
+  })
+
+  it('hasRoomMemoryControlCharacters detects control / newline / line-separator chars', () => {
+    expect(hasRoomMemoryControlCharacters('plain text')).toBe(false)
+    expect(hasRoomMemoryControlCharacters('a\nb')).toBe(true)
+    expect(hasRoomMemoryControlCharacters('a\tb')).toBe(true)
+    expect(hasRoomMemoryControlCharacters(`a${String.fromCharCode(0x7f)}b`)).toBe(true)
+    expect(hasRoomMemoryControlCharacters(`a${String.fromCharCode(0x2028)}b`)).toBe(true)
   })
 })
 
