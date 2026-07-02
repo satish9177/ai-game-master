@@ -1,6 +1,8 @@
 export const MEMORY_CREATED_MESSAGE = 'The room remembers this.'
 export const MEMORY_RECALLED_MESSAGE = 'Something about this place feels remembered.'
 
+export const MEMORY_FEEDBACK_AUTO_DISMISS_MS = 4000
+
 export type MemoryFeedbackMessage =
   | typeof MEMORY_CREATED_MESSAGE
   | typeof MEMORY_RECALLED_MESSAGE
