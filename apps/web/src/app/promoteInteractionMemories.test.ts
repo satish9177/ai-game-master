@@ -8,8 +8,26 @@ import { WorldEventSchema } from '../domain/world/events'
 import type { WorldEvent } from '../domain/world/events'
 import type { Logger, LogContext, LogLevel } from '../platform/logger/Logger'
 import { InMemoryRoomMemoryStore } from '../memory/InMemoryRoomMemoryStore'
-import { RoomMemoryService } from '../memory/RoomMemoryService'
+import { RoomMemoryService, type RememberRoomMemoryResult } from '../memory/RoomMemoryService'
+import { EMPTY_PROMOTION_SUMMARY } from './memoryFeedback'
 import { promoteInteractionMemories } from './promoteInteractionMemories'
+
+/**
+ * `promoteWorldEvent` never builds a draft the firewall rejects, so a
+ * `rejected` outcome can only be observed by faking `remember` directly
+ * (real `RoomMemoryService` has private fields, hence the cast).
+ */
+function fakeRoomMemory(results: readonly RememberRoomMemoryResult[]): RoomMemoryService {
+  let call = 0
+  return {
+    remember: (): Promise<RememberRoomMemoryResult> => {
+      const result = results[call]
+      call++
+      if (result === undefined) throw new Error('SECRET STORE FAILURE DETAIL')
+      return Promise.resolve(result)
+    },
+  } as unknown as RoomMemoryService
+}
 
 const WORLD_ID = 'world-1'
 const SESSION_ID = '33333333-3333-4333-8333-333333333333'
@@ -90,36 +108,77 @@ describe('promoteInteractionMemories', () => {
     const { store, roomMemory, logger } = createHarness()
     const event = roomStateChanged({ roomId: ROOM_ID, flags: { opened: true } })
 
-    await promoteInteractionMemories([event], WORLD_ID, roomMemory, logger)
+    const summary = await promoteInteractionMemories([event], WORLD_ID, roomMemory, logger)
 
     const records = await store.listForRoom({ worldId: WORLD_ID, sessionId: SESSION_ID, roomId: ROOM_ID })
     expect(records).toHaveLength(1)
     expect(records[0]?.kind).toBe('room_observation')
+    expect(summary).toEqual({ recorded: 1, deduplicated: 0, rejected: 0, failed: 0 })
   })
 
   it('skips a non-promotable event without calling remember', async () => {
     const { store, roomMemory, logger } = createHarness()
     const event = movedToRoom()
 
-    await promoteInteractionMemories([event], WORLD_ID, roomMemory, logger)
+    const summary = await promoteInteractionMemories([event], WORLD_ID, roomMemory, logger)
 
     const records = await store.listForRoom({ worldId: WORLD_ID, sessionId: SESSION_ID, roomId: ROOM_ID })
     expect(records).toHaveLength(0)
+    expect(summary).toEqual(EMPTY_PROMOTION_SUMMARY)
+  })
+
+  it('returns a zero summary when there are no events', async () => {
+    const { roomMemory, logger } = createHarness()
+
+    const summary = await promoteInteractionMemories([], WORLD_ID, roomMemory, logger)
+
+    expect(summary).toEqual(EMPTY_PROMOTION_SUMMARY)
   })
 
   it('dedupes the same committed event replayed across two calls (store-level C3 dedupe)', async () => {
     const { store, roomMemory, logger } = createHarness()
     const event = roomStateChanged({ roomId: ROOM_ID, flags: { burned: true } })
 
-    await promoteInteractionMemories([event], WORLD_ID, roomMemory, logger)
-    await promoteInteractionMemories([event], WORLD_ID, roomMemory, logger)
+    const first = await promoteInteractionMemories([event], WORLD_ID, roomMemory, logger)
+    const second = await promoteInteractionMemories([event], WORLD_ID, roomMemory, logger)
 
     const scope: RoomMemoryScope = { worldId: WORLD_ID, sessionId: SESSION_ID, roomId: ROOM_ID }
     const records = await store.listForRoom(scope)
     expect(records).toHaveLength(1)
+    expect(first).toEqual({ recorded: 1, deduplicated: 0, rejected: 0, failed: 0 })
+    expect(second).toEqual({ recorded: 0, deduplicated: 1, rejected: 0, failed: 0 })
   })
 
-  it('does not throw when the store rejects, and logs a safe code only', async () => {
+  it('counts a rejected remember outcome', async () => {
+    const entries: LogEntry[] = []
+    const logger = createSpyLogger(entries)
+    const roomMemory = fakeRoomMemory([{ status: 'rejected', reason: 'text-too-long' }])
+    const event = roomStateChanged({ roomId: ROOM_ID, flags: { collapsed: true } })
+
+    const summary = await promoteInteractionMemories([event], WORLD_ID, roomMemory, logger)
+
+    expect(summary).toEqual({ recorded: 0, deduplicated: 0, rejected: 1, failed: 0 })
+  })
+
+  it('counts a store-reported failure (ok: false) without throwing', async () => {
+    const failingStore: RoomMemoryStore = {
+      record: (): Promise<RoomMemoryWriteResult> =>
+        Promise.resolve({ ok: false, error: { code: 'session-not-found' } }),
+      listForRoom: () => Promise.resolve([]),
+    }
+    const idGenerator: IdGenerator = { newId: () => '00000000-0000-4000-8000-000000000001' }
+    const clock: Clock = { now: () => '2026-07-01T00:00:00.000Z' }
+    const entries: LogEntry[] = []
+    const logger = createSpyLogger(entries)
+    const roomMemory = new RoomMemoryService(failingStore, clock, idGenerator, logger)
+    const event = roomStateChanged({ roomId: ROOM_ID, flags: { collapsed: true } })
+
+    const summary = await promoteInteractionMemories([event], WORLD_ID, roomMemory, logger)
+
+    expect(summary).toEqual({ recorded: 0, deduplicated: 0, rejected: 0, failed: 1 })
+  })
+
+  it('does not throw when the store rejects, counts it as failed, and logs a safe code only', async () => {
     const throwingStore: RoomMemoryStore = {
       record: (): Promise<RoomMemoryWriteResult> =>
         Promise.reject(new Error('SECRET STORE FAILURE DETAIL')),
@@ -132,13 +191,37 @@ describe('promoteInteractionMemories', () => {
     const roomMemory = new RoomMemoryService(throwingStore, clock, idGenerator, logger)
     const event = roomStateChanged({ roomId: ROOM_ID, flags: { collapsed: true } })
 
-    await expect(
-      promoteInteractionMemories([event], WORLD_ID, roomMemory, logger),
-    ).resolves.toBeUndefined()
+    const summary = await promoteInteractionMemories([event], WORLD_ID, roomMemory, logger)
+
+    expect(summary).toEqual({ recorded: 0, deduplicated: 0, rejected: 0, failed: 1 })
 
     const logs = JSON.stringify(entries)
     expect(logs).not.toContain('SECRET STORE FAILURE DETAIL')
     expect(entries.some((entry) => entry.context.code === 'promotion-threw')).toBe(true)
+  })
+
+  it('produces correct counts for mixed outcomes across multiple events', async () => {
+    // Call order: recorded, deduplicated, rejected, failed; the 5th call (no
+    // entry left) simulates an unexpected store throw, also counted as failed.
+    const entries: LogEntry[] = []
+    const logger = createSpyLogger(entries)
+    const roomMemory = fakeRoomMemory([
+      { status: 'recorded', record: { memoryId: 'm1' } as never },
+      { status: 'deduplicated', record: { memoryId: 'm1' } as never },
+      { status: 'rejected', reason: 'text-too-long' },
+      { status: 'failed', reason: 'session-not-found' },
+    ])
+    const events = [
+      roomStateChanged({ roomId: ROOM_ID, flags: { a: true } }, { eventId: '11111111-1111-4111-8111-111111111111', seq: 1 }),
+      roomStateChanged({ roomId: ROOM_ID, flags: { b: true } }, { eventId: '22222222-2222-4222-8222-222222222222', seq: 2 }),
+      roomStateChanged({ roomId: ROOM_ID, flags: { c: true } }, { eventId: '33333333-3333-4333-8333-333333333333', seq: 3 }),
+      roomStateChanged({ roomId: ROOM_ID, flags: { d: true } }, { eventId: '44444444-4444-4444-8444-444444444444', seq: 4 }),
+      roomStateChanged({ roomId: ROOM_ID, flags: { e: true } }, { eventId: '55555555-5555-4555-8555-555555555555', seq: 5 }),
+    ]
+
+    const summary = await promoteInteractionMemories(events, WORLD_ID, roomMemory, logger)
+
+    expect(summary).toEqual({ recorded: 1, deduplicated: 1, rejected: 1, failed: 2 })
   })
 
   it('promotes item-discovered with named text when a display-name resolver is supplied', async () => {
