@@ -1,5 +1,6 @@
 import { computePlayableBounds, objectFootprintRadius } from './generatedRoomLayout'
 import { selectGeneratedStoryAnchorIndex } from './generatedRoomComposition'
+import type { NPCDialogueSpec } from './dialogue/contracts'
 import type { GeneratedRoomVisualTheme } from './generatedRoomThemeVocabulary'
 import type { LoadedRoom } from './loadRoomSpec'
 import type { RoomObject } from './roomSpec'
@@ -12,6 +13,15 @@ export type EnsureGeneratedNpcPresenceOptions = {
 export type EnsureGeneratedNpcPresenceResult = {
   room: LoadedRoom
   npcInserted: boolean
+}
+
+export type EnsureGeneratedNpcDialogueOptions = {
+  themePack?: GeneratedRoomVisualTheme
+}
+
+export type EnsureGeneratedNpcDialogueResult = {
+  room: LoadedRoom
+  npcDialogueNormalizedCount: number
 }
 
 type NpcObject = Extract<RoomObject, { type: 'npc' }>
@@ -82,6 +92,22 @@ const NPC_BODIES: Readonly<Record<ThemeBucket, readonly string[]>> = {
   ]),
 }
 
+// Nameless greetings used when normalizing dialogue onto an existing NPC.
+const NPC_DIALOGUE_GREETINGS: Readonly<Record<ThemeBucket, readonly string[]>> = {
+  default: Object.freeze([
+    'Stay close and keep your voice low.',
+    'I can answer, but quietly.',
+  ]),
+  'fantasy-keep': Object.freeze([
+    'Hold a moment and tread softly.',
+    'Speak softly; this place still listens.',
+  ]),
+  'post-apoc': Object.freeze([
+    'Stay sharp and keep low.',
+    'Quiet now; the ruins carry every sound.',
+  ]),
+}
+
 const ANCHOR_PROMPTS: Partial<Record<RoomObject['type'], readonly string[]>> = {
   throne: Object.freeze(['What authority ruled here?', 'What happened around the throne?']),
   altar: Object.freeze(['What was this altar used for?', 'What kind of ritual happened here?']),
@@ -133,6 +159,45 @@ export function ensureGeneratedNpcPresence(
   }
 }
 
+export function ensureGeneratedNpcDialogue(
+  room: LoadedRoom,
+  options: EnsureGeneratedNpcDialogueOptions = {},
+): EnsureGeneratedNpcDialogueResult {
+  const usedIds = new Set(room.objects.map((object) => object.id).filter(isNonBlankString))
+  let npcDialogueNormalizedCount = 0
+  let anyChanged = false
+
+  const objects = room.objects.map((object) => {
+    if (object.type !== 'npc') return object
+
+    const needsId = !isNonBlankString(object.id)
+    const needsDialogue = object.interaction.dialogue === undefined
+    if (!needsId && !needsDialogue) return object
+
+    const id = needsId ? nextNpcIdFromIds(usedIds) : object.id
+    usedIds.add(id)
+    anyChanged = true
+
+    if (!needsDialogue) {
+      return { ...object, id }
+    }
+
+    npcDialogueNormalizedCount += 1
+
+    return {
+      ...object,
+      id,
+      interaction: {
+        ...object.interaction,
+        dialogue: buildNpcDialogue(room, options, id),
+      },
+    }
+  })
+
+  if (!anyChanged) return { room, npcDialogueNormalizedCount }
+  return { room: { ...room, objects }, npcDialogueNormalizedCount }
+}
+
 function buildNpcTemplate(
   room: LoadedRoom,
   options: EnsureGeneratedNpcPresenceOptions,
@@ -167,11 +232,36 @@ function buildNpcTemplate(
   }
 }
 
+function buildNpcDialogue(
+  room: LoadedRoom,
+  options: EnsureGeneratedNpcDialogueOptions,
+  npcId: string,
+): NPCDialogueSpec {
+  const selectionKey = `${room.id}:${npcId}`
+  const bucket = themeBucket(options.themePack)
+  return {
+    persona: selectFrom(NPC_PERSONAS[bucket], selectionKey, 'persona'),
+    greeting: selectFrom(NPC_DIALOGUE_GREETINGS[bucket], selectionKey, 'greeting'),
+    prompts: [
+      { id: 'ask-room', label: selectPromptOneWithKey(room, options, selectionKey) },
+      { id: 'ask-help', label: selectFrom(HELP_PROMPTS, selectionKey, 'ask-help') },
+    ],
+  }
+}
+
 function selectPromptOne(room: LoadedRoom, options: EnsureGeneratedNpcPresenceOptions): string {
+  return selectPromptOneWithKey(room, options, room.id)
+}
+
+function selectPromptOneWithKey(
+  room: LoadedRoom,
+  options: EnsureGeneratedNpcDialogueOptions,
+  selectionKey: string,
+): string {
   const anchorIndex = selectGeneratedStoryAnchorIndex(room.objects, { themePack: options.themePack })
   const anchorType = anchorIndex >= 0 ? room.objects[anchorIndex]?.type : undefined
   const prompts = anchorType !== undefined ? ANCHOR_PROMPTS[anchorType] : undefined
-  return selectFrom(prompts ?? GENERIC_ROOM_PROMPTS, room.id, `ask-room:${anchorType ?? 'none'}`)
+  return selectFrom(prompts ?? GENERIC_ROOM_PROMPTS, selectionKey, `ask-room:${anchorType ?? 'none'}`)
 }
 
 function themeBucket(themePack: GeneratedRoomVisualTheme | undefined): ThemeBucket {
@@ -197,11 +287,19 @@ function formatName(template: string, name: string): string {
 
 function nextNpcId(objects: RoomObject[]): string {
   const ids = new Set(objects.map((object) => object.id).filter((id): id is string => id != null))
+  return nextNpcIdFromIds(ids)
+}
+
+function nextNpcIdFromIds(ids: ReadonlySet<string>): string {
   if (!ids.has(GENERATED_NPC_BASE_ID)) return GENERATED_NPC_BASE_ID
   for (let index = 2; ; index += 1) {
     const candidate = `${GENERATED_NPC_BASE_ID}-${index}`
     if (!ids.has(candidate)) return candidate
   }
+}
+
+function isNonBlankString(value: string | undefined): value is string {
+  return value !== undefined && value.trim().length > 0
 }
 
 function findNpcPosition(room: LoadedRoom): [number, number, number] | null {

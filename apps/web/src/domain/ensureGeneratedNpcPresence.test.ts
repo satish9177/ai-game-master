@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { buildDialogueLookup } from '../app/dialogue'
-import { ensureGeneratedNpcPresence } from './ensureGeneratedNpcPresence'
+import { ensureGeneratedNpcDialogue, ensureGeneratedNpcPresence } from './ensureGeneratedNpcPresence'
 import { loadRoomSpec } from './loadRoomSpec'
 import type { LoadedRoom } from './loadRoomSpec'
 import type { RoomObject } from './roomSpec'
@@ -336,5 +336,393 @@ describe('ensureGeneratedNpcPresence', () => {
     ensureGeneratedNpcPresence(room, { requested: true })
 
     expect(room).toEqual(before)
+  })
+})
+
+describe('ensureGeneratedNpcDialogue', () => {
+  it('generator-style NPC with no id and no dialogue gets id and dialogue', () => {
+    const room = roomWith([
+      {
+        type: 'npc',
+        name: 'Caretaker',
+        position: [0, 0, 0],
+        interaction: { key: 'F', prompt: 'Press F to talk', body: 'Caretaker waits.' },
+      },
+    ])
+
+    const result = ensureGeneratedNpcDialogue(room)
+    const npc = insertedNpc(result.room)
+
+    expect(result.npcDialogueNormalizedCount).toBe(1)
+    expect(npc.id).toBe('generated-npc')
+    expect(npc.interaction.dialogue).toEqual({
+      persona: expect.any(String),
+      greeting: expect.any(String),
+      prompts: [
+        { id: 'ask-room', label: expect.any(String) },
+        { id: 'ask-help', label: expect.any(String) },
+      ],
+    })
+  })
+
+  it('NPC with non-empty id but no dialogue gets dialogue and preserves id byte-identical', () => {
+    const room = roomWith([
+      {
+        type: 'npc',
+        id: 'npc-existing-id',
+        name: 'Caretaker',
+        position: [1, 0, 0],
+        interaction: { key: 'F', prompt: 'Prompt text', body: 'Body text' },
+      },
+    ])
+
+    const result = ensureGeneratedNpcDialogue(room)
+    const npc = insertedNpc(result.room)
+
+    expect(result.npcDialogueNormalizedCount).toBe(1)
+    expect(npc.id).toBe('npc-existing-id')
+    expect(npc.interaction.dialogue).toBeDefined()
+  })
+
+  it('NPC with existing dialogue but missing id gets id, preserves dialogue, and appears in lookup', () => {
+    const room = roomWith([
+      {
+        type: 'npc',
+        name: 'Caretaker',
+        position: [0, 0, 0],
+        interaction: {
+          key: 'F',
+          prompt: 'Talk',
+          dialogue: {
+            persona: 'existing-persona',
+            greeting: 'Existing greeting.',
+            prompts: [{ id: 'custom', label: 'Custom prompt' }],
+          },
+        },
+      },
+    ])
+    const existingDialogue = insertedNpc(room).interaction.dialogue
+
+    const result = ensureGeneratedNpcDialogue(room)
+    const npc = insertedNpc(result.room)
+    const lookup = buildDialogueLookup(result.room)
+
+    expect(result.room).not.toBe(room)
+    expect(result.npcDialogueNormalizedCount).toBe(0)
+    expect(npc.id).toBe('generated-npc')
+    expect(npc.interaction.dialogue).toBe(existingDialogue)
+    expect(npc.interaction.dialogue).toEqual(existingDialogue)
+    expect(lookup.size).toBeGreaterThanOrEqual(1)
+    expect(lookup.get('generated-npc')?.dialogue).toBe(existingDialogue)
+  })
+
+  it('NPC with existing dialogue but blank id gets id, preserves dialogue, and appears in lookup', () => {
+    const room = roomWith([
+      {
+        type: 'npc',
+        id: '   ',
+        name: 'Caretaker',
+        position: [0, 0, 0],
+        interaction: {
+          key: 'F',
+          prompt: 'Talk',
+          dialogue: {
+            persona: 'existing-persona',
+            greeting: 'Existing greeting.',
+            prompts: [{ id: 'custom', label: 'Custom prompt' }],
+          },
+        },
+      },
+    ])
+    const existingDialogue = insertedNpc(room).interaction.dialogue
+
+    const result = ensureGeneratedNpcDialogue(room)
+    const npc = insertedNpc(result.room)
+    const lookup = buildDialogueLookup(result.room)
+
+    expect(result.npcDialogueNormalizedCount).toBe(0)
+    expect(npc.id).toBe('generated-npc')
+    expect(npc.interaction.dialogue).toBe(existingDialogue)
+    expect(npc.interaction.dialogue).toEqual(existingDialogue)
+    expect(lookup.get('generated-npc')?.dialogue).toBe(existingDialogue)
+  })
+
+  it('NPC already has dialogue is unchanged byte-identical and count is 0', () => {
+    const room = roomWith([
+      {
+        type: 'npc',
+        id: 'talking-npc',
+        name: 'Asha',
+        position: [0, 0, 0],
+        interaction: {
+          key: 'F',
+          prompt: 'Talk',
+          body: 'Asha waits.',
+          dialogue: {
+            persona: 'existing-persona',
+            greeting: 'Existing greeting.',
+            prompts: [{ id: 'custom', label: 'Custom prompt' }],
+          },
+        },
+      },
+    ])
+
+    const beforeNpc = insertedNpc(room)
+    const result = ensureGeneratedNpcDialogue(room)
+
+    expect(result.room).toBe(room)
+    expect(result.npcDialogueNormalizedCount).toBe(0)
+    expect(insertedNpc(result.room)).toEqual(beforeNpc)
+    expect(insertedNpc(result.room).interaction.dialogue).toBe(beforeNpc.interaction.dialogue)
+  })
+
+  it('multiple id-less NPCs get distinct ids and count equals normalized NPCs', () => {
+    const room = roomWith([
+      {
+        type: 'npc',
+        name: 'One',
+        position: [-2, 0, 0],
+        interaction: { key: 'F', prompt: 'Talk one' },
+      },
+      {
+        type: 'npc',
+        id: '   ',
+        name: 'Two',
+        position: [2, 0, 0],
+        interaction: { key: 'F', prompt: 'Talk two' },
+      },
+      { type: 'crate', id: 'generated-npc', position: [0, 0, -2] },
+    ])
+
+    const result = ensureGeneratedNpcDialogue(room)
+    const npcs = result.room.objects.filter((object): object is Extract<RoomObject, { type: 'npc' }> =>
+      object.type === 'npc')
+
+    expect(result.npcDialogueNormalizedCount).toBe(2)
+    expect(npcs.map((npc) => npc.id)).toEqual(['generated-npc-2', 'generated-npc-3'])
+    expect(new Set(npcs.map((npc) => npc.id)).size).toBe(2)
+  })
+
+  it('existing ids are preserved', () => {
+    const room = roomWith([
+      {
+        type: 'npc',
+        id: 'alpha',
+        name: 'Alpha',
+        position: [-2, 0, 0],
+        interaction: { key: 'F', prompt: 'Talk alpha' },
+      },
+      {
+        type: 'npc',
+        id: 'beta',
+        name: 'Beta',
+        position: [2, 0, 0],
+        interaction: { key: 'F', prompt: 'Talk beta' },
+      },
+    ])
+
+    const result = ensureGeneratedNpcDialogue(room)
+    const ids = result.room.objects
+      .filter((object): object is Extract<RoomObject, { type: 'npc' }> => object.type === 'npc')
+      .map((npc) => npc.id)
+
+    expect(ids).toEqual(['alpha', 'beta'])
+  })
+
+  it('prompt IDs are exactly ask-room and ask-help', () => {
+    const room = roomWith([
+      {
+        type: 'npc',
+        id: 'quiet-npc',
+        name: 'Quiet',
+        position: [0, 0, 0],
+        interaction: { key: 'F', prompt: 'Talk' },
+      },
+    ])
+
+    const npc = insertedNpc(ensureGeneratedNpcDialogue(room).room)
+
+    expect(npc.interaction.dialogue?.prompts?.map((prompt) => prompt.id))
+      .toEqual(['ask-room', 'ask-help'])
+  })
+
+  it('anchor-present room influences ask-room label', () => {
+    const room = roomWith([
+      { type: 'altar', position: [0, 0, -4] },
+      {
+        type: 'npc',
+        id: 'anchor-npc',
+        name: 'Anchor',
+        position: [2, 0, 0],
+        interaction: { key: 'F', prompt: 'Talk' },
+      },
+    ])
+
+    const npc = insertedNpc(ensureGeneratedNpcDialogue(room).room)
+
+    expect(ALTAR_PROMPTS).toContain(npc.interaction.dialogue?.prompts?.[0]?.label)
+  })
+
+  it('no-anchor room uses generic safe prompt', () => {
+    const room = roomWith([
+      { type: 'pillar', position: [0, 0, -4] },
+      {
+        type: 'npc',
+        id: 'generic-npc',
+        name: 'Generic',
+        position: [2, 0, 0],
+        interaction: { key: 'F', prompt: 'Talk' },
+      },
+    ])
+
+    const npc = insertedNpc(ensureGeneratedNpcDialogue(room).room)
+
+    expect(GENERIC_ROOM_PROMPTS).toContain(npc.interaction.dialogue?.prompts?.[0]?.label)
+  })
+
+  it('is deterministic for repeated calls with the same input', () => {
+    const room = roomWith([
+      { type: 'machine', position: [0, 0, -4] },
+      {
+        type: 'npc',
+        name: 'Repeatable',
+        position: [2, 0, 0],
+        interaction: { key: 'F', prompt: 'Talk' },
+      },
+    ], { id: 'repeatable-room' })
+
+    const first = ensureGeneratedNpcDialogue(room, { themePack: 'post-apoc' })
+    const second = ensureGeneratedNpcDialogue(room, { themePack: 'post-apoc' })
+
+    expect(second).toEqual(first)
+  })
+
+  it('does not mutate input room', () => {
+    const room = roomWith([
+      {
+        type: 'npc',
+        name: 'Pure',
+        position: [0, 0, 0],
+        interaction: { key: 'F', prompt: 'Talk', body: 'Pure body.' },
+      },
+    ])
+    const before = structuredClone(room)
+
+    ensureGeneratedNpcDialogue(room)
+
+    expect(room).toEqual(before)
+  })
+
+  it('does not leak room, object, provider, prompt, memory, gate, or flag text into added dialogue', () => {
+    const room = roomWith([
+      {
+        type: 'book',
+        id: 'object-secret-id',
+        position: [0, 0, -2],
+        interaction: {
+          key: 'E',
+          prompt: 'OBJECT_PROMPT_SECRET',
+          title: 'OBJECT_TITLE_SECRET',
+          body: 'OBJECT_BODY_SECRET generated-description-secret',
+          effect: { kind: 'inspect', flag: 'secret_flag_key' },
+        },
+      },
+      {
+        type: 'arch',
+        id: 'gate-secret-id',
+        position: [3, 0, -3],
+        interaction: { key: 'E', prompt: 'Gate', exit: { toRoomId: 'secret-gate-target' } },
+      },
+      { type: 'zombie', name: 'OTHER_OBJECT_SECRET_NAME', position: [1, 0, -2] },
+      {
+        type: 'npc',
+        name: 'NPC_SECRET_NAME',
+        position: [2, 0, 0],
+        interaction: {
+          key: 'F',
+          prompt: 'NPC_PROMPT_SECRET user-prompt-secret',
+          body: 'NPC_BODY_SECRET provider-text-secret memory-text-secret',
+        },
+      },
+    ], {
+      id: 'room-secret-id',
+      name: 'ROOM_SECRET_NAME',
+    })
+
+    const npc = insertedNpc(ensureGeneratedNpcDialogue(room).room)
+    const dialogueJson = JSON.stringify(npc.interaction.dialogue)
+
+    for (const forbidden of [
+      'room-secret-id',
+      'ROOM_SECRET_NAME',
+      'object-secret-id',
+      'OBJECT_PROMPT_SECRET',
+      'OBJECT_TITLE_SECRET',
+      'OBJECT_BODY_SECRET',
+      'generated-description-secret',
+      'gate-secret-id',
+      'secret-gate-target',
+      'secret_flag_key',
+      'OTHER_OBJECT_SECRET_NAME',
+      'NPC_SECRET_NAME',
+      'NPC_PROMPT_SECRET',
+      'NPC_BODY_SECRET',
+      'user-prompt-secret',
+      'provider-text-secret',
+      'memory-text-secret',
+    ]) {
+      expect(dialogueJson).not.toContain(forbidden)
+    }
+  })
+
+  it('preserves NPC name, prompt, body, position, and non-NPC objects', () => {
+    const room = roomWith([
+      { type: 'crate', id: 'crate-a', position: [0, 0, -2] },
+      {
+        type: 'npc',
+        id: 'preserved-npc',
+        name: 'Preserved Name',
+        position: [2, 0, 0],
+        interaction: {
+          key: 'F',
+          prompt: 'Preserved prompt',
+          body: 'Preserved body',
+        },
+      },
+    ])
+    const beforeNpc = insertedNpc(room)
+    const beforeCrate = room.objects[0]
+
+    const result = ensureGeneratedNpcDialogue(room)
+    const npc = insertedNpc(result.room)
+
+    expect(npc.name).toBe(beforeNpc.name)
+    expect(npc.interaction.prompt).toBe(beforeNpc.interaction.prompt)
+    expect(npc.interaction.body).toBe(beforeNpc.interaction.body)
+    expect(npc.position).toEqual(beforeNpc.position)
+    expect(result.room.objects[0]).toBe(beforeCrate)
+    expect(result.room.objects[0]).toEqual(beforeCrate)
+  })
+
+  it('makes at least one generated-room NPC visible to buildDialogueLookup', () => {
+    const room = roomWith([
+      {
+        type: 'npc',
+        name: 'Visible',
+        position: [0, 0, 0],
+        interaction: { key: 'F', prompt: 'Talk' },
+      },
+    ], { id: 'generated-lookup-room' })
+
+    const result = ensureGeneratedNpcDialogue(room)
+    const lookup = buildDialogueLookup(result.room)
+
+    expect(result.room.objects.some((object) => object.type === 'npc')).toBe(true)
+    expect(lookup.size).toBeGreaterThanOrEqual(1)
+    expect(lookup.get('generated-npc')).toMatchObject({
+      npcId: 'generated-npc',
+      npcName: 'Visible',
+      dialogue: expect.any(Object),
+    })
   })
 })
