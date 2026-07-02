@@ -308,7 +308,7 @@ describe('RoomViewer NPC dialogue room context wiring', () => {
     expect(setNPCDialoguePending).not.toHaveBeenCalledWith(true)
   })
 
-  it('still calls npcDialogueService.reply when a prompt button is clicked via the existing handleNPCSay path', async () => {
+  it('sends prompt button id separately from the displayed player label', async () => {
     const replies: unknown[] = []
     const room = loadedRoom()
 
@@ -343,6 +343,8 @@ describe('RoomViewer NPC dialogue room context wiring', () => {
 
     await Promise.resolve()
     expect(replies).toHaveLength(0)
+    const setNPCDialogueTurns = mockState.stateSetters[5]
+    setNPCDialogueTurns.mockClear()
 
     const handleNPCSay = mockState.callbacks[0] as (promptId: string | undefined) => void
     handleNPCSay('ask-room')
@@ -352,9 +354,13 @@ describe('RoomViewer NPC dialogue room context wiring', () => {
     expect(replies).toHaveLength(1)
     expect(replies[0]).toMatchObject({
       npcId: 'room-npc',
-      playerLine: 'ask-room',
-      history: [{ speaker: 'player', text: 'Ask about the room' }],
+      promptId: 'ask-room',
+      playerLine: 'Ask about the room',
+      history: [],
     })
+    expect(setNPCDialogueTurns).toHaveBeenCalledWith([
+      { speaker: 'player', text: 'Ask about the room' },
+    ])
   })
 
   it('calls requestDialogueAttempt before reply and proceeds when it returns true', async () => {
@@ -448,8 +454,10 @@ describe('RoomViewer NPC dialogue room context wiring', () => {
 
     const setNPCDialogueMessage = mockState.stateSetters[6]
     const setNPCDialoguePending = mockState.stateSetters[7]
+    const setNPCDialogueTurns = mockState.stateSetters[5]
     setNPCDialogueMessage.mockClear()
     setNPCDialoguePending.mockClear()
+    setNPCDialogueTurns.mockClear()
 
     const handleNPCSay = mockState.callbacks[0] as (promptId: string | undefined) => void
     handleNPCSay('ask-room')
@@ -459,6 +467,7 @@ describe('RoomViewer NPC dialogue room context wiring', () => {
     expect(requestDialogueAttempt).toHaveBeenCalledTimes(1)
     expect(replies).toHaveLength(0)
     expect(setNPCDialogueMessage).toHaveBeenCalledWith(DIALOGUE_AT_CAP_MESSAGE)
+    expect(setNPCDialogueTurns).not.toHaveBeenCalled()
     expect(setNPCDialoguePending).not.toHaveBeenCalledWith(true)
   })
 

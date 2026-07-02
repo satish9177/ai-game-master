@@ -357,10 +357,11 @@ export function RoomViewer({
       const playerTurn: NPCDialogueTurn | undefined = prompt
         ? { speaker: 'player', text: prompt.label }
         : undefined
-      const history = playerTurn
-        ? [...npcDialogueTurns, playerTurn]
-        : [...npcDialogueTurns]
-      setNPCDialogueTurns(history)
+      const previousTurns = [...npcDialogueTurns]
+      const visibleTurns = playerTurn
+        ? [...previousTurns, playerTurn]
+        : previousTurns
+      setNPCDialogueTurns(visibleTurns)
       setNPCDialogueMessage(undefined)
       npcDialoguePendingRef.current = true
       setNPCDialoguePending(true)
@@ -369,8 +370,9 @@ export function RoomViewer({
       void npcDialogueService.reply(buildNPCDialogueReplyInput({
         sessionId,
         target,
-        history,
-        playerLine: prompt?.id,
+        history: previousTurns,
+        promptId: prompt?.id,
+        playerLine: prompt?.label,
         roomContext: roomDialogueContextRef.current,
         questStage: questStageRef.current,
         memoryContext: roomMemoryContextRef.current,

@@ -48,6 +48,16 @@ function request(overrides: Partial<NPCDialogueRequest> = {}): NPCDialogueReques
 
 const userContent = (input: NPCDialogueRequest): string => buildDialoguePromptMessages(input)[1]!.content
 
+function recentConversationSection(content: string): string {
+  const start = content.indexOf('RECENT CONVERSATION')
+  const end = content.indexOf('\nBACKGROUND ROOM MEMORY', start)
+  return end === -1 ? content.slice(start) : content.slice(start, end)
+}
+
+function occurrenceCount(text: string, needle: string): number {
+  return text.split(needle).length - 1
+}
+
 describe('buildDialoguePromptMessages', () => {
   it('builds prompt with authoritative sections before BACKGROUND', () => {
     const content = userContent(request({
@@ -92,6 +102,46 @@ describe('buildDialoguePromptMessages', () => {
 
     expect(withoutMemory).not.toContain('BACKGROUND')
     expect(withEmptyMemory).not.toContain('BACKGROUND')
+  })
+
+  it('renders prompt-button labels once without leaking prompt ids into recent conversation', () => {
+    const roomPrompt = recentConversationSection(userContent(request({
+      promptId: 'ask-room',
+      playerLine: 'What should I look at first?',
+      context: {
+        ...request().context,
+        history: [
+          { speaker: 'npc', text: 'Watch the altar.' },
+        ],
+      },
+    })))
+    const helpPrompt = recentConversationSection(userContent(request({
+      promptId: 'ask-help',
+      playerLine: 'Can you guide me?',
+      context: {
+        ...request().context,
+        history: [
+          { speaker: 'npc', text: 'Stay close to the light.' },
+        ],
+      },
+    })))
+    const exitPrompt = recentConversationSection(userContent(request({
+      promptId: 'ask-exit',
+      playerLine: 'Which way is out?',
+      context: {
+        ...request().context,
+        history: [
+          { speaker: 'npc', text: 'The western arch is open.' },
+        ],
+      },
+    })))
+
+    expect(occurrenceCount(roomPrompt, 'What should I look at first?')).toBe(1)
+    expect(occurrenceCount(helpPrompt, 'Can you guide me?')).toBe(1)
+    expect(occurrenceCount(exitPrompt, 'Which way is out?')).toBe(1)
+    expect(roomPrompt).not.toContain('ask-room')
+    expect(helpPrompt).not.toContain('ask-help')
+    expect(exitPrompt).not.toContain('ask-exit')
   })
 
   it('memory present creates hedged transformed lines', () => {
