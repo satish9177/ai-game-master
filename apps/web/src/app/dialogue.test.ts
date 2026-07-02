@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { loadRoomSpec } from '../domain/loadRoomSpec'
 import type { LoadedRoom } from '../domain/loadRoomSpec'
-import { buildDialogueLookup, dialogueResultMessage } from './dialogue'
+import { buildDialogueLookup, dialogueResultMessage, DIALOGUE_AT_CAP_MESSAGE } from './dialogue'
 
 function loadDialogueRoom(objects: unknown[]): LoadedRoom {
   return loadRoomSpec({
@@ -124,5 +124,10 @@ describe('dialogue composition helpers', () => {
       .toBe('They have nothing to say right now.')
     expect(dialogueResultMessage({ status: 'failed', reason: 'not-found' }))
       .toBe('This conversation is unavailable.')
+  })
+
+  it('exports a stable, non-empty at-cap message for the blocked dialogue-attempt gate', () => {
+    expect(DIALOGUE_AT_CAP_MESSAGE).toBe('They have nothing more to say right now.')
+    expect(DIALOGUE_AT_CAP_MESSAGE.length).toBeGreaterThan(0)
   })
 })

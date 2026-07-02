@@ -13,6 +13,8 @@ export type NPCDialogueLookup = ReadonlyMap<string, NPCDialogueTarget>
 
 const FALLBACK_NPC_NAME = 'Stranger'
 
+export const DIALOGUE_AT_CAP_MESSAGE = 'They have nothing more to say right now.'
+
 export function buildDialogueLookup(room: LoadedRoom): NPCDialogueLookup {
   const lookup = new Map<string, NPCDialogueTarget>()
   for (const object of room.objects) {

@@ -32,7 +32,7 @@ import { buildEncounterLookup, encounterResultMessage } from '../app/encounters'
 import type { EncounterLookup } from '../app/encounters'
 import { buildExitLookup, navigationResultMessage } from '../app/exits'
 import type { ExitLookup } from '../app/exits'
-import { buildDialogueLookup, dialogueResultMessage } from '../app/dialogue'
+import { buildDialogueLookup, dialogueResultMessage, DIALOGUE_AT_CAP_MESSAGE } from '../app/dialogue'
 import type { NPCDialogueLookup, NPCDialogueTarget } from '../app/dialogue'
 
 const ROOM_UNAVAILABLE = 'This room could not be loaded.'
@@ -65,6 +65,7 @@ type RoomViewerProps = {
   interactionService: InteractionService
   encounterService: EncounterService
   npcDialogueService: NPCDialogueService
+  requestDialogueAttempt?: () => boolean
   onNavigate: (toRoomId: string) => Promise<NavigationResult>
   onWorldStateChange?: (state: WorldState) => void
   onCommittedInteractionEvents?: (input: CommittedInteractionEvents) => void
@@ -79,6 +80,7 @@ export function RoomViewer({
   interactionService,
   encounterService,
   npcDialogueService,
+  requestDialogueAttempt,
   onNavigate,
   onWorldStateChange,
   onCommittedInteractionEvents,
@@ -347,6 +349,11 @@ export function RoomViewer({
         : undefined
       if (promptId && !prompt) return
 
+      if (!(requestDialogueAttempt?.() ?? true)) {
+        setNPCDialogueMessage(DIALOGUE_AT_CAP_MESSAGE)
+        return
+      }
+
       const playerTurn: NPCDialogueTurn | undefined = prompt
         ? { speaker: 'player', text: prompt.label }
         : undefined
@@ -392,7 +399,7 @@ export function RoomViewer({
         setNPCDialogueMessage('They have nothing to say right now.')
       })
     },
-    [npcDialogueService, npcDialogueTurns, sessionId],
+    [npcDialogueService, npcDialogueTurns, sessionId, requestDialogueAttempt],
   )
 
   const closeNPCDialogue = useCallback(() => {

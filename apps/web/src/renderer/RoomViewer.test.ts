@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { DIALOGUE_AT_CAP_MESSAGE } from '../app/dialogue'
 import type { NPCDialogueTarget } from '../app/dialogue'
 import { buildNPCDialogueReplyInput } from '../app/npcDialogueReplyInput'
 import { buildRoomDialogueContext } from '../domain/dialogue/buildRoomDialogueContext'
@@ -354,6 +355,200 @@ describe('RoomViewer NPC dialogue room context wiring', () => {
       playerLine: 'ask-room',
       history: [{ speaker: 'player', text: 'Ask about the room' }],
     })
+  })
+
+  it('calls requestDialogueAttempt before reply and proceeds when it returns true', async () => {
+    const callOrder: string[] = []
+    const replies: unknown[] = []
+    const room = loadedRoom()
+    const requestDialogueAttempt = vi.fn(() => {
+      callOrder.push('requestDialogueAttempt')
+      return true
+    })
+
+    const props = {
+      roomSource: { getRoom: async () => ({ ok: true, room }) },
+      sessionId: 'session-1',
+      interactionService: { resolve: async () => ({ status: 'rejected', reason: 'missing-effect' }) },
+      encounterService: { resolve: async () => ({ status: 'failed', reason: 'not-found' }) },
+      npcDialogueService: {
+        reply: async (input: unknown) => {
+          callOrder.push('reply')
+          replies.push(input)
+          return { status: 'replied', turn: { speaker: 'npc', text: 'Allowed line.' } }
+        },
+      },
+      onNavigate: async () => ({ status: 'failed', reason: 'not-found' }),
+      requestDialogueAttempt,
+    } as unknown as Parameters<typeof RoomViewer>[0]
+    RoomViewer(props)
+
+    await Promise.resolve()
+    await Promise.resolve()
+
+    const engine = mockState.engineInstances[0]
+    engine?.onRequestOpenInteraction?.({
+      id: 'room-npc',
+      type: 'npc',
+      label: 'Secret NPC Object Name',
+      affordance: 'talk',
+      key: 'F',
+      prompt: 'Secret interaction prompt',
+      position: { x: 0, y: 0, z: -3 },
+    })
+
+    await Promise.resolve()
+
+    const handleNPCSay = mockState.callbacks[0] as (promptId: string | undefined) => void
+    handleNPCSay('ask-room')
+
+    await Promise.resolve()
+
+    expect(requestDialogueAttempt).toHaveBeenCalledTimes(1)
+    expect(callOrder).toEqual(['requestDialogueAttempt', 'reply'])
+    expect(replies).toHaveLength(1)
+  })
+
+  it('blocks reply and shows the at-cap message when requestDialogueAttempt returns false', async () => {
+    const replies: unknown[] = []
+    const room = loadedRoom()
+    const requestDialogueAttempt = vi.fn(() => false)
+
+    const props = {
+      roomSource: { getRoom: async () => ({ ok: true, room }) },
+      sessionId: 'session-1',
+      interactionService: { resolve: async () => ({ status: 'rejected', reason: 'missing-effect' }) },
+      encounterService: { resolve: async () => ({ status: 'failed', reason: 'not-found' }) },
+      npcDialogueService: {
+        reply: async (input: unknown) => {
+          replies.push(input)
+          return { status: 'replied', turn: { speaker: 'npc', text: 'Should not be requested.' } }
+        },
+      },
+      onNavigate: async () => ({ status: 'failed', reason: 'not-found' }),
+      requestDialogueAttempt,
+    } as unknown as Parameters<typeof RoomViewer>[0]
+    RoomViewer(props)
+
+    await Promise.resolve()
+    await Promise.resolve()
+
+    const engine = mockState.engineInstances[0]
+    engine?.onRequestOpenInteraction?.({
+      id: 'room-npc',
+      type: 'npc',
+      label: 'Secret NPC Object Name',
+      affordance: 'talk',
+      key: 'F',
+      prompt: 'Secret interaction prompt',
+      position: { x: 0, y: 0, z: -3 },
+    })
+
+    await Promise.resolve()
+
+    const setNPCDialogueMessage = mockState.stateSetters[6]
+    const setNPCDialoguePending = mockState.stateSetters[7]
+    setNPCDialogueMessage.mockClear()
+    setNPCDialoguePending.mockClear()
+
+    const handleNPCSay = mockState.callbacks[0] as (promptId: string | undefined) => void
+    handleNPCSay('ask-room')
+
+    await Promise.resolve()
+
+    expect(requestDialogueAttempt).toHaveBeenCalledTimes(1)
+    expect(replies).toHaveLength(0)
+    expect(setNPCDialogueMessage).toHaveBeenCalledWith(DIALOGUE_AT_CAP_MESSAGE)
+    expect(setNPCDialoguePending).not.toHaveBeenCalledWith(true)
+  })
+
+  it('proceeds with the existing reply flow when requestDialogueAttempt is not provided', async () => {
+    const replies: unknown[] = []
+    const room = loadedRoom()
+
+    const props = {
+      roomSource: { getRoom: async () => ({ ok: true, room }) },
+      sessionId: 'session-1',
+      interactionService: { resolve: async () => ({ status: 'rejected', reason: 'missing-effect' }) },
+      encounterService: { resolve: async () => ({ status: 'failed', reason: 'not-found' }) },
+      npcDialogueService: {
+        reply: async (input: unknown) => {
+          replies.push(input)
+          return { status: 'replied', turn: { speaker: 'npc', text: 'Unguarded line.' } }
+        },
+      },
+      onNavigate: async () => ({ status: 'failed', reason: 'not-found' }),
+    } as unknown as Parameters<typeof RoomViewer>[0]
+    RoomViewer(props)
+
+    await Promise.resolve()
+    await Promise.resolve()
+
+    const engine = mockState.engineInstances[0]
+    engine?.onRequestOpenInteraction?.({
+      id: 'room-npc',
+      type: 'npc',
+      label: 'Secret NPC Object Name',
+      affordance: 'talk',
+      key: 'F',
+      prompt: 'Secret interaction prompt',
+      position: { x: 0, y: 0, z: -3 },
+    })
+
+    await Promise.resolve()
+
+    const handleNPCSay = mockState.callbacks[0] as (promptId: string | undefined) => void
+    handleNPCSay(undefined)
+
+    await Promise.resolve()
+
+    expect(replies).toHaveLength(1)
+  })
+
+  it('gates the Continue path (handleNPCSay with no promptId) the same as prompt clicks', async () => {
+    const replies: unknown[] = []
+    const room = loadedRoom()
+    const requestDialogueAttempt = vi.fn(() => false)
+
+    const props = {
+      roomSource: { getRoom: async () => ({ ok: true, room }) },
+      sessionId: 'session-1',
+      interactionService: { resolve: async () => ({ status: 'rejected', reason: 'missing-effect' }) },
+      encounterService: { resolve: async () => ({ status: 'failed', reason: 'not-found' }) },
+      npcDialogueService: {
+        reply: async (input: unknown) => {
+          replies.push(input)
+          return { status: 'replied', turn: { speaker: 'npc', text: 'Should not be requested.' } }
+        },
+      },
+      onNavigate: async () => ({ status: 'failed', reason: 'not-found' }),
+      requestDialogueAttempt,
+    } as unknown as Parameters<typeof RoomViewer>[0]
+    RoomViewer(props)
+
+    await Promise.resolve()
+    await Promise.resolve()
+
+    const engine = mockState.engineInstances[0]
+    engine?.onRequestOpenInteraction?.({
+      id: 'room-npc',
+      type: 'npc',
+      label: 'Secret NPC Object Name',
+      affordance: 'talk',
+      key: 'F',
+      prompt: 'Secret interaction prompt',
+      position: { x: 0, y: 0, z: -3 },
+    })
+
+    await Promise.resolve()
+
+    const handleNPCSay = mockState.callbacks[0] as (promptId: string | undefined) => void
+    handleNPCSay(undefined)
+
+    await Promise.resolve()
+
+    expect(requestDialogueAttempt).toHaveBeenCalledTimes(1)
+    expect(replies).toHaveLength(0)
   })
 
   it('passes resolvedObjectIds through to engine.setRoom when provided', async () => {

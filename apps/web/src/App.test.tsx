@@ -2701,6 +2701,52 @@ describe('generated quest restore — handleLoad wiring (ADR-0059, slice 5)', ()
     expect(appSource).not.toContain('const dialogueProvider = new FakeNPCDialogueProvider()')
   })
 
+  it('keys the dialogue usage gate on the dialogue provider selection, not the room-generation guard', () => {
+    expect(appSource).toContain("const dialogueGuardEnabled = dialogueProviderSelection.kind === 'real'")
+    // Room generation's guardEnabled is derived from a different selection
+    // (roomGeneratorSelectionLog); dialogueGuardEnabled must not reuse it.
+    expect(appSource).not.toContain('const dialogueGuardEnabled = guardEnabled')
+  })
+
+  it('gates real NPC dialogue calls through requestDialogueAttempt, sharing the session usage meter', () => {
+    const requestDialogueAttempt = appSource.slice(
+      appSource.indexOf('const requestDialogueAttempt = useCallback('),
+      appSource.indexOf('const enterActivePlay = useCallback('),
+    )
+
+    // Fake dialogue provider: always allowed, never counted (return before any
+    // read/record against the shared meter).
+    expect(requestDialogueAttempt).toContain('if (!dialogueGuardEnabled) return true')
+    expect(requestDialogueAttempt.indexOf('if (!dialogueGuardEnabled) return true'))
+      .toBeLessThan(requestDialogueAttempt.indexOf('canAttemptOptional('))
+
+    // Real provider, below cap: allowed, and increments the same session meter
+    // used by room/objective/gate generation (usageCountRef / setUsageCount / guardCap).
+    expect(requestDialogueAttempt).toContain('canAttemptOptional({ count: usageCountRef.current }, config)')
+    expect(requestDialogueAttempt).toContain('const next = recordAttempt({ count: usageCountRef.current })')
+    expect(requestDialogueAttempt).toContain('usageCountRef.current = next.count')
+    expect(requestDialogueAttempt).toContain('setUsageCount(next.count)')
+    expect(requestDialogueAttempt).toContain('cap: guardCap')
+
+    // Real provider, at cap: blocks and returns before recordAttempt/setUsageCount
+    // ever run, so usage stays unchanged.
+    const blockedBranch = requestDialogueAttempt.slice(
+      requestDialogueAttempt.indexOf('if (!canAttemptOptional('),
+      requestDialogueAttempt.indexOf('return false'),
+    )
+    expect(blockedBranch).not.toContain('recordAttempt')
+    expect(blockedBranch).not.toContain('setUsageCount')
+
+    // No new/separate usage ref, state, or cap was introduced for dialogue.
+    expect(appSource).not.toMatch(/dialogueUsageCount|dialogueGuardCap|dialogueUsageState/)
+
+    // Logging stays counts/enums-only (no provider text, key, prompt, or dialogue text).
+    expect(requestDialogueAttempt).toContain("logger.info('dialogue attempt blocked'")
+    expect(requestDialogueAttempt).toContain("logger.info('dialogue attempt'")
+
+    expect(appSource).toContain('requestDialogueAttempt={requestDialogueAttempt}')
+  })
+
   it('wires generated gate provider only in the first generated-room prompt path', () => {
     const handlePrompt = appSource.slice(
       appSource.indexOf('const handlePrompt = useCallback('),

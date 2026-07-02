@@ -120,6 +120,10 @@ const gateGeneratorSelection = selectGateGenerator(llmConfig)
 logger.info('gate generator selected', gateGeneratorSelection.log)
 const dialogueProviderSelection = selectDialogueProvider(llmConfig)
 logger.info('dialogue provider selected', dialogueProviderSelection.log)
+// Dialogue usage guardrail (dialogue-usage-guardrails v0): keyed on the dialogue
+// provider selection, not room-generation's `guardEnabled`, so a future
+// divergence between the two providers stays correct.
+const dialogueGuardEnabled = dialogueProviderSelection.kind === 'real'
 const worldBibleSeeder = new FakeWorldBibleSeeder()
 const idGenerator = new UuidGenerator()
 const worldStore = new InMemoryWorldStore()
@@ -439,6 +443,26 @@ function App() {
     [],
   )
   const usageStatus = evaluate({ count: usageCount }, guardConfig)
+  // Dialogue attempt gate (dialogue-usage-guardrails v0, Slice 3): shares the
+  // same session usage meter as room/objective/gate generation. Fake-provider
+  // dialogue is always allowed and never counted.
+  const requestDialogueAttempt = useCallback((): boolean => {
+    if (!dialogueGuardEnabled) return true
+    const config: UsageGuardConfig = { cap: guardCap, enabled: true }
+    if (!canAttemptOptional({ count: usageCountRef.current }, config)) {
+      logger.info('dialogue attempt blocked', {
+        count: usageCountRef.current,
+        cap: guardCap,
+        status: evaluate({ count: usageCountRef.current }, config),
+      })
+      return false
+    }
+    const next = recordAttempt({ count: usageCountRef.current })
+    usageCountRef.current = next.count
+    setUsageCount(next.count)
+    logger.info('dialogue attempt', { count: next.count, cap: guardCap })
+    return true
+  }, [])
 
   const enterActivePlay = useCallback((play: ActivePlay) => {
     activePlayRef.current = play
@@ -995,6 +1019,7 @@ function App() {
           interactionService={interactionService}
           encounterService={encounterService}
           npcDialogueService={npcDialogueService}
+          requestDialogueAttempt={requestDialogueAttempt}
           onNavigate={handleNavigate}
           onWorldStateChange={refreshDerivedViews}
           onCommittedInteractionEvents={handleCommittedInteractionEvents}
