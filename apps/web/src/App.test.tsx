@@ -6,12 +6,14 @@ import {
 } from './App'
 import {
   attachPerRoomObjectiveOnEnter,
+  buildRuntimeRoomMemorySaveJson,
   buildGeneratedRoomCacheSaveJson,
   buildGeneratedQuestSaveJson,
   buildQuestStage,
   readPerRoomObjectiveMemo,
   resolvedObjectIdsForGeneratedPlay,
   resolvedObjectIdsForRoom,
+  restoreRuntimeRoomMemoryFromSlot,
   shouldStartPerRoomObjectiveAttach,
 } from './app/App.helpers'
 import { loadGeneratedRoomCacheSaveState } from './domain/quests/generatedRoomCacheSaveState'
@@ -56,6 +58,10 @@ import { InteractionService } from './interactions/InteractionService'
 import { InMemoryWorldStore } from './world-session/InMemoryWorldStore'
 import { WorldSession } from './world-session/WorldSession'
 import type { RoomResolver } from './app/AdjacentRoomPregenerator'
+import { InMemoryRoomMemoryStore } from './memory/InMemoryRoomMemoryStore'
+import { RoomMemoryService } from './memory/RoomMemoryService'
+import { ROOM_MEMORY_SCHEMA_VERSION, type RoomMemoryRecord } from './domain/memory/roomContracts'
+import { loadRoomMemorySaveState } from './domain/memory/roomMemorySaveState'
 
 const noopLogger: Logger = {
   debug() {},
@@ -127,6 +133,23 @@ function makeState(overrides: Partial<WorldState> = {}): WorldState {
     roomStates: {},
     revision: 1,
     updatedAt: UPDATED_AT,
+    ...overrides,
+  }
+}
+
+function makeRoomMemoryRecord(overrides: Partial<RoomMemoryRecord> = {}): RoomMemoryRecord {
+  return {
+    schemaVersion: ROOM_MEMORY_SCHEMA_VERSION,
+    memoryId: 'room-memory-1',
+    worldId: WORLD_ID,
+    sessionId: SESSION_ID,
+    roomId: 'generated-room',
+    kind: 'room_observation',
+    text: 'safe remembered room detail',
+    provenance: { source: 'game' },
+    confidence: 'medium',
+    seq: 1,
+    createdAt: UPDATED_AT,
     ...overrides,
   }
 }
@@ -2853,5 +2876,200 @@ describe('generated quest restore — handleLoad wiring (ADR-0059, slice 5)', ()
     expect(serialized).not.toContain('interaction:')
     expect(serialized).not.toContain(OBJECT_ID)
     expect(serialized).not.toContain('Find the case file.')
+  })
+})
+
+describe('runtime room memory save/load parking - Slice 5', () => {
+  const scope = { worldId: WORLD_ID, sessionId: SESSION_ID }
+
+  function roomMemoryJson(records: RoomMemoryRecord[]): string {
+    return JSON.stringify({ schemaVersion: 1, records })
+  }
+
+  it('save with runtime memories includes roomMemoryJson that re-validates', () => {
+    const store = new InMemoryRoomMemoryStore()
+    store.restoreAll([makeRoomMemoryRecord()])
+
+    const json = buildRuntimeRoomMemorySaveJson(store, scope)
+
+    expect(typeof json).toBe('string')
+    expect(json).not.toBe('')
+    expect(loadRoomMemorySaveState(json!).ok).toBe(true)
+  })
+
+  it('save with no runtime memories omits roomMemoryJson', () => {
+    const store = new InMemoryRoomMemoryStore()
+
+    expect(buildRuntimeRoomMemorySaveJson(store, scope)).toBeUndefined()
+  })
+
+  it('load valid roomMemoryJson restores memory and existing recall can see it', async () => {
+    const store = new InMemoryRoomMemoryStore()
+    const record = makeRoomMemoryRecord({ roomId: 'room-not-cross-checked' })
+    const summary = restoreRuntimeRoomMemoryFromSlot({
+      store,
+      roomMemoryJson: roomMemoryJson([record]),
+      scope,
+    })
+
+    expect(summary.status).toBe('restored')
+    expect(summary.restoredCount).toBe(1)
+    await expect(store.listForRoom({ ...scope, roomId: record.roomId }, { limit: 10 }))
+      .resolves.toHaveLength(1)
+
+    const service = new RoomMemoryService(
+      store,
+      { now: () => UPDATED_AT },
+      { newId: () => 'unused-id' },
+      noopLogger,
+    )
+    const recalled = await service.recall({ ...scope, roomId: record.roomId })
+    expect(recalled.memories.map((memory) => memory.memoryId)).toEqual([record.memoryId])
+  })
+
+  it('load invalid roomMemoryJson succeeds and leaves memory empty', () => {
+    const store = new InMemoryRoomMemoryStore()
+    store.restoreAll([makeRoomMemoryRecord({ memoryId: 'stale-before-invalid' })])
+
+    const summary = restoreRuntimeRoomMemoryFromSlot({
+      store,
+      roomMemoryJson: 'NOT VALID JSON{{{',
+      scope,
+    })
+
+    expect(summary).toEqual({
+      status: 'invalid',
+      reason: 'invalid-json',
+      restoredCount: 0,
+      droppedCount: 0,
+      droppedByScope: 0,
+      droppedBySource: 0,
+      droppedByText: 0,
+      droppedByCap: 0,
+    })
+    expect(store.snapshotAll()).toEqual([])
+  })
+
+  it('load mismatched worldId/sessionId drops records', () => {
+    const store = new InMemoryRoomMemoryStore()
+    const keep = makeRoomMemoryRecord({ memoryId: 'keep' })
+    const wrongWorld = makeRoomMemoryRecord({ memoryId: 'wrong-world', worldId: 'other-world' })
+    const wrongSession = makeRoomMemoryRecord({ memoryId: 'wrong-session', sessionId: 'other-session' })
+
+    const summary = restoreRuntimeRoomMemoryFromSlot({
+      store,
+      roomMemoryJson: roomMemoryJson([keep, wrongWorld, wrongSession]),
+      scope,
+    })
+
+    expect(summary.restoredCount).toBe(1)
+    expect(summary.droppedByScope).toBe(2)
+    expect(store.snapshotAll().map((memory) => memory.memoryId)).toEqual(['keep'])
+  })
+
+  it('load source llm and unsafe text records drops them', () => {
+    const store = new InMemoryRoomMemoryStore()
+    const safe = makeRoomMemoryRecord({ memoryId: 'safe' })
+    const llm = makeRoomMemoryRecord({
+      memoryId: 'llm',
+      provenance: { source: 'llm' },
+      text: 'secret llm memory text',
+    })
+    const unsafe = makeRoomMemoryRecord({
+      memoryId: 'unsafe',
+      text: 'unsafe memory\nSECRET CURRENT ROOM',
+    })
+
+    const summary = restoreRuntimeRoomMemoryFromSlot({
+      store,
+      roomMemoryJson: roomMemoryJson([safe, llm, unsafe]),
+      scope,
+    })
+
+    expect(summary.restoredCount).toBe(1)
+    expect(summary.droppedBySource).toBe(1)
+    expect(summary.droppedByText).toBe(1)
+    expect(store.snapshotAll().map((memory) => memory.memoryId)).toEqual(['safe'])
+  })
+
+  it('load without roomMemoryJson clears stale previous memory', () => {
+    const store = new InMemoryRoomMemoryStore()
+    store.restoreAll([makeRoomMemoryRecord({ memoryId: 'stale-before-missing' })])
+
+    const summary = restoreRuntimeRoomMemoryFromSlot({ store, scope })
+
+    expect(summary.status).toBe('missing')
+    expect(summary.reason).toBe('missing')
+    expect(store.snapshotAll()).toEqual([])
+  })
+
+  it('save/load round-trip preserves dedupe behavior through restoreAll', async () => {
+    const source = new InMemoryRoomMemoryStore()
+    source.restoreAll([makeRoomMemoryRecord({ memoryId: 'deduped', dedupeKey: 'interaction:orb' })])
+    const json = buildRuntimeRoomMemorySaveJson(source, scope)
+    expect(json).toBeDefined()
+
+    const restored = new InMemoryRoomMemoryStore()
+    restoreRuntimeRoomMemoryFromSlot({ store: restored, roomMemoryJson: json, scope })
+    const write = await restored.record({
+      schemaVersion: ROOM_MEMORY_SCHEMA_VERSION,
+      memoryId: 'new-memory',
+      worldId: WORLD_ID,
+      sessionId: SESSION_ID,
+      roomId: 'generated-room',
+      kind: 'room_observation',
+      text: 'same dedupe key should return existing memory',
+      provenance: { source: 'game' },
+      confidence: 'medium',
+      dedupeKey: 'interaction:orb',
+      createdAt: UPDATED_AT,
+    })
+
+    expect(write.ok).toBe(true)
+    if (write.ok) {
+      expect(write.deduplicated).toBe(true)
+      expect(write.record.memoryId).toBe('deduped')
+    }
+  })
+
+  it('restore summary contains only safe counts/reason codes', () => {
+    const store = new InMemoryRoomMemoryStore()
+    const secret = 'SECRET ROOM MEMORY TEXT'
+    const json = roomMemoryJson([
+      makeRoomMemoryRecord({ memoryId: 'safe', text: 'safe text' }),
+      makeRoomMemoryRecord({ memoryId: 'llm', provenance: { source: 'llm' }, text: secret }),
+    ])
+
+    const summary = restoreRuntimeRoomMemoryFromSlot({ store, roomMemoryJson: json, scope })
+    const serialized = JSON.stringify(summary)
+
+    expect(serialized).not.toContain(secret)
+    expect(serialized).not.toContain(json)
+    expect(summary.droppedBySource).toBe(1)
+  })
+
+  it('App source wires roomMemoryJson into save and load before derived recall refresh', () => {
+    const handleSave = appSource.slice(
+      appSource.indexOf('const handleSave = useCallback('),
+      appSource.indexOf('const handleLoad = useCallback('),
+    )
+    const handleLoad = appSource.slice(
+      appSource.indexOf('const handleLoad = useCallback('),
+      appSource.indexOf('const handleNavigate = useCallback('),
+    )
+
+    expect(appSource).toContain('roomMemoryRuntimeRef.current.store')
+    expect(handleSave).toContain('const stateForSidecars = await worldSession.getWorldState(activePlay.sessionId)')
+    expect(handleSave).toContain('buildRuntimeRoomMemorySaveJson(')
+    expect(handleSave).toContain('roomMemoryJson,')
+    expect(handleLoad).toContain('restoreRuntimeRoomMemoryFromSlot({')
+    expect(handleLoad).toContain('slotResult.roomMemoryJson')
+    expect(handleLoad.indexOf('restoreRuntimeRoomMemoryFromSlot({')).toBeLessThan(
+      handleLoad.indexOf('restoreGeneratedPlayFromSlot('),
+    )
+    expect(handleLoad.indexOf('restoreRuntimeRoomMemoryFromSlot({')).toBeLessThan(
+      handleLoad.indexOf('refreshDerivedViews(stateResult.state)'),
+    )
+    expect(appSource).not.toContain('logger.info("world session restored", { roomMemoryJson')
   })
 })
