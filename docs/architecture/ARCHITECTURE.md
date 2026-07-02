@@ -94,6 +94,13 @@ Throughout these docs:
   `worldId/sessionId`, with no `SaveGame` schema change, no SQLite migration, no
   memory authority change, and no raw memory-text logging
   ([ADR-0070](./decisions/ADR-0070-runtime-room-memory-persistence-v0.md));
+  Room Memory Visible Feedback v0 - two closed, hand-written status lines
+  (`MEMORY_CREATED_MESSAGE`, `MEMORY_RECALLED_MESSAGE`) surface the existing
+  room-memory promotion/recall paths as a read-only, presentational
+  `role="status"` overlay; a pure `decideMemoryFeedback` gate keyed by
+  `roomEntrySeq` handles precedence/anti-spam, with no memory write,
+  `WorldState` mutation, schema, save-load, or provider/cost change
+  ([ADR-0071](./decisions/ADR-0071-room-memory-visible-feedback-v0.md));
   Generated Mechanical Gate Contract v0 — pure domain contract in
   `domain/generatedMechanicalGate.ts` plus tests for a `locked-exit` gate whose state derives from
   existing `WorldState.roomStates[roomId].flags` via `evaluateCondition`; `room-flag` is the only
@@ -748,6 +755,47 @@ Save/Continue/Load without changing authoritative save state
   `RoomMemoryStore` port change, `SaveGame` schema change, provider call, or
   usage-meter change. Logs carry only safe status/reason/counts, never raw
   memory text or sidecar JSON.
+
+## Room Memory Visible Feedback v0
+
+✅ **Implemented, browser/app composition + pure decision helper (manual smoke
+pending maintainer verification).** Room Memory Visible Feedback v0 makes the
+previously invisible room-memory system legible with two closed, generic
+status lines, sequenced after Runtime Room Memory Persistence v0 so feedback
+never promises a memory that could vanish on save/load
+([ADR-0071](./decisions/ADR-0071-room-memory-visible-feedback-v0.md)).
+
+- **Two closed constants only.** `MEMORY_CREATED_MESSAGE` ("The room remembers
+  this.") shows when an interaction commit promotes ≥1 newly recorded room
+  memory; `MEMORY_RECALLED_MESSAGE` ("Something about this place feels
+  remembered.") shows at most once per room entry when recall returns ≥1
+  entry. No raw memory text, ids, names, flag keys, provider output, or
+  count-as-text ever renders.
+- **Pure decision gate.** `decideMemoryFeedback` (`app/memoryFeedback.ts`)
+  is a total function over safe counts (`PromotionSummary`,
+  `hasRecalledMemory`, `roomEntrySeq`, `shownForRoomEntrySeq`); creation always
+  wins over recall, and deduplicated-/rejected-/failed-only promotions produce
+  no feedback. `promoteInteractionMemories` now returns
+  `Promise<PromotionSummary>` (additive; existing swallow-and-log behavior for
+  a per-event `remember` failure is unchanged).
+- **Read-only projection.** `MemoryFeedback` (`renderer/ui/MemoryFeedback.tsx`)
+  is a `{ message: string | null } → role="status" aria-live="polite"`
+  component importing nothing beyond React. `App` owns a single feedback slot,
+  a ~4 s auto-dismiss timer, and clears feedback on every new room entry via
+  `roomEntrySeq`; the anti-spam/precedence wrapper
+  (`memoryFeedbackAfterPromotion`/`memoryFeedbackAfterRecall`/
+  `memoryFeedbackOnRoomEntry`) lives in the existing `app/App.helpers.ts`
+  composition-root module.
+- **No truth or persistence coupling.** No `WorldState` mutation, `WorldEvent`
+  append, `WorldCommand`, memory write beyond the existing promotion path,
+  `SaveGame`/`RoomSpec`/`QuestSpec` schema change, `SlotWrapper` field, or
+  provider/usage-meter/cost change. Feedback state is transient component
+  state only.
+- **Known non-blocking notes.** Placement/z-order against `RoomIntroPanel`,
+  the fallback/repair notice, and the HUD has not had a dedicated visual pass;
+  manual smoke (browser timing/fade, Save/Continue/Load recall re-trigger,
+  generated play, screen-reader contract, console log review, z-order) remains
+  pending maintainer verification.
 
 ## Room Inspect Summary v0
 
