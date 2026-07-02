@@ -101,6 +101,12 @@ Throughout these docs:
   `roomEntrySeq` handles precedence/anti-spam, with no memory write,
   `WorldState` mutation, schema, save-load, or provider/cost change
   ([ADR-0071](./decisions/ADR-0071-room-memory-visible-feedback-v0.md));
+  Memory Poisoning Redteam v0 - test-only regression armor under
+  `apps/web/src/redteam/` proving the free-text dialogue, prompt-memory,
+  runtime room-memory sidecar, feedback, logging, and authoritative-state
+  boundaries against deterministic adversarial fixtures; no runtime behavior,
+  schema, provider, renderer, persistence, or UI change
+  ([ADR-0072](./decisions/ADR-0072-memory-poisoning-redteam-v0.md));
   Generated Mechanical Gate Contract v0 — pure domain contract in
   `domain/generatedMechanicalGate.ts` plus tests for a `locked-exit` gate whose state derives from
   existing `WorldState.roomStates[roomId].flags` via `evaluateCondition`; `room-flag` is the only
