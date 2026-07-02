@@ -24,6 +24,7 @@ export type NPCDialogueInput = {
   dialogue?: NPCDialogueSpec
   persona?: string
   history: NPCDialogueTurn[]
+  promptId?: string
   playerLine?: string
   roomContext?: RoomDialogueContext
   quest?: QuestDialogueContext
@@ -43,7 +44,7 @@ export class NPCDialogueService {
   }
 
   async reply(input: NPCDialogueInput): Promise<NPCDialogueResult> {
-    const { sessionId, npcId, npcName, dialogue, history, playerLine } = input
+    const { sessionId, npcId, npcName, dialogue, history, promptId, playerLine } = input
     if (!dialogue) {
       const result = { status: 'rejected', reason: 'missing-dialogue' } as const
       this.logResult({ sessionId, npcId, status: result.status, reason: result.reason, turnCount: history.length })
@@ -67,7 +68,7 @@ export class NPCDialogueService {
     )
 
     try {
-      const response = await this.provider.reply({ context, playerLine })
+      const response = await this.provider.reply({ context, promptId, playerLine })
       const result = {
         status: 'replied',
         turn: { speaker: 'npc', text: response.text },

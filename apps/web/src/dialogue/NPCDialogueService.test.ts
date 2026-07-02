@@ -89,6 +89,7 @@ describe('NPCDialogueService', () => {
       npcName: 'Asha',
       dialogue: { persona: 'friendly-aide' },
       history: [...history],
+      promptId: 'ask-hall',
       playerLine: 'ask-hall',
     })
 
@@ -98,6 +99,7 @@ describe('NPCDialogueService', () => {
     })
     expect(requests).toHaveLength(1)
     expect(requests[0]).toMatchObject({
+      promptId: 'ask-hall',
       playerLine: 'ask-hall',
       context: {
         roomId: 'throne-room',
@@ -288,6 +290,7 @@ describe('NPCDialogueService', () => {
         npcCount: 2,
       },
       history: [{ speaker: 'player', text: 'SECRET HISTORY TEXT' }],
+      promptId: 'SECRET PROMPT ID',
       playerLine: 'SECRET PLAYER LINE',
     })
 

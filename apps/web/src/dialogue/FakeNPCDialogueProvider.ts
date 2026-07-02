@@ -152,9 +152,8 @@ const ROOM_FOCUS_LINES: Partial<Record<RoomObject['type'], string>> = {
 export class FakeNPCDialogueProvider implements NPCDialogueProvider {
   async reply(request: NPCDialogueRequest): Promise<NPCDialogueResponse> {
     const key = request.context.persona ?? request.context.npcId
-    const prompted = request.playerLine
-      ? PROMPT_LINES[key]?.[request.playerLine]
-      : undefined
+    const routeKey = request.promptId ?? request.playerLine
+    const prompted = routeKey ? promptLine(key, routeKey) : undefined
     if (prompted) return { text: prompted }
 
     const questClue = questClueLine(request, key)
@@ -165,7 +164,7 @@ export class FakeNPCDialogueProvider implements NPCDialogueProvider {
 
     const personaLines = PERSONA_LINES[key]
     if (personaLines) {
-      const promptOffset = request.playerLine ? stableIndex(request.playerLine, personaLines.length) : 0
+      const promptOffset = routeKey ? stableIndex(routeKey, personaLines.length) : 0
       const index = (request.context.history.length + promptOffset) % personaLines.length
       return { text: personaLines[index] ?? FALLBACK_LINES[0] }
     }
@@ -177,11 +176,18 @@ export class FakeNPCDialogueProvider implements NPCDialogueProvider {
     if (memoryAware) return { text: memoryAware }
 
     const lines = FALLBACK_LINES
-    const promptOffset = request.playerLine ? stableIndex(request.playerLine, lines.length) : 0
+    const promptOffset = routeKey ? stableIndex(routeKey, lines.length) : 0
     const identityOffset = stableIndex(key, lines.length)
     const index = (request.context.history.length + promptOffset + identityOffset) % lines.length
     return { text: lines[index] ?? FALLBACK_LINES[0] }
   }
+}
+
+function promptLine(key: string, routeKey: string): string | undefined {
+  const lines = PROMPT_LINES[key]
+  if (!lines || !Object.hasOwn(lines, routeKey)) return undefined
+  const line = lines[routeKey]
+  return typeof line === 'string' ? line : undefined
 }
 
 function questClueLine(request: NPCDialogueRequest, key: string): string | undefined {
