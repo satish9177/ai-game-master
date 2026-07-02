@@ -144,6 +144,20 @@ describe('buildDialoguePromptMessages', () => {
     expect(exitPrompt).not.toContain('ask-exit')
   })
 
+  it('renders typed player text once in recent conversation', () => {
+    const typedPrompt = recentConversationSection(userContent(request({
+      playerLine: 'Look at the altar.',
+      context: {
+        ...request().context,
+        history: [
+          { speaker: 'npc', text: 'The altar is cracked.' },
+        ],
+      },
+    })))
+
+    expect(occurrenceCount(typedPrompt, 'Look at the altar.')).toBe(1)
+  })
+
   it('memory present creates hedged transformed lines', () => {
     const content = userContent(request({
       context: {
@@ -257,7 +271,9 @@ describe('buildDialoguePromptMessages', () => {
               roomSpecJson: '{"schemaVersion":1,"objects":[]}',
               gateJson: '{"unlockObjectId":"secret"}',
               providerBody: 'raw provider body must not leak',
-            } as unknown as NPCDialogueRequest['context']['memory']['entries'][number],
+            } as unknown as NonNullable<
+              NPCDialogueRequest['context']['memory']
+            >['entries'][number],
           ],
         },
         rawRoomSpecJson: '{"schemaVersion":1,"objects":[]}',

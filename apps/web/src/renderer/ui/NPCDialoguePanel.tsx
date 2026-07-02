@@ -1,5 +1,10 @@
 import { useEffect } from 'react'
+import type { FormEvent, KeyboardEvent as ReactKeyboardEvent } from 'react'
 import type { NPCDialoguePrompt, NPCDialogueTurn } from '../../domain/dialogue/contracts'
+import {
+  MAX_PLAYER_FREE_TEXT_CHARS,
+  normalizePlayerFreeText,
+} from '../../domain/dialogue/playerFreeText'
 
 const PERSONA_ROLE_LABELS: Readonly<Record<string, string>> = {
   'friendly-aide': 'Ally',
@@ -29,11 +34,11 @@ export function NPCDialoguePanel({
   prompts?: NPCDialoguePrompt[]
   message?: string
   busy?: boolean
-  onSay: (promptId: string | undefined) => void
+  onSay: (promptId: string | undefined, playerLine?: string) => void
   onClose: () => void
 }) {
   useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
+    const onKey = (event: globalThis.KeyboardEvent) => {
       if (event.code === 'Escape') onClose()
     }
     window.addEventListener('keydown', onKey)
@@ -42,6 +47,21 @@ export function NPCDialoguePanel({
 
   const hasPrompts = prompts !== undefined && prompts.length > 0
   const roleLabel = persona !== undefined ? PERSONA_ROLE_LABELS[persona] : undefined
+  const keepKeysLocal = (event: ReactKeyboardEvent<HTMLInputElement>): void => {
+    if (event.code === 'Escape') return
+    event.stopPropagation()
+  }
+  const handleSubmit = (event: FormEvent<HTMLFormElement>): void => {
+    event.preventDefault()
+    const field = event.currentTarget.elements.namedItem('playerLine')
+    const rawText = field !== null && 'value' in field && typeof field.value === 'string'
+      ? field.value
+      : ''
+    const playerLine = normalizePlayerFreeText(rawText)
+    if (playerLine === null) return
+    onSay(undefined, playerLine)
+    event.currentTarget.reset()
+  }
 
   return (
     <div className="panel-backdrop" onPointerDown={onClose}>
@@ -104,6 +124,21 @@ export function NPCDialoguePanel({
             </div>
           )}
         </div>
+        <form className="npc-dialogue-input-row" onSubmit={handleSubmit}>
+          <input
+            className="npc-dialogue-input"
+            type="text"
+            name="playerLine"
+            maxLength={MAX_PLAYER_FREE_TEXT_CHARS}
+            placeholder="Say something..."
+            aria-label="Say something"
+            disabled={busy}
+            onKeyDown={keepKeysLocal}
+          />
+          <button className="panel-btn npc-dialogue-send" type="submit" disabled={busy}>
+            Send
+          </button>
+        </form>
         {message && <p className="panel-result npc-dialogue-message">{message}</p>}
         <div className="panel-foot">
           <button className="panel-btn" type="button" onClick={onClose}>

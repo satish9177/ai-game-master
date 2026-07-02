@@ -343,7 +343,7 @@ describe('RoomViewer NPC dialogue room context wiring', () => {
 
     await Promise.resolve()
     expect(replies).toHaveLength(0)
-    const setNPCDialogueTurns = mockState.stateSetters[5]
+    const setNPCDialogueTurns = mockState.stateSetters[5]!
     setNPCDialogueTurns.mockClear()
 
     const handleNPCSay = mockState.callbacks[0] as (promptId: string | undefined) => void
@@ -361,6 +361,112 @@ describe('RoomViewer NPC dialogue room context wiring', () => {
     expect(setNPCDialogueTurns).toHaveBeenCalledWith([
       { speaker: 'player', text: 'Ask about the room' },
     ])
+  })
+
+  it('sends normalized typed text without a prompt id or duplicated current turn', async () => {
+    const replies: unknown[] = []
+    const room = loadedRoom()
+
+    const props = {
+      roomSource: { getRoom: async () => ({ ok: true, room }) },
+      sessionId: 'session-1',
+      interactionService: { resolve: async () => ({ status: 'rejected', reason: 'missing-effect' }) },
+      encounterService: { resolve: async () => ({ status: 'failed', reason: 'not-found' }) },
+      npcDialogueService: {
+        reply: async (input: unknown) => {
+          replies.push(input)
+          return { status: 'replied', turn: { speaker: 'npc', text: 'Typed-text line.' } }
+        },
+      },
+      onNavigate: async () => ({ status: 'failed', reason: 'not-found' }),
+    } as unknown as Parameters<typeof RoomViewer>[0]
+    RoomViewer(props)
+
+    await Promise.resolve()
+    await Promise.resolve()
+
+    const engine = mockState.engineInstances[0]
+    engine?.onRequestOpenInteraction?.({
+      id: 'room-npc',
+      type: 'npc',
+      label: 'Secret NPC Object Name',
+      affordance: 'talk',
+      key: 'F',
+      prompt: 'Secret interaction prompt',
+      position: { x: 0, y: 0, z: -3 },
+    })
+
+    await Promise.resolve()
+    const setNPCDialogueTurns = mockState.stateSetters[5]!
+    setNPCDialogueTurns.mockClear()
+
+    const handleNPCSay = mockState.callbacks[0] as (
+      promptId: string | undefined,
+      playerLine?: string,
+    ) => void
+    handleNPCSay(undefined, '  Look\tat \n the   altar  ')
+
+    await Promise.resolve()
+
+    expect(replies).toHaveLength(1)
+    expect(replies[0]).toMatchObject({
+      npcId: 'room-npc',
+      promptId: undefined,
+      playerLine: 'Look at the altar',
+      history: [],
+    })
+    expect(setNPCDialogueTurns).toHaveBeenCalledWith([
+      { speaker: 'player', text: 'Look at the altar' },
+    ])
+  })
+
+  it('ignores empty typed text before the usage gate', async () => {
+    const replies: unknown[] = []
+    const room = loadedRoom()
+    const requestDialogueAttempt = vi.fn(() => true)
+
+    const props = {
+      roomSource: { getRoom: async () => ({ ok: true, room }) },
+      sessionId: 'session-1',
+      interactionService: { resolve: async () => ({ status: 'rejected', reason: 'missing-effect' }) },
+      encounterService: { resolve: async () => ({ status: 'failed', reason: 'not-found' }) },
+      npcDialogueService: {
+        reply: async (input: unknown) => {
+          replies.push(input)
+          return { status: 'replied', turn: { speaker: 'npc', text: 'Should not be requested.' } }
+        },
+      },
+      onNavigate: async () => ({ status: 'failed', reason: 'not-found' }),
+      requestDialogueAttempt,
+    } as unknown as Parameters<typeof RoomViewer>[0]
+    RoomViewer(props)
+
+    await Promise.resolve()
+    await Promise.resolve()
+
+    const engine = mockState.engineInstances[0]
+    engine?.onRequestOpenInteraction?.({
+      id: 'room-npc',
+      type: 'npc',
+      label: 'Secret NPC Object Name',
+      affordance: 'talk',
+      key: 'F',
+      prompt: 'Secret interaction prompt',
+      position: { x: 0, y: 0, z: -3 },
+    })
+
+    await Promise.resolve()
+
+    const handleNPCSay = mockState.callbacks[0] as (
+      promptId: string | undefined,
+      playerLine?: string,
+    ) => void
+    handleNPCSay(undefined, '   \n\t   ')
+
+    await Promise.resolve()
+
+    expect(requestDialogueAttempt).not.toHaveBeenCalled()
+    expect(replies).toHaveLength(0)
   })
 
   it('calls requestDialogueAttempt before reply and proceeds when it returns true', async () => {
@@ -452,15 +558,74 @@ describe('RoomViewer NPC dialogue room context wiring', () => {
 
     await Promise.resolve()
 
-    const setNPCDialogueMessage = mockState.stateSetters[6]
-    const setNPCDialoguePending = mockState.stateSetters[7]
-    const setNPCDialogueTurns = mockState.stateSetters[5]
+    const setNPCDialogueMessage = mockState.stateSetters[6]!
+    const setNPCDialoguePending = mockState.stateSetters[7]!
+    const setNPCDialogueTurns = mockState.stateSetters[5]!
     setNPCDialogueMessage.mockClear()
     setNPCDialoguePending.mockClear()
     setNPCDialogueTurns.mockClear()
 
     const handleNPCSay = mockState.callbacks[0] as (promptId: string | undefined) => void
     handleNPCSay('ask-room')
+
+    await Promise.resolve()
+
+    expect(requestDialogueAttempt).toHaveBeenCalledTimes(1)
+    expect(replies).toHaveLength(0)
+    expect(setNPCDialogueMessage).toHaveBeenCalledWith(DIALOGUE_AT_CAP_MESSAGE)
+    expect(setNPCDialogueTurns).not.toHaveBeenCalled()
+    expect(setNPCDialoguePending).not.toHaveBeenCalledWith(true)
+  })
+
+  it('blocks typed text without appending it when requestDialogueAttempt returns false', async () => {
+    const replies: unknown[] = []
+    const room = loadedRoom()
+    const requestDialogueAttempt = vi.fn(() => false)
+
+    const props = {
+      roomSource: { getRoom: async () => ({ ok: true, room }) },
+      sessionId: 'session-1',
+      interactionService: { resolve: async () => ({ status: 'rejected', reason: 'missing-effect' }) },
+      encounterService: { resolve: async () => ({ status: 'failed', reason: 'not-found' }) },
+      npcDialogueService: {
+        reply: async (input: unknown) => {
+          replies.push(input)
+          return { status: 'replied', turn: { speaker: 'npc', text: 'Should not be requested.' } }
+        },
+      },
+      onNavigate: async () => ({ status: 'failed', reason: 'not-found' }),
+      requestDialogueAttempt,
+    } as unknown as Parameters<typeof RoomViewer>[0]
+    RoomViewer(props)
+
+    await Promise.resolve()
+    await Promise.resolve()
+
+    const engine = mockState.engineInstances[0]
+    engine?.onRequestOpenInteraction?.({
+      id: 'room-npc',
+      type: 'npc',
+      label: 'Secret NPC Object Name',
+      affordance: 'talk',
+      key: 'F',
+      prompt: 'Secret interaction prompt',
+      position: { x: 0, y: 0, z: -3 },
+    })
+
+    await Promise.resolve()
+
+    const setNPCDialogueMessage = mockState.stateSetters[6]!
+    const setNPCDialoguePending = mockState.stateSetters[7]!
+    const setNPCDialogueTurns = mockState.stateSetters[5]!
+    setNPCDialogueMessage.mockClear()
+    setNPCDialoguePending.mockClear()
+    setNPCDialogueTurns.mockClear()
+
+    const handleNPCSay = mockState.callbacks[0] as (
+      promptId: string | undefined,
+      playerLine?: string,
+    ) => void
+    handleNPCSay(undefined, 'Can you help?')
 
     await Promise.resolve()
 
