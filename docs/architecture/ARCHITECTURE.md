@@ -160,6 +160,18 @@ Throughout these docs:
   shows instead. No `NPCDialogueService`/provider, schema, save-load,
   persistence, memory, or `WorldState` change
   ([ADR-0068](./decisions/ADR-0068-dialogue-usage-guardrails-v0.md)).
+- ✅ **Implemented** — NPC Dialogue Free Text Input v0 — `NPCDialoguePanel` now
+  supports one bounded single-line player utterance through the same guarded
+  dialogue path as prompt buttons and Continue. Prompt buttons split structural
+  routing (`promptId`) from player-facing text (`playerLine`), and service
+  history contains previous turns only so real prompts do not duplicate the
+  current player line. Free text is normalized by `normalizePlayerFreeText`
+  (trim, control chars to spaces, whitespace collapse, clamp to 240, trim,
+  empty -> `null`); empty sends do not consume usage. Dialogue remains
+  non-authoritative display text only: no memory write, `WorldState` mutation,
+  persistence, schema, renderer-engine, generated-room, App gating, or provider
+  selection change
+  ([ADR-0069](./decisions/ADR-0069-npc-dialogue-free-text-input-v0.md)).
 - ❌ **Not built** — future shape only; documented so we don't paint into a corner.
 
 ## Status today (Renderer Foundation v0)
@@ -1303,10 +1315,14 @@ memory or room truth.
 
 The composition root resolves the renderer's neutral object id with precedence
 **exit → encounter → dialogue → effect**. Dialogue-bearing NPCs open the
-presentational `NPCDialoguePanel`, which offers authored canned prompts or
-Continue—never free text. Conversation history stays in component state and
-resets on close or room change. Dialogue appends no event, sets no room flag,
-and changes no world state. See
+presentational `NPCDialoguePanel`, which offers authored canned prompts,
+Continue, and a bounded single-line free-text input
+([ADR-0069](./decisions/ADR-0069-npc-dialogue-free-text-input-v0.md)). Prompt
+buttons send `promptId` for fake-provider routing and `playerLine` for
+player-facing text; typed sends normalize/clamp through `normalizePlayerFreeText`
+before the existing usage gate. Conversation history stays in component state
+and resets on close or room change. Dialogue appends no event, sets no room
+flag, writes no memory, and changes no world state. See
 [ADR-0017](./decisions/ADR-0017-npc-dialogue-foundation-v0.md).
 
 Real NPC dialogue now exists as an opt-in, OpenAI-compatible provider

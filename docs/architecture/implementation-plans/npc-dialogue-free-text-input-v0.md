@@ -1,8 +1,7 @@
 # Implementation Plan — `feature/npc-dialogue-free-text-input-v0`
 
-> Status: **Draft — design for maintainer review. No code written.**
-> ADR: **required at closeout** (not drafted yet; expected next number in
-> `docs/architecture/decisions/`).
+> Status: **Implemented — manual smoke pending maintainer verification.**
+> ADR: [ADR-0069](../decisions/ADR-0069-npc-dialogue-free-text-input-v0.md).
 > Companion docs: [ARCHITECTURE](../ARCHITECTURE.md) · [BOUNDARIES](../BOUNDARIES.md) ·
 > [AGENTS.md](../../../AGENTS.md).
 > Direct precedents:
@@ -28,6 +27,9 @@
   write, no save/load persistence of turns, no quest/gate/item effects from
   dialogue, no streaming, no NPC-initiated conversation, no free-text anywhere
   except the open `NPCDialoguePanel`.
+- **Closeout status.** Implemented on branch
+  `feature/npc-dialogue-free-text-input-v0`; manual smoke is pending maintainer
+  verification. Dialogue remains non-authoritative display text only.
 
 ---
 
@@ -167,13 +169,13 @@ Simultaneously fix the existing defect where the **real** provider's
 | File | Change |
 | --- | --- |
 | `apps/web/src/domain/dialogue/playerFreeText.ts` (new) | `MAX_PLAYER_FREE_TEXT_CHARS = 240`; pure `normalizePlayerFreeText(raw: string): string \| null` (trim → strip C0/C1 control chars → collapse repeated whitespace → clamp → null when empty). |
-| `apps/web/src/domain/dialogue/playerFreeText.test.ts` (new) | Unit tests for the normalizer. |
+| `apps/web/src/renderer/ui/NPCDialoguePanel.test.tsx` | Coverage for normalizer behavior through the send path, including empty input, control/newline collapse, and the 240-character clamp. |
 | `apps/web/src/domain/dialogue/contracts.ts` | Add optional `promptId?: string` to `NPCDialogueRequest` (type-only; no zod change). |
 | `apps/web/src/dialogue/NPCDialogueService.ts` | Add `promptId?` to `NPCDialogueInput`; treat `history` as previous turns only and `playerLine` as the current utterance; pass through to `provider.reply({ context, playerLine, promptId })`. No logging change. |
 | `apps/web/src/app/npcDialogueReplyInput.ts` | Pass through optional `promptId`. |
 | `apps/web/src/dialogue/FakeNPCDialogueProvider.ts` | Route/offset on `request.promptId ?? request.playerLine` wherever the prompt route is used today. `promptId` is the routing key; `promptId ?? playerLine` is only for backward compatibility. `PROMPT_LINES[key][routeKey]` lookup must use an own-property check (`Object.hasOwn` or equivalent) before reading the table so prototype keys fall through safely. `PERSONA_LINES[key]`, `QUEST_CLUE[key]`, and `stableIndex(playerLine, ...)` do not need this treatment. Preserve current behavior for existing callers byte-for-byte. |
-| `apps/web/src/renderer/ui/NPCDialoguePanel.tsx` | Local input state + Send button + Enter-to-send; new `onSayFreeText: (text: string) => void` prop; disabled on busy/empty; `maxLength={MAX_PLAYER_FREE_TEXT_CHARS}`; input cleared after send. |
-| `apps/web/src/renderer/RoomViewer.tsx` | Prompt path sends `playerLine: prompt.label`, `promptId: prompt.id`, and previous-turn history only. New `handleNPCFreeText(text)` (normalize/clamp → if `null`, return before gate → gate → UI player turn with typed text → `reply` with `playerLine: text` and previous-turn history only), sharing the pending/request-id/error handling with `handleNPCSay` (extract a small shared helper rather than duplicating). |
+| `apps/web/src/renderer/ui/NPCDialoguePanel.tsx` | Single-line input + Send button + Enter-to-send through the existing `onSay(promptId, playerLine?)` callback; disabled while busy; `maxLength={MAX_PLAYER_FREE_TEXT_CHARS}`; input clears after valid send; Escape is allowed to bubble to the close listener. |
+| `apps/web/src/renderer/RoomViewer.tsx` | Prompt path sends `playerLine: prompt.label`, `promptId: prompt.id`, and previous-turn history only. Free text reuses `handleNPCSay(undefined, text)`: normalize/clamp → if `null`, return before gate → gate → UI player turn with typed text → `reply` with `playerLine: text`, `promptId: undefined`, and previous-turn history only. |
 | Tests (edited) | `NPCDialoguePanel.test.tsx`, `RoomViewer.test.ts`(x), `NPCDialogueService.test.ts`, `FakeNPCDialogueProvider.test.ts`, `llmDialoguePrompt.test.ts`, `npcDialogueReplyInput.test.ts`. |
 
 ### Minimum Safe Change Check
@@ -182,7 +184,8 @@ Simultaneously fix the existing defect where the **real** provider's
   request-id machinery, `DIALOGUE_AT_CAP_MESSAGE`, `dialogueResultMessage`,
   prompt-builder clamps, fake provider tiers, panel styling/`panel-btn` classes.
 - **New code:** one small pure normalizer module, one optional contract field,
-  one panel input block, one RoomViewer handler.
+  one panel input block, and a small extension to the existing `RoomViewer`
+  dialogue handler.
 - **Boundaries unchanged:** read-only dialogue, memory firewall, logging
   redaction, renderer trust, no schema/persistence change.
 - **Targeted tests:** listed in §10.
@@ -191,8 +194,7 @@ Simultaneously fix the existing defect where the **real** provider's
 
 - `NPCDialogueRequest`/`NPCDialogueInput` gain optional `promptId` (TS types
   only). No zod schema, no `schemaVersion`, no persisted shape changes.
-- New UI-local state: the panel's controlled input value. Not lifted, not
-  persisted.
+- New DOM-local input value in the panel form. Not lifted, not persisted.
 
 ## 8. Save/load implications
 
@@ -246,41 +248,74 @@ on save/load — same as today. No `SlotWrapper` or blob change.
   text appears once, not twice; raw prompt id `ask-room` does not appear in the
   real prompt; existing memory/section tests green.
 
-## 11. Manual smoke checklist
-
-1. Fake provider: open a generated NPC, type "hello there" → Player turn shows
-   typed text; deterministic NPC reply appends; meter stays 0.
-2. Prompt buttons and Continue still reply; generated NPCs still open
-   `NPCDialoguePanel` (ADR-0067 regression).
-3. Empty/whitespace input: Send disabled; Enter does nothing; real-provider
-   usage count is unchanged.
-4. Paste 1,000 chars → input holds 240; sent turn shows the clamped text.
-5. Real provider (BYOK): type a question → network tab shows the typed text (not
-   `ask-room`) in the request digest; exactly one request; meter +1.
-6. At cap: Send shows the calm message, no request, panel stays usable.
-7. Console: no player text, reply text, key, or provider body in logs.
-
-## 12. Rollback notes
+## 11. Rollback notes
 
 Single revert restores prior behavior (prompt-id sent as `playerLine`, no input
 UI). All changes are additive/local; nothing persisted depends on them; no
 schema/migration rollback needed. The contract's optional `promptId` is inert if
 unused.
 
-## 13. Implementation slices
+## 12. Implementation slices
 
-1. **Docs (this plan)** — maintainer review checkpoint.
-2. **Domain + contracts:** `playerFreeText.ts` (+tests); `promptId` on
-   contracts/service/reply-input; fake-provider routing via
-   `promptId ?? playerLine` (+tests proving byte-identical legacy behavior).
-3. **UI + wiring:** `NPCDialoguePanel` input/Send; `RoomViewer` free-text handler
-   and prompt-path `label`/`promptId` split; service calls pass previous-turn
-   history only; prompt-builder tests prove prompt labels/typed text appear once
-   and raw prompt ids do not appear (+tests).
-4. **Closeout:** docs (`ARCHITECTURE.md` status entry), **ADR**, manual smoke
-   run.
+1. **Docs (this plan)** — complete in `3eeebea` (planning commit on `main`).
+2. **Domain + contracts** — complete in `0ac1ee1`:
+   `promptId` on contracts/service/reply-input; fake-provider routing via
+   `promptId ?? playerLine`; own-property prompt-line lookup for prototype-key
+   safety; tests for legacy prompt-button routing, `promptId` routing, unknown
+   keys, and `constructor`/`toString`/`hasOwnProperty`/`__proto__` fallback.
+3. **Prompt-button request split** — complete in `4eb1482`: prompt buttons send
+   `promptId: prompt.id`, `playerLine: prompt.label`, and service `history`
+   containing previous turns only; UI still shows the clicked label immediately;
+   real prompt tests prove labels appear once and prompt ids do not leak into
+   `RECENT CONVERSATION`.
+4. **Free-text input UI** — complete in `99c3fe9`: `NPCDialoguePanel` renders a
+   single-line input and Send button; typed text goes through
+   `normalizePlayerFreeText`; empty input returns before usage gating; focused
+   input Escape closes the panel; pending disables input/Send; typed send reuses
+   the existing guarded `RoomViewer` path.
+5. **Docs closeout** — this update: `ARCHITECTURE.md` status entry, ADR-0069,
+   verification notes, and manual smoke checklist. Manual smoke remains pending
+   maintainer verification.
 
-## 14. Dependencies on earlier/later features
+## 13. Verification results
+
+- **Slice 2 (`0ac1ee1`)**:
+  `npm.cmd run test -- FakeNPCDialogueProvider NPCDialogueService dialogue`
+  passed (13 files, 167 tests); `npm.cmd run lint` passed;
+  `npx.cmd tsc --noEmit -p .` passed.
+- **Slice 3 (`4eb1482`)**:
+  `npm.cmd run test -- RoomViewer FakeNPCDialogueProvider NPCDialogueService dialogue`
+  passed (14 files, 184 tests); `npm.cmd run lint` passed;
+  `npx.cmd tsc --noEmit -p .` passed.
+- **Slice 4 (`99c3fe9`, plus review-blocker fixes before closeout)**:
+  `npm.cmd run test -- NPCDialoguePanel RoomViewer llmDialoguePrompt dialogue`
+  passed (14 files, 194 tests); `npm.cmd run lint` passed.
+- **App TypeScript check**:
+  `npx.cmd tsc --noEmit -p tsconfig.app.json` was run after Slice 4 review
+  fixes and failed only in out-of-scope baseline files:
+  `assembleRoom.test.ts`, `ensureGeneratedNpcPresence.ts`, and
+  `OpenAICompatibleNPCDialogueProvider.test.ts`. Those failing files are
+  byte-identical to `main` (`3eeebea`) for this branch comparison.
+
+## 14. Manual smoke checklist
+
+- [ ] Fake provider: open a generated NPC, type "hello there"; Player turn shows
+  typed text, deterministic NPC reply appends, and the usage meter stays at 0.
+- [ ] Prompt buttons and Continue still reply; generated NPCs still open
+  `NPCDialoguePanel` (ADR-0067 regression).
+- [ ] Empty/whitespace input: Send/Enter does nothing and real-provider usage
+  count is unchanged.
+- [ ] Paste 1,000 chars: input and sent turn are bounded to 240 normalized
+  characters.
+- [ ] Focus the text input and press Escape: the panel closes.
+- [ ] Real provider (BYOK): type a question; exactly one request is made, meter
+  increments by 1, and the prompt contains the typed text, not `ask-room`.
+- [ ] At cap: Send shows the existing calm cap message, makes no request, and
+  does not append the typed player turn.
+- [ ] Console/log review: no player text, NPC reply text, prompt body, key, or
+  provider body is logged.
+
+## 15. Dependencies on earlier/later features
 
 - **Depends on (shipped):** ADR-0065 (real provider), ADR-0067 (panel spec for
   generated NPCs), ADR-0068 (`requestDialogueAttempt`).
@@ -288,7 +323,7 @@ unused.
   free-text surface to exist; a future `player_claim` memory-capture feature
   would build on the normalized text seam — explicitly out of scope here.
 
-## 15. Open questions / risks
+## 16. Open questions / risks
 
 - **Fake-provider reply variety for prompted sends:** using
   `promptId ?? playerLine` for hash offsets keeps legacy behavior exact;
