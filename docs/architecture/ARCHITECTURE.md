@@ -2,7 +2,8 @@
 
 > Entry point for the AI Game Master architecture docs.
 > See also: [BOUNDARIES](./BOUNDARIES.md) · [CONVENTIONS](./CONVENTIONS.md) ·
-> [FAILURE-MODES](./FAILURE-MODES.md) · [decisions/](./decisions/).
+> [FAILURE-MODES](./FAILURE-MODES.md) · [decisions/](./decisions/) ·
+> [reviews/](./reviews/) (advisory review records, not ADRs).
 > Contributor & coding-agent rules live in [/AGENTS.md](../../AGENTS.md).
 
 ## Purpose
