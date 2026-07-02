@@ -89,6 +89,11 @@ Throughout these docs:
   gated by `generatedQuestJson`, with no `SaveGame` schema change and no provider
   or cost call on load/cached backtracking
   ([ADR-0060](./decisions/ADR-0060-generated-room-cache-save-load-v0.md));
+  Runtime Room Memory Persistence v0 - optional `roomMemoryJson` sidecar restores
+  browser runtime room memories after authoritative load, scoped to the restored
+  `worldId/sessionId`, with no `SaveGame` schema change, no SQLite migration, no
+  memory authority change, and no raw memory-text logging
+  ([ADR-0070](./decisions/ADR-0070-runtime-room-memory-persistence-v0.md));
   Generated Mechanical Gate Contract v0 — pure domain contract in
   `domain/generatedMechanicalGate.ts` plus tests for a `locked-exit` gate whose state derives from
   existing `WorldState.roomStates[roomId].flags` via `evaluateCondition`; `room-flag` is the only
@@ -717,6 +722,32 @@ Save/Load v0 extends the ADR-0059 sidecar pattern with an optional
   objective JSON, seeds, WorldBible free text, object IDs, flag text, room names, or
   object names. Stored `RoomSpec` may contain object IDs internally only so
   `resolvedObjectIds` can match authoritative flags again.
+
+## Runtime Room Memory Persistence v0
+
+✅ **Implemented, browser/app composition + local sidecar.** Runtime Room Memory
+Persistence v0 extends the save-slot sidecar pattern with optional
+`roomMemoryJson`, allowing browser runtime room memories to survive
+Save/Continue/Load without changing authoritative save state
+([ADR-0070](./decisions/ADR-0070-runtime-room-memory-persistence-v0.md)).
+
+- **Non-authoritative byte parking.** `roomMemoryJson` sits beside
+  `saveGameJson`, `generatedQuestJson`, and `generatedRoomCacheJson` in the
+  `SlotWrapper`. `saveGameJson`, `WorldSession`, the event log, and projected
+  `WorldState` remain authoritative; room memory remains inert supporting
+  context.
+- **Strict restore.** On load, the in-memory room-memory store is cleared before
+  restore. A valid sidecar is parsed, schema-validated, scoped to the restored
+  `worldId/sessionId`, and restored through `InMemoryRoomMemoryStore.restoreAll`.
+  Missing, invalid, unsupported, mismatched, `source:'llm'`, or unsafe-text
+  records degrade to an empty or filtered store while the game still loads.
+- **No room-truth coupling.** Restore does not cross-check `roomId` against
+  loaded rooms. Memories never mutate rooms, flags, quests, gates, items,
+  dialogue effects, reducers, or events.
+- **No backend/schema change.** No SQLite migration, persistence adapter change,
+  `RoomMemoryStore` port change, `SaveGame` schema change, provider call, or
+  usage-meter change. Logs carry only safe status/reason/counts, never raw
+  memory text or sidecar JSON.
 
 ## Room Inspect Summary v0
 

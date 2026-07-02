@@ -425,3 +425,118 @@ describe('saveSlotStore — no SaveGame JSON logged', () => {
     // No logger was involved; the above write completed without logging anything.
   })
 })
+
+describe('saveSlotStore - roomMemoryJson parking', () => {
+  const QUEST_BLOB = '{"schemaVersion":1,"room":{},"objectivesPerRoom":true}'
+  const CACHE_BLOB = '{"schemaVersion":1,"rooms":[{"room":{},"provenance":"generated"}]}'
+  const ROOM_MEMORY_BLOB = '{"schemaVersion":1,"records":[{"memoryId":"m-1"}]}'
+
+  it('write with roomMemoryJson -> read returns the same string', () => {
+    const { kv } = createMapKv()
+    const slot = createSaveSlotStore(kv)
+    slot.write(FAKE_JSON, { label: 'Memory' }, undefined, undefined, ROOM_MEMORY_BLOB)
+    const result = slot.read()
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.roomMemoryJson).toBe(ROOM_MEMORY_BLOB)
+      expect(result.generatedQuestJson).toBeUndefined()
+      expect(result.generatedRoomCacheJson).toBeUndefined()
+      expect(result.saveGameJson).toBe(FAKE_JSON)
+    }
+  })
+
+  it('write with all sidecars -> read returns all strings', () => {
+    const { kv } = createMapKv()
+    const slot = createSaveSlotStore(kv)
+    slot.write(FAKE_JSON, { label: 'All' }, QUEST_BLOB, CACHE_BLOB, ROOM_MEMORY_BLOB)
+    const result = slot.read()
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.generatedQuestJson).toBe(QUEST_BLOB)
+      expect(result.generatedRoomCacheJson).toBe(CACHE_BLOB)
+      expect(result.roomMemoryJson).toBe(ROOM_MEMORY_BLOB)
+      expect(result.saveGameJson).toBe(FAKE_JSON)
+    }
+  })
+
+  it('write without roomMemoryJson -> read returns undefined', () => {
+    const { kv } = createMapKv()
+    const slot = createSaveSlotStore(kv)
+    slot.write(FAKE_JSON, { label: 'Gen' }, QUEST_BLOB, CACHE_BLOB)
+    const result = slot.read()
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.generatedQuestJson).toBe(QUEST_BLOB)
+      expect(result.generatedRoomCacheJson).toBe(CACHE_BLOB)
+      expect(result.roomMemoryJson).toBeUndefined()
+    }
+  })
+
+  it('write with empty roomMemoryJson -> omitted (treated as absent)', () => {
+    const { kv, store } = createMapKv()
+    const slot = createSaveSlotStore(kv)
+    slot.write(FAKE_JSON, undefined, QUEST_BLOB, CACHE_BLOB, '')
+    const raw = store.get(SLOT_KEY)
+    expect(raw).not.toBeNull()
+    if (raw) {
+      const parsed = JSON.parse(raw) as Record<string, unknown>
+      expect(parsed.generatedQuestJson).toBe(QUEST_BLOB)
+      expect(parsed.generatedRoomCacheJson).toBe(CACHE_BLOB)
+      expect('roomMemoryJson' in parsed).toBe(false)
+    }
+    const result = slot.read()
+    expect(result.ok).toBe(true)
+    if (result.ok) expect(result.roomMemoryJson).toBeUndefined()
+  })
+
+  it('older wrapper without roomMemoryJson key reads without error', () => {
+    const { kv, store } = createMapKv()
+    store.set(
+      SLOT_KEY,
+      JSON.stringify({
+        label: 'Old',
+        savedAt: '2026-01-01T00:00:00.000Z',
+        saveGameJson: FAKE_JSON,
+        generatedQuestJson: QUEST_BLOB,
+        generatedRoomCacheJson: CACHE_BLOB,
+      }),
+    )
+    const result = createSaveSlotStore(kv).read()
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.saveGameJson).toBe(FAKE_JSON)
+      expect(result.roomMemoryJson).toBeUndefined()
+    }
+  })
+
+  it('non-string roomMemoryJson is ignored so authoritative load can continue empty', () => {
+    const { kv, store } = createMapKv()
+    store.set(
+      SLOT_KEY,
+      JSON.stringify({
+        label: 'X',
+        savedAt: '2026-01-01T00:00:00.000Z',
+        saveGameJson: FAKE_JSON,
+        roomMemoryJson: 42,
+      }),
+    )
+    const result = createSaveSlotStore(kv).read()
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.saveGameJson).toBe(FAKE_JSON)
+      expect(result.roomMemoryJson).toBeUndefined()
+    }
+  })
+
+  it('invalid roomMemoryJson content does not break saveGameJson read', () => {
+    const { kv } = createMapKv()
+    const slot = createSaveSlotStore(kv)
+    slot.write(FAKE_JSON, { label: 'Memory' }, undefined, undefined, 'NOT VALID JSON{{{')
+    const result = slot.read()
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.saveGameJson).toBe(FAKE_JSON)
+      expect(result.roomMemoryJson).toBe('NOT VALID JSON{{{')
+    }
+  })
+})

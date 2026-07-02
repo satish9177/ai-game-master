@@ -5,6 +5,12 @@ import type { QuestDialogueContext } from '../domain/dialogue/contracts'
 import type { GeneratedStoryThreadKind } from '../domain/generatedStoryThread'
 import type { GeneratedRoomVisualTheme } from '../domain/generatedRoomThemeVocabulary'
 import { resolvedObjectIds } from '../domain/interactions/resolvedObjects'
+import {
+  buildRoomMemorySaveJson as buildRoomMemorySaveStateJson,
+  filterRestorableRoomMemories,
+  loadRoomMemorySaveState,
+  type RoomMemorySaveLoadCode,
+} from '../domain/memory/roomMemorySaveState'
 import { buildGeneratedRoomCacheSaveState } from '../domain/quests/generatedRoomCacheSaveState'
 import { buildGeneratedQuestSaveState } from '../domain/quests/generatedQuestSaveState'
 import type { QuestView } from '../domain/quests/evaluateQuest'
@@ -13,6 +19,7 @@ import type { ObjectiveGenerator } from '../domain/ports/ObjectiveGenerator'
 import type { UsageGuardConfig } from '../domain/usage/usageGuard'
 import { canAttemptOptional } from '../domain/usage/usageGuard'
 import type { WorldState } from '../domain/world/worldState'
+import type { InMemoryRoomMemoryStore } from '../memory/InMemoryRoomMemoryStore'
 import type { Logger } from '../platform/logger/Logger'
 import {
   buildGeneratedObjectiveAttachment,
@@ -36,6 +43,26 @@ export type CurrentPlayIdentity = {
   room: Pick<LoadedRoom, 'id'>
   sessionId: string
 } | null
+
+export type RuntimeRoomMemoryRestoreSummary = {
+  status: 'missing' | 'invalid' | 'restored'
+  reason?: 'missing' | RoomMemorySaveLoadCode
+  restoredCount: number
+  droppedCount: number
+  droppedByScope: number
+  droppedBySource: number
+  droppedByText: number
+  droppedByCap: number
+}
+
+const emptyRoomMemoryRestoreSummary = {
+  restoredCount: 0,
+  droppedCount: 0,
+  droppedByScope: 0,
+  droppedBySource: 0,
+  droppedByText: 0,
+  droppedByCap: 0,
+} as const
 
 export function readPerRoomObjectiveMemo(memo: PerRoomObjectiveMemo, roomId: string): {
   cached: boolean
@@ -177,6 +204,43 @@ export function buildGeneratedRoomCacheSaveJson(input: {
   })
 
   return saveState !== null ? JSON.stringify(saveState) : undefined
+}
+
+export function buildRuntimeRoomMemorySaveJson(
+  store: InMemoryRoomMemoryStore,
+  scope: { worldId: string; sessionId: string },
+): string | undefined {
+  return buildRoomMemorySaveStateJson(store.snapshotAll(), scope) ?? undefined
+}
+
+export function restoreRuntimeRoomMemoryFromSlot(input: {
+  store: InMemoryRoomMemoryStore
+  roomMemoryJson?: string
+  scope: { worldId: string; sessionId: string }
+}): RuntimeRoomMemoryRestoreSummary {
+  input.store.restoreAll([])
+
+  if (input.roomMemoryJson == null) {
+    return { status: 'missing', reason: 'missing', ...emptyRoomMemoryRestoreSummary }
+  }
+
+  const loaded = loadRoomMemorySaveState(input.roomMemoryJson)
+  if (!loaded.ok) {
+    return { status: 'invalid', reason: loaded.code, ...emptyRoomMemoryRestoreSummary }
+  }
+
+  const restorable = filterRestorableRoomMemories(loaded.state.records, input.scope)
+  input.store.restoreAll(restorable.records)
+
+  return {
+    status: 'restored',
+    restoredCount: restorable.keptCount,
+    droppedCount: restorable.droppedCount,
+    droppedByScope: restorable.droppedByScope,
+    droppedBySource: restorable.droppedBySource,
+    droppedByText: restorable.droppedByText,
+    droppedByCap: restorable.droppedByCap,
+  }
 }
 
 export function resolvedObjectIdsForRoom(

@@ -1,3 +1,4 @@
+import { RoomMemoryRecordSchema } from '../domain/memory/roomContracts'
 import type { RoomMemoryInsert, RoomMemoryRecord, RoomMemoryScope } from '../domain/memory/roomContracts'
 import type { RoomMemoryStore, RoomMemoryWriteResult } from '../domain/ports/RoomMemoryStore'
 
@@ -9,6 +10,10 @@ import type { RoomMemoryStore, RoomMemoryWriteResult } from '../domain/ports/Roo
  * session FK — `session-not-found` is exercised against the SQLite adapter —
  * so `record` here never returns a failure. Silent: it never logs (the service
  * is the only logger).
+ *
+ * `snapshotAll`/`restoreAll` are adapter-only helpers beyond the
+ * `RoomMemoryStore` port, added for future App save/load wiring
+ * (runtime-room-memory-persistence-v0, Slice 4). Nothing wires them yet.
  */
 export class InMemoryRoomMemoryStore implements RoomMemoryStore {
   private readonly records: RoomMemoryRecord[] = []
@@ -63,6 +68,48 @@ export class InMemoryRoomMemoryStore implements RoomMemoryStore {
     }
     return max + 1
   }
+
+  /**
+   * Adapter-only helper (not on the `RoomMemoryStore` port): every record
+   * currently held, in deterministic order (`worldId`, `sessionId`, `roomId`,
+   * `seq` asc, `memoryId` tie-break) regardless of insertion/restore order.
+   * Returns clones, so the caller cannot mutate internal state through the
+   * result. For future App save/load wiring
+   * (runtime-room-memory-persistence-v0); no caller wires this yet.
+   */
+  snapshotAll(): RoomMemoryRecord[] {
+    return [...this.records].sort(compareSnapshotOrder).map((record) => clone(record))
+  }
+
+  /**
+   * Adapter-only helper (not on the `RoomMemoryStore` port): replaces all
+   * current records with `records`, after re-validating each against
+   * `RoomMemoryRecordSchema` (defense in depth, mirroring the SQLite adapter's
+   * read-boundary re-validation). An invalid record is silently dropped —
+   * this store never logs. Stores clones, so caller mutation of the input
+   * records after this call cannot reach internal state. `record()`'s seq/
+   * dedupe lookups continue to work correctly afterward since both scan
+   * `this.records` directly. For future App save/load wiring
+   * (runtime-room-memory-persistence-v0); no caller wires this yet.
+   */
+  restoreAll(records: readonly RoomMemoryRecord[]): void {
+    const validated: RoomMemoryRecord[] = []
+    for (const candidate of records) {
+      const parsed = RoomMemoryRecordSchema.safeParse(candidate)
+      if (parsed.success) validated.push(clone(parsed.data))
+    }
+    this.records.length = 0
+    this.records.push(...validated)
+  }
+}
+
+function compareSnapshotOrder(a: RoomMemoryRecord, b: RoomMemoryRecord): number {
+  return (
+    compareIds(a.worldId, b.worldId) ||
+    compareIds(a.sessionId, b.sessionId) ||
+    compareIds(a.roomId, b.roomId) ||
+    (a.seq !== b.seq ? a.seq - b.seq : compareIds(a.memoryId, b.memoryId))
+  )
 }
 
 function compareIds(a: string, b: string): number {

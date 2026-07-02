@@ -82,11 +82,13 @@ import {
 import type { GeneratedMechanicalGate } from './domain/generatedMechanicalGate'
 import {
   attachPerRoomObjectiveOnEnter,
+  buildRuntimeRoomMemorySaveJson,
   buildGeneratedRoomCacheSaveJson,
   buildGeneratedQuestSaveJson,
   buildQuestStage,
   readPerRoomObjectiveMemo,
   resolvedObjectIdsForGeneratedPlay,
+  restoreRuntimeRoomMemoryFromSlot,
   shouldStartPerRoomObjectiveAttach,
   type PerRoomObjectiveMemo,
   type QuestHintState,
@@ -156,6 +158,14 @@ const exampleNavigation = new NavigationService(worldSession, adjacentPregenerat
 
 const STARTING_ROOM_ID = 'throne-room'
 const ROOM_UNAVAILABLE = 'This room could not be loaded.'
+
+function createRoomMemoryRuntime() {
+  const store = new InMemoryRoomMemoryStore()
+  return {
+    store,
+    service: new RoomMemoryService(store, new SystemClock(), idGenerator, logger),
+  }
+}
 
 type ActivePlay = {
   room: LoadedRoom
@@ -405,9 +415,7 @@ function App() {
   // still headless/in-memory only — no backend/API wiring. Built together in
   // one ref (rather than one ref reading another) so render never accesses an
   // existing ref's `.current` (react-hooks/refs).
-  const roomMemoryServiceRef = useRef(
-    new RoomMemoryService(new InMemoryRoomMemoryStore(), new SystemClock(), idGenerator, logger),
-  )
+  const roomMemoryRuntimeRef = useRef(createRoomMemoryRuntime())
   // Bounded, non-authoritative room-memory recall context for NPC dialogue
   // (room-memory-recall-context-v0, Slice F). A monotonic request id discards a
   // stale recall so a previous room's memories can never linger while a newer
@@ -422,7 +430,7 @@ function App() {
     setRoomMemoryContext(undefined)
     void recallRoomMemoryContext(
       { worldId: state.worldId, sessionId: state.sessionId, roomId: state.currentRoomId },
-      roomMemoryServiceRef.current,
+      roomMemoryRuntimeRef.current.service,
       logger,
     ).then((context) => {
       if (roomMemoryRequestRef.current !== requestId) return
@@ -527,7 +535,7 @@ function App() {
     void promoteInteractionMemories(
       input.events,
       input.state.worldId,
-      roomMemoryServiceRef.current,
+      roomMemoryRuntimeRef.current.service,
       logger,
       displayNames,
     ).catch(() => {}).finally(() => {
@@ -759,15 +767,23 @@ function App() {
         },
         questHintsRef.current,
       )
+      const stateForSidecars = await worldSession.getWorldState(activePlay.sessionId)
       let generatedRoomCacheJson: string | undefined
-      if (activePlay.objectivesPerRoom === true && activePlay.adjacentPregenerator != null) {
-        const stateForCache = await worldSession.getWorldState(activePlay.sessionId)
-        if (stateForCache.ok) {
+      let roomMemoryJson: string | undefined
+      if (stateForSidecars.ok) {
+        roomMemoryJson = buildRuntimeRoomMemorySaveJson(
+          roomMemoryRuntimeRef.current.store,
+          {
+            worldId: stateForSidecars.state.worldId,
+            sessionId: stateForSidecars.state.sessionId,
+          },
+        )
+        if (activePlay.objectivesPerRoom === true && activePlay.adjacentPregenerator != null) {
           generatedRoomCacheJson = buildGeneratedRoomCacheSaveJson({
             room: activePlay.room,
             objectivesPerRoom: activePlay.objectivesPerRoom,
             cachedRooms: activePlay.adjacentPregenerator.snapshotCachedRooms(),
-            worldState: stateForCache.state,
+            worldState: stateForSidecars.state,
             ...(activePlay.worldBible?.themePack !== undefined
               ? { themePack: activePlay.worldBible.themePack }
               : {}),
@@ -782,6 +798,7 @@ function App() {
         },
         generatedQuestJson,
         generatedRoomCacheJson,
+        roomMemoryJson,
       )
       if (!writeResult.ok) {
         setSaveLoadStatus('error')
@@ -826,6 +843,32 @@ function App() {
         setSaveLoadStatus('error')
         setSaveLoadError('This save could not be loaded.')
         return
+      }
+
+      const roomMemoryRestore = restoreRuntimeRoomMemoryFromSlot({
+        store: roomMemoryRuntimeRef.current.store,
+        roomMemoryJson: slotResult.roomMemoryJson,
+        scope: {
+          worldId: stateResult.state.worldId,
+          sessionId: stateResult.state.sessionId,
+        },
+      })
+      if (roomMemoryRestore.status === 'invalid') {
+        logger.warn('room memory save sidecar skipped', {
+          reason: roomMemoryRestore.reason,
+          restoredCount: roomMemoryRestore.restoredCount,
+          droppedCount: roomMemoryRestore.droppedCount,
+        })
+      } else {
+        logger.info('room memory save sidecar restored', {
+          status: roomMemoryRestore.status,
+          restoredCount: roomMemoryRestore.restoredCount,
+          droppedCount: roomMemoryRestore.droppedCount,
+          droppedByScope: roomMemoryRestore.droppedByScope,
+          droppedBySource: roomMemoryRestore.droppedBySource,
+          droppedByText: roomMemoryRestore.droppedByText,
+          droppedByCap: roomMemoryRestore.droppedByCap,
+        })
       }
 
       // Generated-play restore (ADR-0059): re-validate the optional parked blob
