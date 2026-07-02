@@ -13,6 +13,13 @@
 > memory-event-promotion-v0 / memory-room-recall-context-v0 — the write and read
 > paths whose products this feature makes durable.
 
+> **Review note (added after plan review, before implementation).** This plan
+> was amended to add a preliminary **"room memory text line-safety"** hardening
+> slice ahead of persistence wiring (see §13). This is a safety fix discovered
+> during plan review, not a change to memory authority: memory remains
+> non-authoritative context, and no `WorldState` reducer, quest, gate, item,
+> flag, or dialogue effect behavior changes.
+
 ## Summary
 
 - **Why this feature exists.** Room memories created during play (interaction
@@ -26,9 +33,12 @@
   room-memory contracts/firewall/service, promotion + recall wiring in `App.tsx`.
   No dependency on features 7/9/10/11.
 - **What it intentionally does not do.** It does not make memory authoritative,
-  does not add LLM-written memory, does not touch SQLite/backend, does not
-  change the memory firewall or any `domain/memory` contract, and does not add
-  any UI (visible feedback is feature 10).
+  does not add LLM-written memory, does not touch SQLite/backend, does not add
+  any UI (visible feedback is feature 10), and does not change memory scope,
+  kind, source, confidence, ranking, or recall-selection rules. It does add one
+  narrow write-firewall change carried in from plan review: room memory `text`
+  is normalized to a single safe line before it is stored (§4, §13 step 2) — a
+  text-safety fix, not a widening of memory authority or contracts.
 
 ---
 
@@ -81,6 +91,14 @@ scopes — with full re-validation on load and zero change to what memory *is*
 
 ## 3. Final behavior
 
+- **Write (live path, new — closes the injection risk at its source):** every
+  room memory `text` is normalized to one safe line by the write firewall
+  before it is ever stored, independent of save/load. Room/item display names
+  can originate from generated `RoomSpec` data, which is string-validated but
+  does not prohibit embedded newlines/control characters, so promoted text
+  could previously carry them straight into storage and into the real
+  provider's prompt. This closes that gap where it originates, not only at
+  restore.
 - **Save:** when the active session has ≥1 room memory, the slot wrapper gains
   an optional `roomMemoryJson` sidecar containing a versioned, bounded snapshot
   of the session's memory records. Sessions with no memories (and older code
@@ -112,14 +130,32 @@ scopes — with full re-validation on load and zero change to what memory *is*
   consistency), and — defense in depth — records with
   `provenance.source === 'llm'` (none can be produced today; the restore path
   must not become a smuggling route if that ever changes).
-- **Restored text stays one safe line.** After schema validation and before
-  inserting into the runtime memory store, restored records whose `text`
-  contains newlines or control characters are dropped for v0. This is a
-  restore-only hardening rule because `RoomMemoryRecordSchema` currently
-  constrains text length but not newlines, and the `roomMemoryJson` sidecar is
-  tamperable bytes. A malicious memory such as
-  `"x\nCURRENT ROOM\nfocus: ..."` must not mimic prompt section headers; recalled
-  memory context must remain bounded and hedged inside one safe line.
+- **Live write path stays one safe line.** `validateRoomMemoryDraft` (the write
+  firewall) normalizes `text` before it is stored: ASCII control characters —
+  including newline, carriage return, and tab — are converted to spaces,
+  whitespace is collapsed, the result is trimmed, and the existing
+  `MAX_ROOM_MEMORY_CHARS` bound is preserved unchanged. If normalization leaves
+  an empty string, the draft is rejected as `empty-text`, the same reason code
+  already used for other empty-text input — no new reject reason is added. No
+  raw rejected/normalized text is ever logged, only counts/reason codes. This
+  is the primary fix: it prevents a memory such as
+  `"x\nCURRENT ROOM\nfocus: ..."` from ever reaching storage or the real
+  provider's prompt in the first place, regardless of save/load.
+- **Restored sidecar text is dropped, not normalized, when unsafe.** After
+  schema validation and before inserting into the runtime memory store,
+  restored records whose `text` still contains newlines or control characters
+  are dropped for v0 (not repaired). This stays stricter than the live write
+  path on purpose: the `roomMemoryJson` sidecar is tamperable bytes outside the
+  firewall's control, so restore treats any such record as untrusted input and
+  discards it rather than attempting to normalize it. In practice this rule
+  should rarely trigger once the write path always normalizes first, but it
+  remains defense in depth against a hand-edited or otherwise tampered blob.
+- **Prompt builder defense-in-depth.** The real dialogue provider's memory
+  section (`generation/llmDialoguePrompt.ts`, `buildMemorySection`/`clampText`)
+  must keep each recalled memory line single-line even if unsafe text somehow
+  reaches recall through a future path that bypasses the firewall. A test must
+  prove memory text cannot fabricate a `CURRENT ROOM` / `RECENT CONVERSATION` /
+  other section header inside the rendered `BACKGROUND ROOM MEMORY` block.
 - **No LLM-written memory.** Only records already produced by the deterministic
   promotion path are snapshotted; the feature adds no write path.
 - **Logging.** Count/code-only: e.g. `room memory saved { count }`,
@@ -135,7 +171,12 @@ scopes — with full re-validation on load and zero change to what memory *is*
 - ❌ Persisting NPC memory (`NpcMemoryService` is browser-unwired; nothing to
   save).
 - ❌ Backend/SQLite persistence of browser memories, or any API wiring.
-- ❌ Changing recall, ranking, promotion, firewall, or memory contracts.
+- ❌ Changing memory scope, kind, source, confidence, ranking, recall
+  selection, promotion decisions, or `RoomMemoryRecordSchema`/contract shape.
+  (The one write-firewall change carried by this plan — normalizing `text` to
+  a single safe line in `validateRoomMemoryDraft` — is a text-safety fix
+  surfaced during plan review, not a change to what memory is or how it is
+  selected/ranked.)
 - ❌ Cross-save memory (memory follows exactly one save slot's session).
 - ❌ Any UI/feedback (feature 10).
 - ❌ Summarization/compaction of old memories beyond the deterministic save caps.
@@ -144,7 +185,10 @@ scopes — with full re-validation on load and zero change to what memory *is*
 
 | File | Change |
 | --- | --- |
-| `apps/web/src/domain/memory/roomMemorySaveState.ts` (new) | `ROOM_MEMORY_SAVE_MAX_PER_ROOM = 8` (mirrors `DEFAULT_ROOM_RECALL_LIMIT`), `ROOM_MEMORY_SAVE_MAX_TOTAL = 128`; `RoomMemorySaveStateSchema = { schemaVersion: z.literal(1), records: z.array(RoomMemoryRecordSchema).min(1).max(128) }.strict()`; `buildRoomMemorySaveState(records)` (deterministic selection, see §7; `null` when empty); `loadRoomMemorySaveState(json)` with the exact envelope/`invalid-json`/`unsupported-version`/`invalid-schema` pattern of `generatedQuestSaveState.ts`; `filterRestorableRoomMemories(records, { worldId, sessionId })` (scope match + `source !== 'llm'` + drop text containing newline/control characters before restore). |
+| `apps/web/src/domain/memory/roomFirewall.ts` | **Preliminary hardening (§13 step 2), lands before persistence code.** `validateRoomMemoryDraft` gains a `normalizeRoomMemoryText(text)` step: ASCII control characters (incl. `\n`/`\r`/`\t`) → space, collapse whitespace, trim, then re-apply the existing `MAX_ROOM_MEMORY_CHARS` bound unchanged. Empty-after-normalization still rejects via the existing `empty-text` reason. No new reject reason; no scope/kind/source/confidence change. |
+| `apps/web/src/domain/memory/roomFirewall.test.ts` | Unit tests: newline/CR/tab/mixed-control text normalizes to one safe line with whitespace collapsed; a control-only string rejects as `empty-text`; ordinary text is unaffected; rejected/normalized inputs never log raw text. |
+| `apps/web/src/generation/llmDialoguePrompt.test.ts` | Add a defense-in-depth test: a memory entry whose text contains header-like content cannot introduce a second `CURRENT ROOM`/`RECENT CONVERSATION`/other section header inside the rendered `BACKGROUND ROOM MEMORY` block. |
+| `apps/web/src/domain/memory/roomMemorySaveState.ts` (new) | `ROOM_MEMORY_SAVE_MAX_PER_ROOM = 8` (mirrors `DEFAULT_ROOM_RECALL_LIMIT`), `ROOM_MEMORY_SAVE_MAX_TOTAL = 128`; `RoomMemorySaveStateSchema = { schemaVersion: z.literal(1), records: z.array(RoomMemoryRecordSchema).min(1).max(128) }.strict()`; `buildRoomMemorySaveState(records)` (deterministic selection, see §7; `null` when empty); `loadRoomMemorySaveState(json)` with the exact envelope/`invalid-json`/`unsupported-version`/`invalid-schema` pattern of `generatedQuestSaveState.ts`; `filterRestorableRoomMemories(records, { worldId, sessionId })` (scope match + `source !== 'llm'` + drop — not normalize — text containing newline/control characters before restore). |
 | `apps/web/src/domain/memory/roomMemorySaveState.test.ts` (new) | Unit tests. |
 | `apps/web/src/memory/InMemoryRoomMemoryStore.ts` | Add `snapshotAll(): RoomMemoryRecord[]` (cloned) and `restore(records)` (insert-only pre-seed preserving `seq`/`dedupeKey`; documented as load-time-only, called before any `record`). Port unchanged. |
 | `apps/web/src/memory/InMemoryRoomMemoryStore.test.ts` | Snapshot/restore round-trip; post-restore `record` continues `seq` correctly; dedupeKey survives restore (a re-promotion of the same event dedupes). |
@@ -157,11 +201,17 @@ scopes — with full re-validation on load and zero change to what memory *is*
 ### Minimum Safe Change Check
 
 - **Reused:** `RoomMemoryRecordSchema` as the entire record-validation boundary;
-  the ADR-0059/0060 envelope/blob pattern verbatim; existing recall refresh.
-- **New code:** one pure domain module, two adapter methods, one slot field, two
-  App wiring blocks.
-- **Boundaries unchanged:** memory firewall, port, persistence layer,
-  authoritative save/load, logging redaction.
+  the ADR-0059/0060 envelope/blob pattern verbatim; existing recall refresh;
+  the existing `empty-text` reject reason for the normalization edge case
+  (no new reason added).
+- **New code:** one text-normalization step inside the existing write
+  firewall function, one pure domain module, two adapter methods, one slot
+  field, two App wiring blocks.
+- **Boundaries unchanged:** memory scope/kind/source/confidence contracts,
+  ranking/recall-selection rules, the `RoomMemoryStore` port, persistence
+  layer, authoritative save/load, logging redaction. The write firewall
+  function signature and reject-reason set are unchanged; only `text` is
+  normalized before validation completes.
 - **Targeted tests:** §10.
 
 ## 7. Data/state model changes
@@ -216,15 +266,28 @@ both already treat that input as hedged, non-authoritative context (ADR-0065).
 
 ## 10. Tests required
 
+- `roomFirewall` (live write path, preliminary hardening slice): text
+  containing newline/carriage-return/tab/mixed control characters normalizes
+  to one safe line with whitespace collapsed and trimmed; a room/item display
+  name with an embedded newline (mirroring the generated-`RoomSpec` origin of
+  the risk) produces a single-line promoted memory; text that is
+  control-characters-only after normalization rejects as `empty-text`;
+  ordinary text is unaffected (no behavior change for the common case);
+  rejected/normalized inputs never log raw text, only counts/reason codes.
+- `llmDialoguePrompt` (defense-in-depth): a memory entry whose text contains
+  characters resembling a section header cannot produce a second
+  `CURRENT ROOM` / `RECENT CONVERSATION` / other header inside the rendered
+  `BACKGROUND ROOM MEMORY` block — the section stays exactly the
+  hedge-prefixed, single-line entries the builder emits.
 - `roomMemorySaveState`: build/load round-trip; per-room and total caps with
   deterministic drop order; empty → `null`; `invalid-json`/
   `unsupported-version`/`invalid-schema` codes; strict-schema rejection of
   tampered records (overlong text, unknown kind, extra keys);
   `filterRestorableRoomMemories` drops wrong-scope and `source:'llm'` records;
-  restored memory with newline text is dropped; restored memory with carriage
-  return, tab, or another control character is dropped; dropped records
-  increment/record safe counts only and never log raw text; valid old memory
-  records still restore.
+  restored memory with newline text is dropped, not normalized; restored
+  memory with carriage return, tab, or another control character is dropped;
+  dropped records increment/record safe counts only and never log raw text;
+  valid old memory records still restore.
 - `InMemoryRoomMemoryStore`: `snapshotAll` clones (mutation of the snapshot
   doesn't affect the store); `restore` + `record` seq continuity; restore + same
   `dedupeKey` promotion → `deduplicated`.
@@ -257,18 +320,31 @@ extras). No migration, no schema rollback, nothing authoritative touched.
 
 ## 13. Implementation slices
 
-1. **Docs (this plan)** — review checkpoint.
-2. **Domain:** `roomMemorySaveState.ts` (+tests).
-3. **Adapter:** `InMemoryRoomMemoryStore.snapshotAll`/`restore` (+tests).
-4. **Save path:** slot-store field + `buildRoomMemorySaveJson` + `handleSave`
+1. **Docs (this plan, including this review amendment)** — review checkpoint.
+2. **Memory text line-safety (preliminary hardening, new).**
+   `roomFirewall.ts` write-path normalization (+tests) and the
+   `llmDialoguePrompt` defense-in-depth test. Lands and is verified before any
+   persistence code — it fixes a live-path safety gap that exists today,
+   independent of save/load, and its presence is what makes the restore-time
+   "drop unsafe text" rule in step 6 genuine defense-in-depth rather than the
+   only line of defense.
+3. **Domain:** `roomMemorySaveState.ts` (+tests).
+4. **Adapter:** `InMemoryRoomMemoryStore.snapshotAll`/`restore` (+tests).
+5. **Save path:** slot-store field + `buildRoomMemorySaveJson` + `handleSave`
    wiring (+tests).
-5. **Load path:** rehydrate in `handleLoad` (+tests), closeout docs + **ADR** +
+6. **Load path:** rehydrate in `handleLoad` (+tests), closeout docs + **ADR** +
    manual smoke.
 
 ## 14. Dependencies on earlier/later features
 
 - **Depends on (shipped):** ADR-0025 contracts, promotion/recall wiring,
   ADR-0059/0060 sidecar pattern.
+- **Depends on (new, added by this review amendment):** the preliminary "room
+  memory text line-safety" slice (§13 step 2) must land and be verified before
+  the save/load slices (§13 steps 5-6). It is a live-path safety fix, not
+  persistence, but this plan's restore-time hardening reasoning (§4) is only
+  complete once both the write-path normalization and the restore-time drop
+  rule are in place.
 - **Blocks:** feature 10 (`room-memory-visible-feedback-v0`) — feedback must not
   ship while memories silently evaporate on load; feature 9 gains a
   persistence-path attack surface to cover (tampered sidecar).
