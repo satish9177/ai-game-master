@@ -7,6 +7,7 @@ import { fallbackRoom } from '../../domain/examples/fallbackRoom'
 import { Engine } from './Engine'
 import { IDLE_BOB_AMPLITUDE, IdleAnimator, idleOffsets, idlePhase } from './animation/idleAnimation'
 import { NpcBehaviorTracker } from './npc/behaviorTracker'
+import { WanderMotor } from './npc/WanderMotor'
 
 const fallback = loadRoomSpec(fallbackRoom)
 const INSPECT_BODY = 'You inspect it carefully, but do not take anything.'
@@ -244,6 +245,8 @@ describe('Engine.setRoom options', () => {
       movement: null,
       idleAnimator: new IdleAnimator(),
       npcBehavior: new NpcBehaviorTracker(),
+      wanderMotor: new WanderMotor(),
+      wanderNpcIds: [] as string[],
     }
 
     try {
@@ -288,6 +291,9 @@ function makeFakeEngine(idleAnimator: IdleAnimator) {
     movement: null,
     idleAnimator,
     npcBehavior: new NpcBehaviorTracker(),
+    wanderMotor: new WanderMotor(),
+    wanderNpcIds: [] as string[],
+    locked: false,
   }
 }
 
@@ -295,6 +301,41 @@ function makeFakeEngine(idleAnimator: IdleAnimator) {
 function objectsGroupFrom(sceneAdd: ReturnType<typeof vi.fn>): THREE.Group {
   const call = sceneAdd.mock.calls.find(([node]) => (node as THREE.Object3D).name === 'objects')
   return call![0] as THREE.Group
+}
+
+function updateNpcWander(fakeEngine: unknown, dt: number): void {
+  (Engine.prototype as unknown as { updateNpcWander: (dt: number) => void })
+    .updateNpcWander.call(fakeEngine, dt)
+}
+
+function wanderRoom(id = 'engine-wander-room') {
+  return loadRoomSpec({
+    schemaVersion: 1,
+    id,
+    name: 'Engine Wander Room',
+    shell: { dimensions: { width: 14, depth: 14, height: 4 } },
+    spawn: { position: [0, 1.6, 0], yaw: 0 },
+    objects: [
+      {
+        id: 'npc',
+        type: 'npc',
+        name: 'Wanderer',
+        position: [0, 0, 2],
+        interaction: { key: 'F', prompt: 'Talk to Wanderer' },
+      },
+      {
+        id: 'scroll',
+        type: 'scroll',
+        position: [3, 0.5, 2],
+        interaction: { key: 'E', prompt: 'Read scroll', body: 'A note.' },
+      },
+      {
+        id: 'pillar',
+        type: 'pillar',
+        position: [-3, 0, 2],
+      },
+    ],
+  })
 }
 
 describe('Engine setRoom idle NPC registration', () => {
@@ -550,6 +591,217 @@ describe('Engine setRoom idle NPC registration', () => {
   })
 })
 
+describe('Engine local NPC wander wiring', () => {
+  it('registers only tagged NPC nodes with WanderMotor', () => {
+    const originalWindow = globalThis.window
+    vi.stubGlobal('window', { addEventListener: vi.fn(), removeEventListener: vi.fn() })
+
+    try {
+      const fakeEngine = makeFakeEngine(new IdleAnimator())
+      const registerSpy = vi.spyOn(fakeEngine.wanderMotor, 'register')
+
+      Engine.prototype.setRoom.call(fakeEngine as never, wanderRoom())
+
+      expect(registerSpy).toHaveBeenCalledTimes(1)
+      expect(registerSpy.mock.calls[0]![0]).toMatchObject({ npcId: 'npc' })
+      expect(fakeEngine.wanderNpcIds).toEqual(['npc'])
+    } finally {
+      if (originalWindow === undefined) vi.unstubAllGlobals()
+      else vi.stubGlobal('window', originalWindow)
+    }
+  })
+
+  it('ignores non-NPC nodes and unrelated rings', () => {
+    const originalWindow = globalThis.window
+    vi.stubGlobal('window', { addEventListener: vi.fn(), removeEventListener: vi.fn() })
+
+    try {
+      const fakeEngine = makeFakeEngine(new IdleAnimator())
+      Engine.prototype.setRoom.call(fakeEngine as never, wanderRoom())
+      const group = objectsGroupFrom(fakeEngine.scene.add)
+      const scrollNode = group.children.find((node) => node.userData.objectType === 'scroll')!
+      const scrollRing = group.children.find((node) => node.userData.forObjectId === 'scroll')!
+      const before = {
+        scrollX: scrollNode.position.x,
+        scrollZ: scrollNode.position.z,
+        ringX: scrollRing.position.x,
+        ringZ: scrollRing.position.z,
+      }
+
+      updateNpcWander(fakeEngine, 0.25)
+
+      expect(scrollNode.position.x).toBe(before.scrollX)
+      expect(scrollNode.position.z).toBe(before.scrollZ)
+      expect(scrollRing.position.x).toBe(before.ringX)
+      expect(scrollRing.position.z).toBe(before.ringZ)
+    } finally {
+      if (originalWindow === undefined) vi.unstubAllGlobals()
+      else vi.stubGlobal('window', originalWindow)
+    }
+  })
+
+  it('moves the matching NPC ring and interactable X/Z with the NPC node', () => {
+    const originalWindow = globalThis.window
+    vi.stubGlobal('window', { addEventListener: vi.fn(), removeEventListener: vi.fn() })
+
+    try {
+      const fakeEngine = makeFakeEngine(new IdleAnimator())
+      Engine.prototype.setRoom.call(fakeEngine as never, wanderRoom())
+      const group = objectsGroupFrom(fakeEngine.scene.add)
+      const npcNode = group.children.find((node) => node.userData.objectType === 'npc')!
+      const npcRing = group.children.find((node) => node.userData.forObjectId === 'npc')!
+      const npcInteractable = fakeEngine.interactables.find((interactable) => interactable.id === 'npc')!
+
+      updateNpcWander(fakeEngine, 0.25)
+
+      expect(npcRing.position.x).toBe(npcNode.position.x)
+      expect(npcRing.position.z).toBe(npcNode.position.z)
+      expect(npcInteractable.position.x).toBe(npcNode.position.x)
+      expect(npcInteractable.position.z).toBe(npcNode.position.z)
+    } finally {
+      if (originalWindow === undefined) vi.unstubAllGlobals()
+      else vi.stubGlobal('window', originalWindow)
+    }
+  })
+
+  it('does not change node Y or rotation.y through wander updates', () => {
+    const originalWindow = globalThis.window
+    vi.stubGlobal('window', { addEventListener: vi.fn(), removeEventListener: vi.fn() })
+
+    try {
+      const fakeEngine = makeFakeEngine(new IdleAnimator())
+      Engine.prototype.setRoom.call(fakeEngine as never, wanderRoom())
+      const group = objectsGroupFrom(fakeEngine.scene.add)
+      const npcNode = group.children.find((node) => node.userData.objectType === 'npc')!
+      const beforeY = npcNode.position.y
+      const beforeRotY = npcNode.rotation.y
+
+      updateNpcWander(fakeEngine, 0.25)
+
+      expect(npcNode.position.y).toBe(beforeY)
+      expect(npcNode.rotation.y).toBe(beforeRotY)
+    } finally {
+      if (originalWindow === undefined) vi.unstubAllGlobals()
+      else vi.stubGlobal('window', originalWindow)
+    }
+  })
+
+  it('pauses wander while interaction locked and resumes when unlocked', () => {
+    const originalWindow = globalThis.window
+    vi.stubGlobal('window', { addEventListener: vi.fn(), removeEventListener: vi.fn() })
+
+    try {
+      const fakeEngine = makeFakeEngine(new IdleAnimator())
+      Engine.prototype.setRoom.call(fakeEngine as never, wanderRoom())
+      const group = objectsGroupFrom(fakeEngine.scene.add)
+      const npcNode = group.children.find((node) => node.userData.objectType === 'npc')!
+
+      updateNpcWander(fakeEngine, 0.25)
+      const moving = { x: npcNode.position.x, z: npcNode.position.z }
+      fakeEngine.locked = true
+      updateNpcWander(fakeEngine, 1)
+      expect(npcNode.position.x).toBe(moving.x)
+      expect(npcNode.position.z).toBe(moving.z)
+
+      fakeEngine.locked = false
+      updateNpcWander(fakeEngine, 0.25)
+      expect(Math.hypot(npcNode.position.x - moving.x, npcNode.position.z - moving.z))
+        .toBeGreaterThan(0)
+    } finally {
+      if (originalWindow === undefined) vi.unstubAllGlobals()
+      else vi.stubGlobal('window', originalWindow)
+    }
+  })
+
+  it('pauses wander while the NPC is talking', () => {
+    const originalWindow = globalThis.window
+    vi.stubGlobal('window', { addEventListener: vi.fn(), removeEventListener: vi.fn() })
+
+    try {
+      const fakeEngine = makeFakeEngine(new IdleAnimator())
+      Engine.prototype.setRoom.call(fakeEngine as never, wanderRoom())
+      const group = objectsGroupFrom(fakeEngine.scene.add)
+      const npcNode = group.children.find((node) => node.userData.objectType === 'npc')!
+
+      updateNpcWander(fakeEngine, 0.25)
+      const moving = { x: npcNode.position.x, z: npcNode.position.z }
+      Engine.prototype.setTalkingNpc.call(fakeEngine as never, 'npc')
+      updateNpcWander(fakeEngine, 1)
+
+      expect(npcNode.position.x).toBe(moving.x)
+      expect(npcNode.position.z).toBe(moving.z)
+      expect(fakeEngine.npcBehavior.stateOf('npc')).toBe('talking')
+    } finally {
+      if (originalWindow === undefined) vi.unstubAllGlobals()
+      else vi.stubGlobal('window', originalWindow)
+    }
+  })
+
+  it('updates npcBehavior wandering state from WanderMotor walking state', () => {
+    const originalWindow = globalThis.window
+    vi.stubGlobal('window', { addEventListener: vi.fn(), removeEventListener: vi.fn() })
+
+    try {
+      const fakeEngine = makeFakeEngine(new IdleAnimator())
+      const setWanderingSpy = vi.spyOn(fakeEngine.npcBehavior, 'setWandering')
+      Engine.prototype.setRoom.call(fakeEngine as never, wanderRoom())
+
+      updateNpcWander(fakeEngine, 0.25)
+
+      expect(setWanderingSpy).toHaveBeenLastCalledWith('npc', true)
+      expect(fakeEngine.npcBehavior.stateOf('npc')).toBe('wandering')
+    } finally {
+      if (originalWindow === undefined) vi.unstubAllGlobals()
+      else vi.stubGlobal('window', originalWindow)
+    }
+  })
+
+  it('clears stale wander registrations when a room is replaced', () => {
+    const originalWindow = globalThis.window
+    vi.stubGlobal('window', { addEventListener: vi.fn(), removeEventListener: vi.fn() })
+
+    try {
+      const fakeEngine = makeFakeEngine(new IdleAnimator())
+      Engine.prototype.setRoom.call(fakeEngine as never, wanderRoom('wander-a'))
+      const groupA = objectsGroupFrom(fakeEngine.scene.add)
+      const npcA = groupA.children.find((node) => node.userData.objectType === 'npc')!
+      updateNpcWander(fakeEngine, 0.25)
+      const npcAFrozen = { x: npcA.position.x, z: npcA.position.z }
+
+      fakeEngine.scene.add.mockClear()
+      Engine.prototype.setRoom.call(fakeEngine as never, wanderRoom('wander-b'))
+      const groupB = objectsGroupFrom(fakeEngine.scene.add)
+      const npcB = groupB.children.find((node) => node.userData.objectType === 'npc')!
+      updateNpcWander(fakeEngine, 0.25)
+
+      expect(npcA.position.x).toBe(npcAFrozen.x)
+      expect(npcA.position.z).toBe(npcAFrozen.z)
+      expect(Math.hypot(npcB.position.x, npcB.position.z - 2)).toBeGreaterThan(0)
+      expect(fakeEngine.wanderNpcIds).toEqual(['npc'])
+    } finally {
+      if (originalWindow === undefined) vi.unstubAllGlobals()
+      else vi.stubGlobal('window', originalWindow)
+    }
+  })
+
+  it('uses fake Engine objects only for local wander wiring tests', () => {
+    const originalWindow = globalThis.window
+    vi.stubGlobal('window', { addEventListener: vi.fn(), removeEventListener: vi.fn() })
+
+    try {
+      const fakeEngine = makeFakeEngine(new IdleAnimator())
+
+      expect(() => {
+        Engine.prototype.setRoom.call(fakeEngine as never, wanderRoom())
+        updateNpcWander(fakeEngine, 0.1)
+      }).not.toThrow()
+    } finally {
+      if (originalWindow === undefined) vi.unstubAllGlobals()
+      else vi.stubGlobal('window', originalWindow)
+    }
+  })
+})
+
 describe('Engine dispose', () => {
   it('clears idle and behavior state safely during teardown', () => {
     const originalWindow = globalThis.window
@@ -561,6 +813,8 @@ describe('Engine dispose', () => {
     const clearSpy = vi.spyOn(idleAnimator, 'clear')
     const npcBehavior = new NpcBehaviorTracker()
     const behaviorClearSpy = vi.spyOn(npcBehavior, 'clear')
+    const wanderMotor = new WanderMotor()
+    const wanderClearSpy = vi.spyOn(wanderMotor, 'clear')
     const fakeEngine = {
       rafId: 0,
       resizeObserver: { disconnect: vi.fn() },
@@ -583,6 +837,8 @@ describe('Engine dispose', () => {
       room: null,
       idleAnimator,
       npcBehavior,
+      wanderMotor,
+      wanderNpcIds: ['npc'],
     }
 
     try {
@@ -598,5 +854,7 @@ describe('Engine dispose', () => {
 
     expect(clearSpy).toHaveBeenCalledTimes(1)
     expect(behaviorClearSpy).toHaveBeenCalledTimes(1)
+    expect(wanderClearSpy).toHaveBeenCalledTimes(1)
+    expect(fakeEngine.wanderNpcIds).toEqual([])
   })
 })

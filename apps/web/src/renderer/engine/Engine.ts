@@ -16,6 +16,8 @@ import { buildInteractables, type Interactable } from '../../domain/ports/intera
 import { IdleAnimator, idlePhase } from './animation/idleAnimation'
 import { IDLE_INTENSITY_BY_STATE } from '../../domain/ports/npcBehavior'
 import { NpcBehaviorTracker } from './npc/behaviorTracker'
+import { WanderMotor } from './npc/WanderMotor'
+import { buildNpcWanderField } from '../../domain/npcMovementContract'
 
 export type SetRoomOptions = {
   resolvedObjectIds?: ReadonlySet<string>
@@ -55,6 +57,8 @@ export class Engine {
   private readonly interactables: Interactable[] = []
   private readonly idleAnimator = new IdleAnimator()
   private readonly npcBehavior = new NpcBehaviorTracker()
+  private readonly wanderMotor = new WanderMotor()
+  private readonly wanderNpcIds: string[] = []
   private activeInteractable: Interactable | null = null
   private readonly interactRange = 2.5 // meters (XZ) to register as "in range"
   private locked = false // true while a dialogue panel owns input
@@ -97,6 +101,8 @@ export class Engine {
   /** Receives the validated room, builds the shell, and places the player. */
   setRoom(room: LoadedRoom, options: SetRoomOptions = {}): void {
     this.npcBehavior.clear()
+    this.wanderMotor.clear()
+    this.wanderNpcIds.length = 0
     this.room = room
     this.scene.add(buildLighting(room.lighting, room.shell.dimensions))
     this.scene.add(buildShell(room, { cutawaySides: this.cutawaySides() }))
@@ -116,6 +122,7 @@ export class Engine {
     this.movement = new MovementControls()
 
     this.interactables.push(...buildInteractables(room, options.resolvedObjectIds))
+    this.wanderNpcIds.push(...registerWanderNpcs(this.wanderMotor, room, objects, this.interactables))
     window.addEventListener('keydown', this.onInteractKey)
 
     this.logger.info('room received', {
@@ -172,10 +179,22 @@ export class Engine {
     if (this.movement && this.bounds) {
       this.movement.update(this.player, dt, this.bounds)
     }
+    this.updateNpcWander(dt)
     this.idleAnimator.update(dt)
     this.cameraController.follow(this.player.position)
     this.updateProximity()
     this.renderer.render(this.scene, this.cameraController.camera)
+  }
+
+  private updateNpcWander(dt: number): void {
+    this.wanderMotor.update(dt, {
+      interactionLocked: this.locked,
+      isNpcTalking: (npcId) => this.npcBehavior.stateOf(npcId) === 'talking',
+    })
+
+    for (const npcId of this.wanderNpcIds) {
+      this.npcBehavior.setWandering(npcId, this.wanderMotor.isWalking(npcId))
+    }
   }
 
   /** Nearest interactable in range right now, or null. */
@@ -240,6 +259,8 @@ export class Engine {
     this.interactables.length = 0
     this.idleAnimator.clear()
     this.npcBehavior.clear()
+    this.wanderMotor.clear()
+    this.wanderNpcIds.length = 0
     this.activeInteractable = null
     this.locked = false
     this.onActiveInteractionChange = null
@@ -289,4 +310,37 @@ function registerIdleNpcs(
       intensity: () => IDLE_INTENSITY_BY_STATE[behavior.stateOf(key)],
     })
   })
+}
+
+function registerWanderNpcs(
+  wanderMotor: WanderMotor,
+  room: LoadedRoom,
+  group: THREE.Group,
+  interactables: readonly Interactable[],
+): string[] {
+  const npcIds: string[] = []
+
+  for (const node of group.children) {
+    if (node.userData.objectType !== 'npc') continue
+    const objectId = node.userData.objectId as string | undefined
+    if (objectId === undefined) continue
+
+    const field = buildNpcWanderField(room, objectId)
+    if (field === null) continue
+
+    const ring = group.children.find((candidate) => candidate.userData.forObjectId === objectId)
+    const interactable = interactables.find((candidate) => candidate.id === objectId)
+    wanderMotor.register({
+      npcId: objectId,
+      node,
+      field,
+      seed: `${room.id}:${objectId}`,
+      home: field.home,
+      ...(ring !== undefined ? { ring } : {}),
+      ...(interactable !== undefined ? { interactable } : {}),
+    })
+    npcIds.push(objectId)
+  }
+
+  return npcIds
 }
