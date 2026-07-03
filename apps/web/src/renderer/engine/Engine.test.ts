@@ -6,6 +6,7 @@ import { assembleRoom } from '../../domain/assembleRoom'
 import { fallbackRoom } from '../../domain/examples/fallbackRoom'
 import { Engine } from './Engine'
 import { IDLE_BOB_AMPLITUDE, IdleAnimator, idleOffsets, idlePhase } from './animation/idleAnimation'
+import { NpcBehaviorTracker } from './npc/behaviorTracker'
 
 const fallback = loadRoomSpec(fallbackRoom)
 const INSPECT_BODY = 'You inspect it carefully, but do not take anything.'
@@ -242,6 +243,7 @@ describe('Engine.setRoom options', () => {
       bounds: null,
       movement: null,
       idleAnimator: new IdleAnimator(),
+      npcBehavior: new NpcBehaviorTracker(),
     }
 
     try {
@@ -285,6 +287,7 @@ function makeFakeEngine(idleAnimator: IdleAnimator) {
     bounds: null,
     movement: null,
     idleAnimator,
+    npcBehavior: new NpcBehaviorTracker(),
   }
 }
 
@@ -295,6 +298,99 @@ function objectsGroupFrom(sceneAdd: ReturnType<typeof vi.fn>): THREE.Group {
 }
 
 describe('Engine setRoom idle NPC registration', () => {
+  it('updates the presentation tracker through setTalkingNpc without throwing', () => {
+    const fakeEngine = { npcBehavior: new NpcBehaviorTracker() }
+
+    expect(() => Engine.prototype.setTalkingNpc.call(fakeEngine as never, 'npc')).not.toThrow()
+    expect(() => Engine.prototype.setTalkingNpc.call(fakeEngine as never, null)).not.toThrow()
+  })
+
+  it('resolves talking NPC idle intensity to 0', () => {
+    const originalWindow = globalThis.window
+    vi.stubGlobal('window', { addEventListener: vi.fn(), removeEventListener: vi.fn() })
+
+    try {
+      const idleAnimator = new IdleAnimator()
+      const fakeEngine = makeFakeEngine(idleAnimator)
+
+      Engine.prototype.setTalkingNpc.call(fakeEngine as never, 'npc')
+      Engine.prototype.setRoom.call(fakeEngine as never, room)
+      Engine.prototype.setTalkingNpc.call(fakeEngine as never, 'npc')
+
+      const group = objectsGroupFrom(fakeEngine.scene.add)
+      const npcNode = group.children.find((node) => node.userData.objectType === 'npc')!
+      const npcBaseY = npcNode.position.y
+      const npcBaseRotY = npcNode.rotation.y
+
+      idleAnimator.update(5)
+
+      expect(npcNode.position.y).toBe(npcBaseY)
+      expect(npcNode.rotation.y).toBe(npcBaseRotY)
+    } finally {
+      if (originalWindow === undefined) {
+        vi.unstubAllGlobals()
+      } else {
+        vi.stubGlobal('window', originalWindow)
+      }
+    }
+  })
+
+  it('keeps unknown and non-talking NPC idle intensity at 1', () => {
+    const originalWindow = globalThis.window
+    vi.stubGlobal('window', { addEventListener: vi.fn(), removeEventListener: vi.fn() })
+
+    try {
+      const idleAnimator = new IdleAnimator()
+      const fakeEngine = makeFakeEngine(idleAnimator)
+
+      Engine.prototype.setRoom.call(fakeEngine as never, room)
+      Engine.prototype.setTalkingNpc.call(fakeEngine as never, 'other-npc')
+
+      const group = objectsGroupFrom(fakeEngine.scene.add)
+      const npcNode = group.children.find((node) => node.userData.objectType === 'npc')!
+      const npcBaseY = npcNode.position.y
+
+      idleAnimator.update(5)
+
+      const expectedBobY = idleOffsets(idlePhase(room.id, 'npc'), 5).bobY
+      expect(npcNode.position.y).toBeCloseTo(npcBaseY + expectedBobY, 12)
+    } finally {
+      if (originalWindow === undefined) {
+        vi.unstubAllGlobals()
+      } else {
+        vi.stubGlobal('window', originalWindow)
+      }
+    }
+  })
+
+  it('clears stale talking state when a room is set', () => {
+    const originalWindow = globalThis.window
+    vi.stubGlobal('window', { addEventListener: vi.fn(), removeEventListener: vi.fn() })
+
+    try {
+      const idleAnimator = new IdleAnimator()
+      const fakeEngine = makeFakeEngine(idleAnimator)
+
+      Engine.prototype.setTalkingNpc.call(fakeEngine as never, 'npc')
+      Engine.prototype.setRoom.call(fakeEngine as never, room)
+
+      const group = objectsGroupFrom(fakeEngine.scene.add)
+      const npcNode = group.children.find((node) => node.userData.objectType === 'npc')!
+      const npcBaseY = npcNode.position.y
+
+      idleAnimator.update(5)
+
+      const expectedBobY = idleOffsets(idlePhase(room.id, 'npc'), 5).bobY
+      expect(npcNode.position.y).toBeCloseTo(npcBaseY + expectedBobY, 12)
+    } finally {
+      if (originalWindow === undefined) {
+        vi.unstubAllGlobals()
+      } else {
+        vi.stubGlobal('window', originalWindow)
+      }
+    }
+  })
+
   it('registers tagged NPC nodes and ignores rings/helpers, without throwing', () => {
     const originalWindow = globalThis.window
     vi.stubGlobal('window', { addEventListener: vi.fn(), removeEventListener: vi.fn() })
@@ -455,7 +551,7 @@ describe('Engine setRoom idle NPC registration', () => {
 })
 
 describe('Engine dispose', () => {
-  it('calls idleAnimator.clear() safely during teardown', () => {
+  it('clears idle and behavior state safely during teardown', () => {
     const originalWindow = globalThis.window
     const originalCancelAnimationFrame = globalThis.cancelAnimationFrame
     vi.stubGlobal('window', { removeEventListener: vi.fn() })
@@ -463,6 +559,8 @@ describe('Engine dispose', () => {
 
     const idleAnimator = new IdleAnimator()
     const clearSpy = vi.spyOn(idleAnimator, 'clear')
+    const npcBehavior = new NpcBehaviorTracker()
+    const behaviorClearSpy = vi.spyOn(npcBehavior, 'clear')
     const fakeEngine = {
       rafId: 0,
       resizeObserver: { disconnect: vi.fn() },
@@ -484,6 +582,7 @@ describe('Engine dispose', () => {
       },
       room: null,
       idleAnimator,
+      npcBehavior,
     }
 
     try {
@@ -498,5 +597,6 @@ describe('Engine dispose', () => {
     }
 
     expect(clearSpy).toHaveBeenCalledTimes(1)
+    expect(behaviorClearSpy).toHaveBeenCalledTimes(1)
   })
 })

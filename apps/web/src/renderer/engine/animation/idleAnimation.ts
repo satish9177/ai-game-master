@@ -38,6 +38,7 @@ export type IdleAnimatorEntry = {
   phase: number
   baseY: number
   baseRotY: number
+  intensity?: () => number
 }
 
 /**
@@ -57,8 +58,9 @@ export class IdleAnimator {
     this.elapsedS += dt
     for (const entry of this.entries) {
       const { bobY, swayRad } = idleOffsets(entry.phase, this.elapsedS)
-      entry.node.position.y = entry.baseY + bobY
-      entry.node.rotation.y = entry.baseRotY + swayRad
+      const intensity = entry.intensity?.() ?? 1
+      entry.node.position.y = entry.baseY + bobY * intensity
+      entry.node.rotation.y = entry.baseRotY + swayRad * intensity
     }
   }
 

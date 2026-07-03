@@ -14,6 +14,8 @@ import { buildPlayerMarker } from './playerMarker'
 import type { Logger } from '../../platform/logger/Logger'
 import { buildInteractables, type Interactable } from '../../domain/ports/interaction'
 import { IdleAnimator, idlePhase } from './animation/idleAnimation'
+import { IDLE_INTENSITY_BY_STATE } from '../../domain/ports/npcBehavior'
+import { NpcBehaviorTracker } from './npc/behaviorTracker'
 
 export type SetRoomOptions = {
   resolvedObjectIds?: ReadonlySet<string>
@@ -52,6 +54,7 @@ export class Engine {
   private bounds: Bounds | null = null
   private readonly interactables: Interactable[] = []
   private readonly idleAnimator = new IdleAnimator()
+  private readonly npcBehavior = new NpcBehaviorTracker()
   private activeInteractable: Interactable | null = null
   private readonly interactRange = 2.5 // meters (XZ) to register as "in range"
   private locked = false // true while a dialogue panel owns input
@@ -93,12 +96,13 @@ export class Engine {
 
   /** Receives the validated room, builds the shell, and places the player. */
   setRoom(room: LoadedRoom, options: SetRoomOptions = {}): void {
+    this.npcBehavior.clear()
     this.room = room
     this.scene.add(buildLighting(room.lighting, room.shell.dimensions))
     this.scene.add(buildShell(room, { cutawaySides: this.cutawaySides() }))
     const objects = buildObjects(room, this.logger, options.resolvedObjectIds)
     this.scene.add(objects)
-    registerIdleNpcs(this.idleAnimator, room, objects)
+    registerIdleNpcs(this.idleAnimator, this.npcBehavior, room, objects)
     this.placePlayer(room.spawn)
 
     const { width, depth } = room.shell.dimensions
@@ -188,6 +192,11 @@ export class Engine {
     this.movement?.setEnabled(!locked)
   }
 
+  /** Presentation-only NPC dialogue state; does not affect gameplay truth. */
+  setTalkingNpc(npcId: string | null): void {
+    this.npcBehavior.setTalking(npcId)
+  }
+
   /**
    * Each frame, pick the nearest interactable within range on the XZ plane.
    * Strict `<` so ties resolve to the first-listed object deterministically.
@@ -230,6 +239,7 @@ export class Engine {
     this.bounds = null
     this.interactables.length = 0
     this.idleAnimator.clear()
+    this.npcBehavior.clear()
     this.activeInteractable = null
     this.locked = false
     this.onActiveInteractionChange = null
@@ -259,7 +269,12 @@ export class Engine {
  * with `room.objects` order (rings/markers interleave in `group.children`
  * but carry no tag), so the fallback stays deterministic across reloads.
  */
-function registerIdleNpcs(idleAnimator: IdleAnimator, room: LoadedRoom, group: THREE.Group): void {
+function registerIdleNpcs(
+  idleAnimator: IdleAnimator,
+  behavior: NpcBehaviorTracker,
+  room: LoadedRoom,
+  group: THREE.Group,
+): void {
   idleAnimator.clear()
   const objectNodes = group.children.filter((node) => node.userData.objectType !== undefined)
   objectNodes.forEach((node, index) => {
@@ -271,6 +286,7 @@ function registerIdleNpcs(idleAnimator: IdleAnimator, room: LoadedRoom, group: T
       phase: idlePhase(room.id, key),
       baseY: node.position.y,
       baseRotY: node.rotation.y,
+      intensity: () => IDLE_INTENSITY_BY_STATE[behavior.stateOf(key)],
     })
   })
 }

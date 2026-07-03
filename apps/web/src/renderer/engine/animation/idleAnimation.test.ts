@@ -72,6 +72,74 @@ describe('IdleAnimator', () => {
     expect(node.position.y).toBeLessThanOrEqual(2 + IDLE_BOB_AMPLITUDE)
   })
 
+  it('defaults to intensity 1 and reproduces current offsets', () => {
+    const animator = new IdleAnimator()
+    const node = makeNode()
+    const phase = idlePhase('room-1', 'npc-1')
+    animator.register({ node, phase, baseY: 2, baseRotY: 0.5 })
+
+    animator.update(1)
+
+    const { bobY, swayRad } = idleOffsets(phase, 1)
+    expect(node.position.y).toBeCloseTo(2 + bobY, 12)
+    expect(node.rotation.y).toBeCloseTo(0.5 + swayRad, 12)
+  })
+
+  it('returns intensity 0 nodes exactly to baseY and baseRotY', () => {
+    const animator = new IdleAnimator()
+    const node = makeNode()
+    animator.register({
+      node,
+      phase: idlePhase('room-1', 'npc-1'),
+      baseY: 2,
+      baseRotY: 0.5,
+      intensity: () => 0,
+    })
+
+    animator.update(1)
+
+    expect(node.position.y).toBe(2)
+    expect(node.rotation.y).toBe(0.5)
+  })
+
+  it('applies half bob offset for intensity 0.5', () => {
+    const animator = new IdleAnimator()
+    const node = makeNode()
+    const phase = idlePhase('room-1', 'npc-1')
+    animator.register({
+      node,
+      phase,
+      baseY: 2,
+      baseRotY: 0.5,
+      intensity: () => 0.5,
+    })
+
+    animator.update(1)
+
+    expect(node.position.y).toBeCloseTo(2 + idleOffsets(phase, 1).bobY * 0.5, 12)
+  })
+
+  it('never writes X/Z when intensity changes', () => {
+    const animator = new IdleAnimator()
+    const node = makeNode()
+    node.rotation.x = 0.25
+    node.rotation.z = 0.75
+    animator.register({
+      node,
+      phase: idlePhase('room-1', 'npc-1'),
+      baseY: 2,
+      baseRotY: 0.5,
+      intensity: () => 0,
+    })
+
+    animator.update(1)
+
+    expect(node.position.x).toBe(1)
+    expect(node.position.z).toBe(3)
+    expect(node.rotation.x).toBe(0.25)
+    expect(node.rotation.z).toBe(0.75)
+  })
+
   it('leaves rotation.y at baseRotY because sway is disabled', () => {
     const animator = new IdleAnimator()
     const node = makeNode()
