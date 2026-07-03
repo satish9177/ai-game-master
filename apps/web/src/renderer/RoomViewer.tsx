@@ -155,6 +155,7 @@ export function RoomViewer({
     let cancelled = false
 
     const resetNPCDialogue = () => {
+      engine.setTalkingNpc(null)
       npcDialogueRequestRef.current += 1
       npcDialoguePendingRef.current = false
       activeNPCDialogueRef.current = null
@@ -225,6 +226,7 @@ export function RoomViewer({
         setDialogue(null)
         setChoices(undefined)
         activeNPCDialogueRef.current = dialogueTarget
+        engine.setTalkingNpc(target.id)
         setNPCDialogueTarget(dialogueTarget)
         const seed: NPCDialogueTurn[] = dialogueTarget.dialogue.greeting
           ? [{ speaker: 'npc', text: dialogueTarget.dialogue.greeting }]
@@ -411,6 +413,7 @@ export function RoomViewer({
 
   const closeNPCDialogue = useCallback(() => {
     engineRef.current?.setInteractionLock(false)
+    engineRef.current?.setTalkingNpc(null)
     npcDialogueRequestRef.current += 1
     npcDialoguePendingRef.current = false
     activeNPCDialogueRef.current = null

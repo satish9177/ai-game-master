@@ -18,6 +18,7 @@ const mockState = vi.hoisted(() => ({
     onActiveInteractionChange: ((target: Interactable | null) => void) | null
     setRoom: ReturnType<typeof vi.fn>
     setInteractionLock: ReturnType<typeof vi.fn>
+    setTalkingNpc: ReturnType<typeof vi.fn>
     dispose: ReturnType<typeof vi.fn>
   }>,
 }))
@@ -62,6 +63,7 @@ vi.mock('./engine/Engine', () => ({
     onActiveInteractionChange: ((target: Interactable | null) => void) | null = null
     setRoom = vi.fn()
     setInteractionLock = vi.fn()
+    setTalkingNpc = vi.fn()
     dispose = vi.fn()
 
     constructor() {
@@ -306,6 +308,74 @@ describe('RoomViewer NPC dialogue room context wiring', () => {
       { speaker: 'npc', text: 'Secret greeting text' },
     ])
     expect(setNPCDialoguePending).not.toHaveBeenCalledWith(true)
+  })
+
+  it('marks the opened NPC as talking after the reset clear', async () => {
+    const room = loadedRoom()
+
+    const props = {
+      roomSource: { getRoom: async () => ({ ok: true, room }) },
+      sessionId: 'session-1',
+      interactionService: { resolve: async () => ({ status: 'rejected', reason: 'missing-effect' }) },
+      encounterService: { resolve: async () => ({ status: 'failed', reason: 'not-found' }) },
+      npcDialogueService: {
+        reply: async () => ({ status: 'replied', turn: { speaker: 'npc', text: 'A line.' } }),
+      },
+      onNavigate: async () => ({ status: 'failed', reason: 'not-found' }),
+    } as unknown as Parameters<typeof RoomViewer>[0]
+    RoomViewer(props)
+
+    await Promise.resolve()
+    await Promise.resolve()
+
+    const engine = mockState.engineInstances[0]
+    engine?.onRequestOpenInteraction?.({
+      id: 'room-npc',
+      type: 'npc',
+      label: 'Secret NPC Object Name',
+      affordance: 'talk',
+      key: 'F',
+      prompt: 'Secret interaction prompt',
+      position: { x: 0, y: 0, z: -3 },
+    })
+
+    expect(engine?.setTalkingNpc).toHaveBeenNthCalledWith(1, null)
+    expect(engine?.setTalkingNpc).toHaveBeenNthCalledWith(2, 'room-npc')
+  })
+
+  it('clears the talking NPC when NPC dialogue closes', async () => {
+    const room = loadedRoom()
+
+    const props = {
+      roomSource: { getRoom: async () => ({ ok: true, room }) },
+      sessionId: 'session-1',
+      interactionService: { resolve: async () => ({ status: 'rejected', reason: 'missing-effect' }) },
+      encounterService: { resolve: async () => ({ status: 'failed', reason: 'not-found' }) },
+      npcDialogueService: {
+        reply: async () => ({ status: 'replied', turn: { speaker: 'npc', text: 'A line.' } }),
+      },
+      onNavigate: async () => ({ status: 'failed', reason: 'not-found' }),
+    } as unknown as Parameters<typeof RoomViewer>[0]
+    RoomViewer(props)
+
+    await Promise.resolve()
+    await Promise.resolve()
+
+    const engine = mockState.engineInstances[0]
+    engine?.onRequestOpenInteraction?.({
+      id: 'room-npc',
+      type: 'npc',
+      label: 'Secret NPC Object Name',
+      affordance: 'talk',
+      key: 'F',
+      prompt: 'Secret interaction prompt',
+      position: { x: 0, y: 0, z: -3 },
+    })
+
+    const closeNPCDialogue = mockState.callbacks[1] as () => void
+    closeNPCDialogue()
+
+    expect(engine?.setTalkingNpc).toHaveBeenLastCalledWith(null)
   })
 
   it('sends prompt button id separately from the displayed player label', async () => {
