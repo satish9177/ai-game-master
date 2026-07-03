@@ -161,7 +161,7 @@ export function shouldPauseWander(input: {
   return input.interactionLocked || input.npcTalking
 }
 
-function isWanderSegmentAllowed(field: NpcWanderField, start: WanderXZ, end: WanderXZ): boolean {
+export function isWanderSegmentAllowed(field: NpcWanderField, start: WanderXZ, end: WanderXZ): boolean {
   const distance = distanceXZ(start, end)
   const samples = Math.max(1, Math.ceil(distance / NPC_WANDER.SEGMENT_SAMPLE_SPACING))
   for (let sample = 0; sample <= samples; sample += 1) {
@@ -174,7 +174,7 @@ function isWanderSegmentAllowed(field: NpcWanderField, start: WanderXZ, end: Wan
   return true
 }
 
-function distanceXZ(a: WanderXZ, b: WanderXZ): number {
+export function distanceXZ(a: WanderXZ, b: WanderXZ): number {
   return Math.hypot(a.x - b.x, a.z - b.z)
 }
 
