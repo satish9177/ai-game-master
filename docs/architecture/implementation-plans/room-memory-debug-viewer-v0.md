@@ -1,6 +1,6 @@
 # Implementation Plan — `feature/room-memory-debug-viewer-v0`
 
-> Status: **DRAFT — docs-only. Not approved. No code until the maintainer approves this plan.**
+> Status: **COMPLETE — Slices 1–3 implemented and reviewed. See Implementation closeout below.**
 >
 > File location note: repo convention places implementation plans under
 > `docs/architecture/implementation-plans/` (all siblings live here). The task
@@ -330,3 +330,56 @@ Before handing off (extends [AGENTS.md](../../../AGENTS.md) review checklist):
 - [ ] No consequence-journal code path or `JournalPanel` touched.
 - [ ] Tests cover sanitization, ordering, gate, and the no-write/no-log-leak
       invariants; build/lint/test reported honestly.
+
+---
+
+## Implementation closeout
+
+**Status: complete.** All three slices implemented and reviewed.
+
+### Slices completed
+
+- **Slice 1** — room memory debug projection
+- **Slice 2** — presentational `RoomMemoryDebugPanel`
+- **Slice 3** — dev-gated App integration seam
+
+### Implemented files
+
+- `apps/web/src/domain/memory/roomMemoryDebugView.ts`
+- `apps/web/src/domain/memory/roomMemoryDebugView.test.ts`
+- `apps/web/src/renderer/ui/RoomMemoryDebugPanel.tsx`
+- `apps/web/src/renderer/ui/RoomMemoryDebugPanel.test.tsx`
+- `apps/web/src/index.css`
+- `apps/web/src/App.tsx`
+- `apps/web/src/App.test.tsx`
+- `apps/web/src/app/debugConfig.ts`
+- `apps/web/src/app/debugConfig.test.ts`
+- `apps/web/src/app/roomMemoryDebugViewer.ts`
+- `apps/web/src/app/roomMemoryDebugViewer.test.ts`
+- `apps/web/src/app/llmConfig.ts` — comment-only update
+
+### Verification
+
+- `npm.cmd run test -- roomMemoryDebugView RoomMemoryDebugPanel` — passed
+- `npm.cmd run test -- debugConfig roomMemoryDebugViewer App roomMemoryDebugView RoomMemoryDebugPanel` — passed
+- `npm.cmd run lint` — passed
+- `npm.cmd run build` — failed only on known unrelated TypeScript errors in
+  `assembleRoom.test.ts`, `ensureGeneratedNpcPresence.ts`, `npcMovementContract.test.ts`,
+  and `OpenAICompatibleNPCDialogueProvider.test.ts`
+
+### Safety confirmation
+
+- Read-only debug/dev viewer only.
+- Explicit gate: `import.meta.env.DEV && VITE_ROOM_MEMORY_DEBUG_VIEWER === "true"`.
+- No memory writes.
+- No room-memory mutation.
+- No event-log mutation.
+- No provider/LLM/prompt changes.
+- No schema/save-load changes.
+- No gameplay authority change.
+- No persistence changes.
+- No polling/subscriptions/live event hooks.
+- No raw prompt/provider/memory leakage.
+- Sanitized projection only reaches UI.
+- Consequence journal untouched.
+- Unrelated FTS/persistence files intentionally excluded from this slice's scope.
