@@ -45,6 +45,8 @@ export function buildGroundRing(options: {
       opacity,
       side: THREE.DoubleSide,
       depthWrite: false, // a thin floor decal; don't occlude via the depth buffer
+      roughness: 0.55,
+      metalness: 0.02,
       toneMapped,
     }),
   )

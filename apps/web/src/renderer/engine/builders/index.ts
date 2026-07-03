@@ -191,9 +191,9 @@ function buildArch(obj: ObjectOf<'arch'>): THREE.Object3D {
   const { width, height, color } = obj
   const g = new THREE.Group()
   const post = 0.4
-  g.add(box(post, height, post, -width / 2, height / 2, 0, color)) // left post
-  g.add(box(post, height, post, width / 2, height / 2, 0, color)) // right post
-  g.add(box(width + post, 0.5, post, 0, height + 0.25, 0, color)) // lintel
+  g.add(archBox(post, height, post, -width / 2, height / 2, 0, color)) // left post
+  g.add(archBox(post, height, post, width / 2, height / 2, 0, color)) // right post
+  g.add(archBox(width + post, 0.5, post, 0, height + 0.25, 0, color)) // lintel
   return g
 }
 
@@ -382,18 +382,18 @@ function readPosition(raw: unknown): Vec3 {
 }
 
 export const AFFORDANCE_RING_COLOR: Record<Affordance, string> = {
-  inspect: '#ffcf6b',
-  talk: '#6fe39a',
-  exit: '#6bbcff',
-  approach: '#ff7048',
-  take: '#ffd84d',
-  use: '#9b7cff',
+  inspect: '#ffd166',
+  talk: '#63e6a2',
+  exit: '#64d8ff',
+  approach: '#ff7a59',
+  take: '#ffe066',
+  use: '#aa8cff',
 }
-export const RETURN_EXIT_RING_COLOR = '#f472b6'
-export const INTERACTABLE_RING_EMISSIVE_INTENSITY = 1.25
-export const INTERACTABLE_RING_OPACITY = 1
-export const RESOLVED_RING_EMISSIVE_INTENSITY = 0.22
-export const RESOLVED_RING_OPACITY = 0.34
+export const RETURN_EXIT_RING_COLOR = '#ff77c8'
+export const INTERACTABLE_RING_EMISSIVE_INTENSITY = 1.4
+export const INTERACTABLE_RING_OPACITY = 0.94
+export const RESOLVED_RING_EMISSIVE_INTENSITY = 0.28
+export const RESOLVED_RING_OPACITY = 0.38
 
 /**
  * A static floor ring placed under an interactable object at its XZ (on the
@@ -406,15 +406,15 @@ function buildInteractableIndicator(
   resolved = false,
 ): THREE.Object3D {
   const ring = buildGroundRing({
-    innerRadius: 0.68,
-    outerRadius: 1.08,
+    innerRadius: 0.72,
+    outerRadius: 1.14,
     color,
     emissiveIntensity: resolved
       ? RESOLVED_RING_EMISSIVE_INTENSITY
       : INTERACTABLE_RING_EMISSIVE_INTENSITY,
     opacity: resolved ? RESOLVED_RING_OPACITY : INTERACTABLE_RING_OPACITY,
-    floorY: 0.06,
-    renderOrder: 8,
+    floorY: 0.07,
+    renderOrder: 12,
     toneMapped: false,
   })
   ring.name = 'interactable-indicator'
@@ -431,4 +431,28 @@ function enableShadows(node: THREE.Object3D): void {
       mesh.receiveShadow = true
     }
   })
+}
+
+function archBox(
+  sx: number,
+  sy: number,
+  sz: number,
+  px: number,
+  py: number,
+  pz: number,
+  color: string,
+): THREE.Mesh {
+  const archColor = new THREE.Color(color)
+  const m = new THREE.Mesh(
+    new THREE.BoxGeometry(sx, sy, sz),
+    new THREE.MeshStandardMaterial({
+      color: archColor,
+      emissive: archColor.clone().multiplyScalar(0.35),
+      emissiveIntensity: 0.22,
+      roughness: 0.72,
+      metalness: 0.04,
+    }),
+  )
+  m.position.set(px, py, pz)
+  return m
 }

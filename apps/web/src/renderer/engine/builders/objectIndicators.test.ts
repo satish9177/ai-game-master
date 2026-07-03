@@ -104,13 +104,27 @@ describe('buildObjects interactable indicators', () => {
 
     expect(indicators(g)).toHaveLength(1)
     expect(ring.name).toBe('interactable-indicator')
-    expect(geometry.parameters.innerRadius).toBeCloseTo(0.68)
-    expect(geometry.parameters.outerRadius).toBeCloseTo(1.08)
+    expect(geometry.parameters.innerRadius).toBeCloseTo(0.72)
+    expect(geometry.parameters.outerRadius).toBeCloseTo(1.14)
     expect(material.emissiveIntensity).toBeCloseTo(INTERACTABLE_RING_EMISSIVE_INTENSITY)
     expect(material.opacity).toBe(INTERACTABLE_RING_OPACITY)
     expect(material.depthWrite).toBe(false)
+    expect(material.roughness).toBeCloseTo(0.55)
+    expect(material.metalness).toBeCloseTo(0.02)
     expect(material.toneMapped).toBe(false)
-    expect(ring.renderOrder).toBe(8)
+    expect(ring.renderOrder).toBe(12)
+  })
+
+  it('preserves object-id tagging while polishing the indicator material', () => {
+    const g = buildObjects(roomWith([{ ...scroll, id: 'scroll-1' }]), noopLogger)
+    const ring = indicatorMesh(g)
+    const material = ring.material as THREE.MeshStandardMaterial
+
+    expect(ring.userData.forObjectId).toBe('scroll-1')
+    expect(ring.userData.objectId).toBeUndefined()
+    expect(ring.userData.objectType).toBeUndefined()
+    expect(material.transparent).toBe(true)
+    expect(material.opacity).toBeCloseTo(INTERACTABLE_RING_OPACITY)
   })
 
   it('dims resolved interactable indicators without changing color or geometry', () => {
@@ -272,6 +286,37 @@ describe('buildObjects interactable indicators', () => {
 
     expect(indicatorColor(take)).toBe(AFFORDANCE_RING_COLOR.take)
     expect(indicatorColor(use)).toBe(AFFORDANCE_RING_COLOR.use)
+  })
+
+  it('keeps exit arch tags and position stable while giving arch segments clearer material', () => {
+    const g = buildObjects(roomWith([{
+      type: 'arch',
+      id: 'north-arch',
+      position: [1, 0, -5],
+      interaction: { key: 'E', prompt: 'Leave', exit: { toRoomId: 'ruined-room' } },
+    }]), noopLogger)
+
+    const arch = g.children.find((child) => child.userData.objectId === 'north-arch')
+    if (!arch) throw new Error('missing arch object')
+    const archMeshes = arch.children.filter(
+      (child): child is THREE.Mesh => child instanceof THREE.Mesh,
+    )
+    const material = archMeshes[0]?.material
+    if (!(material instanceof THREE.MeshStandardMaterial)) {
+      throw new Error('expected arch segment material')
+    }
+
+    expect(arch.userData.objectType).toBe('arch')
+    expect(arch.position.toArray()).toEqual([1, 0, -5])
+    expect(archMeshes).toHaveLength(3)
+    expect(archMeshes.map((mesh) => mesh.position.toArray())).toEqual([
+      [-1.25, 1.75, 0],
+      [1.25, 1.75, 0],
+      [0, 3.75, 0],
+    ])
+    expect(material.emissiveIntensity).toBeCloseTo(0.22)
+    expect(material.roughness).toBeCloseTo(0.72)
+    expect(material.metalness).toBeCloseTo(0.04)
   })
 
   it('does not render raw JSON or debug data into indicator names', () => {
