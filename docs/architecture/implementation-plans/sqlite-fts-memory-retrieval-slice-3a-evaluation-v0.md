@@ -305,6 +305,45 @@ Report results honestly. The maintainer commits manually (agents do not commit).
 - **Tests that prove it:** §13 (Gate B-FTS flip, degradation/fallback,
   log-safety), with the existing plateau + constants canary left green.
 
+## Implementation / deviation note (post-review)
+
+The original design in §4/§9 preferred **one** SQLite FTS →
+`RoomMemoryService.recallRelevant` → context → prompt MEMORY end-to-end eval
+file, using a SQLite-backed eval harness in `evaluation/`. During
+implementation this was found to be blocked by the existing eslint
+architecture walls: they intentionally prevent a single `src/evaluation/`
+module from importing `persistence/**`, the headless `memory/**` application
+layer, and `generation/**` together (the same reciprocal firewalls this plan
+itself calls out in §0/§164-178). **`eslint.config.js` remains frozen and was
+not changed** to work around this — widening the boundary rule was rejected as
+out of scope for an evaluation-only slice.
+
+The implementation therefore uses an approved **boundary-preserving two-proof
+approach** instead of one combined file:
+
+- **(A) Real SQLite/bm25/relevance-over-flood** remains proven exactly where
+  it already was: `persistence/memoryFts.test.ts` (untouched, store-level
+  proof against a real SQLite temp-DB).
+- **(B) Service → context → prompt propagation/fallback** is proven in the new
+  `evaluation/relevanceFts.eval.test.ts`, using a deterministic **fake**
+  `RoomMemorySearchStore` (`FakeFtsRoomMemorySearchStore`) layered over the
+  real `RoomMemoryService` + `InMemoryRoomMemoryStore` (the same firewall-
+  validated `remember()` path). The fake reproduces the real adapter's
+  keyword-filter + `seq desc, memoryId asc` tie-break, but does **not**
+  reimplement bm25 scoring — that ranking function stays proven only inside
+  `persistence/**`, per the frozen boundary.
+
+Together (A) + (B) cover the same claim the single-file design intended
+(candidate order survives from FTS retrieval through the dialogue-context →
+prompt MEMORY chain), without loosening any lint wall. This is an **approved
+plan deviation** that preserves architecture boundaries; it does not change
+scope, non-goals, or file-touch restrictions elsewhere in this plan:
+
+- Slice 3a **remains evaluation-only**.
+- **No** runtime/browser/`App.tsx`/`recallRoomMemoryContext.ts`/provider/
+  gameplay wiring was added.
+- The existing `relevance.eval.test.ts` plateau is **unchanged**.
+
 ## Review notes / risk
 
 The most important boundary call is **not** wiring FTS into
