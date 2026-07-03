@@ -1,6 +1,6 @@
 # Implementation Plan — `feature/sqlite-fts-memory-retrieval-v0`
 
-> Status: **PROPOSED — awaiting maintainer approval for implementation. Docs-only saved. No code until approved.**
+> Status: **COMPLETE for Slice 1 + Slice 2. Slice 3 remains GATED / deferred.**
 >
 > Headless, Node/SQLite-only, **additive full-text / keyword recall aid**. SQLite FTS5
 > is a **lexical** index (token/keyword matching with a fixed tokenizer + BM25
@@ -16,6 +16,30 @@
 > `memory-context-ranking-v0`,
 > [ADR-0074 long-session-memory-evaluation-v0](../decisions/ADR-0074-long-session-memory-evaluation-v0.md)
 > (Gate B / Risk 3 plateau this feature ultimately targets, via a later wiring slice).
+
+## 0. Closeout status
+
+- **Slice 1 complete:** migration `0005_memory_fts`, store-driven FTS indexing from
+  validated `record.text`, SQLite search ports/adapters, base-table record reads, and
+  persistence coverage for backfill, live indexing, scope isolation, deterministic
+  ordering, tamper-skip, relevance-over-flood, unsafe-token robustness, and
+  immutability.
+- **Slice 2 complete:** optional `recallRelevant` support on NPC and room memory
+  services, safe-token query construction via the branded FTS helper, unavailable
+  result when no search store is injected, caller-owned fallback, scope re-filtering,
+  and limit/maxChars caps while preserving FTS adapter order.
+- **Slice 3 remains gated/deferred:** no UI, dialogue, browser, provider/LLM,
+  gameplay, evaluation, `App.tsx`, `RoomViewer`, renderer, `WorldState`,
+  `WorldEvent`, `SaveGame`, `RoomSpec`, or `QuestSpec` wiring has been added.
+- Existing `recall()` behavior remains unchanged and continues to use the
+  seq-desc recall selectors. `recallRelevant` is additive and optional.
+- The Gate B plateau from ADR-0074 remains measured/unchanged until a later approved
+  wiring/evaluation slice.
+- Targeted verification during implementation/polish:
+  `npm.cmd run test -- memoryFts`, `npm.cmd run test -- ftsQuery`,
+  `npm.cmd run test -- memory`, `npm.cmd run test -- migrations`,
+  and `npm.cmd run lint` passed in the relevant slices. Full feature-end
+  verification remains a maintainer-controlled step.
 
 ## 1. Goal of the feature slice
 

@@ -220,6 +220,61 @@ describe('memory FTS scope isolation', () => {
 })
 
 describe('memory FTS ordering and filtering', () => {
+  it('relevance-over-flood: returns the keyword match and excludes same-scope flood rows', async () => {
+    const { db, close } = createMemoryDb()
+    try {
+      seedSession(db, 'session-1')
+      const store = new SqliteNpcMemoryStore(db, silentLogger())
+      for (let i = 0; i < 12; i += 1) {
+        await store.record(npcInsert({ memoryId: `flood-${i}`, text: `common lantern memory ${i}` }))
+      }
+      await store.record(npcInsert({ memoryId: 'keyword-match', text: 'obsidian astrolabe clue' }))
+
+      const got = await store.searchForNpc(
+        { worldId: 'world-1', sessionId: 'session-1', npcId: 'npc-1' },
+        ftsQuery('obsidian'),
+      )
+      expect(got.map((record) => record.memoryId)).toEqual(['keyword-match'])
+      expect(got.map((record) => record.memoryId)).not.toContain('flood-0')
+    } finally {
+      close()
+    }
+  })
+
+  it('unsafe-token robustness: helper strips FTS syntax tokens and quoted operators stay literal', async () => {
+    const { db, close } = createMemoryDb()
+    try {
+      seedSession(db, 'session-1')
+      const store = new SqliteNpcMemoryStore(db, silentLogger())
+      await store.record(npcInsert({ memoryId: 'literal-operator', text: 'and not needle' }))
+      await store.record(npcInsert({ memoryId: 'plain', text: 'plain memory' }))
+
+      expect(createMemoryFtsQueryFromTokens(['*', ':', '(', ')', '"', '🙂', '!!!'])).toBeNull()
+      const query = createMemoryFtsQueryFromTokens([
+        'AND',
+        'NOT',
+        'needle',
+        '*',
+        ':',
+        '(',
+        ')',
+        '"',
+        '🙂',
+        '!!!',
+      ])
+      expect(query?.expression).toBe('"AND" OR "NOT" OR "needle"')
+
+      await expect(
+        store.searchForNpc(
+          { worldId: 'world-1', sessionId: 'session-1', npcId: 'npc-1' },
+          query ?? ftsQuery('needle'),
+        ),
+      ).resolves.toMatchObject([{ memoryId: 'literal-operator' }])
+    } finally {
+      close()
+    }
+  })
+
   it('orders deterministic equal-rank NPC matches by bm25 asc, then seq desc', async () => {
     const { db, close } = createMemoryDb()
     try {
