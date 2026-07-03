@@ -2,6 +2,7 @@ import * as THREE from 'three'
 import { describe, expect, it } from 'vitest'
 import {
   IDLE_BOB_AMPLITUDE,
+  IDLE_BOB_FREQUENCY_HZ,
   IDLE_SWAY_AMPLITUDE_RAD,
   IdleAnimator,
   idleOffsets,
@@ -38,6 +39,15 @@ describe('idleOffsets', () => {
       expect(Math.abs(idleOffsets(phase, elapsedS).swayRad)).toBe(0)
     }
     expect(IDLE_SWAY_AMPLITUDE_RAD).toBe(0)
+  })
+
+  it('bob amplitude and cadence stay in the visible range', () => {
+    // Guards against silently retuning the bob back to imperceptible: at the
+    // isometric camera's fixed framing, amplitude below ~0.06m and frequency
+    // outside ~0.4-1.0 Hz reads as static or as a distracting bounce.
+    expect(IDLE_BOB_AMPLITUDE).toBeGreaterThanOrEqual(0.06)
+    expect(IDLE_BOB_FREQUENCY_HZ).toBeGreaterThanOrEqual(0.4)
+    expect(IDLE_BOB_FREQUENCY_HZ).toBeLessThanOrEqual(1.0)
   })
 })
 

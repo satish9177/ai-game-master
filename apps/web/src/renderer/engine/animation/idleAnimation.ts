@@ -2,9 +2,9 @@ import type * as THREE from 'three'
 import { stableHash01 } from '../../../domain/stableHash'
 
 /** Meters. Conservative raise-only bob height. */
-export const IDLE_BOB_AMPLITUDE = 0.025
+export const IDLE_BOB_AMPLITUDE = 0.09
 /** Hz. Breathing-like cadence, deliberately calmer than a bounce. */
-export const IDLE_BOB_FREQUENCY_HZ = 0.25
+export const IDLE_BOB_FREQUENCY_HZ = 0.5
 /** Radians. Disabled for v0; enabling later is a constants-only change. */
 export const IDLE_SWAY_AMPLITUDE_RAD = 0
 /** Hz. Inert while `IDLE_SWAY_AMPLITUDE_RAD` is 0. */
