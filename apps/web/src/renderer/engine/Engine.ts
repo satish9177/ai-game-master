@@ -13,6 +13,7 @@ import { isometricOffsetDirection } from './camera/isometric'
 import { buildPlayerMarker } from './playerMarker'
 import type { Logger } from '../../platform/logger/Logger'
 import { buildInteractables, type Interactable } from '../../domain/ports/interaction'
+import { IdleAnimator, idlePhase } from './animation/idleAnimation'
 
 export type SetRoomOptions = {
   resolvedObjectIds?: ReadonlySet<string>
@@ -50,6 +51,7 @@ export class Engine {
   private movement: MovementControls | null = null
   private bounds: Bounds | null = null
   private readonly interactables: Interactable[] = []
+  private readonly idleAnimator = new IdleAnimator()
   private activeInteractable: Interactable | null = null
   private readonly interactRange = 2.5 // meters (XZ) to register as "in range"
   private locked = false // true while a dialogue panel owns input
@@ -94,7 +96,9 @@ export class Engine {
     this.room = room
     this.scene.add(buildLighting(room.lighting, room.shell.dimensions))
     this.scene.add(buildShell(room, { cutawaySides: this.cutawaySides() }))
-    this.scene.add(buildObjects(room, this.logger, options.resolvedObjectIds))
+    const objects = buildObjects(room, this.logger, options.resolvedObjectIds)
+    this.scene.add(objects)
+    registerIdleNpcs(this.idleAnimator, room, objects)
     this.placePlayer(room.spawn)
 
     const { width, depth } = room.shell.dimensions
@@ -164,6 +168,7 @@ export class Engine {
     if (this.movement && this.bounds) {
       this.movement.update(this.player, dt, this.bounds)
     }
+    this.idleAnimator.update(dt)
     this.cameraController.follow(this.player.position)
     this.updateProximity()
     this.renderer.render(this.scene, this.cameraController.camera)
@@ -224,6 +229,7 @@ export class Engine {
     this.movement = null
     this.bounds = null
     this.interactables.length = 0
+    this.idleAnimator.clear()
     this.activeInteractable = null
     this.locked = false
     this.onActiveInteractionChange = null
@@ -240,4 +246,31 @@ export class Engine {
 
     this.room = null
   }
+}
+
+/**
+ * Registers each top-level NPC node — tagged `userData.objectType === 'npc'`
+ * by the builder registry — with the idle animator. Rings, helper nodes, and
+ * mystery markers are untagged and skipped. `clear()` runs first so a room
+ * replacement never retains a stale node from the previous room.
+ *
+ * Fallback key: prefers `userData.objectId` (the source object id). When
+ * absent, indexes into only the *tagged* top-level nodes, which line up 1:1
+ * with `room.objects` order (rings/markers interleave in `group.children`
+ * but carry no tag), so the fallback stays deterministic across reloads.
+ */
+function registerIdleNpcs(idleAnimator: IdleAnimator, room: LoadedRoom, group: THREE.Group): void {
+  idleAnimator.clear()
+  const objectNodes = group.children.filter((node) => node.userData.objectType !== undefined)
+  objectNodes.forEach((node, index) => {
+    if (node.userData.objectType !== 'npc') return
+    const objectId = node.userData.objectId as string | undefined
+    const key = objectId ?? `npc#${index}`
+    idleAnimator.register({
+      node,
+      phase: idlePhase(room.id, key),
+      baseY: node.position.y,
+      baseRotY: node.rotation.y,
+    })
+  })
 }

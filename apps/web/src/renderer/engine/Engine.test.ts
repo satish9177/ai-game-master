@@ -1,9 +1,11 @@
+import * as THREE from 'three'
 import { describe, expect, it, vi } from 'vitest'
 import { loadRoomSpec } from '../../domain/loadRoomSpec'
 import { buildInteractables } from '../../domain/ports/interaction'
 import { assembleRoom } from '../../domain/assembleRoom'
 import { fallbackRoom } from '../../domain/examples/fallbackRoom'
 import { Engine } from './Engine'
+import { IDLE_BOB_AMPLITUDE, IdleAnimator, idleOffsets, idlePhase } from './animation/idleAnimation'
 
 const fallback = loadRoomSpec(fallbackRoom)
 const INSPECT_BODY = 'You inspect it carefully, but do not take anything.'
@@ -239,6 +241,7 @@ describe('Engine.setRoom options', () => {
       interactables,
       bounds: null,
       movement: null,
+      idleAnimator: new IdleAnimator(),
     }
 
     try {
@@ -260,5 +263,240 @@ describe('Engine.setRoom options', () => {
 
     expect(inspect?.resolved).toBe(true)
     expect(take).not.toHaveProperty('resolved')
+  })
+})
+
+function makeFakeEngine(idleAnimator: IdleAnimator) {
+  return {
+    room: null,
+    scene: { add: vi.fn() },
+    logger: {
+      debug() {},
+      info() {},
+      warn() {},
+      error() {},
+      child() {
+        return this
+      },
+    },
+    cutawaySides: () => [],
+    placePlayer: vi.fn(),
+    interactables: [] as ReturnType<typeof buildInteractables>,
+    bounds: null,
+    movement: null,
+    idleAnimator,
+  }
+}
+
+/** Finds the objects group among a fake `scene.add` mock's recorded calls. */
+function objectsGroupFrom(sceneAdd: ReturnType<typeof vi.fn>): THREE.Group {
+  const call = sceneAdd.mock.calls.find(([node]) => (node as THREE.Object3D).name === 'objects')
+  return call![0] as THREE.Group
+}
+
+describe('Engine setRoom idle NPC registration', () => {
+  it('registers tagged NPC nodes and ignores rings/helpers, without throwing', () => {
+    const originalWindow = globalThis.window
+    vi.stubGlobal('window', { addEventListener: vi.fn(), removeEventListener: vi.fn() })
+
+    try {
+      const idleAnimator = new IdleAnimator()
+      const fakeEngine = makeFakeEngine(idleAnimator)
+
+      expect(() => {
+        Engine.prototype.setRoom.call(fakeEngine as never, room)
+      }).not.toThrow()
+
+      const group = objectsGroupFrom(fakeEngine.scene.add)
+      const npcNode = group.children.find((node) => node.userData.objectType === 'npc')!
+      const ring = group.children.find((node) => node.name === 'interactable-indicator')!
+      const statueNode = group.children.find((node) => node.userData.objectType === 'statue')!
+
+      const npcBaseY = npcNode.position.y
+      const ringBaseY = ring.position.y
+      const statueBaseY = statueNode.position.y
+
+      idleAnimator.update(5)
+
+      // The room's npc object carries id 'npc', so the registration key is that id.
+      const expectedBobY = idleOffsets(idlePhase(room.id, 'npc'), 5).bobY
+      expect(expectedBobY).toBeGreaterThan(0)
+      expect(expectedBobY).toBeLessThanOrEqual(IDLE_BOB_AMPLITUDE)
+      expect(npcNode.position.y).toBeCloseTo(npcBaseY + expectedBobY, 12)
+
+      // Rings and non-npc objects are never registered, so they never move.
+      expect(ring.position.y).toBe(ringBaseY)
+      expect(statueNode.position.y).toBe(statueBaseY)
+    } finally {
+      if (originalWindow === undefined) {
+        vi.unstubAllGlobals()
+      } else {
+        vi.stubGlobal('window', originalWindow)
+      }
+    }
+  })
+
+  it('derives a deterministic fallback key for an id-less NPC from room.objects order, not group child order', () => {
+    const originalWindow = globalThis.window
+    vi.stubGlobal('window', { addEventListener: vi.fn(), removeEventListener: vi.fn() })
+
+    try {
+      // Tagged top-level nodes end up as [statue(idx0), npc(idx1)] — the
+      // interactable ring for the statue sits between them as an untagged
+      // sibling in raw `group.children`, so a group-child-index fallback would
+      // wrongly compute "npc#2"; the room.objects-order fallback is "npc#1".
+      const fallbackRoom = loadRoomSpec({
+        schemaVersion: 1,
+        id: 'idle-fallback-room',
+        name: 'Idle Fallback Room',
+        shell: { dimensions: { width: 10, depth: 10, height: 4 } },
+        spawn: { position: [0, 1.6, 0], yaw: 0 },
+        objects: [
+          {
+            id: 'deco',
+            type: 'statue',
+            position: [1, 0, -3],
+            interaction: { key: 'F', prompt: 'Look', dialogue: { greeting: 'Hi.' } },
+          },
+          {
+            type: 'npc',
+            name: 'Wanderer',
+            position: [2, 0, -3],
+            interaction: { key: 'F', prompt: 'Talk to wanderer' },
+          },
+        ],
+      })
+
+      const idleAnimator = new IdleAnimator()
+      const fakeEngine = makeFakeEngine(idleAnimator)
+      Engine.prototype.setRoom.call(fakeEngine as never, fallbackRoom)
+
+      const group = objectsGroupFrom(fakeEngine.scene.add)
+      const npcNode = group.children.find((node) => node.userData.objectType === 'npc')!
+      const npcBaseY = npcNode.position.y
+
+      idleAnimator.update(3.25)
+
+      const expectedBobY = idleOffsets(idlePhase(fallbackRoom.id, 'npc#1'), 3.25).bobY
+      expect(npcNode.position.y).toBeCloseTo(npcBaseY + expectedBobY, 12)
+    } finally {
+      if (originalWindow === undefined) {
+        vi.unstubAllGlobals()
+      } else {
+        vi.stubGlobal('window', originalWindow)
+      }
+    }
+  })
+
+  it('clears previous room idle registrations when a new room replaces it', () => {
+    const originalWindow = globalThis.window
+    vi.stubGlobal('window', { addEventListener: vi.fn(), removeEventListener: vi.fn() })
+
+    try {
+      const roomA = loadRoomSpec({
+        schemaVersion: 1,
+        id: 'idle-room-a',
+        name: 'Idle Room A',
+        shell: { dimensions: { width: 8, depth: 8, height: 4 } },
+        spawn: { position: [0, 1.6, 0], yaw: 0 },
+        objects: [{
+          id: 'npc-a',
+          type: 'npc',
+          name: 'A',
+          position: [0, 0, -2],
+          interaction: { key: 'F', prompt: 'Talk to A' },
+        }],
+      })
+      const roomB = loadRoomSpec({
+        schemaVersion: 1,
+        id: 'idle-room-b',
+        name: 'Idle Room B',
+        shell: { dimensions: { width: 8, depth: 8, height: 4 } },
+        spawn: { position: [0, 1.6, 0], yaw: 0 },
+        objects: [{
+          id: 'npc-b',
+          type: 'npc',
+          name: 'B',
+          position: [0, 0, -2],
+          interaction: { key: 'F', prompt: 'Talk to B' },
+        }],
+      })
+
+      const idleAnimator = new IdleAnimator()
+      const fakeEngine = makeFakeEngine(idleAnimator)
+
+      Engine.prototype.setRoom.call(fakeEngine as never, roomA)
+      const groupA = objectsGroupFrom(fakeEngine.scene.add)
+      const npcA = groupA.children.find((node) => node.userData.objectType === 'npc')!
+
+      idleAnimator.update(1)
+      const npcABobbedY = npcA.position.y
+      expect(npcABobbedY).toBeGreaterThan(0) // proves npc-a was actually registered
+
+      fakeEngine.scene.add.mockClear()
+      Engine.prototype.setRoom.call(fakeEngine as never, roomB)
+      const groupB = objectsGroupFrom(fakeEngine.scene.add)
+      const npcB = groupB.children.find((node) => node.userData.objectType === 'npc')!
+
+      idleAnimator.update(1)
+
+      // The stale npc-a node was cleared out of the animator, so it never
+      // receives another update; npc-b, from the replacement room, does.
+      expect(npcA.position.y).toBe(npcABobbedY)
+      expect(npcB.position.y).toBeGreaterThan(0)
+    } finally {
+      if (originalWindow === undefined) {
+        vi.unstubAllGlobals()
+      } else {
+        vi.stubGlobal('window', originalWindow)
+      }
+    }
+  })
+})
+
+describe('Engine dispose', () => {
+  it('calls idleAnimator.clear() safely during teardown', () => {
+    const originalWindow = globalThis.window
+    const originalCancelAnimationFrame = globalThis.cancelAnimationFrame
+    vi.stubGlobal('window', { removeEventListener: vi.fn() })
+    vi.stubGlobal('cancelAnimationFrame', vi.fn())
+
+    const idleAnimator = new IdleAnimator()
+    const clearSpy = vi.spyOn(idleAnimator, 'clear')
+    const fakeEngine = {
+      rafId: 0,
+      resizeObserver: { disconnect: vi.fn() },
+      onInteractKey: () => {},
+      movement: null,
+      bounds: null,
+      interactables: [] as unknown[],
+      activeInteractable: null,
+      locked: false,
+      onActiveInteractionChange: null,
+      onRequestOpenInteraction: null,
+      scene: new THREE.Scene(),
+      disposables: { dispose: vi.fn() },
+      cameraController: { dispose: vi.fn() },
+      renderer: {
+        dispose: vi.fn(),
+        forceContextLoss: vi.fn(),
+        domElement: { parentNode: null },
+      },
+      room: null,
+      idleAnimator,
+    }
+
+    try {
+      expect(() => Engine.prototype.dispose.call(fakeEngine as never)).not.toThrow()
+    } finally {
+      if (originalWindow === undefined) {
+        vi.unstubAllGlobals()
+      } else {
+        vi.stubGlobal('window', originalWindow)
+        vi.stubGlobal('cancelAnimationFrame', originalCancelAnimationFrame)
+      }
+    }
+
+    expect(clearSpy).toHaveBeenCalledTimes(1)
   })
 })
