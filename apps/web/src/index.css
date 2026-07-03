@@ -702,6 +702,137 @@ body {
   line-height: 1.3;
 }
 
+/* ---------- room memory debug viewer ---------- */
+.room-memory-debug-panel {
+  position: fixed;
+  right: 1rem;
+  bottom: 5rem;
+  z-index: 10;
+  width: min(34rem, calc(100vw - 2rem));
+  max-height: min(30rem, calc(100vh - 7rem));
+  border-radius: 0.5rem;
+  background: rgba(12, 12, 16, 0.88);
+  border: 1px solid #2c2a36;
+  color: #ece6d6;
+  font-size: 0.82rem;
+  user-select: none;
+}
+
+.room-memory-debug-panel-toggle,
+.room-memory-debug-panel-refresh {
+  border: none;
+  color: #cfc7b6;
+  cursor: pointer;
+}
+
+.room-memory-debug-panel-toggle {
+  display: block;
+  width: 100%;
+  padding: 0.45rem 0.65rem;
+  background: none;
+  font-size: 0.85rem;
+  text-align: left;
+}
+
+.room-memory-debug-panel-toggle:hover,
+.room-memory-debug-panel-refresh:hover {
+  color: #f3ead2;
+}
+
+.room-memory-debug-panel-body {
+  max-height: calc(min(30rem, 100vh - 7rem) - 2rem);
+  overflow: auto;
+  padding: 0.55rem 0.65rem 0.65rem;
+  border-top: 1px solid #2c2a36;
+}
+
+.room-memory-debug-panel-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.55rem;
+}
+
+.room-memory-debug-panel-label {
+  color: #f3ead2;
+  font-weight: 700;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+}
+
+.room-memory-debug-panel-meta {
+  margin-top: 0.15rem;
+  color: #8b8576;
+  font-size: 0.78rem;
+  line-height: 1.35;
+}
+
+.room-memory-debug-panel-refresh {
+  flex: none;
+  padding: 0.25rem 0.55rem;
+  border-radius: 0.35rem;
+  background: #1e1c28;
+  border: 1px solid #3a3747;
+  font-size: 0.78rem;
+}
+
+.room-memory-debug-panel-empty {
+  margin: 0;
+  color: #8b8576;
+  font-style: italic;
+}
+
+.room-memory-debug-panel-list {
+  display: grid;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.room-memory-debug-panel-row {
+  padding: 0.5rem;
+  border-radius: 0.4rem;
+  background: rgba(22, 21, 28, 0.82);
+  border: 1px solid #2c2a36;
+}
+
+.room-memory-debug-panel-row-meta {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.35rem 0.5rem;
+  margin: 0;
+}
+
+.room-memory-debug-panel-row-meta div {
+  min-width: 0;
+}
+
+.room-memory-debug-panel-row-meta dt {
+  color: #8b8576;
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.room-memory-debug-panel-row-meta dd {
+  margin: 0.08rem 0 0;
+  color: #d8d0bd;
+  font-size: 0.76rem;
+  overflow-wrap: anywhere;
+}
+
+.room-memory-debug-panel-text {
+  margin: 0.45rem 0 0;
+  padding-top: 0.45rem;
+  border-top: 1px solid #2c2a36;
+  color: #cfc7b6;
+  font-size: 0.8rem;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
 /* ---------- save/load bar ---------- */
 .save-load-bar {
   position: fixed;
