@@ -1,10 +1,11 @@
 # Implementation Plan — `feature/generated-per-room-objective-save-load-v0`
 
-> Status: **Draft — revised after review. No code written.** Review verdict was
-> "request changes"; B1 (per-entry lenient objective degradation) and B2
-> (explicit `objectiveMatchesRoom`) are now resolved, stale line references
-> refreshed, and the required test list expanded. Ready for Slice 2.
-> ADR: **required at closeout** (not drafted yet).
+> Status: **Implemented & merged (2026-07-03).** Slices 1–4 complete; B1 (per-entry
+> lenient objective degradation) and B2 (explicit `objectiveMatchesRoom`) shipped as
+> planned. `objectiveMatchesRoom` is co-located in
+> `domain/quests/generatedRoomCacheSaveState.ts` rather than a separate file (the
+> plan allowed either). ADR: **[ADR-0073](../decisions/ADR-0073-generated-per-room-objective-save-load-v0.md)**.
+> See [§16 Closeout & verification](#16-closeout--verification).
 > Companion docs: [ARCHITECTURE](../ARCHITECTURE.md) · [BOUNDARIES](../BOUNDARIES.md) ·
 > [AGENTS.md](../../../AGENTS.md).
 > Direct precedents:
@@ -357,3 +358,46 @@ rollback.
   and objective and regenerate fresh on deep backtracking (existing ADR-0060
   behavior) — the objective for a regenerated room may then be regenerated (and
   metered) as a *new* room entry. Unchanged, but worth restating in the ADR.
+
+## 16. Closeout & verification
+
+**Status:** implemented and merged 2026-07-03. Decision recorded in
+[ADR-0073](../decisions/ADR-0073-generated-per-room-objective-save-load-v0.md).
+
+**Shipped surface (matches §6 with one location nuance):**
+
+- `domain/quests/generatedRoomCacheSaveState.ts` — added strict
+  `SavedGeneratedRoomObjectiveSchema`, a leniently-accepted optional `objective` on
+  `SavedGeneratedRoomEntrySchema` (`z.unknown().optional()`), build-time + restore-time
+  strict validation (`sanitizeLoadedObjectives`), and the pure `objectiveMatchesRoom`
+  cross-check **co-located here** (not a separate `objectiveMatchesRoom.ts`).
+- `app/App.helpers.ts` — `buildGeneratedRoomCacheSaveJson` takes the objective memo and
+  attaches objectives to non-current visited entries only; the current-room entry never
+  carries one.
+- `app/restoreGeneratedRoomCache.ts` — returns an `objectives` map (non-current rooms
+  only; current-room objective ignored).
+- `App.tsx` — `restoreGeneratedRoomCacheFromSlot` surfaces `restoredObjectives`;
+  `seedRestoredGeneratedObjectiveMemo` seeds them while iterating `restoredRoomIds`
+  only; `handleSave` passes `perRoomObjectiveMemoRef.current`.
+
+**Invariants confirmed in the merged code:**
+
+- Non-current visited cached generated rooms save/restore objective attachments.
+- Current-room objective still comes only from `generatedQuestJson`; the current-room
+  cache entry never carries an objective and any such field is ignored on restore.
+- Restore seeds the memo only by `restoredRoomIds` (no orphan entries).
+- Malformed/mismatched/tampered objective attachments degrade to null/absent while the
+  room restore continues (lenient blob parse + strict `safeParse` + `objectiveMatchesRoom`).
+- Completion is re-derived from `WorldState` via `evaluateQuest`, never persisted.
+- No provider calls, no `WorldState` mutation, no memory writes, no DB/schema migration,
+  no dialogue behavior change.
+
+**Verification (run at closeout):**
+
+- Targeted tests passed — `generatedRoomCacheSaveState` + `restoreGeneratedRoomCache`:
+  2 files, 51 tests green; `App.test`: 139 tests green.
+- Lint passed — `npm run lint` clean.
+- `tsc` — only the known baseline failures (no new errors from this feature).
+- Manual smoke passed — generated *"zombie survival with treasure hunt"*, explored 3
+  rooms, saved in room 3, loaded and backtracked; earlier-room objectives restored and
+  completion state displayed correctly.

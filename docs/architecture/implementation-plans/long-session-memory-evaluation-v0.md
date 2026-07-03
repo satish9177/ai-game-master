@@ -1,7 +1,10 @@
 # Implementation Plan — `feature/long-session-memory-evaluation-v0`
 
-> Status: **Draft — docs-only. No code written. Review amendments applied
-> 2026-07-03 (maintainer decisions folded in); awaiting final approval.**
+> Status: **Implemented (test-only) — 2026-07-03.** Slices 1–4 complete. Gates
+> A–F land under `apps/web/src/evaluation/`; closeout ADR is
+> [ADR-0074](../decisions/ADR-0074-long-session-memory-evaluation-v0.md). No
+> runtime/production source changed. Known Gate B retrieval plateau is
+> **measured, not fixed**.
 > ADR: **required at closeout** (test-only armor still gets an ADR — precedent:
 > [ADR-0072](../decisions/ADR-0072-memory-poisoning-redteam-v0.md)).
 > Companion docs: [ARCHITECTURE](../ARCHITECTURE.md) · [BOUNDARIES](../BOUNDARIES.md) ·
@@ -281,12 +284,19 @@ All under `apps/web/src/evaluation/` (new sibling of `redteam/`):
 | --- | --- |
 | `apps/web/src/evaluation/fixtures.ts` | Fixed ids, fake clock/id-gen, `longSessionMemoryFixture`, `syntheticEventStream`, planted-marker helpers. No runtime imports beyond what tests already legally import (domain, memory services, in-memory stores, generation prompt builder, app orchestrators). |
 | `apps/web/src/evaluation/promptBudget.eval.test.ts` | Gate A. |
-| `apps/web/src/evaluation/recallRelevance.eval.test.ts` | Gate B (incl. the calibrated plateau/tie-break case). |
+| `apps/web/src/evaluation/relevance.eval.test.ts` | Gate B (incl. the calibrated plateau/tie-break case). |
 | `apps/web/src/evaluation/dedupeFlood.eval.test.ts` | Gate C. |
 | `apps/web/src/evaluation/scopeStability.eval.test.ts` | Gate D. |
-| `apps/web/src/evaluation/evalSideEffects.eval.test.ts` | Gates E + F (log sweep runs against entries captured across the suite's flows; side-effect snapshot checks). |
-| `docs/architecture/decisions/ADR-00xx-long-session-memory-evaluation-v0.md` | Closeout ADR (slice 4). |
+| `apps/web/src/evaluation/logSafety.eval.test.ts` | Gate E (log sweep across the suite's recall/context/prompt/promotion/save-load flows). |
+| `apps/web/src/evaluation/noSideEffects.eval.test.ts` | Gate F (side-effect snapshot checks + no-network guard). |
+| `docs/architecture/decisions/ADR-0074-long-session-memory-evaluation-v0.md` | Closeout ADR (slice 4). |
 | `docs/architecture/ARCHITECTURE.md` | One status-list entry at closeout (slice 4), same shape as the ADR-0072 entry. |
+
+> As-built note (2026-07-03): Gates E and F ship as two files
+> (`logSafety.eval.test.ts`, `noSideEffects.eval.test.ts`) rather than the single
+> `evalSideEffects.eval.test.ts` sketched above, and Gate B's file is
+> `relevance.eval.test.ts`. The shared Slice-2 `fixtures.ts` was extended
+> (test-only) with the Gate B/D/E/F harnesses, scopes, and log-sweep helpers.
 
 **Not changed:** any file under `src/` outside `src/evaluation/`; any config
 (`tsconfig`, ESLint, Vite, `package.json`); any schema; any doc other than the
@@ -310,16 +320,18 @@ two closeout entries. Zero overlap with the in-flight
 
 ## 7. Slice breakdown
 
-1. **Slice 1 — this docs plan.** Review/approval checkpoint. No code.
-2. **Slice 2 — fixtures + budget/dedupe core.** `fixtures.ts`,
+1. **Slice 1 — this docs plan.** ✅ Done. Review/approval checkpoint. No code.
+2. **Slice 2 — fixtures + budget/dedupe core.** ✅ Done. `fixtures.ts`,
    `promptBudget.eval.test.ts` (Gate A), `dedupeFlood.eval.test.ts` (Gate C).
    The volume machinery lands here and everything else reuses it.
-3. **Slice 3 — relevance + scope stability.**
-   `recallRelevance.eval.test.ts` (Gate B),
+3. **Slice 3 — relevance + scope stability.** ✅ Done.
+   `relevance.eval.test.ts` (Gate B),
    `scopeStability.eval.test.ts` (Gate D — including the Risk-2 primary
    assertion).
-4. **Slice 4 — sweeps + closeout.** `evalSideEffects.eval.test.ts`
-   (Gates E/F), closeout ADR, one `ARCHITECTURE.md` status entry.
+4. **Slice 4 — sweeps + closeout.** ✅ Done. `logSafety.eval.test.ts` (Gate E),
+   `noSideEffects.eval.test.ts` (Gate F), closeout
+   [ADR-0074](../decisions/ADR-0074-long-session-memory-evaluation-v0.md), one
+   `ARCHITECTURE.md` status entry.
 
 Each slice is independently green and independently revertable.
 
