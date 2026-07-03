@@ -147,6 +147,40 @@ describe('trusted object builder registry', () => {
   })
 })
 
+describe('built object userData tagging', () => {
+  it('tags a built NPC top-level node with objectType and objectId', () => {
+    const room = loadRoomSpec(roomEnvelope([
+      currentObjects.npc,
+      { ...(currentObjects.npc as Record<string, unknown>), id: 'npc-1' },
+    ]))
+    const { logger } = recordingLogger()
+    const built = buildObjects(room, logger)
+    const npcNodes = built.children.filter((n) => n.userData.objectType === 'npc')
+
+    expect(npcNodes).toHaveLength(2)
+    expect(npcNodes[0]!.userData.objectId).toBeUndefined()
+    expect(npcNodes[1]!.userData.objectId).toBe('npc-1')
+  })
+
+  it('tags a built non-NPC object, such as throne, with its objectType', () => {
+    const room = loadRoomSpec(roomEnvelope([currentObjects.throne]))
+    const { logger } = recordingLogger()
+    const built = buildObjects(room, logger)
+
+    expect(built.children[0]!.userData.objectType).toBe('throne')
+  })
+
+  it('does not tag the interactable indicator ring as an npc', () => {
+    const room = loadRoomSpec(roomEnvelope([currentObjects.npc]))
+    const { logger } = recordingLogger()
+    const built = buildObjects(room, logger)
+
+    const ring = indicators(built)[0]!
+    expect(ring.userData.objectType).toBeUndefined()
+    expect(built.children.filter((n) => n.userData.objectType === 'npc')).toHaveLength(1)
+  })
+})
+
 describe('skipped-object mystery marker', () => {
   it('renders an unknown object as a bounded, non-magenta mystery marker', () => {
     const room = loadRoomSpec(roomEnvelope([{

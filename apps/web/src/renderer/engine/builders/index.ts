@@ -37,6 +37,11 @@ export function buildObjects(
 
   for (const obj of room.objects) {
     const node = buildKnownObject(obj, logger)
+    // Generic tag on the top-level object node only (never siblings like the
+    // indicator ring below), so later engine code can find built objects by
+    // type/id without special-casing any one object type.
+    node.userData.objectType = obj.type
+    if (obj.id !== undefined) node.userData.objectId = obj.id
     applyTransform(node, obj.position, obj.rotationY, obj.scale)
     enableShadows(node)
     group.add(node)
