@@ -1,10 +1,12 @@
 # Implementation Plan — `feature/generated-room-demo-polish-pass-v0`
 
-> Status: **Docs-only design plan. No implementation approved yet.**
-> This file is the whole deliverable for this slice: a *design* for a focused
-> demo polish pass over generated rooms. It changes **no** runtime code, edits
-> **no** runtime files, and adds **no** tests. Implementation begins only after
-> maintainer approval, one small slice at a time.
+> Status: **Implementation closed for Slices 2-5; pending manual smoke before final merge/signoff.**
+> This plan began as the docs-only design for a focused demo polish pass over
+> generated rooms. The shipped implementation covered the approved low-risk core
+> slices (notice/copy, lighting/material readability, interactable/exit
+> visibility, and NPC presentation). Slice 7 is this docs-only closeout. No ADR,
+> `ARCHITECTURE.md` status line, runtime code, tests, or launch-polish work is
+> added by this closeout slice.
 >
 > Companion docs: [ARCHITECTURE](../ARCHITECTURE.md) · [BOUNDARIES](../BOUNDARIES.md) ·
 > [AGENTS.md](../../../AGENTS.md) · [CONVENTIONS](../CONVENTIONS.md) ·
@@ -538,27 +540,78 @@ Explicitly out of scope here; handed off to the launch-polish feature:
 
 ## 14. Closeout checklist
 
+### Closeout status
+
+Closed scope:
+
+- **Slice 2 shipped:** fallback notice copy/CSS/tests.
+- **Slice 3 shipped:** lighting and material readability polish.
+- **Slice 4 shipped:** interactable and exit affordance visibility polish.
+- **Slice 5 shipped:** NPC presentation polish.
+- **Slice 6 intentionally skipped:** it is approval-gated domain composition tuning,
+  there is no specific manual-evaluation **WEAK** finding requiring it, and the
+  approved plan says Slices 2-5 are the low-risk core and shippable without Slice 6.
+  No `domain/generatedRoomComposition.ts` change shipped.
+
+Safety summary:
+
+- No provider/LLM behavior change.
+- No `RoomSpec` / `SceneSpec` schema change.
+- No `LoadedRoom`, `WorldState`, `WorldEvent`, save/load, or memory change.
+- No gameplay, navigation, pathfinding, or combat authority change.
+- No new sensitive logging.
+- No dependency, asset pipeline, GLTF, texture, shader, or font change.
+- NPC movement-stack runtime files were unchanged.
+- Domain composition tuning was skipped with Slice 6.
+- `open-source-launch-polish-v0` was not started.
+
+Verification summary:
+
+- Slice 2: full suite passed before commit.
+- Slice 3: targeted lighting/shell builder tests and lint passed; build failed only
+  on known pre-existing TypeScript errors outside Slice 3.
+- Slice 4: `indicators`, `builders`, and lint passed; build failed only on known
+  pre-existing TypeScript errors outside Slice 4.
+- Slice 5: `characters`, `humanoid`, `WanderMotor`, `npcMovementContract`,
+  `builders`, and lint passed; build failed only on known pre-existing TypeScript
+  errors outside Slice 5.
+
+Manual smoke status:
+
+- Manual smoke / before-after manual evaluation was **not performed during
+  closeout**. It remains required before final feature merge/signoff.
+
+Deferred / follow-up:
+
+- Slice 6 composition readability remains available later if a concrete
+  manual-evaluation **WEAK** finding appears.
+- ADR and `ARCHITECTURE.md` status line were not added in this slice; either can
+  be added later if the maintainer requests it.
+- `open-source-launch-polish-v0` remains a separate feature.
+
 Marked complete at the end of the final shipped slice:
 
 - [ ] The ranked WEAK/POLISH backlog from a fresh manual-evaluation run is captured
       and each shipped slice cites the findings it addressed.
 - [ ] Only WEAK/POLISH findings were touched; **no BLOCKER** was "fixed" cosmetically
       (any BLOCKER was escalated as a bug outside this pass).
-- [ ] `git diff --stat` shows only presentation/UI/builder files (+ the optional,
+- [x] `git diff --stat` shows only presentation/UI/builder files (+ the optional,
       bounded `generatedRoomComposition.ts` if Slice 6 shipped) and docs — no schema,
       save/load, world-session, memory, persistence, server, or provider file.
-- [ ] No schema, save/load, config, dependency, or logging-surface change; §11
+- [x] No schema, save/load, config, dependency, or logging-surface change; §11
       boundary checklist re-verified.
-- [ ] NPC movement-stack safety re-confirmed green (contract + motor suites; axis
+- [x] NPC movement-stack safety re-confirmed green (contract + motor suites; axis
       split, follow-the-NPC talkability, lock/talking pause all hold).
-- [ ] Layout-contract safety clamps unweakened; `assembleRoom` pipeline order
+- [x] Layout-contract safety clamps unweakened; `assembleRoom` pipeline order
       unchanged.
 - [ ] Targeted tests + `npm run lint` + `npm run build` green; reported honestly.
+      Targeted tests and lint passed for shipped slices, but build still fails on
+      known pre-existing TypeScript errors outside this feature.
 - [ ] A before/after manual-evaluation run shows the targeted WEAK rows improved
       with zero new `0`/FAIL and zero new BLOCKER; §12 acceptance criteria met.
-- [ ] Status blockquote at the top of this plan updated to **Implemented**; ADR +
-      one `ARCHITECTURE.md` status line added if the maintainer wants one.
-- [ ] Confirm `open-source-launch-polish-v0` is *not* started by this work; hand
+- [x] Status blockquote at the top of this plan updated to **Implemented**; ADR +
+      one `ARCHITECTURE.md` status line not added in this slice.
+- [x] Confirm `open-source-launch-polish-v0` is *not* started by this work; hand
       off deferred items (§13).
 
 ---
