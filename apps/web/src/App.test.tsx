@@ -210,7 +210,7 @@ describe('App room intro wiring', () => {
     ])
     const html = renderOverlay(room, FALLBACK_NOTICE)
     expect(html).toContain('A corpse lies to the north')
-    expect(html).toContain('safe one. Try another prompt.')
+    expect(html).toContain('stable version')
     expect(html).toContain('room-notice')
     expect(html).toContain('Dismiss notice')
     expect(html).toContain('Dismiss room introduction')

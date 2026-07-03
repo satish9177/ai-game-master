@@ -10,7 +10,7 @@ import type { RoomProvenance } from '../domain/assembleRoom'
  * in the source's structured logs, per FAILURE-MODES.md cases 4 / 4b).
  */
 export const FALLBACK_NOTICE =
-  "We couldn't build that room exactly, so here's a safe one. Try another prompt."
+  "This room needed a safe fallback, so you're seeing a stable version. You can keep exploring or try a different idea."
 
 /**
  * Show the notice only when the room did not come through cleanly. A `generated`

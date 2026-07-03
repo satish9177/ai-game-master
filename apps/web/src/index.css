@@ -56,11 +56,13 @@ body {
   align-items: center;
   gap: 0.75rem;
   width: min(560px, 92vw);
-  padding: 0.5rem 0.75rem;
+  padding: 0.625rem 0.85rem;
   border-radius: 0.5rem;
-  background: rgba(58, 49, 28, 0.92);
-  border: 1px solid #6a5a32;
-  color: #f3ead2;
+  background: rgba(21, 31, 42, 0.94);
+  border: 1px solid #607086;
+  color: #eef5ff;
+  box-shadow: 0 0.75rem 2rem rgba(0, 0, 0, 0.28);
+  backdrop-filter: blur(6px);
   font-size: 0.95rem;
 }
 
@@ -70,15 +72,19 @@ body {
 
 .room-notice-close {
   flex: none;
-  background: none;
-  border: none;
-  color: #d8cfb6;
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: 999px;
+  background: rgba(238, 245, 255, 0.08);
+  border: 1px solid rgba(238, 245, 255, 0.16);
+  color: #dce9f8;
   font-size: 1.25rem;
   line-height: 1;
   cursor: pointer;
 }
 
 .room-notice-close:hover {
+  background: rgba(238, 245, 255, 0.16);
   color: #fff;
 }
 
