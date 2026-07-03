@@ -9,6 +9,7 @@ import type {
   NpcMemoryStoreErrorCode,
   NpcMemoryWriteResult,
 } from '../domain/ports/NpcMemoryStore'
+import type { NpcMemorySearchStore } from '../domain/ports/NpcMemorySearchStore'
 import { WorldCommandSchema, WorldEventSchema } from '../domain/world/events'
 import type { Logger, LogContext, LogLevel } from '../platform/logger/Logger'
 import { InMemoryNpcMemoryStore } from './InMemoryNpcMemoryStore'
@@ -67,6 +68,20 @@ class FailingStore implements NpcMemoryStore {
   }
   async listForNpc(): Promise<NpcMemoryRecord[]> {
     return []
+  }
+}
+
+class CapturingNpcSearchStore implements NpcMemorySearchStore {
+  calls: Array<{ expression: string; scope: MemoryScope; limit: number | undefined }> = []
+  records: NpcMemoryRecord[] = []
+
+  async searchForNpc(
+    scope: MemoryScope,
+    query: Parameters<NpcMemorySearchStore['searchForNpc']>[1],
+    options: { limit?: number } = {},
+  ): Promise<NpcMemoryRecord[]> {
+    this.calls.push({ expression: query.expression, scope, limit: options.limit })
+    return this.records
   }
 }
 
@@ -129,6 +144,166 @@ describe('NpcMemoryService.recall', () => {
     await service.remember(baseInput)
     const recalled = await service.recall({ worldId: 'world-1', sessionId: 'other', npcId: 'npc-1' })
     expect(recalled).toEqual({ status: 'recalled', memories: [] })
+  })
+})
+
+describe('NpcMemoryService.recallRelevant', () => {
+  it('returns unavailable when no search store is injected', async () => {
+    const { service } = harness()
+    await service.remember(baseInput)
+    await expect(service.recallRelevant(scopeOf(baseInput), { tokens: ['bridge'] })).resolves.toEqual({
+      status: 'unavailable',
+      memories: [],
+    })
+  })
+
+  it('uses the injected search store and leaves recall() on the base store path', async () => {
+    const { store, entries } = harness()
+    const searchStore = new CapturingNpcSearchStore()
+    const service = new NpcMemoryService(
+      store,
+      { now: () => '2026-06-23T10:00:00.000Z' },
+      { newId: () => 'mem-x' },
+      capturingLogger(entries),
+      searchStore,
+    )
+    const written = await service.remember({ ...baseInput, text: 'bridge marker' })
+    expect(written.status).toBe('recorded')
+    if (written.status !== 'recorded') return
+    searchStore.records = [written.record]
+
+    const relevant = await service.recallRelevant(scopeOf(baseInput), { tokens: ['bridge'] }, { limit: 4 })
+    expect(relevant).toEqual({ status: 'recalled', memories: [written.record] })
+    expect(searchStore.calls).toEqual([{ expression: '"bridge"', scope: scopeOf(baseInput), limit: 4 }])
+
+    const recalled = await service.recall(scopeOf(baseInput))
+    expect(recalled.memories).toEqual([written.record])
+    expect(searchStore.calls).toHaveLength(1)
+  })
+
+  it('applies exact scope filtering plus limit and maxChars caps to search results', async () => {
+    const searchStore = new CapturingNpcSearchStore()
+    const service = new NpcMemoryService(
+      new InMemoryNpcMemoryStore(),
+      { now: () => '2026-06-23T10:00:00.000Z' },
+      { newId: () => 'mem-x' },
+      capturingLogger([]),
+      searchStore,
+    )
+    const scoped: NpcMemoryRecord = {
+      schemaVersion: 1,
+      memoryId: 'm1',
+      worldId: 'world-1',
+      sessionId: 'session-1',
+      npcId: 'npc-1',
+      kind: 'player_claim',
+      text: '12345',
+      provenance: { source: 'player' },
+      confidence: 'medium',
+      seq: 2,
+      createdAt: '2026-06-23T10:00:00.000Z',
+    }
+    const tooLong: NpcMemoryRecord = { ...scoped, memoryId: 'm2', text: '67890', seq: 1 }
+    const wrongNpc: NpcMemoryRecord = { ...scoped, memoryId: 'leak', npcId: 'npc-2', text: 'leak', seq: 3 }
+    searchStore.records = [wrongNpc, scoped, tooLong]
+
+    const relevant = await service.recallRelevant(scopeOf(baseInput), { tokens: ['safe'] }, { limit: 2, maxChars: 5 })
+    expect(relevant).toEqual({ status: 'recalled', memories: [scoped] })
+  })
+
+  it('preserves search-store order instead of re-sorting by seq desc', async () => {
+    const searchStore = new CapturingNpcSearchStore()
+    const service = new NpcMemoryService(
+      new InMemoryNpcMemoryStore(),
+      { now: () => '2026-06-23T10:00:00.000Z' },
+      { newId: () => 'mem-x' },
+      capturingLogger([]),
+      searchStore,
+    )
+    const olderBetterMatch: NpcMemoryRecord = {
+      schemaVersion: 1,
+      memoryId: 'older-better',
+      worldId: 'world-1',
+      sessionId: 'session-1',
+      npcId: 'npc-1',
+      kind: 'player_claim',
+      text: 'better',
+      provenance: { source: 'player' },
+      confidence: 'medium',
+      seq: 1,
+      createdAt: '2026-06-23T10:00:00.000Z',
+    }
+    const newerWeakerMatch: NpcMemoryRecord = {
+      ...olderBetterMatch,
+      memoryId: 'newer-weaker',
+      text: 'weaker',
+      seq: 9,
+    }
+    searchStore.records = [olderBetterMatch, newerWeakerMatch]
+
+    const relevant = await service.recallRelevant(scopeOf(baseInput), { tokens: ['safe'] }, { limit: 1 })
+    expect(relevant).toEqual({ status: 'recalled', memories: [olderBetterMatch] })
+  })
+
+  it('does not fallback to recall() automatically when the query has no safe tokens', async () => {
+    const calls: string[] = []
+    const recordingStore: NpcMemoryStore = {
+      record: (input) => new InMemoryNpcMemoryStore().record(input),
+      listForNpc: async () => {
+        calls.push('listForNpc')
+        return []
+      },
+    }
+    const searchStore = new CapturingNpcSearchStore()
+    const service = new NpcMemoryService(
+      recordingStore,
+      { now: () => '2026-06-23T10:00:00.000Z' },
+      { newId: () => 'mem-x' },
+      capturingLogger([]),
+      searchStore,
+    )
+
+    await expect(service.recallRelevant(scopeOf(baseInput), { tokens: ['', 'bad-token!'] })).resolves.toEqual({
+      status: 'recalled',
+      memories: [],
+    })
+    expect(calls).toEqual([])
+    expect(searchStore.calls).toEqual([])
+  })
+
+  it('does not log raw query tokens or memory text', async () => {
+    const entries: LogEntry[] = []
+    const searchStore = new CapturingNpcSearchStore()
+    const secretText = 'SECRET-RELEVANT-MEMORY-TEXT'
+    const secretQuery = 'SECRETQUERYTOKEN'
+    searchStore.records = [
+      {
+        schemaVersion: 1,
+        memoryId: 'm1',
+        worldId: 'world-1',
+        sessionId: 'session-1',
+        npcId: 'npc-1',
+        kind: 'player_claim',
+        text: secretText,
+        provenance: { source: 'player' },
+        confidence: 'medium',
+        seq: 1,
+        createdAt: '2026-06-23T10:00:00.000Z',
+      },
+    ]
+    const service = new NpcMemoryService(
+      new InMemoryNpcMemoryStore(),
+      { now: () => '2026-06-23T10:00:00.000Z' },
+      { newId: () => 'mem-x' },
+      capturingLogger(entries),
+      searchStore,
+    )
+
+    await service.recallRelevant(scopeOf(baseInput), { tokens: [secretQuery] })
+    const serialized = JSON.stringify(entries)
+    expect(serialized).not.toContain(secretText)
+    expect(serialized).not.toContain(secretQuery)
+    expect(serialized).toContain('"count":1')
   })
 })
 

@@ -10,6 +10,7 @@ import type {
   RoomMemoryStoreErrorCode,
   RoomMemoryWriteResult,
 } from '../domain/ports/RoomMemoryStore'
+import type { RoomMemorySearchStore } from '../domain/ports/RoomMemorySearchStore'
 import { WorldCommandSchema, WorldEventSchema } from '../domain/world/events'
 import type { WorldEvent } from '../domain/world/events'
 import { WORLD_SCHEMA_VERSION } from '../domain/world/worldState'
@@ -73,6 +74,20 @@ class FailingStore implements RoomMemoryStore {
   }
 }
 
+class CapturingRoomSearchStore implements RoomMemorySearchStore {
+  calls: Array<{ expression: string; scope: RoomMemoryScope; limit: number | undefined }> = []
+  records: RoomMemoryRecord[] = []
+
+  async searchForRoom(
+    scope: RoomMemoryScope,
+    query: Parameters<RoomMemorySearchStore['searchForRoom']>[1],
+    options: { limit?: number } = {},
+  ): Promise<RoomMemoryRecord[]> {
+    this.calls.push({ expression: query.expression, scope, limit: options.limit })
+    return this.records
+  }
+}
+
 describe('RoomMemoryService.remember', () => {
   it('records a valid memory, stamping memoryId/createdAt and an assigned seq', async () => {
     const { service } = harness()
@@ -132,6 +147,166 @@ describe('RoomMemoryService.recall', () => {
     await service.remember(baseInput)
     const recalled = await service.recall({ worldId: 'world-1', sessionId: 'other', roomId: 'room-1' })
     expect(recalled).toEqual({ status: 'recalled', memories: [] })
+  })
+})
+
+describe('RoomMemoryService.recallRelevant', () => {
+  it('returns unavailable when no search store is injected', async () => {
+    const { service } = harness()
+    await service.remember(baseInput)
+    await expect(service.recallRelevant(scopeOf(baseInput), { tokens: ['door'] })).resolves.toEqual({
+      status: 'unavailable',
+      memories: [],
+    })
+  })
+
+  it('uses the injected search store and leaves recall() on the base store path', async () => {
+    const { store, entries } = harness()
+    const searchStore = new CapturingRoomSearchStore()
+    const service = new RoomMemoryService(
+      store,
+      { now: () => '2026-06-23T10:00:00.000Z' },
+      { newId: () => 'mem-x' },
+      capturingLogger(entries),
+      searchStore,
+    )
+    const written = await service.remember({ ...baseInput, text: 'door marker' })
+    expect(written.status).toBe('recorded')
+    if (written.status !== 'recorded') return
+    searchStore.records = [written.record]
+
+    const relevant = await service.recallRelevant(scopeOf(baseInput), { tokens: ['door'] }, { limit: 4 })
+    expect(relevant).toEqual({ status: 'recalled', memories: [written.record] })
+    expect(searchStore.calls).toEqual([{ expression: '"door"', scope: scopeOf(baseInput), limit: 4 }])
+
+    const recalled = await service.recall(scopeOf(baseInput))
+    expect(recalled.memories).toEqual([written.record])
+    expect(searchStore.calls).toHaveLength(1)
+  })
+
+  it('applies exact scope filtering plus limit and maxChars caps to search results', async () => {
+    const searchStore = new CapturingRoomSearchStore()
+    const service = new RoomMemoryService(
+      new InMemoryRoomMemoryStore(),
+      { now: () => '2026-06-23T10:00:00.000Z' },
+      { newId: () => 'mem-x' },
+      capturingLogger([]),
+      searchStore,
+    )
+    const scoped: RoomMemoryRecord = {
+      schemaVersion: 1,
+      memoryId: 'm1',
+      worldId: 'world-1',
+      sessionId: 'session-1',
+      roomId: 'room-1',
+      kind: 'player_claim',
+      text: '12345',
+      provenance: { source: 'player' },
+      confidence: 'medium',
+      seq: 2,
+      createdAt: '2026-06-23T10:00:00.000Z',
+    }
+    const tooLong: RoomMemoryRecord = { ...scoped, memoryId: 'm2', text: '67890', seq: 1 }
+    const wrongRoom: RoomMemoryRecord = { ...scoped, memoryId: 'leak', roomId: 'room-2', text: 'leak', seq: 3 }
+    searchStore.records = [wrongRoom, scoped, tooLong]
+
+    const relevant = await service.recallRelevant(scopeOf(baseInput), { tokens: ['safe'] }, { limit: 2, maxChars: 5 })
+    expect(relevant).toEqual({ status: 'recalled', memories: [scoped] })
+  })
+
+  it('preserves search-store order instead of re-sorting by seq desc', async () => {
+    const searchStore = new CapturingRoomSearchStore()
+    const service = new RoomMemoryService(
+      new InMemoryRoomMemoryStore(),
+      { now: () => '2026-06-23T10:00:00.000Z' },
+      { newId: () => 'mem-x' },
+      capturingLogger([]),
+      searchStore,
+    )
+    const olderBetterMatch: RoomMemoryRecord = {
+      schemaVersion: 1,
+      memoryId: 'older-better',
+      worldId: 'world-1',
+      sessionId: 'session-1',
+      roomId: 'room-1',
+      kind: 'player_claim',
+      text: 'better',
+      provenance: { source: 'player' },
+      confidence: 'medium',
+      seq: 1,
+      createdAt: '2026-06-23T10:00:00.000Z',
+    }
+    const newerWeakerMatch: RoomMemoryRecord = {
+      ...olderBetterMatch,
+      memoryId: 'newer-weaker',
+      text: 'weaker',
+      seq: 9,
+    }
+    searchStore.records = [olderBetterMatch, newerWeakerMatch]
+
+    const relevant = await service.recallRelevant(scopeOf(baseInput), { tokens: ['safe'] }, { limit: 1 })
+    expect(relevant).toEqual({ status: 'recalled', memories: [olderBetterMatch] })
+  })
+
+  it('does not fallback to recall() automatically when the query has no safe tokens', async () => {
+    const calls: string[] = []
+    const recordingStore: RoomMemoryStore = {
+      record: (input) => new InMemoryRoomMemoryStore().record(input),
+      listForRoom: async () => {
+        calls.push('listForRoom')
+        return []
+      },
+    }
+    const searchStore = new CapturingRoomSearchStore()
+    const service = new RoomMemoryService(
+      recordingStore,
+      { now: () => '2026-06-23T10:00:00.000Z' },
+      { newId: () => 'mem-x' },
+      capturingLogger([]),
+      searchStore,
+    )
+
+    await expect(service.recallRelevant(scopeOf(baseInput), { tokens: ['', 'bad-token!'] })).resolves.toEqual({
+      status: 'recalled',
+      memories: [],
+    })
+    expect(calls).toEqual([])
+    expect(searchStore.calls).toEqual([])
+  })
+
+  it('does not log raw query tokens or memory text', async () => {
+    const entries: LogEntry[] = []
+    const searchStore = new CapturingRoomSearchStore()
+    const secretText = 'SECRET-RELEVANT-ROOM-MEMORY-TEXT'
+    const secretQuery = 'SECRETROOMQUERYTOKEN'
+    searchStore.records = [
+      {
+        schemaVersion: 1,
+        memoryId: 'm1',
+        worldId: 'world-1',
+        sessionId: 'session-1',
+        roomId: 'room-1',
+        kind: 'player_claim',
+        text: secretText,
+        provenance: { source: 'player' },
+        confidence: 'medium',
+        seq: 1,
+        createdAt: '2026-06-23T10:00:00.000Z',
+      },
+    ]
+    const service = new RoomMemoryService(
+      new InMemoryRoomMemoryStore(),
+      { now: () => '2026-06-23T10:00:00.000Z' },
+      { newId: () => 'mem-x' },
+      capturingLogger(entries),
+      searchStore,
+    )
+
+    await service.recallRelevant(scopeOf(baseInput), { tokens: [secretQuery] })
+    const serialized = JSON.stringify(entries)
+    expect(serialized).not.toContain(secretText)
+    expect(serialized).not.toContain(secretQuery)
+    expect(serialized).toContain('"count":1')
   })
 })
 

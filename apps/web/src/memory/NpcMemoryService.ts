@@ -11,6 +11,8 @@ import type { MemoryDraftInput, MemoryRejectReason } from '../domain/memory/fire
 import type { Clock } from '../domain/ports/Clock'
 import type { IdGenerator } from '../domain/ports/IdGenerator'
 import type { NpcMemoryStore, NpcMemoryStoreErrorCode } from '../domain/ports/NpcMemoryStore'
+import type { NpcMemorySearchStore } from '../domain/ports/NpcMemorySearchStore'
+import { createMemoryFtsQueryFromTokens } from '../domain/memory/ftsQuery'
 import type { Logger } from '../platform/logger/Logger'
 
 /**
@@ -33,14 +35,28 @@ export type RecallResult = { status: 'recalled'; memories: NpcMemoryRecord[] }
 
 export type RecallOptions = { limit?: number; maxChars?: number }
 
+export type RecallRelevantQuery = { tokens: readonly string[] }
+
+export type RecallRelevantResult =
+  | { status: 'recalled'; memories: NpcMemoryRecord[] }
+  | { status: 'unavailable'; memories: [] }
+
 export class NpcMemoryService {
   private readonly store: NpcMemoryStore
+  private readonly searchStore?: NpcMemorySearchStore
   private readonly clock: Clock
   private readonly idGenerator: IdGenerator
   private readonly log: Logger
 
-  constructor(store: NpcMemoryStore, clock: Clock, idGenerator: IdGenerator, logger: Logger) {
+  constructor(
+    store: NpcMemoryStore,
+    clock: Clock,
+    idGenerator: IdGenerator,
+    logger: Logger,
+    ...optional: [searchStore?: NpcMemorySearchStore]
+  ) {
     this.store = store
+    this.searchStore = optional[0]
     this.clock = clock
     this.idGenerator = idGenerator
     this.log = logger
@@ -126,4 +142,58 @@ export class NpcMemoryService {
     })
     return { status: 'recalled', memories }
   }
+
+  async recallRelevant(
+    scope: MemoryScope,
+    query: RecallRelevantQuery,
+    options?: RecallOptions,
+  ): Promise<RecallRelevantResult> {
+    if (this.searchStore === undefined) {
+      return { status: 'unavailable', memories: [] }
+    }
+
+    const searchQuery = createMemoryFtsQueryFromTokens(query.tokens)
+    if (searchQuery === null) {
+      this.log.info('npc memory relevant recall returned no matches', {
+        worldId: scope.worldId,
+        sessionId: scope.sessionId,
+        npcId: scope.npcId,
+        count: 0,
+      })
+      return { status: 'recalled', memories: [] }
+    }
+
+    const limit = options?.limit ?? DEFAULT_RECALL_LIMIT
+    const maxChars = options?.maxChars ?? DEFAULT_RECALL_MAX_CHARS
+    const raw = await this.searchStore.searchForNpc(scope, searchQuery, { limit })
+    const scoped = filterMemoriesForScope(raw, scope)
+    const memories = selectBoundedInIncomingOrder(scoped, { limit, maxChars })
+
+    this.log.info('npc memory relevant recalled', {
+      worldId: scope.worldId,
+      sessionId: scope.sessionId,
+      npcId: scope.npcId,
+      count: memories.length,
+    })
+    return { status: 'recalled', memories }
+  }
+}
+
+function selectBoundedInIncomingOrder(
+  records: readonly NpcMemoryRecord[],
+  options: { limit: number; maxChars: number },
+): NpcMemoryRecord[] {
+  const limit = Math.max(0, Math.trunc(options.limit))
+  const maxChars = Math.max(0, Math.trunc(options.maxChars))
+  const selected: NpcMemoryRecord[] = []
+  let usedChars = 0
+
+  for (const record of records) {
+    if (selected.length >= limit) break
+    const nextChars = usedChars + record.text.length
+    if (nextChars > maxChars) break
+    selected.push(record)
+    usedChars = nextChars
+  }
+  return selected
 }

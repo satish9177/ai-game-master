@@ -10,7 +10,9 @@ import {
 import type { RoomMemoryDraftInput, RoomMemoryRejectReason } from '../domain/memory/roomFirewall'
 import type { Clock } from '../domain/ports/Clock'
 import type { IdGenerator } from '../domain/ports/IdGenerator'
+import { createMemoryFtsQueryFromTokens } from '../domain/memory/ftsQuery'
 import type { RoomMemoryStore, RoomMemoryStoreErrorCode } from '../domain/ports/RoomMemoryStore'
+import type { RoomMemorySearchStore } from '../domain/ports/RoomMemorySearchStore'
 import type { Logger } from '../platform/logger/Logger'
 
 /**
@@ -33,14 +35,28 @@ export type RecallRoomMemoryResult = { status: 'recalled'; memories: RoomMemoryR
 
 export type RecallRoomMemoryOptions = { limit?: number; maxChars?: number }
 
+export type RecallRelevantRoomMemoryQuery = { tokens: readonly string[] }
+
+export type RecallRelevantRoomMemoryResult =
+  | { status: 'recalled'; memories: RoomMemoryRecord[] }
+  | { status: 'unavailable'; memories: [] }
+
 export class RoomMemoryService {
   private readonly store: RoomMemoryStore
+  private readonly searchStore?: RoomMemorySearchStore
   private readonly clock: Clock
   private readonly idGenerator: IdGenerator
   private readonly log: Logger
 
-  constructor(store: RoomMemoryStore, clock: Clock, idGenerator: IdGenerator, logger: Logger) {
+  constructor(
+    store: RoomMemoryStore,
+    clock: Clock,
+    idGenerator: IdGenerator,
+    logger: Logger,
+    ...optional: [searchStore?: RoomMemorySearchStore]
+  ) {
     this.store = store
+    this.searchStore = optional[0]
     this.clock = clock
     this.idGenerator = idGenerator
     this.log = logger
@@ -133,4 +149,58 @@ export class RoomMemoryService {
     })
     return { status: 'recalled', memories }
   }
+
+  async recallRelevant(
+    scope: RoomMemoryScope,
+    query: RecallRelevantRoomMemoryQuery,
+    options?: RecallRoomMemoryOptions,
+  ): Promise<RecallRelevantRoomMemoryResult> {
+    if (this.searchStore === undefined) {
+      return { status: 'unavailable', memories: [] }
+    }
+
+    const searchQuery = createMemoryFtsQueryFromTokens(query.tokens)
+    if (searchQuery === null) {
+      this.log.info('room memory relevant recall returned no matches', {
+        worldId: scope.worldId,
+        sessionId: scope.sessionId,
+        roomId: scope.roomId,
+        count: 0,
+      })
+      return { status: 'recalled', memories: [] }
+    }
+
+    const limit = options?.limit ?? DEFAULT_ROOM_RECALL_LIMIT
+    const maxChars = options?.maxChars ?? DEFAULT_ROOM_RECALL_MAX_CHARS
+    const raw = await this.searchStore.searchForRoom(scope, searchQuery, { limit })
+    const scoped = filterRoomMemoriesForScope(raw, scope)
+    const memories = selectBoundedInIncomingOrder(scoped, { limit, maxChars })
+
+    this.log.info('room memory relevant recalled', {
+      worldId: scope.worldId,
+      sessionId: scope.sessionId,
+      roomId: scope.roomId,
+      count: memories.length,
+    })
+    return { status: 'recalled', memories }
+  }
+}
+
+function selectBoundedInIncomingOrder(
+  records: readonly RoomMemoryRecord[],
+  options: { limit: number; maxChars: number },
+): RoomMemoryRecord[] {
+  const limit = Math.max(0, Math.trunc(options.limit))
+  const maxChars = Math.max(0, Math.trunc(options.maxChars))
+  const selected: RoomMemoryRecord[] = []
+  let usedChars = 0
+
+  for (const record of records) {
+    if (selected.length >= limit) break
+    const nextChars = usedChars + record.text.length
+    if (nextChars > maxChars) break
+    selected.push(record)
+    usedChars = nextChars
+  }
+  return selected
 }
