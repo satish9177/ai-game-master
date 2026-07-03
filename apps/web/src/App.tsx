@@ -9,6 +9,7 @@ import { QuestTracker } from './renderer/ui/QuestTracker'
 import { JournalPanel } from './renderer/ui/JournalPanel'
 import { RoomIntroPanel } from './renderer/ui/RoomIntroPanel'
 import { MemoryFeedback } from './renderer/ui/MemoryFeedback'
+import { RoomMemoryDebugPanel } from './renderer/ui/RoomMemoryDebugPanel'
 import { projectPlayerHud } from './renderer/ui/playerHud'
 import type { PlayerHudView } from './renderer/ui/playerHud'
 import { evaluateQuest, type QuestView } from './domain/quests/evaluateQuest'
@@ -28,6 +29,7 @@ import { SessionRoomCache } from './room/SessionRoomCache'
 import { FakeRoomGenerator } from './generation/FakeRoomGenerator'
 import { FakeWorldBibleSeeder } from './generation/FakeWorldBibleSeeder'
 import { readLlmConfig } from './app/llmConfig'
+import { readDebugConfig } from './app/debugConfig'
 import { selectRoomGenerator } from './app/selectRoomGenerator'
 import { selectObjectiveGenerator } from './app/selectObjectiveGenerator'
 import { selectGateGenerator } from './app/selectGateGenerator'
@@ -100,12 +102,19 @@ import {
   type QuestHintState,
 } from './app/App.helpers'
 import { EMPTY_PROMOTION_SUMMARY, MEMORY_FEEDBACK_AUTO_DISMISS_MS } from './app/memoryFeedback'
+import {
+  INITIAL_ROOM_MEMORY_DEBUG_VIEWER_STATE,
+  refreshRoomMemoryDebugViewer,
+  toggleRoomMemoryDebugViewer,
+} from './app/roomMemoryDebugViewer'
 import { themeVocabulary } from './domain/generatedRoomThemeVocabulary'
 
 import { NPCDialogueService } from './dialogue/NPCDialogueService'
 
 // Composition root: concrete adapters are constructed once and injected.
 const logger = createConsoleLogger()
+const debugConfig = readDebugConfig()
+const roomMemoryDebugViewerEnabled = debugConfig.roomMemoryDebugViewerEnabled
 // The PromptBar-generated room path uses the configured generator: the
 // FakeRoomGenerator by default, or a real OpenAI-compatible provider when the
 // env config is complete (real-room-generator-provider v0; ADR-0023). The
@@ -434,6 +443,19 @@ function App() {
   // one ref (rather than one ref reading another) so render never accesses an
   // existing ref's `.current` (react-hooks/refs).
   const roomMemoryRuntimeRef = useRef(createRoomMemoryRuntime())
+  const [roomMemoryDebugViewer, setRoomMemoryDebugViewer] = useState(
+    INITIAL_ROOM_MEMORY_DEBUG_VIEWER_STATE,
+  )
+  const handleToggleRoomMemoryDebugViewer = useCallback(() => {
+    setRoomMemoryDebugViewer((current) =>
+      toggleRoomMemoryDebugViewer(current, roomMemoryRuntimeRef.current.store),
+    )
+  }, [])
+  const handleRefreshRoomMemoryDebugViewer = useCallback(() => {
+    setRoomMemoryDebugViewer((current) =>
+      refreshRoomMemoryDebugViewer(current, roomMemoryRuntimeRef.current.store),
+    )
+  }, [])
   // Bounded, non-authoritative room-memory recall context for NPC dialogue
   // (room-memory-recall-context-v0, Slice F). A monotonic request id discards a
   // stale recall so a previous room's memories can never linger while a newer
@@ -1150,6 +1172,15 @@ function App() {
         onDismissNotice={() => setNotice(null)}
       />
       <MemoryFeedback message={memoryFeedbackState.message} />
+      {roomMemoryDebugViewerEnabled && (
+        <RoomMemoryDebugPanel
+          rows={roomMemoryDebugViewer.rows}
+          currentRoomId={activePlay?.room.id ?? null}
+          open={roomMemoryDebugViewer.open}
+          onToggle={handleToggleRoomMemoryDebugViewer}
+          onRefresh={handleRefreshRoomMemoryDebugViewer}
+        />
+      )}
       <PromptBar onSubmit={handlePrompt} disabled={inFlight} />
       {guardEnabled && (
         <UsageMeter

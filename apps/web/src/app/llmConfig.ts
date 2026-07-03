@@ -2,8 +2,8 @@
  * LLM provider configuration for the prompt-generated room path
  * (real-room-generator-provider v0; ADR-0023).
  *
- * This is the ONLY place that reads `import.meta.env`. It normalizes the raw
- * `VITE_*` values into a typed `LlmConfig` and resolves the provider's built-in
+ * This is the LLM config seam that reads provider-related `import.meta.env`.
+ * It normalizes the raw `VITE_*` values into a typed `LlmConfig` and resolves the provider's built-in
  * base URL. `generation/` receives a plain config object and never touches env.
  *
  * SAFETY: the resolved `apiKey` is a secret. It is carried in the config so the

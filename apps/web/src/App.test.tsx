@@ -3678,3 +3678,49 @@ describe('memory feedback state wiring - Slice 4', () => {
     expect(appSource).not.toContain('MemoryFeedback message={roomMemoryContext')
   })
 })
+
+describe('room memory debug viewer App seam - Slice 3', () => {
+  it('uses the central dev gate and renders no panel when the gate is false', () => {
+    expect(appSource).toContain("import { readDebugConfig } from './app/debugConfig'")
+    expect(appSource).toContain('const debugConfig = readDebugConfig()')
+    expect(appSource).toContain(
+      'const roomMemoryDebugViewerEnabled = debugConfig.roomMemoryDebugViewerEnabled',
+    )
+    expect(appSource).toContain('roomMemoryDebugViewerEnabled && (')
+    expect(appSource).toContain('<RoomMemoryDebugPanel')
+    expect(appSource).not.toContain('import.meta.env.VITE_ROOM_MEMORY_DEBUG_VIEWER')
+  })
+
+  it('opens from the runtime store snapshot source and refreshes only from the explicit callback', () => {
+    const seam = appSource.slice(
+      appSource.indexOf('const [roomMemoryDebugViewer, setRoomMemoryDebugViewer] = useState('),
+      appSource.indexOf('// Bounded, non-authoritative room-memory recall context'),
+    )
+
+    expect(seam).toContain('INITIAL_ROOM_MEMORY_DEBUG_VIEWER_STATE')
+    expect(seam).toContain('toggleRoomMemoryDebugViewer(current, roomMemoryRuntimeRef.current.store)')
+    expect(seam).toContain('refreshRoomMemoryDebugViewer(current, roomMemoryRuntimeRef.current.store)')
+    expect(seam).not.toContain('setInterval')
+    expect(seam).not.toContain('addEventListener')
+    expect(seam).not.toContain('logger')
+    expect(seam).not.toContain('remember(')
+    expect(seam).not.toContain('record(')
+    expect(seam).not.toContain('restoreAll(')
+  })
+
+  it('passes only projected rows and active room id into the presentational panel', () => {
+    const render = appSource.slice(
+      appSource.indexOf('{roomMemoryDebugViewerEnabled && ('),
+      appSource.indexOf('<PromptBar onSubmit={handlePrompt} disabled={inFlight} />'),
+    )
+
+    expect(render).toContain('rows={roomMemoryDebugViewer.rows}')
+    expect(render).toContain('currentRoomId={activePlay?.room.id ?? null}')
+    expect(render).toContain('open={roomMemoryDebugViewer.open}')
+    expect(render).toContain('onToggle={handleToggleRoomMemoryDebugViewer}')
+    expect(render).toContain('onRefresh={handleRefreshRoomMemoryDebugViewer}')
+    expect(render).not.toContain('snapshotAll')
+    expect(render).not.toContain('roomMemoryContext')
+    expect(render).not.toContain('JournalPanel')
+  })
+})
