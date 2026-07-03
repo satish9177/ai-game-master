@@ -226,7 +226,7 @@ export function RoomViewer({
         setDialogue(null)
         setChoices(undefined)
         activeNPCDialogueRef.current = dialogueTarget
-        engine.setTalkingNpc(target.id)
+        engine.setTalkingNpc(dialogueTarget.npcId)
         setNPCDialogueTarget(dialogueTarget)
         const seed: NPCDialogueTurn[] = dialogueTarget.dialogue.greeting
           ? [{ speaker: 'npc', text: dialogueTarget.dialogue.greeting }]
