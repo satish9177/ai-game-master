@@ -190,6 +190,19 @@ Throughout these docs:
   persistence, schema, renderer-engine, generated-room, App gating, or provider
   selection change
   ([ADR-0069](./decisions/ADR-0069-npc-dialogue-free-text-input-v0.md)).
+- ✅ **Implemented** — Generated Per-Room Objective Save/Load v0 — closes the
+  ADR-0060 "objective UI safety" gap: non-current visited cached generated rooms now
+  save/restore their objective attachment (`{ questSpec, hint, completionHint }`)
+  inside the existing `generatedRoomCacheJson` blob via a leniently-accepted optional
+  `objective` entry field plus a strict `SavedGeneratedRoomObjectiveSchema` and the pure
+  `objectiveMatchesRoom` cross-check. The current-room objective still comes only from
+  `generatedQuestJson`; the current-room cache entry never carries one; restore seeds
+  the memo only by `restoredRoomIds`; completion is re-derived from `WorldState` via
+  `evaluateQuest`, never persisted; malformed/mismatched/tampered objectives degrade to
+  null/absent while the room restores. No provider call, `WorldState` mutation, memory
+  write, dialogue change, `SaveGame`/`WorldState`/`RoomSpec`/`QuestSpec` `schemaVersion`
+  bump, or DB migration
+  ([ADR-0073](./decisions/ADR-0073-generated-per-room-objective-save-load-v0.md)).
 - ❌ **Not built** — future shape only; documented so we don't paint into a corner.
 
 ## Status today (Renderer Foundation v0)
