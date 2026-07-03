@@ -246,8 +246,8 @@ describe('buildEventConsequenceJournal - ordering, cap, and ids', () => {
 
     expect(view.entries).toHaveLength(CAP)
     // Newest retained; oldest 5 dropped.
-    expect(view.entries[0].id).toBe(`evt-${5 + 1}`)
-    expect(view.entries[CAP - 1].id).toBe(`evt-${CAP + 5}`)
+    expect(view.entries[0]!.id).toBe(`evt-${5 + 1}`)
+    expect(view.entries[CAP - 1]!.id).toBe(`evt-${CAP + 5}`)
   })
 
   it('caps against qualifying entries only (skipped events do not consume the cap)', () => {

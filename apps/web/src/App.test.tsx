@@ -876,6 +876,44 @@ describe('App generated-play adjacent room source wiring', () => {
   })
 })
 
+describe('App event-consequence-journal seam wiring (Slice 2)', () => {
+  it('reads the feature flag only through the app-layer reader, never raw env', () => {
+    expect(appSource).toContain('readEventConsequenceJournalEnabled()')
+    // The flag env var name must never appear inline in App — it is read only
+    // inside the seam module (like debugConfig/llmConfig).
+    expect(appSource).not.toContain('VITE_CONSEQUENCE_JOURNAL_FROM_EVENTS')
+    expect(appSource).not.toContain('import.meta.env')
+  })
+
+  it('uses the smallest read-only async seam: getEventLog -> projector -> journal slot', () => {
+    expect(appSource).toContain('loadEventConsequenceJournal({')
+    expect(appSource).toContain('getEventLog: (id) => worldSession.getEventLog(id)')
+    // OFF short-circuit keeps the existing journal behavior byte-identical.
+    expect(appSource).toContain('if (!eventConsequenceJournalFromEventsEnabled) return')
+    // Stale async results are discarded so a newer refresh always wins.
+    expect(appSource).toContain('eventJournalRequestRef')
+  })
+
+  it('reuses the existing JournalPanel and adds no new journal UI', () => {
+    expect(appSource).toContain('{journal && <JournalPanel view={journal} />}')
+    // Exactly one journal panel is rendered (single render slot).
+    expect(appSource.match(/<JournalPanel/g)?.length).toBe(1)
+  })
+
+  it('adds no polling, no subscriptions, and no event-log writes', () => {
+    expect(appSource).not.toContain('setInterval')
+    expect(appSource).not.toContain('.subscribe(')
+    expect(appSource).not.toContain('appendEvent')
+  })
+
+  it('wires the seam at the session-start / load / room-entry flows', () => {
+    expect(appSource).toContain('applyEventJournalFromSession(initialState.sessionId)')
+    expect(appSource).toContain('applyEventJournalFromSession(started.state.sessionId)')
+    expect(appSource).toContain('applyEventJournalFromSession(stateResult.state.sessionId)')
+    expect(appSource).toContain('applyEventJournalFromSession(result.state.sessionId)')
+  })
+})
+
 describe('App per-room objective memo state', () => {
   function createSafeLogger() {
     const logs: Array<{ message: string; context: Record<string, unknown> }> = []

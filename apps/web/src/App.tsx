@@ -46,6 +46,10 @@ import { restoreGeneratedQuestPlay } from './app/restoreGeneratedQuestPlay'
 import type { RestoredGeneratedQuestPlay } from './app/restoreGeneratedQuestPlay'
 import { restoreGeneratedRoomCache } from './app/restoreGeneratedRoomCache'
 import { computeDerivedViews } from './app/derivedViews'
+import {
+  loadEventConsequenceJournal,
+  readEventConsequenceJournalEnabled,
+} from './app/eventConsequenceJournalSeam'
 import { navigateWithExitGate } from './app/gatedNavigation'
 import { LocalStorageSaveSlotStore } from './app/saveSlotStore'
 import { createConsoleLogger } from './platform/logger/consoleLogger'
@@ -115,6 +119,10 @@ import { NPCDialogueService } from './dialogue/NPCDialogueService'
 const logger = createConsoleLogger()
 const debugConfig = readDebugConfig()
 const roomMemoryDebugViewerEnabled = debugConfig.roomMemoryDebugViewerEnabled
+// Consequence-journal-from-events v1 (D1): default-OFF feature flag, read only
+// here in the composition layer. When OFF the existing authored/generated
+// journal behavior is byte-identical; the event seam is never invoked.
+const eventConsequenceJournalFromEventsEnabled = readEventConsequenceJournalEnabled()
 // The PromptBar-generated room path uses the configured generator: the
 // FakeRoomGenerator by default, or a real OpenAI-compatible provider when the
 // env config is complete (real-room-generator-provider v0; ADR-0023). The
@@ -567,6 +575,30 @@ function App() {
     refreshRoomMemoryContext(state)
   }, [refreshRoomMemoryContext])
 
+  // Event-derived consequence journal seam (consequence-journal-from-events v1,
+  // Slice 2 / D2). Runs only at the session-start / load / room-entry flows,
+  // AFTER refreshDerivedViews has already set the existing authored/generated
+  // journal. When the flag is ON and the projection succeeds it overrides that
+  // slot with the event-derived view; on flag OFF, a failed/not-found log read,
+  // or a projection throw it leaves the existing journal untouched (D1). A
+  // monotonic request id discards a stale async result so a newer refresh always
+  // wins. Read-only: the only call is the in-memory getEventLog; no polling, no
+  // subscriptions, no event writes.
+  const eventJournalRequestRef = useRef(0)
+  const applyEventJournalFromSession = useCallback((sessionId: string) => {
+    if (!eventConsequenceJournalFromEventsEnabled) return
+    const requestId = ++eventJournalRequestRef.current
+    void loadEventConsequenceJournal({
+      enabled: eventConsequenceJournalFromEventsEnabled,
+      sessionId,
+      getEventLog: (id) => worldSession.getEventLog(id),
+    }).then((view) => {
+      if (eventJournalRequestRef.current !== requestId) return
+      if (view === null) return
+      setJournal(view)
+    })
+  }, [])
+
   // Memory promotion seam (memory-event-promotion-v0 wiring slice). Runs only
   // after RoomViewer's interaction commit already succeeded — it never appends
   // events and a promotion failure never surfaces here (promoteInteractionMemories
@@ -634,12 +666,13 @@ function App() {
         journalSpecRef.current = result.journalSpec ?? null
         enterActivePlay(play)
         refreshDerivedViews(initialState)
+        applyEventJournalFromSession(initialState.sessionId)
       } else setFatalMessage(ROOM_UNAVAILABLE)
     })
     return () => {
       requestVersion.current += 1
     }
-  }, [enterActivePlay, refreshDerivedViews, setQuestHintsForView, setQuestSpecForView])
+  }, [applyEventJournalFromSession, enterActivePlay, refreshDerivedViews, setQuestHintsForView, setQuestSpecForView])
 
   const handlePrompt = useCallback((prompt: string) => {
     // In-flight lock: prevent a second call while one is pending.
@@ -791,6 +824,7 @@ function App() {
           }),
         })
         refreshDerivedViews(started.state)
+        applyEventJournalFromSession(started.state.sessionId)
         // A repaired or fallback room couldn't be built exactly as asked — show the
         // static, prompt-free notice. A clean `generated` room shows nothing.
         if (shouldShowFallbackNotice(result.provenance)) setNotice(FALLBACK_NOTICE)
@@ -805,7 +839,7 @@ function App() {
       logger.error('generated room source threw', { code: 'room-source-failed' })
       setFatalMessage(ROOM_UNAVAILABLE)
     })
-  }, [enterActivePlay, refreshDerivedViews, setQuestHintsForView, setQuestSpecForView])
+  }, [applyEventJournalFromSession, enterActivePlay, refreshDerivedViews, setQuestHintsForView, setQuestSpecForView])
 
   const handleGenerateAnyway = useCallback(() => {
     confirmGrantedRef.current = true
@@ -1023,6 +1057,7 @@ function App() {
         setNotice(degraded ? FALLBACK_NOTICE : null)
       }
       refreshDerivedViews(stateResult.state)
+      applyEventJournalFromSession(stateResult.state.sessionId)
       setFatalMessage(null)
       setSaveLoadStatus('idle')
       logger.info('world session restored', {
@@ -1034,7 +1069,7 @@ function App() {
       setSaveLoadStatus('error')
       setSaveLoadError('This save could not be loaded.')
     })
-  }, [enterActivePlay, refreshDerivedViews, setQuestHintsForView, setQuestSpecForView])
+  }, [applyEventJournalFromSession, enterActivePlay, refreshDerivedViews, setQuestHintsForView, setQuestSpecForView])
 
   const handleNavigate = useCallback(async (toRoomId: string): Promise<NavigationResult> => {
     if (!activePlay?.navigation) return { status: 'rejected', reason: 'missing-exit' }
@@ -1109,6 +1144,7 @@ function App() {
       // Re-project derived views from the post-move WorldState so objective 3
       // (ruined-safehouse visited) flips done immediately on entering the room.
       refreshDerivedViews(result.state)
+      applyEventJournalFromSession(result.state.sessionId)
       if (shouldAttachObjective) {
         const destinationRoom = result.room
         const destinationSessionId = activePlay.sessionId
@@ -1135,7 +1171,7 @@ function App() {
       }
     }
     return result
-  }, [activePlay, guardConfig, refreshDerivedViews, setQuestHintsForView, setQuestSpecForView])
+  }, [activePlay, applyEventJournalFromSession, guardConfig, refreshDerivedViews, setQuestHintsForView, setQuestSpecForView])
 
   return (
     <ErrorBoundary logger={logger}>
