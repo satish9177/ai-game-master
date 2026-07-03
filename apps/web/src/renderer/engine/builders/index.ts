@@ -225,7 +225,12 @@ function buildNpc(obj: ObjectOf<'npc'>): THREE.Object3D {
   // from the shared humanoid kit with default colors and a turban; a small nose
   // marks the facing direction (local +Z), so at rotationY=0 it looks south
   // toward an approaching player.
-  return buildHumanoid({ robeColor: obj.color })
+  return buildHumanoid({
+    robeColor: obj.color,
+    skinColor: '#d4ad84',
+    turbanColor: '#f0ead8',
+    accentColor: '#f0c96b',
+  })
 }
 
 // Sickly grey-green flesh for the undead; clothing color comes from obj.color.

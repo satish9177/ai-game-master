@@ -27,11 +27,17 @@ export interface HumanoidOptions {
   turbanColor?: THREE.ColorRepresentation
   /** `rest` hangs the arms at the sides; `reach` extends them forward (+Z). */
   arms?: 'rest' | 'reach'
+  /** Optional front-facing color accent for calm NPC readability. */
+  accentColor?: THREE.ColorRepresentation
 }
 
 const DEFAULT_SKIN = '#c8a27a'
 const DARK = '#3a2f25' // feet, nose, default belt
 const DEFAULT_TURBAN = '#e8e2d0'
+const HUMANOID_MATERIAL: Pick<THREE.MeshStandardMaterialParameters, 'roughness' | 'metalness'> = {
+  roughness: 0.78,
+  metalness: 0.02,
+}
 
 export function buildHumanoid(options: HumanoidOptions): THREE.Group {
   const {
@@ -41,6 +47,7 @@ export function buildHumanoid(options: HumanoidOptions): THREE.Group {
     headwear = 'turban',
     turbanColor = DEFAULT_TURBAN,
     arms = 'rest',
+    accentColor,
   } = options
 
   const g = new THREE.Group()
@@ -51,7 +58,7 @@ export function buildHumanoid(options: HumanoidOptions): THREE.Group {
     y = 0,
     z = 0,
   ): THREE.Mesh => {
-    const m = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color }))
+    const m = new THREE.Mesh(geo, humanoidMaterial(color))
     m.position.set(x, y, z)
     g.add(m)
     return m
@@ -62,6 +69,9 @@ export function buildHumanoid(options: HumanoidOptions): THREE.Group {
   part(new THREE.CylinderGeometry(0.24, 0.46, 1.15, 12), robeColor, 0, 0.575, 0) // robe + legs
   part(new THREE.CylinderGeometry(0.3, 0.3, 0.1, 12), beltColor, 0, 0.9, 0) // belt
   part(new THREE.BoxGeometry(0.56, 0.2, 0.3), robeColor, 0, 1.2, 0) // shoulders
+  if (accentColor) {
+    part(new THREE.BoxGeometry(0.12, 0.5, 0.04), accentColor, -0.12, 0.86, 0.25) // front sash
+  }
 
   if (arms === 'reach') {
     // Arms rotated to point forward (+Z) with hands out front — a shambling,
@@ -88,4 +98,8 @@ export function buildHumanoid(options: HumanoidOptions): THREE.Group {
   }
 
   return g
+}
+
+function humanoidMaterial(color: THREE.ColorRepresentation): THREE.MeshStandardMaterial {
+  return new THREE.MeshStandardMaterial({ color, ...HUMANOID_MATERIAL })
 }

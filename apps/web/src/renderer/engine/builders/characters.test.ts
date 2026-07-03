@@ -33,6 +33,16 @@ function meshes(o: THREE.Object3D): THREE.Mesh[] {
   return out
 }
 
+function materialColors(o: THREE.Object3D): string[] {
+  return meshes(o).flatMap((mesh) => {
+    const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material]
+    return materials.flatMap((material) => {
+      if (!(material instanceof THREE.MeshStandardMaterial)) return []
+      return [material.color.getHexString()]
+    })
+  })
+}
+
 function indicators(group: THREE.Group): THREE.Object3D[] {
   return group.children.filter((c) => c.name === 'interactable-indicator')
 }
@@ -61,6 +71,19 @@ describe('humanoid characters in buildObjects', () => {
     const g = buildObjects(roomWith([npc]), noopLogger)
     expect(meshes(g).length).toBeGreaterThanOrEqual(12)
     expect(indicators(g)).toHaveLength(1)
+  })
+
+  it('keeps NPC tags and transform stable while adding a calm presentation accent', () => {
+    const g = buildObjects(roomWith([{ ...npc, id: 'npc-1' }]), noopLogger)
+    const npcNode = g.children.find((node) => node.userData.objectId === 'npc-1')
+    const ring = indicators(g)[0]
+
+    expect(npcNode?.userData.objectType).toBe('npc')
+    expect(npcNode?.position.toArray()).toEqual([-2, 0, 0])
+    expect(npcNode?.rotation.y).toBe(0)
+    expect(npcNode?.scale.toArray()).toEqual([1, 1, 1])
+    expect(materialColors(npcNode!)).toContain('f0c96b')
+    expect(ring?.userData.forObjectId).toBe('npc-1')
   })
 
   it('builds a zombie and adds no indicator when it has no interaction', () => {

@@ -16,6 +16,13 @@ function meshes(o: THREE.Object3D): THREE.Mesh[] {
   return out
 }
 
+function standardMaterial(mesh: THREE.Mesh): THREE.MeshStandardMaterial {
+  if (Array.isArray(mesh.material) || !(mesh.material instanceof THREE.MeshStandardMaterial)) {
+    throw new Error('expected humanoid standard material')
+  }
+  return mesh.material
+}
+
 describe('buildHumanoid', () => {
   it('assembles a full figure including a head, with unique materials per mesh', () => {
     const parts = meshes(buildHumanoid({ robeColor: '#3a6ea5' }))
@@ -23,6 +30,16 @@ describe('buildHumanoid', () => {
     const head = parts.find((m) => m.geometry instanceof THREE.SphereGeometry && m.position.y > 1.4)
     expect(head).toBeDefined()
     expect(new Set(parts.map((m) => m.material)).size).toBe(parts.length)
+    expect(standardMaterial(parts[0]!).roughness).toBeCloseTo(0.78)
+    expect(standardMaterial(parts[0]!).metalness).toBeCloseTo(0.02)
+  })
+
+  it('adds an optional front accent for NPC silhouette readability', () => {
+    const parts = meshes(buildHumanoid({ robeColor: '#3a6ea5', accentColor: '#f0c96b' }))
+    const accent = parts.find((mesh) => standardMaterial(mesh).color.getHexString() === 'f0c96b')
+
+    expect(accent).toBeDefined()
+    expect(accent?.position.toArray()).toEqual([-0.12, 0.86, 0.25])
   })
 
   it('omits the headwear mesh when the head is bare', () => {
