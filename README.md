@@ -29,6 +29,10 @@ agents), then the architecture docs in
   handling.
 - [decisions/](./docs/architecture/decisions/) — architecture decision records
   (ADRs).
+- [Generated room manual evaluation suite](./docs/evaluation/generated-room-manual-evaluation-suite-v0.md)
+  — human checklist for generated-room demo review.
+- [Release readiness check v0](./docs/release/release-readiness-check-v0.md) —
+  historical point-in-time audit from 2026-06-24, not a current release status.
 
 ## How to run
 
@@ -142,8 +146,9 @@ Three.js builders — this boundary holds regardless of what the LLM outputs.
   shown.
 - **In-memory browser gameplay** — the Node/SQLite backend exists headless but the
   browser is unwired; gameplay state lives in-memory and `localStorage` only.
-- **Fake NPC dialogue** — the real LLM dialogue provider is a planned follow-up;
-  NPCs respond with canned text today.
+- **Fake NPC dialogue remains the default** — offline NPC replies are canned and
+  zero-cost; real LLM NPC dialogue exists only as an opt-in dev/BYOK provider
+  path when configured.
 - **Adjacent-room warming uses the fake generator only** — background pre-generation
   makes no real LLM calls and costs nothing.
 - **Primitives only** — no GLTF / imported models, no textures; rooms are built
