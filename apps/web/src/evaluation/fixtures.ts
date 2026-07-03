@@ -10,6 +10,9 @@ import { InMemoryRoomMemoryStore } from '../memory/InMemoryRoomMemoryStore'
 import { NpcMemoryService, type RememberResult as RememberNpcMemoryResult } from '../memory/NpcMemoryService'
 import { RoomMemoryService, type RememberRoomMemoryResult } from '../memory/RoomMemoryService'
 import type { LogContext, LogLevel } from '../platform/logger/Logger'
+import { InMemoryWorldStore } from '../world-session/InMemoryWorldStore'
+import { SaveGameService } from '../world-session/saveGame'
+import { WorldSession } from '../world-session/WorldSession'
 import { createSpyLogger, expectNoForbiddenMarkers } from '../redteam/fixtures'
 import { expect } from 'vitest'
 
@@ -253,4 +256,153 @@ export function syntheticEventStream(count: number, options: SyntheticEventStrea
     })
   }
   return events
+}
+
+/* ------------------------------------------------------------------------- *
+ * Slice 3/4 shared fixtures (Gates B, D, E, F).
+ * ------------------------------------------------------------------------- */
+
+/** Three in-scope rooms for the scope-stability gate (Gate D crosses ≥3 rooms). */
+export const EVAL_ROOM_A_ID = 'eval-room-a'
+export const EVAL_ROOM_B_ID = 'eval-room-b'
+export const EVAL_ROOM_C_ID = 'eval-room-c'
+export const EVAL_ROOM_IDS = [EVAL_ROOM_A_ID, EVAL_ROOM_B_ID, EVAL_ROOM_C_ID] as const
+
+/** Decoy scopes (a different world / session / room) that must never leak (Gate D). */
+export const EVAL_OTHER_WORLD_ID = 'eval-other-world'
+export const EVAL_OTHER_SESSION_ID = 'eval-other-session'
+export const EVAL_DECOY_ROOM_ID = 'eval-decoy-room'
+
+/**
+ * A UUID `worldId` for the world-session-backed gates (Gate D save/load, Gate F
+ * side effects). `CanonSeed.worldId`/`WorldState.worldId`/`sessionId` are
+ * `UuidSchema`-constrained, so these gates cannot reuse the plain `EVAL_WORLD_ID`.
+ * Room-memory scope `roomId` stays a plain string (it is not FK'd / not a UUID).
+ */
+export const EVAL_CANON_WORLD_ID = '00000000-0000-4000-8000-0000000ea100'
+
+/**
+ * Unique forbidden markers embedded in fixture memory text / player-like inputs /
+ * provider-looking strings (Gate E). Distinct from the redteam `markers` payloads
+ * (which this suite deliberately does not import) and distinct from any id/enum a
+ * memory service is allowed to log — so any appearance in captured logs is a leak.
+ */
+export const evalMarkers = {
+  memoryText: 'XEVAL-MEMORY-TEXT-1M',
+  plantedText: 'XEVAL-PLANTED-TEXT-2P',
+  playerLine: 'XEVAL-PLAYER-LINE-3L',
+  providerBody: 'XEVAL-PROVIDER-BODY-4B',
+} as const
+
+export const EVAL_ALL_MARKERS: readonly string[] = Object.values(evalMarkers)
+
+/** A room-memory harness (store + real service + captured logs) reused across gates. */
+export type RoomMemoryHarness = {
+  store: InMemoryRoomMemoryStore
+  service: RoomMemoryService
+  logEntries: LogEntry[]
+}
+
+export function createRoomMemoryHarness(idPrefix = 'eval-room-mem'): RoomMemoryHarness {
+  const store = new InMemoryRoomMemoryStore()
+  const logEntries: LogEntry[] = []
+  const service = new RoomMemoryService(
+    store,
+    createFixedClock(),
+    createSequentialIdGenerator(idPrefix),
+    createSpyLogger(logEntries),
+  )
+  return { store, service, logEntries }
+}
+
+/** A valid `CanonSeed` for starting a real in-memory world session (Gate D / F). */
+export function evalCanon(worldId: string = EVAL_CANON_WORLD_ID): unknown {
+  return {
+    schemaVersion: WORLD_SCHEMA_VERSION,
+    worldId,
+    name: 'eval-canon',
+    startingRoomId: EVAL_ROOM_A_ID,
+    initialPlayer: {
+      health: { current: 10, max: 10 },
+      status: [],
+      inventory: [],
+    },
+  }
+}
+
+/** A real (in-memory) world-session harness with UUID ids and captured logs. */
+export type WorldSessionHarness = {
+  store: InMemoryWorldStore
+  session: WorldSession
+  saves: SaveGameService
+  logEntries: LogEntry[]
+}
+
+export function createWorldSessionHarness(): WorldSessionHarness {
+  const store = new InMemoryWorldStore()
+  const logEntries: LogEntry[] = []
+  const logger = createSpyLogger(logEntries)
+  let id = 1
+  const idGenerator: IdGenerator = {
+    newId: () => `00000000-0000-4000-8000-${String(id++).padStart(12, '0')}`,
+  }
+  const clock = createFixedClock()
+  return {
+    store,
+    session: new WorldSession(store, clock, idGenerator, logger),
+    saves: new SaveGameService(store, logger),
+    logEntries,
+  }
+}
+
+/**
+ * Deep-walk every string reachable from a captured log entry's message and
+ * context values (Gate E). Objects/arrays are recursed; primitives are stringified
+ * only if already strings — number/boolean values carry no free text to leak.
+ */
+export function collectLogStrings(entries: readonly LogEntry[]): string[] {
+  const strings: string[] = []
+  const visit = (value: unknown): void => {
+    if (typeof value === 'string') strings.push(value)
+    else if (Array.isArray(value)) value.forEach(visit)
+    else if (value !== null && typeof value === 'object') Object.values(value).forEach(visit)
+  }
+  for (const entry of entries) {
+    strings.push(entry.message)
+    visit(entry.context)
+  }
+  return strings
+}
+
+/**
+ * Gate E sweep: no captured log string (message or any nested context value) may
+ * contain a forbidden marker or the raw fixture memory-text prefix. Count/status
+ * diagnostics (ids, enums, counts, codes) are allowed and are not asserted away.
+ */
+export function expectNoEvalMarkersInLogs(
+  entries: readonly LogEntry[],
+  forbidden: readonly string[] = EVAL_ALL_MARKERS,
+): void {
+  const strings = collectLogStrings(entries)
+  for (const text of strings) {
+    for (const marker of forbidden) expect(text).not.toContain(marker)
+    expect(text).not.toContain('memory text ')
+  }
+}
+
+/**
+ * Gate E structural check: every logged context value is a primitive
+ * (id/enum/count/code/boolean) — never a nested object, array, or raw text blob.
+ * Mirrors the "log context values remain ids/enums/counts/codes/booleans only"
+ * assertion in the plan.
+ */
+export function expectSafeLogContextValues(entries: readonly LogEntry[]): void {
+  for (const entry of entries) {
+    for (const value of Object.values(entry.context)) {
+      const kind = typeof value
+      const isPrimitive =
+        kind === 'string' || kind === 'number' || kind === 'boolean' || value === null || value === undefined
+      expect(isPrimitive).toBe(true)
+    }
+  }
 }

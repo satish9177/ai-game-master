@@ -203,6 +203,19 @@ Throughout these docs:
   write, dialogue change, `SaveGame`/`WorldState`/`RoomSpec`/`QuestSpec` `schemaVersion`
   bump, or DB migration
   ([ADR-0073](./decisions/ADR-0073-generated-per-room-objective-save-load-v0.md)).
+- ✅ **Implemented** — Long-Session Memory Evaluation v0 — test-only, at-scale
+  regression armor under `apps/web/src/evaluation/` (sibling of `redteam/`)
+  proving the wired browser room-memory chain over long sessions (~1000
+  records). Gates A–F lock the prompt-context budget, planted-memory relevance
+  ordering, dedupe-under-flood, the `(worldId, sessionId, roomId)` scope triple
+  across save/load (assessment Risk 2), count-only log diagnostics, and the
+  absence of `WorldEvent`/`WorldState`/memory-write/network side effects.
+  Thresholds are absolute literals equal to today's constants (a constants
+  canary catches deliberate cap changes); Gate B's deterministic retrieval
+  plateau (assessment Risk 3) is **measured, not fixed** — a red-to-green target
+  for a future retrieval feature. No runtime behavior, memory-algorithm,
+  provider/network, `WorldState` mutation, schema, DB, or UI change
+  ([ADR-0074](./decisions/ADR-0074-long-session-memory-evaluation-v0.md)).
 - ❌ **Not built** — future shape only; documented so we don't paint into a corner.
 
 ## Status today (Renderer Foundation v0)
