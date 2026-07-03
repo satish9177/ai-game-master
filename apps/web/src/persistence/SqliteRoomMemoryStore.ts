@@ -6,6 +6,8 @@ import type {
   RoomMemoryStoreErrorCode,
   RoomMemoryWriteResult,
 } from '../domain/ports/RoomMemoryStore'
+import type { RoomMemorySearchStore } from '../domain/ports/RoomMemorySearchStore'
+import type { MemoryFtsQuery } from '../domain/memory/ftsQuery'
 import type { Logger } from '../platform/logger/Logger'
 import { withTransaction } from './db'
 
@@ -38,7 +40,7 @@ const PERSISTENCE_SCHEMA_VERSION = 1
 class ConflictSignal extends Error {}
 class NotFoundSignal extends Error {}
 
-export class SqliteRoomMemoryStore implements RoomMemoryStore {
+export class SqliteRoomMemoryStore implements RoomMemoryStore, RoomMemorySearchStore {
   private readonly db: DatabaseSync
   private readonly log: Logger
 
@@ -113,6 +115,55 @@ export class SqliteRoomMemoryStore implements RoomMemoryStore {
     return records
   }
 
+  async searchForRoom(
+    scope: RoomMemoryScope,
+    query: MemoryFtsQuery,
+    options: { limit?: number } = {},
+  ): Promise<RoomMemoryRecord[]> {
+    const limit = options.limit ?? -1
+    let rows: unknown[]
+    try {
+      rows = this.db
+        .prepare(
+          `SELECT m.memory_id, m.memory_json
+             FROM room_memories_fts
+             JOIN room_memories m ON m.memory_id = room_memories_fts.memory_id
+            WHERE room_memories_fts MATCH ?
+              AND room_memories_fts.world_id = ?
+              AND room_memories_fts.session_id = ?
+              AND room_memories_fts.room_id = ?
+              AND m.world_id = ? AND m.session_id = ? AND m.room_id = ?
+            ORDER BY bm25(room_memories_fts) ASC, m.seq DESC, m.memory_id ASC
+            LIMIT ?`,
+        )
+        .all(
+          query.expression,
+          scope.worldId,
+          scope.sessionId,
+          scope.roomId,
+          scope.worldId,
+          scope.sessionId,
+          scope.roomId,
+          limit,
+        )
+    } catch {
+      this.log.warn('room memory fts unavailable', {
+        sessionId: scope.sessionId,
+        roomId: scope.roomId,
+        code: 'fts-unavailable',
+      })
+      return []
+    }
+
+    const records: RoomMemoryRecord[] = []
+    for (const row of rows) {
+      if (!isRow(row)) continue
+      const parsed = this.parseStoredMemory(row.memory_id, row.memory_json, scope)
+      if (parsed) records.push(parsed)
+    }
+    return records
+  }
+
   private sessionExists(sessionId: string): boolean {
     return (
       this.db.prepare('SELECT 1 FROM world_sessions WHERE session_id = ?').get(sessionId) !==
@@ -149,6 +200,13 @@ export class SqliteRoomMemoryStore implements RoomMemoryStore {
         record.createdAt,
         record.dedupeKey ?? null,
       )
+
+    this.db
+      .prepare(
+        `INSERT INTO room_memories_fts(text, memory_id, world_id, session_id, room_id)
+         VALUES (?, ?, ?, ?, ?)`,
+      )
+      .run(record.text, record.memoryId, record.worldId, record.sessionId, record.roomId)
   }
 
   /**
@@ -239,4 +297,8 @@ export class SqliteRoomMemoryStore implements RoomMemoryStore {
 
 function isUniqueViolation(error: unknown): boolean {
   return error instanceof Error && /UNIQUE constraint failed/i.test(error.message)
+}
+
+function isRow(value: unknown): value is { memory_id: unknown; memory_json: unknown } {
+  return typeof value === 'object' && value !== null && 'memory_id' in value && 'memory_json' in value
 }

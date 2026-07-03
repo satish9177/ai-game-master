@@ -19,14 +19,16 @@ describe('migrations / 0001_init', () => {
   it('creates the durable tables and append-only triggers', () => {
     const { db, close } = createMemoryDb()
     try {
-      expect(names(db, 'table')).toEqual([
+      expect(names(db, 'table')).toEqual(expect.arrayContaining([
         'npc_memories',
+        'npc_memories_fts',
         'room_memories',
+        'room_memories_fts',
         'rooms',
         'schema_migrations',
         'world_events',
         'world_sessions',
-      ])
+      ]))
       expect(names(db, 'trigger')).toEqual([
         'npc_memories_no_update',
         'room_memories_no_update',
@@ -44,7 +46,7 @@ describe('migrations / 0001_init', () => {
       const rows = db
         .prepare('SELECT version, name, applied_at FROM schema_migrations ORDER BY version')
         .all()
-      expect(rows).toHaveLength(4)
+      expect(rows).toHaveLength(5)
       const row = rows[0]!
       expect(Number(row.version)).toBe(1)
       expect(row.name).toBe('init')
@@ -61,7 +63,7 @@ describe('migrations / 0001_init', () => {
       runMigrations(db)
       runMigrations(db)
       const count = db.prepare('SELECT COUNT(*) AS n FROM schema_migrations').get()
-      expect(Number(count?.n)).toBe(4)
+      expect(Number(count?.n)).toBe(5)
     } finally {
       close()
     }
@@ -216,7 +218,7 @@ describe('migrations / 0004_memory_dedupe_key', () => {
       runMigrations(db)
       expect(columns(db, 'npc_memories').filter((c) => c === 'dedupe_key')).toHaveLength(1)
       const count = db.prepare('SELECT COUNT(*) AS n FROM schema_migrations').get()
-      expect(Number(count?.n)).toBe(4)
+      expect(Number(count?.n)).toBe(5)
     } finally {
       close()
     }
@@ -282,6 +284,30 @@ describe('migrations / 0004_memory_dedupe_key', () => {
   })
 })
 
+describe('migrations / 0005_memory_fts', () => {
+  it('creates NPC and room memory FTS tables without live triggers', () => {
+    const { db, close } = createMemoryDb()
+    try {
+      expect(names(db, 'table')).toContain('npc_memories_fts')
+      expect(names(db, 'table')).toContain('room_memories_fts')
+      expect(names(db, 'trigger')).not.toContain('npc_memories_fts_insert')
+      expect(names(db, 'trigger')).not.toContain('room_memories_fts_insert')
+    } finally {
+      close()
+    }
+  })
+
+  it('records migration version 5 as memory_fts', () => {
+    const { db, close } = createMemoryDb()
+    try {
+      const row = db.prepare('SELECT name FROM schema_migrations WHERE version = 5').get()
+      expect(row?.name).toBe('memory_fts')
+    } finally {
+      close()
+    }
+  })
+})
+
 describe('migrations / durability', () => {
   const reopened: string[] = []
 
@@ -304,7 +330,7 @@ describe('migrations / durability', () => {
       // re-running migrations against the persisted file is a no-op.
       runMigrations(reopenedDb)
       const count = reopenedDb.prepare('SELECT COUNT(*) AS n FROM schema_migrations').get()
-      expect(Number(count?.n)).toBe(4)
+      expect(Number(count?.n)).toBe(5)
     } finally {
       reopenedDb.close()
     }

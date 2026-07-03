@@ -6,6 +6,8 @@ import type {
   NpcMemoryStoreErrorCode,
   NpcMemoryWriteResult,
 } from '../domain/ports/NpcMemoryStore'
+import type { NpcMemorySearchStore } from '../domain/ports/NpcMemorySearchStore'
+import type { MemoryFtsQuery } from '../domain/memory/ftsQuery'
 import type { Logger } from '../platform/logger/Logger'
 import { withTransaction } from './db'
 
@@ -34,7 +36,7 @@ const PERSISTENCE_SCHEMA_VERSION = 1
 class ConflictSignal extends Error {}
 class NotFoundSignal extends Error {}
 
-export class SqliteNpcMemoryStore implements NpcMemoryStore {
+export class SqliteNpcMemoryStore implements NpcMemoryStore, NpcMemorySearchStore {
   private readonly db: DatabaseSync
   private readonly log: Logger
 
@@ -106,6 +108,55 @@ export class SqliteNpcMemoryStore implements NpcMemoryStore {
     return records
   }
 
+  async searchForNpc(
+    scope: MemoryScope,
+    query: MemoryFtsQuery,
+    options: { limit?: number } = {},
+  ): Promise<NpcMemoryRecord[]> {
+    const limit = options.limit ?? -1
+    let rows: unknown[]
+    try {
+      rows = this.db
+        .prepare(
+          `SELECT m.memory_id, m.memory_json
+             FROM npc_memories_fts
+             JOIN npc_memories m ON m.memory_id = npc_memories_fts.memory_id
+            WHERE npc_memories_fts MATCH ?
+              AND npc_memories_fts.world_id = ?
+              AND npc_memories_fts.session_id = ?
+              AND npc_memories_fts.npc_id = ?
+              AND m.world_id = ? AND m.session_id = ? AND m.npc_id = ?
+            ORDER BY bm25(npc_memories_fts) ASC, m.seq DESC, m.memory_id ASC
+            LIMIT ?`,
+        )
+        .all(
+          query.expression,
+          scope.worldId,
+          scope.sessionId,
+          scope.npcId,
+          scope.worldId,
+          scope.sessionId,
+          scope.npcId,
+          limit,
+        )
+    } catch {
+      this.log.warn('npc memory fts unavailable', {
+        sessionId: scope.sessionId,
+        npcId: scope.npcId,
+        code: 'fts-unavailable',
+      })
+      return []
+    }
+
+    const records: NpcMemoryRecord[] = []
+    for (const row of rows) {
+      if (!isRow(row)) continue
+      const parsed = this.parseStoredMemory(row.memory_id, row.memory_json, scope)
+      if (parsed) records.push(parsed)
+    }
+    return records
+  }
+
   private sessionExists(sessionId: string): boolean {
     return (
       this.db.prepare('SELECT 1 FROM world_sessions WHERE session_id = ?').get(sessionId) !==
@@ -142,6 +193,13 @@ export class SqliteNpcMemoryStore implements NpcMemoryStore {
         record.createdAt,
         record.dedupeKey ?? null,
       )
+
+    this.db
+      .prepare(
+        `INSERT INTO npc_memories_fts(text, memory_id, world_id, session_id, npc_id)
+         VALUES (?, ?, ?, ?, ?)`,
+      )
+      .run(record.text, record.memoryId, record.worldId, record.sessionId, record.npcId)
   }
 
   /**
@@ -219,4 +277,8 @@ export class SqliteNpcMemoryStore implements NpcMemoryStore {
 
 function isUniqueViolation(error: unknown): boolean {
   return error instanceof Error && /UNIQUE constraint failed/i.test(error.message)
+}
+
+function isRow(value: unknown): value is { memory_id: unknown; memory_json: unknown } {
+  return typeof value === 'object' && value !== null && 'memory_id' in value && 'memory_json' in value
 }
