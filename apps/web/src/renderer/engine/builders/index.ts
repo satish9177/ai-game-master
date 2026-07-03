@@ -54,7 +54,9 @@ export function buildObjects(
         ? RETURN_EXIT_RING_COLOR
         : AFFORDANCE_RING_COLOR[affordance] ?? AFFORDANCE_RING_COLOR.inspect
       const resolved = obj.id !== undefined && resolvedObjectIds?.has(obj.id) === true
-      group.add(buildInteractableIndicator(obj.position, ringColor, resolved))
+      const indicator = buildInteractableIndicator(obj.position, ringColor, resolved)
+      if (obj.id !== undefined) indicator.userData.forObjectId = obj.id
+      group.add(indicator)
     }
   }
 

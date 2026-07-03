@@ -179,6 +179,40 @@ describe('built object userData tagging', () => {
     expect(ring.userData.objectType).toBeUndefined()
     expect(built.children.filter((n) => n.userData.objectType === 'npc')).toHaveLength(1)
   })
+
+  it('tags an NPC indicator ring with the source object id only', () => {
+    const room = loadRoomSpec(roomEnvelope([
+      { ...(currentObjects.npc as Record<string, unknown>), id: 'npc-1' },
+    ]))
+    const { logger } = recordingLogger()
+    const built = buildObjects(room, logger)
+    const ring = indicators(built)[0]!
+    const npcNode = built.children.find((n) => n.userData.objectType === 'npc')!
+
+    expect(ring.userData.forObjectId).toBe('npc-1')
+    expect(ring.userData.objectType).toBeUndefined()
+    expect(ring.userData.objectId).toBeUndefined()
+    expect(npcNode.userData.objectType).toBe('npc')
+    expect(npcNode.userData.objectId).toBe('npc-1')
+  })
+
+  it('tags a non-NPC interactable indicator ring with the source object id', () => {
+    const room = loadRoomSpec(roomEnvelope([
+      { ...(currentObjects.scroll as Record<string, unknown>), id: 'scroll-1' },
+    ]))
+    const { logger } = recordingLogger()
+    const built = buildObjects(room, logger)
+
+    expect(indicators(built)[0]!.userData.forObjectId).toBe('scroll-1')
+  })
+
+  it('does not invent forObjectId for indicators whose source object has no id', () => {
+    const room = loadRoomSpec(roomEnvelope([currentObjects.npc]))
+    const { logger } = recordingLogger()
+    const built = buildObjects(room, logger)
+
+    expect(indicators(built)[0]!.userData.forObjectId).toBeUndefined()
+  })
 })
 
 describe('skipped-object mystery marker', () => {
