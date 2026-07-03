@@ -1,11 +1,13 @@
 # Implementation Plan — `feature/open-source-launch-polish-v0`
 
-> Status: **Docs-only design. Not approved. No code implemented.**
+> Status: **Implemented / closed for approved docs-only slices.**
 > This plan defines a docs/repo-readiness pass for open-source/demo launch,
 > after `generated-room-demo-polish-pass-v0`
 > ([closeout](./generated-room-demo-polish-pass-v0.md)). It touches
-> **documentation and repo-hygiene files only** — no runtime code, no tests
-> (yet), no generated media.
+> **documentation and repo-hygiene files only** — no runtime code, no tests,
+> no generated media. Shipped slices: README cross-links/drift fixes,
+> `CONTRIBUTING.md`, README troubleshooting, root `.gitignore`, README
+> screenshot/GIF placeholder instructions, and this closeout update.
 >
 > Companion docs: [ARCHITECTURE](../ARCHITECTURE.md) · [BOUNDARIES](../BOUNDARIES.md) ·
 > [AGENTS.md](../../../AGENTS.md) · [CONVENTIONS](../CONVENTIONS.md) ·
@@ -527,29 +529,62 @@ own approval):
 
 ## 13. Closeout checklist
 
-*(To be completed at the end of the final shipped slice — left unchecked at
-plan-approval time.)*
+Closeout completed for the maintainer-approved batched docs-only pass.
 
-- [ ] Every slice the maintainer approved (§14) shipped; any skipped slice has
-      a stated reason.
-- [ ] `git diff --stat` across all shipped slices shows only documentation/
-      repo-hygiene files (§11).
-- [ ] README verified accurate end-to-end against current code (Slice 2/§9).
-- [ ] `CONTRIBUTING.md` present and consistent with `AGENTS.md` (if Slice 3
-      shipped).
-- [ ] Troubleshooting content present and accurate (if Slice 4 shipped).
-- [ ] Repo hygiene checklist completed; each item satisfied or explicitly
-      deferred with a reason (Slice 5).
-- [ ] No screenshot/GIF/media file committed anywhere in the diff (Slice 6,
-      if shipped, is text-only).
-- [ ] `npm run build` / `npm run lint` / `npm run test` run at least once
-      after all shipped slices and reported honestly (expected: unaffected).
-- [ ] Safety/boundary checklist (§10) re-confirmed.
-- [ ] Status blockquote at the top of this plan updated to reflect what
+- [x] Every slice the maintainer approved (§14) shipped; skipped items are
+      recorded below.
+- [x] `git diff --stat` across shipped slices shows only documentation/
+      repo-hygiene files (§11): `README.md`, `CONTRIBUTING.md`, `.gitignore`,
+      and this plan.
+- [x] README links touched by this feature were verified with `Test-Path`;
+      claims were checked against `.env.example` and architecture docs during
+      implementation.
+- [x] `CONTRIBUTING.md` is present and points to `AGENTS.md` without duplicating
+      it heavily.
+- [x] README troubleshooting content is present and avoids raw logs, prompts,
+      provider bodies, generated JSON, memory text, secrets, and PII.
+- [x] Repo hygiene checklist completed for this batch: root `.gitignore` added;
+      root `node_modules/` ignored; `apps/web/.env.local` remains ignored;
+      tracked `node_modules` entries remain absent; `LICENSE` is explicitly
+      deferred.
+- [x] No screenshot/GIF/media file committed anywhere in the diff; Slice 6 is
+      README text only.
+- [x] `npm.cmd run lint`, `npm.cmd run test`, and `npm.cmd run build` were run
+      after the docs batch and are reported honestly:
+      - `npm.cmd run lint`: passed.
+      - `npm.cmd run test`: did not pass cleanly; 155/160 test files and
+        2778/2778 tests passed, then Vitest reported worker/fork errors
+        including `spawn EPERM` for
+        `apps/web/src/platform/system/system.test.ts` after the long-running
+        test process had to be stopped.
+      - `npm.cmd run build`: failed on existing TypeScript errors in
+        `apps/web/src/domain/assembleRoom.test.ts`,
+        `apps/web/src/domain/ensureGeneratedNpcPresence.ts`,
+        `apps/web/src/domain/npcMovementContract.test.ts`, and
+        `apps/web/src/generation/OpenAICompatibleNPCDialogueProvider.test.ts`.
+        No touched file is involved.
+- [x] Safety/boundary checklist (§10) re-confirmed.
+- [x] Status blockquote at the top of this plan updated to reflect what
       actually shipped.
-- [ ] Confirm no gameplay/memory/NPC feature (§12) was started by this work.
-- [ ] Decision recorded on whether an ADR / `ARCHITECTURE.md` status line was
-      added (default: no — this feature makes no architecture decision).
+- [x] Confirmed no gameplay/memory/NPC feature (§12) was started by this work.
+- [x] Decision recorded: no ADR and no `ARCHITECTURE.md` status line were added.
+
+Shipped in this feature:
+
+- Slice 2: README cross-links and stale NPC-dialogue limitation fix.
+- Slice 3: root `CONTRIBUTING.md`.
+- Slice 4: README troubleshooting section.
+- Slice 5: root `.gitignore` plus this closeout's repo-hygiene checklist.
+- Slice 6: README screenshot/GIF placeholder instructions only; no media.
+- Slice 7: this closeout update.
+
+Deferred or skipped by maintainer decision:
+
+- `LICENSE` deferred because no license choice was approved in this batch.
+- `docs/status/SHIPPED-FEATURES.md` deferred; no status doc created.
+- ADR and `ARCHITECTURE.md` status line skipped.
+- `docs/release/release-readiness-check-v0.md` not updated or re-run; it remains
+  a historical point-in-time audit.
 
 ---
 

@@ -85,6 +85,13 @@ following overlays are visible immediately:
 8. *(Optional)* Set up a real API key to try live LLM generation — see
    **Generation modes** below.
 
+## Screenshot / GIF placeholder
+
+No screenshot or GIF is committed yet. A future capture should use the
+60-second demo flow above with offline/fake mode, or with no real API key
+active. Avoid showing secrets, env files, browser console output, raw provider
+responses, prompts, generated JSON, memory text, or private local paths.
+
 ## Controls
 
 | Input | Action |
@@ -126,6 +133,26 @@ production must move the provider server-side.
 **Usage guardrail:** When a real provider is active the app counts generation
 attempts against a per-session cap and asks you to confirm before continuing at
 the cap.
+
+## Troubleshooting
+
+- **Commands fail from the repo root:** the app is under `apps/web`, so run
+  `npm install`, `npm run dev`, `npm run build`, `npm run lint`, and
+  `npm run test` from that directory.
+- **PowerShell blocks `npm.ps1`:** use `npm.cmd` instead, for example
+  `npm.cmd run dev`.
+- **Real provider does not activate:** missing or incomplete BYOK env vars fall
+  back to fake/offline behavior. Confirm `VITE_AIGM_LLM_PROVIDER`, the matching
+  key, and `VITE_AIGM_LLM_MODEL` in `apps/web/.env.local`, then restart the dev
+  server.
+- **The 3D view is blank or unstable:** try a current browser with WebGL enabled
+  and updated graphics drivers. See
+  [FAILURE-MODES.md](./docs/architecture/FAILURE-MODES.md) for the project's
+  failure-handling notes.
+- **Need diagnostics:** check the browser console for safe high-level status,
+  enums, booleans, or counts. Do not paste raw logs that include prompts,
+  provider bodies, generated JSON, memory text, dialogue, secrets, or personal
+  data into issues or PRs.
 
 ## Data-only RoomSpec / trusted-renderer trust boundary
 
