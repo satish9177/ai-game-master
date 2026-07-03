@@ -47,6 +47,8 @@ describe('buildLighting', () => {
   it('adds a renderer-internal directional key light that casts shadows', () => {
     const sun = directionalOf(buildLighting(lighting(true), DIMS))
     expect(sun.castShadow).toBe(true)
+    expect(sun.intensity).toBeCloseTo(2.35)
+    expect(sun.color.getHexString()).toBe('fff6e8')
     // The light's target must be in the group so its aim applies.
     const g = buildLighting(lighting(true), DIMS)
     expect(g.children.includes(directionalOf(g).target)).toBe(true)

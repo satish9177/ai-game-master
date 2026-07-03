@@ -15,6 +15,11 @@ const CUTAWAY_WALL_HEIGHT = 0.4
 /** Height of the trim cap that trims a cutaway curb so the open side reads. */
 const CURB_TRIM_HEIGHT = 0.08
 
+const SHELL_MATERIAL: Pick<THREE.MeshStandardMaterialParameters, 'roughness' | 'metalness'> = {
+  roughness: 0.82,
+  metalness: 0.02,
+}
+
 /**
  * Builds the static room shell — floor + four walls — from the RoomSpec.
  * Low-poly: plain flat boxes, one material per mesh so the engine's scene-graph
@@ -50,7 +55,7 @@ export function buildShell(
   // Floor: thin box centered at origin with its top surface at y = 0.
   const floor = new THREE.Mesh(
     new THREE.BoxGeometry(width, wallThickness, depth),
-    new THREE.MeshStandardMaterial({ color: floorColor }),
+    makeShellMaterial(floorColor),
   )
   floor.position.set(0, -wallThickness / 2, 0)
   floor.name = 'floor'
@@ -113,7 +118,7 @@ function makeWall(
 ): THREE.Mesh {
   const wall = new THREE.Mesh(
     new THREE.BoxGeometry(sx, sy, sz),
-    new THREE.MeshStandardMaterial({ color }),
+    makeShellMaterial(color),
   )
   wall.position.set(px, py, pz)
   wall.name = 'wall'
@@ -138,7 +143,7 @@ function makeCurbTrim(
   const lip = 0.12 // overhang past the wall thickness so the cap is visible
   const cap = new THREE.Mesh(
     new THREE.BoxGeometry(sx + (sx < sz ? lip : 0), CURB_TRIM_HEIGHT, sz + (sz <= sx ? lip : 0)),
-    new THREE.MeshStandardMaterial({ color }),
+    makeShellMaterial(color),
   )
   cap.position.set(px, curbHeight + CURB_TRIM_HEIGHT / 2, pz)
   cap.name = 'curb-trim'
@@ -182,10 +187,17 @@ function makeSeam(
 ): THREE.Mesh {
   const seam = new THREE.Mesh(
     new THREE.BoxGeometry(sx, sy, sz),
-    new THREE.MeshStandardMaterial({ color }),
+    makeShellMaterial(color, { roughness: 0.9, metalness: 0 }),
   )
   seam.position.set(px, py, pz)
   seam.name = 'floor-seam'
   seam.receiveShadow = true
   return seam
+}
+
+function makeShellMaterial(
+  color: THREE.ColorRepresentation,
+  material: Partial<typeof SHELL_MATERIAL> = {},
+): THREE.MeshStandardMaterial {
+  return new THREE.MeshStandardMaterial({ color, ...SHELL_MATERIAL, ...material })
 }

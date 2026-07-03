@@ -43,9 +43,9 @@ export function buildLighting(
  * high up and over the far (north/west) corner, so shadows fall toward the open
  * south/east cutaway side and read clearly from the fixed isometric camera.
  */
-const KEY_LIGHT_DIR = new THREE.Vector3(-0.55, 1.4, -0.5).normalize()
-const KEY_LIGHT_COLOR = '#fff2e0' // faint warm sun, neutral enough not to recolour rooms
-const KEY_LIGHT_INTENSITY = 2.2
+const KEY_LIGHT_DIR = new THREE.Vector3(-0.55, 1.5, -0.5).normalize()
+const KEY_LIGHT_COLOR = '#fff6e8' // faint warm sun, neutral enough not to recolour rooms
+const KEY_LIGHT_INTENSITY = 2.35
 const SHADOW_MAP_SIZE = 2048
 
 /**

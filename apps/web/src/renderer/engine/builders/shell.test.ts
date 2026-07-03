@@ -39,6 +39,13 @@ function wallHeight(mesh: THREE.Mesh): number {
   return (mesh.geometry as THREE.BoxGeometry).parameters.height
 }
 
+function standardMaterial(mesh: THREE.Mesh): THREE.MeshStandardMaterial {
+  if (Array.isArray(mesh.material) || !(mesh.material instanceof THREE.MeshStandardMaterial)) {
+    throw new Error(`expected standard material on ${mesh.name}`)
+  }
+  return mesh.material
+}
+
 /** Height of the single wall on the given side, by its position. */
 function heightOnSide(group: THREE.Group, side: WallSide): number {
   const walls = meshesNamed(group, 'wall')
@@ -86,12 +93,30 @@ describe('buildShell cutaway', () => {
 })
 
 describe('buildShell readability', () => {
+  it('keeps shell colors from the spec while giving shell surfaces subtle material response', () => {
+    const g = buildShell(room(), { cutawaySides: ['south'] })
+    const [floor] = meshesNamed(g, 'floor')
+    const [wall] = meshesNamed(g, 'wall')
+    if (!floor || !wall) throw new Error('expected floor and wall meshes')
+
+    const floorMaterial = standardMaterial(floor)
+    expect(floorMaterial.color.getHexString()).toBe('444444')
+    expect(floorMaterial.roughness).toBeCloseTo(0.82)
+    expect(floorMaterial.metalness).toBeCloseTo(0.02)
+
+    const wallMaterial = standardMaterial(wall)
+    expect(wallMaterial.color.getHexString()).toBe('888888')
+    expect(wallMaterial.roughness).toBeCloseTo(0.82)
+    expect(wallMaterial.metalness).toBeCloseTo(0.02)
+  })
+
   it('lays subtle floor seams that sit flush on the floor (not a tall grid)', () => {
     const seams = meshesNamed(buildShell(room()), 'floor-seam')
     expect(seams.length).toBeGreaterThan(0)
     for (const seam of seams) {
       expect(seam.position.y).toBeLessThan(0.05) // just above the floor (y = 0)
       expect(wallHeight(seam)).toBeLessThan(0.05) // thin — a joint line, not a wall
+      expect(standardMaterial(seam).roughness).toBeCloseTo(0.9)
     }
   })
 
