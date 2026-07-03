@@ -104,6 +104,8 @@ export function buildNpcWanderField(
       continue
     }
 
+    if (object.type === 'rug') continue
+
     exclusions.push({
       x,
       z,

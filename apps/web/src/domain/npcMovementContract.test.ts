@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { loadRoomSpec } from './loadRoomSpec'
 import type { LoadedRoom } from './loadRoomSpec'
+import { throneRoom } from './examples/throneRoom'
 import {
   buildNpcWanderField,
   chooseWanderStep,
@@ -11,7 +12,7 @@ import {
 } from './npcMovementContract'
 import type { NpcWanderField, WanderXZ } from './npcMovementContract'
 import { objectFootprintRadius } from './generatedRoomLayout'
-import { stableHash01 } from './stableHash'
+import { stableHash01, stableHash32 } from './stableHash'
 import { LIMITS } from './validateRoom'
 
 function movementRoom(): LoadedRoom {
@@ -161,6 +162,39 @@ describe('buildNpcWanderField', () => {
 
     expect(JSON.stringify(room)).toBe(before)
   })
+
+  it('treats rugs as walkable floor decoration while keeping other footprint exclusions', () => {
+    const room = loadRoomSpec({
+      schemaVersion: 1,
+      id: 'rug-wander-room',
+      name: 'Rug Wander Room',
+      shell: { dimensions: { width: 12, depth: 12, height: 4 } },
+      spawn: { position: [0, 1.6, 4], yaw: 180 },
+      objects: [
+        {
+          id: 'wanderer',
+          type: 'npc',
+          name: 'Wanderer',
+          position: [0, 0, 0],
+          interaction: { key: 'F', prompt: 'Talk' },
+        },
+        { id: 'rug', type: 'rug', position: [0, 0.01, 0], size: [4, 6] },
+        { id: 'pillar', type: 'pillar', position: [2, 0, 0] },
+      ],
+    })
+
+    const built = buildNpcWanderField(room, 'wanderer')
+    expect(built).not.toBeNull()
+    expect(built!.exclusions.some((disc) => disc.objectId === 'rug')).toBe(false)
+    expect(built!.exclusions).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        reason: 'footprint',
+        objectId: 'pillar',
+        radius: objectFootprintRadius(room.objects.find((object) => object.id === 'pillar')!),
+      }),
+    ]))
+    expect(isWanderPositionAllowed(built!, built!.home)).toBe(true)
+  })
 })
 
 describe('isWanderPositionAllowed', () => {
@@ -205,6 +239,15 @@ describe('isWanderPositionAllowed', () => {
       exclusions: [],
     }
     expect(isWanderPositionAllowed(openField, { x: built.bounds.halfX, z: 0 })).toBe(true)
+  })
+
+  it('allows steward-malik home on the authored throne-room rug', () => {
+    const room = loadRoomSpec(throneRoom)
+    const built = buildNpcWanderField(room, 'steward-malik')
+
+    expect(built).not.toBeNull()
+    expect(built!.exclusions.some((disc) => disc.objectType === 'rug')).toBe(false)
+    expect(isWanderPositionAllowed(built!, built!.home)).toBe(true)
   })
 })
 
@@ -300,6 +343,22 @@ describe('chooseWanderStep', () => {
     }
 
     expect(chooseWanderStep(boxedField, { x: 0, z: 0 }, 1, 0)).toBeNull()
+  })
+
+  it('finds a safe target for steward-malik in the authored throne room', () => {
+    const room = loadRoomSpec(throneRoom)
+    const built = buildNpcWanderField(room, 'steward-malik')
+    expect(built).not.toBeNull()
+
+    const step = chooseWanderStep(
+      built!,
+      built!.home,
+      stableHash32(`${room.id}:steward-malik`),
+      0,
+    )
+
+    expect(step).not.toBeNull()
+    expect(isWanderPositionAllowed(built!, step!.target)).toBe(true)
   })
 })
 
