@@ -1,8 +1,11 @@
 # Implementation Plan — `feature/npc-relationship-state-v0`
 
-> Status: **DESIGN — NOT APPROVED, NOT IMPLEMENTED.**
-> This is a review artifact only. No runtime/source file is changed by this
-> document. Implementation waits for maintainer approval, slice by slice.
+> Status: **IMPLEMENTED / CLOSED through Slice 3.**
+> Slice 1 (pure domain model + reducer), Slice 2 (inert runtime reduce/log/hold
+> wiring), and Slice 3 (read-only bucketed dialogue context exposure) are all
+> implemented. Valenced effects (trust/fear/respect movement), decay,
+> persistence, and NPC-to-NPC relationships remain separate, unapproved future
+> features — see §18 Closeout.
 >
 > Companion docs: [ARCHITECTURE](../ARCHITECTURE.md) · [BOUNDARIES](../BOUNDARIES.md) ·
 > [FAILURE-MODES](../FAILURE-MODES.md) · [CONVENTIONS](../CONVENTIONS.md) · [/AGENTS.md](../../../AGENTS.md).
@@ -23,9 +26,9 @@
 in-memory-only relationship projection over validated structured dialogue
 effects.**
 
-Status: **design only.** Not approved. Not built. Known-red `npm run build`
-(pre-existing, unrelated TypeScript failures in other WIP files) is **out of
-scope** and this plan does not claim to fix it.
+Status: **IMPLEMENTED / CLOSED through Slice 3.** See §18 Closeout. Known-red
+`npm run build` (pre-existing, unrelated TypeScript failures in other WIP
+files) remains **out of scope** and this plan does not claim to fix it.
 
 ---
 
@@ -553,3 +556,64 @@ a direct mutation.
   unchanged; no persistence/migration/schema bump; no provider/prompt change;
   relationship derives only from validated structured effects and inspects no text.
 - **Tests prove it:** §12.
+
+---
+
+## 18. Closeout
+
+**Final status: COMPLETE.**
+
+**Slices implemented:**
+
+1. **Pure domain model / reducer** — `domain/npcRelationship/contracts.ts`,
+   `reducer.ts` (frozen delta table + bounding constants), `neutral.ts` factory,
+   plus co-located deterministic tests.
+2. **Ephemeral runtime reduce/log/hold wiring** — the app-layer helper that
+   derives structured effects at the existing dialogue seam, reduces them
+   through `applyRelationshipEffects`, safe-logs counts/enums only, and holds
+   the result in a session-local in-memory ref keyed by `npcId`.
+3. **Read-only bucketed NPC dialogue context exposure** — a pure projector that
+   turns the in-memory relationship state for the active NPC into bounded,
+   hedged, closed-vocabulary bands fed into dialogue context the same way room
+   memory is (ADR-0065).
+
+**Authority summary:**
+
+- Relationship projection remains strictly below `WorldState` authority; it is
+  not truth and has no write path to truth.
+- The only currently-emitted candidates are neutral, so only **familiarity**
+  moves today.
+- **trust, respect, and fear remain at neutral/none** until a future,
+  separately approved feature makes valenced structured-effect kinds
+  emittable.
+- Prompt/dialogue exposure is **tone guidance only** — bounded, hedged,
+  non-authoritative — never a claim of fact and never gameplay-gating.
+
+**Safety boundaries held throughout:**
+
+- No persistence, schema, or save-game changes.
+- No `WorldState` mutation.
+- No `WorldEvent` or `WorldCommand` introduced or touched.
+- No memory writes and no change to the memory firewall.
+- No fact or `fact_visibility` derivation.
+- No raw dialogue text logged at any slice.
+- No raw numeric relationship score or NPC id leaked into logs or dialogue
+  context — only closed bucket enums/labels.
+
+**Verification recorded:**
+
+- Slice 1 (`domain/npcRelationship` contracts + reducer) tests passed.
+- Slice 2 (runtime reduce/log/hold wiring) tests passed.
+- Slice 3 full suite: **3232/3232** passed.
+- Lint: clean.
+- `npm run build` remains known-red from unrelated pre-existing WIP files, as
+  scoped out from the start of this plan.
+
+**Known limitations:**
+
+- Relationship state is ephemeral and resets on new prompt/load — it is not
+  persisted anywhere.
+- Only familiarity changes today; trust, fear, and respect require future
+  validated valenced effects/events before they can move.
+- No NPC-to-NPC (or NPC-to-other-entity) relationships in v0 — strictly
+  NPC→player only.
