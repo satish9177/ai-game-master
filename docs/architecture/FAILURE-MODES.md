@@ -1222,6 +1222,31 @@ blob can rehydrate visited generated rooms for stable backtracking after
   object names. Stored `RoomSpec` may contain object IDs internally only so
   `resolvedObjectIds` can match authoritative flags.
 
+## 35. Consequence journal from events ✅ v1 (event-derived, flag-gated fallback)
+
+Consequence Journal From Events v1 lets the append-only `WorldEvent` log
+optionally fill the existing `journal` slot with a chronological, event-derived
+view, behind an explicit default-OFF flag
+([plan](./implementation-plans/consequence-journal-from-events-v1.md); D1/D2).
+
+| Situation | Detection | Handling / result | Logging |
+| --- | --- | --- | --- |
+| Flag OFF (default) | `VITE_CONSEQUENCE_JOURNAL_FROM_EVENTS !== 'true'` | `loadEventConsequenceJournal` returns `null` before calling `getEventLog`; existing authored/generated journal selection continues byte-identical | none |
+| `getEventLog` not found / rejects / throws | `EventLogResult.ok === false`, or a thrown error caught by the seam's `try/catch` | seam returns `null`; existing journal state from `refreshDerivedViews` is left unchanged; no error surfaced | none |
+| Projection yields no qualifying events | `buildEventConsequenceJournal` returns `entries: []` | if applied, `JournalPanel` shows the existing empty state ("Nothing of consequence yet."); otherwise the existing journal is left as-is | none |
+| Stale async result (rapid navigation/reload) | monotonic `eventJournalRequestRef` compared against the request that started the call | a superseded response is discarded; only the latest request can ever set the `journal` slot | none |
+
+- **No polling, no subscriptions, no event writes.** The seam performs one
+  read-only `getEventLog` call per session-start/load/room-entry; it never
+  appends events, mutates `WorldState`, or writes memory.
+- **No raw content leakage.** The projector reads only closed enums (`type`,
+  `op`), numeric signs/counts, and `seq`; it never reads or echoes `seed`, room
+  ids, item names/ids, `health.reason`, raw `status` strings, or flag
+  keys/values.
+- **Single render slot preserved.** At most one journal source fills the
+  `journal` slot; the event source only ever replaces it after the existing
+  authored/generated projection already ran, and only on flag-ON success.
+
 ---
 
 ## Summary
@@ -1270,6 +1295,7 @@ blob can rehydrate visited generated rooms for stable backtracking after
 | 32 | Generated mechanical gate fake (derivation) | `buildGeneratedMechanicalGate` over the final room reuses ADR-0061 `validateGeneratedMechanicalGate` + `isGeneratedGateSatisfiable`; runs only when `AssembleRoomOptions.deriveMechanicalGateDiagnostic === true` (generated first-room only); room returned unchanged | flag-writer + exit present → contract-valid satisfiable `locked-exit` gate derivable, `mechanicalGateAvailable: true`; missing ingredient/unsatisfiable/option-off/fallback → `null`, `mechanicalGateAvailable: false`; gate never stored, persisted, or enforced; no mutation/schema/navigation change; diagnostic/log limited to the `mechanicalGateAvailable` boolean only | ✅ implemented (ADR-0062 Slice 2) |
 | 33 | Generated mechanical gate runtime enforcement | `evaluateGeneratedExitGate` re-derives gate from `activePlay.room` via `buildGeneratedMechanicalGate`; runs only in generated play (`generatedGateEnabled = objectivesPerRoom === true`); evaluates against freshly fetched `WorldState`; save/load stores no gate data and re-derives from the restored `LoadedRoom` + restored flags | `getWorldState` fails → pass `null` state → fail-open, navigate normally; gate `null` (no flag-writer, no exit, unsatisfiable) → fail-open; gate governs a different exit → fail-open; gate locked (flag absent/false) → `reason:'gate-locked'`, static UI message, `navigate` not called; gate unlocked (flag set by interaction) → navigate normally; missing/corrupt generated room cache does not break current-room gate behavior; authored/demo gate path (`reason:'blocked'`, Malik message) byte-identical; no schema/persistence/renderer/provider change | ✅ implemented (ADR-0063) |
 | 34 | Generated mechanical gate provider proposal | Real provider proposes untrusted structural gate data only; app derives the full `GeneratedMechanicalGate` and accepts it only after schema parse, frozen contract validation, and satisfiability checks; `providerGateStatus` / `providerGate` live only on transient `ActivePlay` | proposal fails, is rejected, times out, or is unsafe → `providerGateStatus:'rejected'` only in transient `ActivePlay`, navigation fails open for the provider path, deterministic fallback is not used after provider rejection; provider disabled or usage cap exhausted → no provider attempt and ADR-0063 deterministic behavior unchanged; no persistence/schema change; no raw gate/provider/prompt/flag/object IDs leak | ✅ implemented (ADR-0064) |
+| 35 | Consequence journal from events | flag read once in the app layer; `loadEventConsequenceJournal` try/catch over `getEventLog`; monotonic request id guards stale async results | OFF or any failure → existing authored/generated journal unchanged; ON + success → event-derived view fills the existing slot; no event-log mutation, no polling/subscriptions, no raw event text leakage | ✅ v1 |
 
 The through-line: **validate at the boundary, degrade visibly and safely, log
 the detail, show the user calm.**

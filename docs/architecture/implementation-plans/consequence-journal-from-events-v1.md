@@ -4,7 +4,8 @@
 > ADR: none for this plan. An ADR may be considered **during closeout only** if
 > the implementation meaningfully changes journal-source precedence (it is not
 > expected to — see D1/D2 below).
-> Status: **APPROVED — docs-only plan; decisions D1/D2 locked. No code yet.**
+> Status: **COMPLETE — Slice 1 and Slice 2 implemented and verified; Slice 3
+> docs closeout below. Decisions D1/D2 locked and honoured as shipped.**
 > Depends on / relates to: Consequence Journal v0 (ADR-0029), Generated Room
 > Consequence Journal v0 (ADR-0058), World State & Event Log v0 (ADR-0013).
 
@@ -400,5 +401,86 @@ Modelled on `generatedConsequenceJournal.test.ts` (pure Vitest, no DOM/jsdom).
 - [ ] Domain projector imports no `zod`/`react`/`three`/`platform`/app layers.
 - [ ] Projector is pure, total, deterministic, non-throwing.
 - [ ] `npm run test` (targeted), `npm run build`, `npm run lint` reported green.
+
+---
+
+## 14. Closeout (Slice 3)
+
+**Implementation status: complete.**
+
+### Completed slices
+
+- **Slice 1** — pure event-log-to-`JournalView` projector.
+- **Slice 2** — feature-flagged async App seam.
+
+### Implemented files
+
+- `apps/web/src/domain/journal/eventConsequenceJournal.ts`
+- `apps/web/src/domain/journal/eventConsequenceJournal.test.ts`
+- `apps/web/src/app/eventConsequenceJournalSeam.ts`
+- `apps/web/src/app/eventConsequenceJournalSeam.test.ts`
+- `apps/web/src/App.tsx`
+- `apps/web/src/App.test.tsx`
+
+Note: `eventConsequenceJournal.test.ts` required a test-only
+`noUncheckedIndexedAccess` fix; no production/runtime code changed as a result.
+
+### Verification
+
+- `npm.cmd run test -- eventConsequenceJournal eventConsequenceJournalSeam App.test journal derivedViews`
+  — **passed:** 6 files, 248 tests.
+- `npm.cmd run lint` — **passed.**
+- `npm.cmd run build` — **failed only** on known unrelated pre-existing
+  TypeScript errors, none in any journal/seam/`App` file touched by this
+  feature:
+  - `assembleRoom.test.ts`
+  - `ensureGeneratedNpcPresence.ts`
+  - `npcMovementContract.test.ts`
+  - `OpenAICompatibleNPCDialogueProvider.test.ts`
+  - `src/evaluation/relevanceFts.eval.test.ts` — belongs to separate,
+    in-progress/untracked sqlite-FTS memory evaluation work (see
+    `sqlite-fts-memory-retrieval-v0`), **not** part of
+    consequence-journal-from-events-v1. Re-checked at closeout time: the build
+    now reports 5 unrelated errors (previously 4, before this untracked file
+    existed), and none touch `eventConsequenceJournal.ts`,
+    `eventConsequenceJournalSeam.ts`, or `App.tsx`.
+
+### Safety confirmation
+
+- Default **OFF** behind `VITE_CONSEQUENCE_JOURNAL_FROM_EVENTS === "true"`.
+- **OFF** preserves existing authored/generated journal behaviour.
+- **ON** reads `WorldSession.getEventLog(sessionId)` only.
+- Event-derived journal uses sanitized closed phrases only.
+- Reuses existing `JournalPanel`; no new journal UI.
+- No event-log mutation; no memory writes; no room-memory mutation.
+- No provider/LLM/prompt changes.
+- No schema/save-load changes.
+- No gameplay-authority change.
+- No persistence/FTS work.
+- No polling/subscriptions.
+- No raw prompt/provider/memory/event text leakage.
+
+### Known limitation
+
+**ON-mode event-derived journal updates on session/load/room-entry flows, not
+instantly after in-room interaction.** This was accepted for v1 as the minimal
+seam per D2 (no polling, no subscriptions, no `refreshDerivedViews` refactor).
+A future slice could shrink this latency if needed, but it is out of scope
+here.
+
+### Slice 3 — docs closeout
+
+- **Implementation plan closeout: complete** (this document).
+- **`docs/architecture/ARCHITECTURE.md` entry added** — see "Consequence
+  Journal From Events v1".
+- **`docs/architecture/FAILURE-MODES.md` entry added** — see "35. Consequence
+  journal from events".
+- No runtime file changes were made in this slice.
+
+### ADR
+
+Per the locked closeout rule above: no ADR is authored. D1/D2 were honored
+exactly as shipped — flag-gated Option A, smallest async seam — and no new
+architecture decision beyond the approved plan was needed.
 </content>
 </invoke>

@@ -2047,6 +2047,38 @@ surviving user-triggered calls against the existing meter
   status }` shape, matching the existing usage-log discipline; no provider
   name/content, API key, prompt, or dialogue text is logged.
 
+## Consequence Journal From Events v1
+
+✅ **Implemented, browser/app composition + pure domain projector.** A second,
+event-derived way to fill the existing `journal` slot:
+`domain/journal/eventConsequenceJournal.ts` reads the already-recorded
+`WorldEvent` log via `WorldSession.getEventLog(sessionId)` and projects it into
+the existing `JournalView` shape using only closed, sanitized phrases (event
+type, numeric sign/count, and `seq` — never any string payload field). The
+existing `renderer/ui/JournalPanel.tsx` is reused unchanged; there is no new
+journal UI. See the
+[implementation plan](./implementation-plans/consequence-journal-from-events-v1.md)
+for full detail.
+
+- **Default OFF, explicit flag.** Gated by
+  `VITE_CONSEQUENCE_JOURNAL_FROM_EVENTS === "true"`, read only in the
+  app/composition layer (`app/eventConsequenceJournalSeam.ts`). When OFF, the
+  existing authored/generated journal selection in `computeDerivedViews` stays
+  byte-identical and the event projector is never invoked.
+- **Smallest async seam, no refactor.** `refreshDerivedViews` remains
+  synchronous and untouched; the event journal is set from a small async step
+  at the existing session-start / load / room-entry flows.
+- **Falls back to existing behavior, not to error.** When the flag is OFF, or
+  `getEventLog` rejects/returns not-found, or projection throws, the app
+  silently keeps whatever `refreshDerivedViews` already produced — no
+  user-facing error, no gameplay impact.
+- **Read-only, no new authority.** No event-log mutation, no memory writes, no
+  provider/LLM/prompt change, and no schema/save-load change. `WorldSession`
+  and the event log remain the sole truth.
+
+No ADR was authored — D1/D2 in the implementation plan were honored exactly as
+shipped, and no new architecture decision beyond the approved plan was needed.
+
 ## Layered architecture
 
 Dependencies point **inward**, toward the domain. Outer layers may depend on
