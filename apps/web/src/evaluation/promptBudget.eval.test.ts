@@ -19,6 +19,7 @@ import {
   memorySectionLines,
   type LogEntry,
 } from './fixtures'
+import { toUngatedRoomMemoryDialogueContext } from './recalledRoomMemoryAdapter'
 
 /**
  * Constants canary (§4 of the plan): absolute literals equal to today's
@@ -48,7 +49,8 @@ const NPC_SCOPE = { worldId: EVAL_WORLD_ID, sessionId: EVAL_SESSION_ID, npcId: E
 async function composedPromptFor(count: number): Promise<{ promptText: string; logEntries: LogEntry[] }> {
   const fixture = await longSessionMemoryFixture({ count })
   const logEntries: LogEntry[] = []
-  const memory = await recallRoomMemoryContext(ROOM_SCOPE, fixture.service, createSpyLogger(logEntries))
+  const recalled = await recallRoomMemoryContext(ROOM_SCOPE, fixture.service, createSpyLogger(logEntries))
+  const memory = toUngatedRoomMemoryDialogueContext(recalled)
   const request = evalDialogueRequest({ memory })
   const messages = buildDialoguePromptMessages(request)
   const promptText = messages.map((message) => message.content).join('\n\n')
@@ -73,7 +75,8 @@ describe('Gate A - prompt-context budget under load', () => {
   it('dialogue recall context stays within 5 entries at N=1000', async () => {
     const fixture = await longSessionMemoryFixture({ count: 1000 })
     const logEntries: LogEntry[] = []
-    const context = await recallRoomMemoryContext(ROOM_SCOPE, fixture.service, createSpyLogger(logEntries))
+    const recalled = await recallRoomMemoryContext(ROOM_SCOPE, fixture.service, createSpyLogger(logEntries))
+    const context = toUngatedRoomMemoryDialogueContext(recalled)
 
     expect(context.entries.length).toBeLessThanOrEqual(5)
     // Mirrors the room-recall lower bound: recall yields exactly 2 records at

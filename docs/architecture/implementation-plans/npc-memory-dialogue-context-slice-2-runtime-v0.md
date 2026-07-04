@@ -350,7 +350,10 @@ Edited (Slice 2b):
 - `WorldState` / `WorldEvent` / `SaveGame` / `RoomSpec` / `QuestSpec`
 - `eslint.config.js`, `package.json` (no new dependency; `app/**` may already
   import `domain/facts` + `domain/memory` types — no new lint rule)
-- `evaluation/**`, `redteam/**` (no source change; must stay green)
+- `redteam/**` (no source change expected; must stay green)
+- `evaluation/**` (no behavior change expected except API-shape test harness
+  adaptation if a direct `recallRoomMemoryContext` caller needs the legacy
+  ungated `{ entries }` context for an existing evaluation gate)
 
 ## 15. Verification commands (from `apps/web`)
 
@@ -377,7 +380,22 @@ npm run build
   files. **This is where `player_claim` stops reaching NPC prompts** — implement
   and review separately from 2a.
 
-## 17. Open questions
+## 17. Implementation note — evaluation API-shape adaptation
+
+Some `evaluation/**` tests directly called `recallRoomMemoryContext` and consumed
+the old `{ entries }` dialogue-context shape. Slice 2b intentionally changes that
+helper to return `RecalledRoomMemory { scope, records }`, so those evaluation
+callers are adapted with an evaluation-local helper that maps the ranked records
+back to the legacy ungated context shape (`records -> slice(5) -> { text, kind }`)
+only for the existing plateau/budget/log-safety gates that are not testing
+visibility filtering.
+
+This is a test harness/API-shape update only. Evaluation semantics remain
+unchanged: the old gates continue measuring the existing recall/ranking plateau
+behavior, not the new visibility gate. No runtime FTS wiring is added, and no
+prompt-template or provider behavior changes are made.
+
+## 18. Open questions
 
 None blocking — Decisions 1–8 resolve the shaping questions. Deferred (not this
 slice): NPC-memory → dialogue wiring and `npc-known` visibility; FTS

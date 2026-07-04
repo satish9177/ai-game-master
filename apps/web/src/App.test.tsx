@@ -3675,7 +3675,7 @@ describe('memory feedback state wiring - Slice 4', () => {
     expect(handleCommittedInteractionEvents).toContain('refreshRoomMemoryContext(input.state)')
   })
 
-  it('App wires recall feedback from the recall context entry count, preserving stale-request protection', () => {
+  it('App wires recall feedback from the pre-visibility recalled record count, preserving stale-request protection', () => {
     const refreshRoomMemoryContext = appSource.slice(
       appSource.indexOf('const refreshRoomMemoryContext = useCallback('),
       appSource.indexOf('const enterActivePlay = useCallback('),
@@ -3683,7 +3683,23 @@ describe('memory feedback state wiring - Slice 4', () => {
 
     expect(refreshRoomMemoryContext).toContain('if (roomMemoryRequestRef.current !== requestId) return')
     expect(refreshRoomMemoryContext).toContain('memoryFeedbackAfterRecall(current, {')
-    expect(refreshRoomMemoryContext).toContain('hasRecalledMemory: context.entries.length > 0')
+    expect(refreshRoomMemoryContext).toContain('hasRecalledMemory: recalled.records.length > 0')
+  })
+
+  it('App builds per-NPC visible room memory context and omits empty visible results', () => {
+    const memoryContextCallback = appSource.slice(
+      appSource.indexOf('const getRoomMemoryContextForNpc = useCallback('),
+      appSource.indexOf('// Usage guardrail state'),
+    )
+    const render = appSource.slice(
+      appSource.indexOf('<RoomViewer'),
+      appSource.indexOf('{...(activePlay.objectivesPerRoom === true'),
+    )
+
+    expect(memoryContextCallback).toContain('buildVisibleRoomMemoryContext(recalledRoomMemory, npcId)')
+    expect(memoryContextCallback).toContain('context.entries.length > 0 ? context : undefined')
+    expect(render).toContain('getRoomMemoryContextForNpc={getRoomMemoryContextForNpc}')
+    expect(render).not.toContain('roomMemoryContext={')
   })
 
   it('App clears memory feedback on every new room entry (enterActivePlay and handleNavigate)', () => {
@@ -3758,7 +3774,7 @@ describe('room memory debug viewer App seam - Slice 3', () => {
     expect(render).toContain('onToggle={handleToggleRoomMemoryDebugViewer}')
     expect(render).toContain('onRefresh={handleRefreshRoomMemoryDebugViewer}')
     expect(render).not.toContain('snapshotAll')
-    expect(render).not.toContain('roomMemoryContext')
+    expect(render).not.toContain('recalledRoomMemory')
     expect(render).not.toContain('JournalPanel')
   })
 })

@@ -23,6 +23,7 @@ import {
 } from './fixtures'
 import { InMemoryRoomMemoryStore } from '../memory/InMemoryRoomMemoryStore'
 import { RoomMemoryService } from '../memory/RoomMemoryService'
+import { toUngatedRoomMemoryDialogueContext } from './recalledRoomMemoryAdapter'
 
 /**
  * Gate D — scope-triple stability across save/load (Slice 3).
@@ -171,7 +172,12 @@ describe('Gate D - memory sidecar round-trip: exact in-scope recall, zero decoy 
         expect(decoyIds.has(record.memoryId)).toBe(false)
       }
 
-      const context = await recallRoomMemoryContext({ worldId, sessionId, roomId }, restoredService, createSpyLogger([]))
+      const recalled = await recallRoomMemoryContext(
+        { worldId, sessionId, roomId },
+        restoredService,
+        createSpyLogger([]),
+      )
+      const context = toUngatedRoomMemoryDialogueContext(recalled)
       for (const entry of context.entries) {
         expect(entry.text.startsWith('decoy')).toBe(false)
       }

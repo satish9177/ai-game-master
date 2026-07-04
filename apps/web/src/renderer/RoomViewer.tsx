@@ -71,7 +71,7 @@ type RoomViewerProps = {
   onWorldStateChange?: (state: WorldState) => void
   onCommittedInteractionEvents?: (input: CommittedInteractionEvents) => void
   questStage?: QuestDialogueContext
-  roomMemoryContext?: RoomMemoryDialogueContext
+  getRoomMemoryContextForNpc?: (npcId: string) => RoomMemoryDialogueContext | undefined
   resolvedObjectIds?: ReadonlySet<string>
 }
 
@@ -86,7 +86,7 @@ export function RoomViewer({
   onWorldStateChange,
   onCommittedInteractionEvents,
   questStage,
-  roomMemoryContext,
+  getRoomMemoryContextForNpc,
   resolvedObjectIds,
 }: RoomViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null)
@@ -105,10 +105,12 @@ export function RoomViewer({
   // Bounded, non-authoritative room-memory recall context (memory-decoupled: this
   // component only imports the pure `domain/dialogue` contract type, never
   // `memory/**`; the composition root owns `RoomMemoryService` and recall).
-  const roomMemoryContextRef = useRef<RoomMemoryDialogueContext | undefined>(undefined)
+  const getRoomMemoryContextForNpcRef = useRef<
+    ((npcId: string) => RoomMemoryDialogueContext | undefined) | undefined
+  >(undefined)
   useEffect(() => {
-    roomMemoryContextRef.current = roomMemoryContext
-  }, [roomMemoryContext])
+    getRoomMemoryContextForNpcRef.current = getRoomMemoryContextForNpc
+  }, [getRoomMemoryContextForNpc])
   const activeEncounterRef = useRef<{ encounter: EncounterSpec; ref: string | undefined } | null>(
     null,
   )
@@ -382,7 +384,7 @@ export function RoomViewer({
         playerLine,
         roomContext: roomDialogueContextRef.current,
         questStage: questStageRef.current,
-        memoryContext: roomMemoryContextRef.current,
+        memoryContext: getRoomMemoryContextForNpcRef.current?.(target.npcId),
       })).then((result) => {
         if (
           activeNPCDialogueRef.current !== target

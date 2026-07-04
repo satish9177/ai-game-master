@@ -66,6 +66,8 @@ import { RoomMemoryService } from './memory/RoomMemoryService'
 import { createDisplayNameResolver } from './domain/memory/displayNames'
 import { promoteInteractionMemories } from './app/promoteInteractionMemories'
 import { recallRoomMemoryContext } from './app/recallRoomMemoryContext'
+import type { RecalledRoomMemory } from './app/recallRoomMemoryContext'
+import { buildVisibleRoomMemoryContext } from './app/buildVisibleRoomMemoryContext'
 import type { RoomMemoryDialogueContext } from './domain/dialogue/contracts'
 import { loadRoomSpec, type LoadedRoom } from './domain/loadRoomSpec'
 import { fallbackRoom as fallbackRoomSpec } from './domain/examples/fallbackRoom'
@@ -469,7 +471,7 @@ function App() {
   // stale recall so a previous room's memories can never linger while a newer
   // recall is pending: `refreshRoomMemoryContext` clears the value immediately
   // on every call, then applies its own result only if still the latest.
-  const [roomMemoryContext, setRoomMemoryContext] = useState<RoomMemoryDialogueContext | undefined>(
+  const [recalledRoomMemory, setRecalledRoomMemory] = useState<RecalledRoomMemory | undefined>(
     undefined,
   )
   const roomMemoryRequestRef = useRef(0)
@@ -482,22 +484,27 @@ function App() {
     useState<MemoryFeedbackState>(INITIAL_MEMORY_FEEDBACK_STATE)
   const refreshRoomMemoryContext = useCallback((state: WorldState) => {
     const requestId = ++roomMemoryRequestRef.current
-    setRoomMemoryContext(undefined)
+    setRecalledRoomMemory(undefined)
     void recallRoomMemoryContext(
       { worldId: state.worldId, sessionId: state.sessionId, roomId: state.currentRoomId },
       roomMemoryRuntimeRef.current.service,
       logger,
-    ).then((context) => {
+    ).then((recalled) => {
       if (roomMemoryRequestRef.current !== requestId) return
-      setRoomMemoryContext(context)
+      setRecalledRoomMemory(recalled)
       setMemoryFeedbackState((current) =>
         memoryFeedbackAfterRecall(current, {
-          hasRecalledMemory: context.entries.length > 0,
+          hasRecalledMemory: recalled.records.length > 0,
           roomEntrySeq: roomEntrySeqRef.current,
         }),
       )
     })
   }, [])
+  const getRoomMemoryContextForNpc = useCallback((npcId: string): RoomMemoryDialogueContext | undefined => {
+    if (recalledRoomMemory === undefined) return undefined
+    const context = buildVisibleRoomMemoryContext(recalledRoomMemory, npcId)
+    return context !== undefined && context.entries.length > 0 ? context : undefined
+  }, [recalledRoomMemory])
   // Usage guardrail state (real provider only; fake path stays inert).
   // Refs hold the live values for reading inside stable useCallback closures;
   // the parallel state values trigger re-renders for the UsageMeter display.
@@ -1187,7 +1194,7 @@ function App() {
           onWorldStateChange={refreshDerivedViews}
           onCommittedInteractionEvents={handleCommittedInteractionEvents}
           questStage={buildQuestStage({ quest, questHints, questSpec: questSpecSnapshot })}
-          roomMemoryContext={roomMemoryContext}
+          getRoomMemoryContextForNpc={getRoomMemoryContextForNpc}
           {...(activePlay.objectivesPerRoom === true
             ? { resolvedObjectIds: activePlay.entryResolvedObjectIds }
             : {})}

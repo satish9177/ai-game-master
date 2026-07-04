@@ -1,12 +1,7 @@
 import { selectVisibleRoomMemories } from '../domain/facts/selectVisibleRoomMemories'
 import type { RoomMemoryDialogueContext } from '../domain/dialogue/contracts'
-import type { RoomMemoryRecord, RoomMemoryScope } from '../domain/memory/roomContracts'
 import { DEFAULT_ROOM_MEMORY_DIALOGUE_LIMIT } from './recallRoomMemoryContext'
-
-export type RecalledRoomMemory = {
-  scope: RoomMemoryScope
-  records: RoomMemoryRecord[]
-}
+import type { RecalledRoomMemory } from './recallRoomMemoryContext'
 
 export function buildVisibleRoomMemoryContext(
   recalled: RecalledRoomMemory,

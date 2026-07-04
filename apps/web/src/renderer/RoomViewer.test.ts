@@ -915,9 +915,12 @@ describe('RoomViewer NPC dialogue room context wiring', () => {
     expect(replies[0]).not.toHaveProperty('quest')
   })
 
-  it('passes the current roomMemoryContext into NPCDialogueService.reply on the first Continue click after opening NPC dialogue', async () => {
+  it('gets room memory context with the real target npcId and passes it into NPCDialogueService.reply', async () => {
     const replies: unknown[] = []
     const room = loadedRoom()
+    const getRoomMemoryContextForNpc = vi.fn(() => ({
+      entries: [{ text: 'The east door is locked.', kind: 'room_observation' }],
+    }))
 
     const props = {
       roomSource: { getRoom: async () => ({ ok: true, room }) },
@@ -931,7 +934,7 @@ describe('RoomViewer NPC dialogue room context wiring', () => {
         },
       },
       onNavigate: async () => ({ status: 'failed', reason: 'not-found' }),
-      roomMemoryContext: { entries: [{ text: 'The east door is locked.', kind: 'player_claim' }] },
+      getRoomMemoryContextForNpc,
     } as unknown as Parameters<typeof RoomViewer>[0]
     RoomViewer(props)
 
@@ -958,15 +961,64 @@ describe('RoomViewer NPC dialogue room context wiring', () => {
     await Promise.resolve()
 
     expect(replies).toHaveLength(1)
+    expect(getRoomMemoryContextForNpc).toHaveBeenCalledWith('room-npc')
     expect(replies[0]).toMatchObject({
       npcId: 'room-npc',
       history: [],
       playerLine: undefined,
-      memoryContext: { entries: [{ text: 'The east door is locked.', kind: 'player_claim' }] },
+      memoryContext: { entries: [{ text: 'The east door is locked.', kind: 'room_observation' }] },
     })
   })
 
-  it('omits roomMemoryContext when none is provided, on the first Continue click after opening NPC dialogue', async () => {
+  it('omits roomMemoryContext when the callback returns undefined, on the first Continue click after opening NPC dialogue', async () => {
+    const replies: unknown[] = []
+    const room = loadedRoom()
+    const getRoomMemoryContextForNpc = vi.fn(() => undefined)
+
+    const props = {
+      roomSource: { getRoom: async () => ({ ok: true, room }) },
+      sessionId: 'session-1',
+      interactionService: { resolve: async () => ({ status: 'rejected', reason: 'missing-effect' }) },
+      encounterService: { resolve: async () => ({ status: 'failed', reason: 'not-found' }) },
+      npcDialogueService: {
+        reply: async (input: unknown) => {
+          replies.push(input)
+          return { status: 'replied', turn: { speaker: 'npc', text: 'A line.' } }
+        },
+      },
+      onNavigate: async () => ({ status: 'failed', reason: 'not-found' }),
+      getRoomMemoryContextForNpc,
+    } as unknown as Parameters<typeof RoomViewer>[0]
+    RoomViewer(props)
+
+    await Promise.resolve()
+    await Promise.resolve()
+
+    const engine = mockState.engineInstances[0]
+    engine?.onRequestOpenInteraction?.({
+      id: 'room-npc',
+      type: 'npc',
+      label: 'Secret NPC Object Name',
+      affordance: 'talk',
+      key: 'F',
+      prompt: 'Secret interaction prompt',
+      position: { x: 0, y: 0, z: -3 },
+    })
+
+    await Promise.resolve()
+    expect(replies).toHaveLength(0)
+
+    const handleNPCSay = mockState.callbacks[0] as (promptId: string | undefined) => void
+    handleNPCSay(undefined)
+
+    await Promise.resolve()
+
+    expect(replies).toHaveLength(1)
+    expect(getRoomMemoryContextForNpc).toHaveBeenCalledWith('room-npc')
+    expect(replies[0]).not.toHaveProperty('memoryContext')
+  })
+
+  it('omits roomMemoryContext when no callback is provided, on the first Continue click after opening NPC dialogue', async () => {
     const replies: unknown[] = []
     const room = loadedRoom()
 

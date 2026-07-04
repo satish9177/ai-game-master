@@ -20,6 +20,7 @@ import {
   memorySectionLines,
   type LogEntry,
 } from './fixtures'
+import { toUngatedRoomMemoryDialogueContext } from './recalledRoomMemoryAdapter'
 
 /**
  * Gate B — relevance with planted memories (Slice 3).
@@ -198,7 +199,8 @@ describe('Gate B - planted record survives recall -> context -> prompt', () => {
     expect(plantedResult.status).toBe('recorded')
 
     const logEntries: LogEntry[] = []
-    const context = await recallRoomMemoryContext(ROOM_SCOPE, harness.service, createSpyLogger(logEntries))
+    const recalled = await recallRoomMemoryContext(ROOM_SCOPE, harness.service, createSpyLogger(logEntries))
+    const context = toUngatedRoomMemoryDialogueContext(recalled)
 
     // Recall returns all 7 short records; context slices to the 5-entry dialogue cap.
     expect(context.entries.length).toBe(DEFAULT_ROOM_MEMORY_DIALOGUE_LIMIT)
@@ -209,7 +211,8 @@ describe('Gate B - planted record survives recall -> context -> prompt', () => {
 
   it('surfaces the planted record as the first prompt MEMORY line', async () => {
     const { harness } = await plantedContextHarness()
-    const context = await recallRoomMemoryContext(ROOM_SCOPE, harness.service, createSpyLogger([]))
+    const recalled = await recallRoomMemoryContext(ROOM_SCOPE, harness.service, createSpyLogger([]))
+    const context = toUngatedRoomMemoryDialogueContext(recalled)
 
     const request = evalDialogueRequest({ memory: context })
     const promptText = buildDialoguePromptMessages(request)

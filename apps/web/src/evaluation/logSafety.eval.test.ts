@@ -27,6 +27,7 @@ import {
   expectSafeLogContextValues,
   type LogEntry,
 } from './fixtures'
+import { toUngatedRoomMemoryDialogueContext } from './recalledRoomMemoryAdapter'
 
 /**
  * Gate E — count-only diagnostics / no-leak log sweep (Slice 4).
@@ -65,7 +66,8 @@ describe('Gate E - no raw memory/player/provider text in logs', () => {
     }
     await runtime.service.remember(draft)
     await runtime.service.recall(ROOM_SCOPE)
-    const context = await recallRoomMemoryContext(ROOM_SCOPE, runtime.service, createSpyLogger(logEntries))
+    const recalled = await recallRoomMemoryContext(ROOM_SCOPE, runtime.service, createSpyLogger(logEntries))
+    const context = toUngatedRoomMemoryDialogueContext(recalled)
 
     // --- Prompt build (no logger of its own; marker rides player line + memory). ---
     const request = evalDialogueRequest({

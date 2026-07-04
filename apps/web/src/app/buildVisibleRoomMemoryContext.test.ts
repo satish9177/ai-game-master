@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { DEFAULT_ROOM_MEMORY_DIALOGUE_LIMIT } from './recallRoomMemoryContext'
+import type { RecalledRoomMemory } from './recallRoomMemoryContext'
 import { buildVisibleRoomMemoryContext } from './buildVisibleRoomMemoryContext'
-import type { RecalledRoomMemory } from './buildVisibleRoomMemoryContext'
 import { ROOM_MEMORY_SCHEMA_VERSION } from '../domain/memory/roomContracts'
 import type { RoomMemoryKind, RoomMemoryRecord } from '../domain/memory/roomContracts'
 

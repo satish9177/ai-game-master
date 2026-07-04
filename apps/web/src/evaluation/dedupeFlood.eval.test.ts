@@ -27,6 +27,7 @@ import {
   syntheticEventStream,
   type LogEntry,
 } from './fixtures'
+import { toUngatedRoomMemoryDialogueContext } from './recalledRoomMemoryAdapter'
 
 const ROOM_SCOPE = { worldId: EVAL_WORLD_ID, sessionId: EVAL_SESSION_ID, roomId: EVAL_ROOM_ID }
 
@@ -69,7 +70,8 @@ describe('Gate C - dedupe under flood', () => {
     const recall = await service.recall(ROOM_SCOPE)
     expect(recall.memories.length).toBe(1)
 
-    const context = await recallRoomMemoryContext(ROOM_SCOPE, service, createSpyLogger(logEntries))
+    const recalled = await recallRoomMemoryContext(ROOM_SCOPE, service, createSpyLogger(logEntries))
+    const context = toUngatedRoomMemoryDialogueContext(recalled)
     expect(context.entries.length).toBe(1)
 
     const request = evalDialogueRequest({ memory: context })
@@ -144,7 +146,8 @@ describe('Gate C - dedupe under flood', () => {
     expect(totalChars).toBeLessThanOrEqual(600)
 
     const logEntries: LogEntry[] = []
-    const context = await recallRoomMemoryContext(ROOM_SCOPE, fixture.service, createSpyLogger(logEntries))
+    const recalled = await recallRoomMemoryContext(ROOM_SCOPE, fixture.service, createSpyLogger(logEntries))
+    const context = toUngatedRoomMemoryDialogueContext(recalled)
     expect(context.entries.length).toBeLessThanOrEqual(5)
 
     const request = evalDialogueRequest({ memory: context })

@@ -12,6 +12,7 @@ import {
   longSessionMemoryFixture,
   type LogEntry,
 } from './fixtures'
+import { toUngatedRoomMemoryDialogueContext } from './recalledRoomMemoryAdapter'
 
 /**
  * Gate F — no side effects from evaluation flows (Slice 4).
@@ -45,7 +46,8 @@ describe('Gate F - recall/context/prompt at N=1000 has no side effects', () => {
     const fixture = await longSessionMemoryFixture({ count: 1000 })
     const logEntries: LogEntry[] = []
     await fixture.service.recall(ROOM_SCOPE)
-    const context = await recallRoomMemoryContext(ROOM_SCOPE, fixture.service, createSpyLogger(logEntries))
+    const recalled = await recallRoomMemoryContext(ROOM_SCOPE, fixture.service, createSpyLogger(logEntries))
+    const context = toUngatedRoomMemoryDialogueContext(recalled)
     buildDialoguePromptMessages(evalDialogueRequest({ memory: context }))
 
     expect(await worldSession.store.listEvents(sessionId)).toEqual(beforeEvents)
@@ -58,7 +60,8 @@ describe('Gate F - recall/context/prompt at N=1000 has no side effects', () => {
     expect(before).toBe(1000)
 
     await fixture.service.recall(ROOM_SCOPE)
-    const context = await recallRoomMemoryContext(ROOM_SCOPE, fixture.service, createSpyLogger([]))
+    const recalled = await recallRoomMemoryContext(ROOM_SCOPE, fixture.service, createSpyLogger([]))
+    const context = toUngatedRoomMemoryDialogueContext(recalled)
     buildDialoguePromptMessages(evalDialogueRequest({ memory: context }))
 
     expect(fixture.store.snapshotAll().length).toBe(before)
@@ -70,7 +73,8 @@ describe('Gate F - recall/context/prompt at N=1000 has no side effects', () => {
 
     const fixture = await longSessionMemoryFixture({ count: 1000 })
     await fixture.service.recall(ROOM_SCOPE)
-    const context = await recallRoomMemoryContext(ROOM_SCOPE, fixture.service, createSpyLogger([]))
+    const recalled = await recallRoomMemoryContext(ROOM_SCOPE, fixture.service, createSpyLogger([]))
+    const context = toUngatedRoomMemoryDialogueContext(recalled)
     buildDialoguePromptMessages(evalDialogueRequest({ memory: context }))
 
     expect(fetchSpy).not.toHaveBeenCalled()

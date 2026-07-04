@@ -8,6 +8,7 @@ import { buildDialoguePromptMessages } from '../generation/llmDialoguePrompt'
 import { InMemoryRoomMemoryStore } from '../memory/InMemoryRoomMemoryStore'
 import { RoomMemoryService } from '../memory/RoomMemoryService'
 import { recallRelevantRoomMemoryContext } from './recallRelevantRoomMemoryContext'
+import { toUngatedRoomMemoryDialogueContext } from './recalledRoomMemoryAdapter'
 import {
   EVAL_OBSERVATION_HEDGE_PREFIX,
   EVAL_ROOM_ID,
@@ -69,7 +70,11 @@ function extractQueryTokens(expression: string): string[] {
  * This is a keyword-filter stand-in, not a bm25 re-implementation.
  */
 class FakeFtsRoomMemorySearchStore implements RoomMemorySearchStore {
-  constructor(private readonly baseStore: InMemoryRoomMemoryStore) {}
+  private readonly baseStore: InMemoryRoomMemoryStore
+
+  constructor(baseStore: InMemoryRoomMemoryStore) {
+    this.baseStore = baseStore
+  }
 
   async searchForRoom(
     scope: RoomMemoryScope,
@@ -244,7 +249,8 @@ describe('Gate B-FTS - degradation always falls back to recall() + rankMemories,
     const viaOrchestrator = await recallRelevantRoomMemoryContext(ROOM_SCOPE, harness.service, createSpyLogger([]), {
       tokens: ['anything'],
     })
-    const viaExisting = await recallRoomMemoryContext(ROOM_SCOPE, harness.service, createSpyLogger([]))
+    const recalled = await recallRoomMemoryContext(ROOM_SCOPE, harness.service, createSpyLogger([]))
+    const viaExisting = toUngatedRoomMemoryDialogueContext(recalled)
 
     expect(viaOrchestrator).toEqual(viaExisting)
     expect(viaOrchestrator.entries.length).toBeGreaterThan(0)

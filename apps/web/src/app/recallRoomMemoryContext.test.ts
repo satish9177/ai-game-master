@@ -43,7 +43,7 @@ function harness() {
 const scope: RoomMemoryScope = { worldId: WORLD_ID, sessionId: SESSION_ID, roomId: ROOM_ID }
 
 describe('recallRoomMemoryContext', () => {
-  it('bounds recall to the default top-N dialogue limit', async () => {
+  it('returns scope plus ranked raw records without applying the dialogue limit', async () => {
     const { service, logger } = harness()
     for (let i = 0; i < 8; i += 1) {
       await service.remember({
@@ -58,7 +58,9 @@ describe('recallRoomMemoryContext', () => {
 
     const context = await recallRoomMemoryContext(scope, service, logger)
 
-    expect(context.entries.length).toBe(DEFAULT_ROOM_MEMORY_DIALOGUE_LIMIT)
+    expect(context.scope).toEqual(scope)
+    expect(context.records.length).toBe(8)
+    expect(context.records.length).toBeGreaterThan(DEFAULT_ROOM_MEMORY_DIALOGUE_LIMIT)
   })
 
   it('degrades to an empty context when the store throws, logging only a safe code', async () => {
@@ -74,7 +76,7 @@ describe('recallRoomMemoryContext', () => {
 
     const context = await recallRoomMemoryContext(scope, service, logger)
 
-    expect(context).toEqual({ entries: [] })
+    expect(context).toEqual({ scope, records: [] })
     const logs = JSON.stringify(entries)
     expect(logs).not.toContain('SECRET DB FAILURE')
     expect(entries.some((entry) => entry.context.code === 'recall-threw')).toBe(true)
@@ -101,8 +103,8 @@ describe('recallRoomMemoryContext', () => {
 
     const context = await recallRoomMemoryContext(scope, service, logger)
 
-    expect(context.entries).toHaveLength(1)
-    expect(context.entries[0]?.text).toBe('the-current-room-memory')
+    expect(context.records).toHaveLength(1)
+    expect(context.records[0]?.text).toBe('the-current-room-memory')
   })
 
   it('orders entries by rankMemories score (an activeNpcId match ranks first)', async () => {
@@ -129,7 +131,7 @@ describe('recallRoomMemoryContext', () => {
 
     const context = await recallRoomMemoryContext(scope, service, logger, { activeNpcId: 'steward' })
 
-    expect(context.entries[0]?.text).toBe('npc-specific-memory')
+    expect(context.records[0]?.text).toBe('npc-specific-memory')
   })
 
   it('never writes to the store during recall', async () => {

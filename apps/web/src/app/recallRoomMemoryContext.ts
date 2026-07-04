@@ -1,6 +1,5 @@
 import { rankMemories } from '../domain/memory/ranking'
-import type { RoomMemoryScope } from '../domain/memory/roomContracts'
-import type { RoomMemoryDialogueContext } from '../domain/dialogue/contracts'
+import type { RoomMemoryRecord, RoomMemoryScope } from '../domain/memory/roomContracts'
 import type { RoomMemoryService } from '../memory/RoomMemoryService'
 import type { Logger } from '../platform/logger/Logger'
 
@@ -19,27 +18,28 @@ import type { Logger } from '../platform/logger/Logger'
  */
 export const DEFAULT_ROOM_MEMORY_DIALOGUE_LIMIT = 5
 
+export type RecalledRoomMemory = {
+  scope: RoomMemoryScope
+  records: RoomMemoryRecord[]
+}
+
 export async function recallRoomMemoryContext(
   scope: RoomMemoryScope,
   roomMemory: RoomMemoryService,
   logger: Logger,
   options?: { activeNpcId?: string; limit?: number },
-): Promise<RoomMemoryDialogueContext> {
-  const limit = options?.limit ?? DEFAULT_ROOM_MEMORY_DIALOGUE_LIMIT
+): Promise<RecalledRoomMemory> {
   try {
     const result = await roomMemory.recall(scope)
     const ranked = rankMemories(result.memories, {
       currentRoomId: scope.roomId,
       ...(options?.activeNpcId !== undefined ? { activeNpcId: options.activeNpcId } : {}),
     })
-    const entries = ranked.slice(0, limit).map((entry) => ({
-      text: entry.record.text,
-      kind: entry.record.kind,
-    }))
-    logger.info('room memory context recalled', { roomId: scope.roomId, count: entries.length })
-    return { entries }
+    const records = ranked.map((entry) => entry.record)
+    logger.info('room memory context recalled', { roomId: scope.roomId, count: records.length })
+    return { scope, records }
   } catch {
     logger.warn('room memory context failed', { roomId: scope.roomId, code: 'recall-threw' })
-    return { entries: [] }
+    return { scope, records: [] }
   }
 }
