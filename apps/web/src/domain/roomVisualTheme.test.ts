@@ -1,8 +1,8 @@
-import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { deriveRoomVisualTheme } from './roomVisualTheme'
 import { loadRoomSpec, type LoadedRoom } from './loadRoomSpec'
 import type { RoomSpec } from './roomSpec'
+import source from './roomVisualTheme.ts?raw'
 
 function makeRoom(objects: unknown[]): LoadedRoom {
   return loadRoomSpec({
@@ -116,8 +116,6 @@ describe('deriveRoomVisualTheme', () => {
   })
 
   it('does not import forbidden renderer, app, memory, persistence, provider, dialogue, or FTS modules', () => {
-    const source = readFileSync(new URL('./roomVisualTheme.ts', import.meta.url), 'utf8')
-
     expect(source).not.toContain('renderer/')
     expect(source).not.toContain('App')
     expect(source).not.toContain('memory')

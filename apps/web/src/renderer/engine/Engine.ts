@@ -13,6 +13,7 @@ import { isometricOffsetDirection } from './camera/isometric'
 import { buildPlayerMarker } from './playerMarker'
 import type { Logger } from '../../platform/logger/Logger'
 import { buildInteractables, type Interactable } from '../../domain/ports/interaction'
+import { deriveRoomVisualTheme } from '../../domain/roomVisualTheme'
 import { IdleAnimator, idlePhase } from './animation/idleAnimation'
 import { IDLE_INTENSITY_BY_STATE } from '../../domain/ports/npcBehavior'
 import { NpcBehaviorTracker } from './npc/behaviorTracker'
@@ -104,7 +105,8 @@ export class Engine {
     this.wanderMotor.clear()
     this.wanderNpcIds.length = 0
     this.room = room
-    this.scene.add(buildLighting(room.lighting, room.shell.dimensions))
+    const visualTheme = deriveRoomVisualTheme(room)
+    this.scene.add(buildLighting(room.lighting, room.shell.dimensions, visualTheme))
     this.scene.add(buildShell(room, { cutawaySides: this.cutawaySides() }))
     const objects = buildObjects(room, this.logger, options.resolvedObjectIds)
     this.scene.add(objects)

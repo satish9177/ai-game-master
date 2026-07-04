@@ -1,4 +1,8 @@
 import * as THREE from 'three'
+import {
+  themeVocabulary,
+  type GeneratedRoomVisualTheme,
+} from '../../../domain/generatedRoomThemeVocabulary'
 import type { LoadedRoom } from '../../../domain/loadRoomSpec'
 
 /**
@@ -19,19 +23,24 @@ import type { LoadedRoom } from '../../../domain/loadRoomSpec'
 export function buildLighting(
   lighting: LoadedRoom['lighting'],
   dimensions: LoadedRoom['shell']['dimensions'],
+  theme: GeneratedRoomVisualTheme | null = null,
 ): THREE.Group {
   const group = new THREE.Group()
   group.name = 'lighting'
 
   const { color, intensity } = lighting.ambient
-  group.add(new THREE.AmbientLight(color, intensity))
+  group.add(new THREE.AmbientLight(gradeLightingColor(color, theme, 'ambient'), intensity))
 
   if (lighting.hemisphere) {
     const { sky, ground, intensity: hemiIntensity } = lighting.hemisphere
-    group.add(new THREE.HemisphereLight(sky, ground, hemiIntensity))
+    group.add(new THREE.HemisphereLight(
+      gradeLightingColor(sky, theme, 'hemisphereSky'),
+      gradeLightingColor(ground, theme, 'hemisphereGround'),
+      hemiIntensity,
+    ))
   }
 
-  const sun = buildKeyLight(dimensions)
+  const sun = buildKeyLight(dimensions, theme)
   group.add(sun)
   group.add(sun.target) // target at room centre; in the graph so its pose applies
 
@@ -48,6 +57,57 @@ const KEY_LIGHT_COLOR = '#fff6e8' // faint warm sun, neutral enough not to recol
 const KEY_LIGHT_INTENSITY = 2.35
 const SHADOW_MAP_SIZE = 2048
 
+type LightingColorRole = 'ambient' | 'hemisphereSky' | 'hemisphereGround' | 'key'
+
+const THEME_LIGHTING_GRADE: Record<
+  GeneratedRoomVisualTheme,
+  Record<LightingColorRole, { amount: number }>
+> = {
+  'fantasy-keep': {
+    ambient: { amount: 0.18 },
+    hemisphereSky: { amount: 0.14 },
+    hemisphereGround: { amount: 0.16 },
+    key: { amount: 0.18 },
+  },
+  'post-apoc': {
+    ambient: { amount: 0.2 },
+    hemisphereSky: { amount: 0.18 },
+    hemisphereGround: { amount: 0.16 },
+    key: { amount: 0.22 },
+  },
+}
+
+function lightingGradeTarget(
+  theme: GeneratedRoomVisualTheme,
+  role: LightingColorRole,
+  fallbackColor: string,
+): string {
+  const palette = themeVocabulary(theme).palette
+  if (theme === 'fantasy-keep') {
+    if (role === 'hemisphereSky') {
+      return palette.prop[3] ?? palette.wall[2] ?? palette.wall[0] ?? fallbackColor
+    }
+    if (role === 'hemisphereGround') return palette.floor[0] ?? fallbackColor
+    return palette.prop[2] ?? palette.prop[0] ?? fallbackColor
+  }
+
+  if (role === 'hemisphereGround') return palette.floor[0] ?? fallbackColor
+  return palette.wall[2] ?? palette.wall[0] ?? fallbackColor
+}
+
+export function gradeLightingColor(
+  color: string,
+  theme: GeneratedRoomVisualTheme | null,
+  role: LightingColorRole,
+): string {
+  if (theme === null) return color
+
+  const grade = THEME_LIGHTING_GRADE[theme][role]
+  return `#${new THREE.Color(color)
+    .lerp(new THREE.Color(lightingGradeTarget(theme, role, color)), grade.amount)
+    .getHexString()}`
+}
+
 /**
  * A directional "sun" whose orthographic shadow frustum is fit deterministically
  * to the room's bounding sphere (from width/depth/height) and positioned at twice
@@ -55,9 +115,15 @@ const SHADOW_MAP_SIZE = 2048
  * for any room size without any per-frame fitting — same dimensions in, same
  * frustum out.
  */
-function buildKeyLight(dimensions: LoadedRoom['shell']['dimensions']): THREE.DirectionalLight {
+function buildKeyLight(
+  dimensions: LoadedRoom['shell']['dimensions'],
+  theme: GeneratedRoomVisualTheme | null,
+): THREE.DirectionalLight {
   const { width, depth, height } = dimensions
-  const sun = new THREE.DirectionalLight(KEY_LIGHT_COLOR, KEY_LIGHT_INTENSITY)
+  const sun = new THREE.DirectionalLight(
+    gradeLightingColor(KEY_LIGHT_COLOR, theme, 'key'),
+    KEY_LIGHT_INTENSITY,
+  )
 
   // Bounding-sphere radius (+margin) covers the whole room from the light's angle.
   const radius = 0.5 * Math.hypot(width, depth, height) + 1
