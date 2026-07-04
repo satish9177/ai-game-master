@@ -68,6 +68,7 @@ import { promoteInteractionMemories } from './app/promoteInteractionMemories'
 import { recallRoomMemoryContext } from './app/recallRoomMemoryContext'
 import type { RecalledRoomMemory } from './app/recallRoomMemoryContext'
 import { buildVisibleRoomMemoryContext } from './app/buildVisibleRoomMemoryContext'
+import { deriveAndLogDialogueSemanticEvents } from './app/deriveAndLogDialogueSemanticEvents'
 import type { RoomMemoryDialogueContext } from './domain/dialogue/contracts'
 import { loadRoomSpec, type LoadedRoom } from './domain/loadRoomSpec'
 import { fallbackRoom as fallbackRoomSpec } from './domain/examples/fallbackRoom'
@@ -116,6 +117,7 @@ import {
 import { themeVocabulary } from './domain/generatedRoomThemeVocabulary'
 
 import { NPCDialogueService } from './dialogue/NPCDialogueService'
+import type { NpcDialogueResolvedEvent } from './renderer/RoomViewer'
 
 // Composition root: concrete adapters are constructed once and injected.
 const logger = createConsoleLogger()
@@ -424,6 +426,7 @@ function bootstrapExamplePlay(): Promise<ExampleBootstrapResult | null> {
 function App() {
   const [activePlay, setActivePlay] = useState<ActivePlay | null>(null)
   const activePlayRef = useRef<ActivePlay | null>(null)
+  const currentWorldStateRef = useRef<WorldState | null>(null)
   const [roomEntrySeq, setRoomEntrySeq] = useState(0)
   // Mirrors `roomEntrySeq` synchronously (room-memory-visible-feedback-v0,
   // Slice 4): the memory-feedback callbacks below fire inside the same tick
@@ -505,6 +508,24 @@ function App() {
     const context = buildVisibleRoomMemoryContext(recalledRoomMemory, npcId)
     return context !== undefined && context.entries.length > 0 ? context : undefined
   }, [recalledRoomMemory])
+  const handleNpcDialogueResolved = useCallback((event: NpcDialogueResolvedEvent): void => {
+    const state = currentWorldStateRef.current
+    if (state === null) return
+    const play = activePlayRef.current
+    deriveAndLogDialogueSemanticEvents({
+      scope: {
+        worldId: state.worldId,
+        sessionId: state.sessionId,
+        roomId: play?.room.id ?? state.currentRoomId,
+        npcId: event.npcId,
+      },
+      promptId: event.promptId,
+      turnIndex: event.turnIndex,
+      hasNpcReply: event.hasNpcReply,
+      makeEventId: (kind, indexInTurn) => `dialogue-semantic-event:${kind}:${indexInTurn}:${idGenerator.newId()}`,
+      logger,
+    })
+  }, [])
   // Usage guardrail state (real provider only; fake path stays inert).
   // Refs hold the live values for reading inside stable useCallback closures;
   // the parallel state values trigger re-renders for the UsageMeter display.
@@ -565,6 +586,7 @@ function App() {
   // interaction/encounter resolve) so the projection logic can never drift
   // between sites. Stable (no deps).
   const refreshDerivedViews = useCallback((state: WorldState) => {
+    currentWorldStateRef.current = state
     const play = activePlayRef.current
     const generatedJournalInput =
       play != null && (play.objectivesPerRoom === true || play.storyKind !== undefined)
@@ -1193,6 +1215,7 @@ function App() {
           onNavigate={handleNavigate}
           onWorldStateChange={refreshDerivedViews}
           onCommittedInteractionEvents={handleCommittedInteractionEvents}
+          onNpcDialogueResolved={handleNpcDialogueResolved}
           questStage={buildQuestStage({ quest, questHints, questSpec: questSpecSnapshot })}
           getRoomMemoryContextForNpc={getRoomMemoryContextForNpc}
           {...(activePlay.objectivesPerRoom === true

@@ -3702,6 +3702,42 @@ describe('memory feedback state wiring - Slice 4', () => {
     expect(render).not.toContain('roomMemoryContext={')
   })
 
+  it('App wires inert dialogue semantic events from structural RoomViewer callback data only', () => {
+    const handler = appSource.slice(
+      appSource.indexOf('const handleNpcDialogueResolved = useCallback('),
+      appSource.indexOf('// Usage guardrail state'),
+    )
+    const render = appSource.slice(
+      appSource.indexOf('<RoomViewer'),
+      appSource.indexOf('{...(activePlay.objectivesPerRoom === true'),
+    )
+
+    expect(appSource).toContain("import { deriveAndLogDialogueSemanticEvents } from './app/deriveAndLogDialogueSemanticEvents'")
+    expect(appSource).toContain("import type { NpcDialogueResolvedEvent } from './renderer/RoomViewer'")
+    expect(appSource).toContain('const currentWorldStateRef = useRef<WorldState | null>(null)')
+    expect(appSource).toContain('currentWorldStateRef.current = state')
+    expect(handler).toContain('const state = currentWorldStateRef.current')
+    expect(handler).toContain('const play = activePlayRef.current')
+    expect(handler).toContain('worldId: state.worldId')
+    expect(handler).toContain('sessionId: state.sessionId')
+    expect(handler).toContain('roomId: play?.room.id ?? state.currentRoomId')
+    expect(handler).toContain('npcId: event.npcId')
+    expect(handler).toContain('promptId: event.promptId')
+    expect(handler).toContain('turnIndex: event.turnIndex')
+    expect(handler).toContain('hasNpcReply: event.hasNpcReply')
+    expect(handler).toContain('makeEventId: (kind, indexInTurn) =>')
+    expect(handler).toContain('logger,')
+    expect(render).toContain('onNpcDialogueResolved={handleNpcDialogueResolved}')
+
+    expect(handler).not.toContain('set')
+    expect(handler).not.toContain('worldSession.')
+    expect(handler).not.toContain('roomMemoryRuntimeRef')
+    expect(handler).not.toContain('save')
+    expect(handler).not.toContain('playerLine')
+    expect(handler).not.toContain('npcText')
+    expect(handler).not.toContain('providerText')
+  })
+
   it('App clears memory feedback on every new room entry (enterActivePlay and handleNavigate)', () => {
     const enterActivePlay = appSource.slice(
       appSource.indexOf('const enterActivePlay = useCallback('),

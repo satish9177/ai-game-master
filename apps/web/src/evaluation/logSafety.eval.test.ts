@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { recallRoomMemoryContext } from '../app/recallRoomMemoryContext'
+import { deriveAndLogDialogueSemanticEvents } from '../app/deriveAndLogDialogueSemanticEvents'
 import { promoteInteractionMemories } from '../app/promoteInteractionMemories'
 import type { RoomMemoryDraftInput } from '../domain/memory/roomFirewall'
 import {
@@ -87,6 +88,25 @@ describe('Gate E - no raw memory/player/provider text in logs', () => {
       payload: { roomId: EVAL_ROOM_ID, flags: { [`${evalMarkers.memoryText}-flag`]: true } },
     }
     await promoteInteractionMemories([markerEvent], EVAL_WORLD_ID, runtime.service, createSpyLogger(logEntries))
+
+    // --- Dialogue semantic event derivation logs structural fields only. ---
+    deriveAndLogDialogueSemanticEvents({
+      scope: {
+        worldId: EVAL_WORLD_ID,
+        sessionId: EVAL_SESSION_ID,
+        roomId: EVAL_ROOM_ID,
+        npcId: 'eval-logsafety-npc',
+      },
+      promptId: 'ask-room',
+      turnIndex: 1,
+      hasNpcReply: true,
+      makeEventId: (kind, indexInTurn) => `eval-dialogue-semantic-${kind}-${indexInTurn}`,
+      logger: createSpyLogger(logEntries),
+      playerLine: evalMarkers.playerLine,
+      npcText: evalMarkers.memoryText,
+      providerText: evalMarkers.providerBody,
+      memoryText: evalMarkers.memoryText,
+    } as Parameters<typeof deriveAndLogDialogueSemanticEvents>[0])
 
     // --- Memory sidecar save/load (pure domain; no logger, but exercise the path). ---
     const json = buildRoomMemorySaveJson(runtime.store.snapshotAll(), {

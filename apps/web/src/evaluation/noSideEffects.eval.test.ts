@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { recallRoomMemoryContext } from '../app/recallRoomMemoryContext'
+import { deriveAndLogDialogueSemanticEvents } from '../app/deriveAndLogDialogueSemanticEvents'
 import { buildDialoguePromptMessages } from '../generation/llmDialoguePrompt'
 import {
   EVAL_ROOM_ID,
@@ -77,6 +78,40 @@ describe('Gate F - recall/context/prompt at N=1000 has no side effects', () => {
     const context = toUngatedRoomMemoryDialogueContext(recalled)
     buildDialoguePromptMessages(evalDialogueRequest({ memory: context }))
 
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
+  it('dialogue semantic event derivation creates no world, memory, persistence, or provider side effects', async () => {
+    const worldSession = createWorldSessionHarness()
+    const started = await worldSession.session.startSession(evalCanon())
+    if (!started.ok) throw new Error('session start failed')
+    const beforeEvents = await worldSession.store.listEvents(started.state.sessionId)
+    const beforeState = await worldSession.session.getWorldState(started.state.sessionId)
+
+    const fixture = await longSessionMemoryFixture({ count: 3 })
+    const beforeMemoryCount = fixture.store.snapshotAll().length
+    const fetchSpy = vi.fn(() => Promise.reject(new Error('network is forbidden in evaluation')))
+    vi.stubGlobal('fetch', fetchSpy)
+
+    const logEntries: LogEntry[] = []
+    const events = deriveAndLogDialogueSemanticEvents({
+      scope: {
+        worldId: started.state.worldId,
+        sessionId: started.state.sessionId,
+        roomId: EVAL_ROOM_ID,
+        npcId: 'eval-npc',
+      },
+      promptId: 'ask-room',
+      turnIndex: 0,
+      hasNpcReply: true,
+      makeEventId: (kind, indexInTurn) => `eval-dialogue-semantic-${kind}-${indexInTurn}`,
+      logger: createSpyLogger(logEntries),
+    })
+
+    expect(events.map((event) => event.kind)).toEqual(['player_asked_question', 'npc_responded'])
+    expect(await worldSession.store.listEvents(started.state.sessionId)).toEqual(beforeEvents)
+    expect(await worldSession.session.getWorldState(started.state.sessionId)).toEqual(beforeState)
+    expect(fixture.store.snapshotAll().length).toBe(beforeMemoryCount)
     expect(fetchSpy).not.toHaveBeenCalled()
   })
 })

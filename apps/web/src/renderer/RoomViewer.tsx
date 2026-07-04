@@ -60,6 +60,13 @@ export type CommittedInteractionEvents = {
   item?: { itemId: string; name: string }
 }
 
+export type NpcDialogueResolvedEvent = {
+  npcId: string
+  promptId?: string
+  hasNpcReply: boolean
+  turnIndex?: number
+}
+
 type RoomViewerProps = {
   roomSource: RoomSource
   sessionId: string
@@ -70,6 +77,7 @@ type RoomViewerProps = {
   onNavigate: (toRoomId: string) => Promise<NavigationResult>
   onWorldStateChange?: (state: WorldState) => void
   onCommittedInteractionEvents?: (input: CommittedInteractionEvents) => void
+  onNpcDialogueResolved?: (event: NpcDialogueResolvedEvent) => void
   questStage?: QuestDialogueContext
   getRoomMemoryContextForNpc?: (npcId: string) => RoomMemoryDialogueContext | undefined
   resolvedObjectIds?: ReadonlySet<string>
@@ -85,6 +93,7 @@ export function RoomViewer({
   onNavigate,
   onWorldStateChange,
   onCommittedInteractionEvents,
+  onNpcDialogueResolved,
   questStage,
   getRoomMemoryContextForNpc,
   resolvedObjectIds,
@@ -111,6 +120,10 @@ export function RoomViewer({
   useEffect(() => {
     getRoomMemoryContextForNpcRef.current = getRoomMemoryContextForNpc
   }, [getRoomMemoryContextForNpc])
+  const onNpcDialogueResolvedRef = useRef<((event: NpcDialogueResolvedEvent) => void) | undefined>(undefined)
+  useEffect(() => {
+    onNpcDialogueResolvedRef.current = onNpcDialogueResolved
+  }, [onNpcDialogueResolved])
   const activeEncounterRef = useRef<{ encounter: EncounterSpec; ref: string | undefined } | null>(
     null,
   )
@@ -370,6 +383,7 @@ export function RoomViewer({
       const visibleTurns = playerTurn
         ? [...previousTurns, playerTurn]
         : previousTurns
+      const turnIndex = previousTurns.length
       setNPCDialogueTurns(visibleTurns)
       setNPCDialogueMessage(undefined)
       npcDialoguePendingRef.current = true
@@ -392,6 +406,12 @@ export function RoomViewer({
         ) return
         npcDialoguePendingRef.current = false
         setNPCDialoguePending(false)
+        onNpcDialogueResolvedRef.current?.({
+          npcId: target.npcId,
+          ...(prompt?.id !== undefined ? { promptId: prompt.id } : {}),
+          hasNpcReply: result.status === 'replied',
+          turnIndex,
+        })
         if (result.status === 'replied') {
           setNPCDialogueTurns((current) => [...current, result.turn])
         } else {
@@ -404,6 +424,12 @@ export function RoomViewer({
         ) return
         npcDialoguePendingRef.current = false
         setNPCDialoguePending(false)
+        onNpcDialogueResolvedRef.current?.({
+          npcId: target.npcId,
+          ...(prompt?.id !== undefined ? { promptId: prompt.id } : {}),
+          hasNpcReply: false,
+          turnIndex,
+        })
         createConsoleLogger().error('npc dialogue resolution threw', {
           code: 'dialogue-failed',
         })
