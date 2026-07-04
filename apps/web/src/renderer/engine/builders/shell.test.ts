@@ -110,6 +110,23 @@ describe('buildShell readability', () => {
     expect(wallMaterial.metalness).toBeCloseTo(0.02)
   })
 
+  it('applies a themed shell finish without changing shell colors', () => {
+    const g = buildShell(room(), { visualTheme: 'post-apoc' })
+    const [floor] = meshesNamed(g, 'floor')
+    const [wall] = meshesNamed(g, 'wall')
+    if (!floor || !wall) throw new Error('expected floor and wall meshes')
+
+    const floorMaterial = standardMaterial(floor)
+    expect(floorMaterial.color.getHexString()).toBe('444444')
+    expect(floorMaterial.roughness).toBeCloseTo(0.9)
+    expect(floorMaterial.metalness).toBeCloseTo(0.08)
+
+    const wallMaterial = standardMaterial(wall)
+    expect(wallMaterial.color.getHexString()).toBe('888888')
+    expect(wallMaterial.roughness).toBeCloseTo(0.9)
+    expect(wallMaterial.metalness).toBeCloseTo(0.08)
+  })
+
   it('lays subtle floor seams that sit flush on the floor (not a tall grid)', () => {
     const seams = meshesNamed(buildShell(room()), 'floor-seam')
     expect(seams.length).toBeGreaterThan(0)

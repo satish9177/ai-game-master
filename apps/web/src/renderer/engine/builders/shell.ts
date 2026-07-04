@@ -1,5 +1,7 @@
 import * as THREE from 'three'
+import type { GeneratedRoomVisualTheme } from '../../../domain/generatedRoomThemeVocabulary'
 import type { LoadedRoom } from '../../../domain/loadRoomSpec'
+import { themedMaterialParameters } from './materialTheme'
 
 /** One of the four room walls. -Z = north, +Z = south, +X = east, -X = west. */
 export type WallSide = 'north' | 'south' | 'east' | 'west'
@@ -40,11 +42,15 @@ const SHELL_MATERIAL: Pick<THREE.MeshStandardMaterialParameters, 'roughness' | '
  */
 export function buildShell(
   room: LoadedRoom,
-  options: { cutawaySides?: readonly WallSide[] } = {},
+  options: {
+    cutawaySides?: readonly WallSide[]
+    visualTheme?: GeneratedRoomVisualTheme | null
+  } = {},
 ): THREE.Group {
   const { dimensions, wallThickness, floorColor, wallColor, exits } = room.shell
   const { width, depth, height } = dimensions
   const cutaway = new Set(options.cutawaySides ?? [])
+  const visualTheme = options.visualTheme ?? null
   // A cut-away wall drops to a curb (never taller than the room itself).
   const heightFor = (side: WallSide): number =>
     cutaway.has(side) ? Math.min(CUTAWAY_WALL_HEIGHT, height) : height
@@ -55,14 +61,14 @@ export function buildShell(
   // Floor: thin box centered at origin with its top surface at y = 0.
   const floor = new THREE.Mesh(
     new THREE.BoxGeometry(width, wallThickness, depth),
-    makeShellMaterial(floorColor),
+    makeShellMaterial(floorColor, {}, visualTheme),
   )
   floor.position.set(0, -wallThickness / 2, 0)
   floor.name = 'floor'
   floor.receiveShadow = true
   group.add(floor)
 
-  addFloorSeams(group, width, depth, floorColor)
+  addFloorSeams(group, width, depth, floorColor, visualTheme)
 
   const t = wallThickness
   const halfW = width / 2
@@ -78,31 +84,31 @@ export function buildShell(
     const segLen = (width - gap) / 2
     if (segLen > 0) {
       const offset = gap / 2 + segLen / 2
-      group.add(makeWall(segLen, nh, t, -offset, nh / 2, -halfD, wallColor))
-      group.add(makeWall(segLen, nh, t, offset, nh / 2, -halfD, wallColor))
+      group.add(makeWall(segLen, nh, t, -offset, nh / 2, -halfD, wallColor, visualTheme))
+      group.add(makeWall(segLen, nh, t, offset, nh / 2, -halfD, wallColor, visualTheme))
       if (cutaway.has('north')) {
-        group.add(makeCurbTrim(segLen, t, -offset, -halfD, nh, trimColor))
-        group.add(makeCurbTrim(segLen, t, offset, -halfD, nh, trimColor))
+        group.add(makeCurbTrim(segLen, t, -offset, -halfD, nh, trimColor, visualTheme))
+        group.add(makeCurbTrim(segLen, t, offset, -halfD, nh, trimColor, visualTheme))
       }
     }
   } else {
-    group.add(makeWall(width, nh, t, 0, nh / 2, -halfD, wallColor))
-    if (cutaway.has('north')) group.add(makeCurbTrim(width, t, 0, -halfD, nh, trimColor))
+    group.add(makeWall(width, nh, t, 0, nh / 2, -halfD, wallColor, visualTheme))
+    if (cutaway.has('north')) group.add(makeCurbTrim(width, t, 0, -halfD, nh, trimColor, visualTheme))
   }
 
   // South wall (z = +halfD).
   const sh = heightFor('south')
-  group.add(makeWall(width, sh, t, 0, sh / 2, halfD, wallColor))
-  if (cutaway.has('south')) group.add(makeCurbTrim(width, t, 0, halfD, sh, trimColor))
+  group.add(makeWall(width, sh, t, 0, sh / 2, halfD, wallColor, visualTheme))
+  if (cutaway.has('south')) group.add(makeCurbTrim(width, t, 0, halfD, sh, trimColor, visualTheme))
 
   // East wall (x = +halfW) and west wall (x = -halfW), running along Z.
   const eh = heightFor('east')
-  group.add(makeWall(t, eh, depth, halfW, eh / 2, 0, wallColor))
-  if (cutaway.has('east')) group.add(makeCurbTrim(t, depth, halfW, 0, eh, trimColor))
+  group.add(makeWall(t, eh, depth, halfW, eh / 2, 0, wallColor, visualTheme))
+  if (cutaway.has('east')) group.add(makeCurbTrim(t, depth, halfW, 0, eh, trimColor, visualTheme))
 
   const wh = heightFor('west')
-  group.add(makeWall(t, wh, depth, -halfW, wh / 2, 0, wallColor))
-  if (cutaway.has('west')) group.add(makeCurbTrim(t, depth, -halfW, 0, wh, trimColor))
+  group.add(makeWall(t, wh, depth, -halfW, wh / 2, 0, wallColor, visualTheme))
+  if (cutaway.has('west')) group.add(makeCurbTrim(t, depth, -halfW, 0, wh, trimColor, visualTheme))
 
   return group
 }
@@ -115,10 +121,11 @@ function makeWall(
   py: number,
   pz: number,
   color: string,
+  visualTheme: GeneratedRoomVisualTheme | null,
 ): THREE.Mesh {
   const wall = new THREE.Mesh(
     new THREE.BoxGeometry(sx, sy, sz),
-    makeShellMaterial(color),
+    makeShellMaterial(color, {}, visualTheme),
   )
   wall.position.set(px, py, pz)
   wall.name = 'wall'
@@ -139,11 +146,12 @@ function makeCurbTrim(
   pz: number,
   curbHeight: number,
   color: THREE.Color,
+  visualTheme: GeneratedRoomVisualTheme | null,
 ): THREE.Mesh {
   const lip = 0.12 // overhang past the wall thickness so the cap is visible
   const cap = new THREE.Mesh(
     new THREE.BoxGeometry(sx + (sx < sz ? lip : 0), CURB_TRIM_HEIGHT, sz + (sz <= sx ? lip : 0)),
-    makeShellMaterial(color),
+    makeShellMaterial(color, {}, visualTheme),
   )
   cap.position.set(px, curbHeight + CURB_TRIM_HEIGHT / 2, pz)
   cap.name = 'curb-trim'
@@ -158,7 +166,13 @@ function makeCurbTrim(
  * wide-spaced (large flagstones), so it reads as stone joints, not a debug grid.
  * Each seam is one thin box with its own material (freed by disposeObject).
  */
-function addFloorSeams(group: THREE.Group, width: number, depth: number, floorColor: string): void {
+function addFloorSeams(
+  group: THREE.Group,
+  width: number,
+  depth: number,
+  floorColor: string,
+  visualTheme: GeneratedRoomVisualTheme | null,
+): void {
   const seamColor = new THREE.Color(floorColor).multiplyScalar(0.7) // slightly darker than floor
   const tile = 2.5 // meters between seams — large flagstones, not a fine lattice
   const seamWidth = 0.06
@@ -168,11 +182,11 @@ function addFloorSeams(group: THREE.Group, width: number, depth: number, floorCo
 
   // Seams running along Z (the joints you cross walking up/down screen).
   for (let x = -width / 2 + tile; x < width / 2 - 0.01; x += tile) {
-    group.add(makeSeam(seamWidth, seamHeight, depth - inset * 2, x, y, 0, seamColor))
+    group.add(makeSeam(seamWidth, seamHeight, depth - inset * 2, x, y, 0, seamColor, visualTheme))
   }
   // Seams running along X.
   for (let z = -depth / 2 + tile; z < depth / 2 - 0.01; z += tile) {
-    group.add(makeSeam(width - inset * 2, seamHeight, seamWidth, 0, y, z, seamColor))
+    group.add(makeSeam(width - inset * 2, seamHeight, seamWidth, 0, y, z, seamColor, visualTheme))
   }
 }
 
@@ -184,10 +198,11 @@ function makeSeam(
   py: number,
   pz: number,
   color: THREE.Color,
+  visualTheme: GeneratedRoomVisualTheme | null,
 ): THREE.Mesh {
   const seam = new THREE.Mesh(
     new THREE.BoxGeometry(sx, sy, sz),
-    makeShellMaterial(color, { roughness: 0.9, metalness: 0 }),
+    makeShellMaterial(color, { roughness: 0.9, metalness: 0 }, visualTheme),
   )
   seam.position.set(px, py, pz)
   seam.name = 'floor-seam'
@@ -198,6 +213,12 @@ function makeSeam(
 function makeShellMaterial(
   color: THREE.ColorRepresentation,
   material: Partial<typeof SHELL_MATERIAL> = {},
+  visualTheme: GeneratedRoomVisualTheme | null = null,
 ): THREE.MeshStandardMaterial {
-  return new THREE.MeshStandardMaterial({ color, ...SHELL_MATERIAL, ...material })
+  return new THREE.MeshStandardMaterial({
+    color,
+    ...SHELL_MATERIAL,
+    ...themedMaterialParameters(visualTheme, 'shell'),
+    ...material,
+  })
 }

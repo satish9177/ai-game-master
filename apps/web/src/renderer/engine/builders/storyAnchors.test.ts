@@ -62,6 +62,19 @@ describe('story anchor builders', () => {
   it('altar and statue have distinct procedural geometry', () => {
     expect(signature(buildAltar(altar()))).not.toEqual(signature(buildStatue(statue())))
   })
+
+  it('limits themed accent to altar accent meshes while preserving base colors', () => {
+    const built = buildAltar(altar(), 'fantasy-keep')
+    const colors = meshes(built).map((mesh) => {
+      const material = mesh.material
+      if (!(material instanceof THREE.MeshStandardMaterial)) return ''
+      return material.color.getHexString()
+    })
+
+    expect(colors).toContain('c4a15a')
+    expect(colors).toContain('8a8172')
+    expect(colors).not.toContain('ff8a3d')
+  })
 })
 
 describe('story anchor interaction affordance', () => {

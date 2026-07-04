@@ -49,6 +49,16 @@ function pointLights(root: THREE.Object3D): THREE.PointLight[] {
   return found
 }
 
+function standardMaterials(root: THREE.Object3D): THREE.MeshStandardMaterial[] {
+  return meshes(root).flatMap((mesh) => {
+    const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material]
+    return materials.filter(
+      (material): material is THREE.MeshStandardMaterial =>
+        material instanceof THREE.MeshStandardMaterial,
+    )
+  })
+}
+
 const builders: [string, () => THREE.Object3D][] = [
   ['machine', () => buildMachine(machine())],
   ['artifact', () => buildArtifact(artifact())],
@@ -84,6 +94,31 @@ describe('strange/device/light builders', () => {
       const material = mesh.material
       return material instanceof THREE.MeshStandardMaterial && material.emissiveIntensity > 0
     })).toBe(true)
+  })
+
+  it('applies themed emissive only to special machine indicators and artifact/candle light meshes', () => {
+    const machineMaterials = standardMaterials(buildMachine(machine(), 'post-apoc'))
+    const artifactMaterials = standardMaterials(buildArtifact(artifact(), 'post-apoc'))
+    const candleMaterials = standardMaterials(buildCandle(candle(), 'fantasy-keep'))
+
+    expect(machineMaterials.some((material) =>
+      material.emissive.getHexString() === '9ad7d3' && material.emissiveIntensity > 0,
+    )).toBe(true)
+    expect(machineMaterials.some((material) => material.color.getHexString() === '4f5558')).toBe(true)
+    expect(artifactMaterials.some((material) =>
+      material.emissive.getHexString() === '9ad7d3' && material.emissiveIntensity > 0,
+    )).toBe(true)
+    expect(candleMaterials.some((material) =>
+      material.emissive.getHexString() === 'ff8a3d' && material.emissiveIntensity > 0,
+    )).toBe(true)
+  })
+
+  it('keeps machine panel indicators non-emissive under a null theme (regression lock)', () => {
+    const machineMaterials = standardMaterials(buildMachine(machine()))
+    const glowing = machineMaterials.filter((material) =>
+      material.emissive.getHexString() !== '000000' && material.emissiveIntensity > 0,
+    )
+    expect(glowing).toHaveLength(0)
   })
 })
 

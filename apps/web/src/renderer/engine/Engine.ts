@@ -107,8 +107,8 @@ export class Engine {
     this.room = room
     const visualTheme = deriveRoomVisualTheme(room)
     this.scene.add(buildLighting(room.lighting, room.shell.dimensions, visualTheme))
-    this.scene.add(buildShell(room, { cutawaySides: this.cutawaySides() }))
-    const objects = buildObjects(room, this.logger, options.resolvedObjectIds)
+    this.scene.add(buildShell(room, { cutawaySides: this.cutawaySides(), visualTheme }))
+    const objects = buildObjects(room, this.logger, options.resolvedObjectIds, visualTheme)
     this.scene.add(objects)
     registerIdleNpcs(this.idleAnimator, this.npcBehavior, room, objects)
     this.placePlayer(room.spawn)

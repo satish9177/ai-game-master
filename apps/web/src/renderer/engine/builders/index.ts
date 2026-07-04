@@ -1,4 +1,5 @@
 import * as THREE from 'three'
+import type { GeneratedRoomVisualTheme } from '../../../domain/generatedRoomThemeVocabulary'
 import type { LoadedRoom } from '../../../domain/loadRoomSpec'
 import type { RoomObject } from '../../../domain/roomSpec'
 import {
@@ -14,6 +15,10 @@ import { buildChest, buildCorpse, buildTable } from './practicalProps'
 import { buildAltar, buildStatue } from './storyAnchors'
 import { buildArtifact, buildCandle, buildMachine } from './strangeDevices'
 import { buildHumanoid } from './parts/humanoid'
+import {
+  makeThemedStandardMaterial,
+  themedEmissiveColor,
+} from './materialTheme'
 
 /**
  * Builds the room's props from RoomSpec objects via a type-to-builder registry.
@@ -31,12 +36,13 @@ export function buildObjects(
   room: LoadedRoom,
   logger: Logger,
   resolvedObjectIds?: ReadonlySet<string>,
+  visualTheme: GeneratedRoomVisualTheme | null = null,
 ): THREE.Group {
   const group = new THREE.Group()
   group.name = 'objects'
 
   for (const obj of room.objects) {
-    const node = buildKnownObject(obj, logger)
+    const node = buildKnownObject(obj, logger, visualTheme)
     // Generic tag on the top-level object node only (never siblings like the
     // indicator ring below), so later engine code can find built objects by
     // type/id without special-casing any one object type.
@@ -73,7 +79,10 @@ export function buildObjects(
 
 type Vec3 = [number, number, number]
 type ObjectOf<K extends RoomObject['type']> = Extract<RoomObject, { type: K }>
-type ObjectBuilder<K extends RoomObject['type']> = (obj: ObjectOf<K>) => THREE.Object3D
+type ObjectBuilder<K extends RoomObject['type']> = (
+  obj: ObjectOf<K>,
+  visualTheme: GeneratedRoomVisualTheme | null,
+) => THREE.Object3D
 type ObjectBuilderRegistry = { [K in RoomObject['type']]: ObjectBuilder<K> }
 
 // Adding a RoomObject type without a trusted builder is a compile error.
@@ -104,9 +113,16 @@ const registry = {
   zombie: buildZombie,
 } satisfies ObjectBuilderRegistry
 
-function buildKnownObject(obj: RoomObject, logger: Logger): THREE.Object3D {
+function buildKnownObject(
+  obj: RoomObject,
+  logger: Logger,
+  visualTheme: GeneratedRoomVisualTheme | null,
+): THREE.Object3D {
   const builder = (
-    registry as Record<string, ((o: RoomObject) => THREE.Object3D) | undefined>
+    registry as Record<
+      string,
+      ((o: RoomObject, visualTheme: GeneratedRoomVisualTheme | null) => THREE.Object3D) | undefined
+    >
   )[obj.type]
   if (!builder) {
     logger.warn('no builder for object type — rendering mystery marker', {
@@ -114,17 +130,20 @@ function buildKnownObject(obj: RoomObject, logger: Logger): THREE.Object3D {
     })
     return buildMysteryMarker()
   }
-  return builder(obj)
+  return builder(obj, visualTheme)
 }
 
 /* ---------- builders ---------- */
 
-function buildThrone(obj: ObjectOf<'throne'>): THREE.Object3D {
+function buildThrone(
+  obj: ObjectOf<'throne'>,
+  visualTheme: GeneratedRoomVisualTheme | null,
+): THREE.Object3D {
   // Faces -Z by default; the example's rotationY=180 turns it to face the room.
   const g = new THREE.Group()
-  g.add(box(2, 0.3, 1.6, 0, 0.15, 0, obj.color)) // base
-  g.add(box(1.6, 0.3, 1.4, 0, 0.6, 0, obj.color)) // seat
-  g.add(box(1.6, 2, 0.3, 0, 1.6, 0.55, obj.color)) // backrest (on +Z side)
+  g.add(box(2, 0.3, 1.6, 0, 0.15, 0, obj.color, visualTheme, 'focalAnchor')) // base
+  g.add(box(1.6, 0.3, 1.4, 0, 0.6, 0, obj.color, visualTheme, 'focalAnchor')) // seat
+  g.add(box(1.6, 2, 0.3, 0, 1.6, 0.55, obj.color, visualTheme, 'focalAnchor')) // backrest (on +Z side)
   return g
 }
 
@@ -141,7 +160,10 @@ function buildRug(obj: ObjectOf<'rug'>): THREE.Object3D {
   return new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: obj.color }))
 }
 
-function buildTorch(obj: ObjectOf<'torch'>): THREE.Object3D {
+function buildTorch(
+  obj: ObjectOf<'torch'>,
+  visualTheme: GeneratedRoomVisualTheme | null,
+): THREE.Object3D {
   // v0 pillar-mounted torch: the object's position is the mount point on a
   // pillar/wall (e.g. y=3), which in the example coincides with a 0.4m-radius
   // pillar. So the sconce brackets outward along local +Z and the flame sits
@@ -154,7 +176,7 @@ function buildTorch(obj: ObjectOf<'torch'>): THREE.Object3D {
   // Horizontal arm from the mount out to the flame.
   const arm = new THREE.Mesh(
     new THREE.BoxGeometry(0.1, 0.1, reach),
-    new THREE.MeshStandardMaterial({ color: '#2a1d12' }),
+    makeThemedStandardMaterial('#2a1d12', visualTheme, 'special'),
   )
   arm.position.set(0, 0, reach / 2)
   g.add(arm)
@@ -162,17 +184,18 @@ function buildTorch(obj: ObjectOf<'torch'>): THREE.Object3D {
   // Cup/holder at the end of the arm.
   const cup = new THREE.Mesh(
     new THREE.CylinderGeometry(0.12, 0.08, 0.22, 8),
-    new THREE.MeshStandardMaterial({ color: '#2a1d12' }),
+    makeThemedStandardMaterial('#2a1d12', visualTheme, 'special'),
   )
   cup.position.set(0, 0.15, reach)
   g.add(cup)
 
   // Emissive flame: glows on its own, large enough to read from across the room.
+  const emissive = themedEmissiveColor(visualTheme) ?? color
   const flame = new THREE.Mesh(
     new THREE.ConeGeometry(0.2, 0.6, 8),
-    new THREE.MeshStandardMaterial({
+    makeThemedStandardMaterial(color, visualTheme, 'special', {
       color,
-      emissive: color,
+      emissive,
       emissiveIntensity: 2.5,
     }),
   )
@@ -358,10 +381,12 @@ function box(
   py: number,
   pz: number,
   color: string,
+  visualTheme: GeneratedRoomVisualTheme | null = null,
+  role: 'focalAnchor' | 'industrial' | 'special' = 'focalAnchor',
 ): THREE.Mesh {
   const m = new THREE.Mesh(
     new THREE.BoxGeometry(sx, sy, sz),
-    new THREE.MeshStandardMaterial({ color }),
+    makeThemedStandardMaterial(color, visualTheme, role),
   )
   m.position.set(px, py, pz)
   return m
