@@ -5,6 +5,7 @@ import { validateRoom } from './validateRoom'
 import type { RoomIssueCode, RoomValidationResult } from './validateRoom'
 import { clampGeneratedShell, repairGeneratedObjects, repairGeneratedSpawn, repairGeneratedExits } from './generatedRoomLayout'
 import { composeGeneratedRoom } from './generatedRoomComposition'
+import { separateGeneratedObjects } from './generatedRoomSeparation'
 import { repairGeneratedAliases } from './generatedRoomAliases'
 import { repairGeneratedObjectTransforms } from './generatedRoomObjectTransforms'
 import { assignGeneratedObjectPurpose } from './generatedRoomObjectPurpose'
@@ -84,6 +85,12 @@ export type RoomDiagnostics = {
   objectsRepaired: boolean
   /** Whether composition relocated existing objects. Always false for fallback. */
   composed: boolean
+  /**
+   * Whether deterministic generated-object overlap separation moved any object.
+   * This is a benign layout normalization and never deletes objects. Always false
+   * for fallback.
+   */
+  overlapRepaired: boolean
   /** Whether the generated room had no story anchor. False for fallback. */
   lacksAnchor: boolean
   /** Whether the generated room had no interactable. False for fallback. */
@@ -244,11 +251,20 @@ export function assembleRoom(
   })
   const { composed, lacksAnchor, lacksInteractable } = composition.diagnostics
 
+  // Stage 2.7b — separate overlapping generated objects by moving only lower
+  // priority movable objects. This never deletes objects and accepts residual
+  // overlap after bounded passes.
+  const overlapFixed = separateGeneratedObjects(composition.room, {
+    themePack: options.themePack,
+    storyKind: options.storyKind,
+  })
+  const overlapRepaired = overlapFixed !== composition.room
+
   // Stage 2.8 — clamp and nudge the generated spawn into a safe floor position.
   // Handles spawn outside the playable area, too close to wall, or crowded by a
   // blocking object. Keeps provenance `generated`; reported via `spawnRepaired`.
-  const spawnFixed = repairGeneratedSpawn(composition.room)
-  const spawnRepaired = spawnFixed !== composition.room
+  const spawnFixed = repairGeneratedSpawn(overlapFixed)
+  const spawnRepaired = spawnFixed !== overlapFixed
 
   // Stage 2.9 — ensure at least one stable, usable generated exit exists before
   // wall snapping. Existing usable exits are preserved; otherwise the first arch
@@ -307,7 +323,7 @@ export function assembleRoom(
     && buildGeneratedMechanicalGate(displayTextFixed) !== null
 
   // Stage 3 — semantic playability. No fatal issue → accept as generated. Benign
-  // normalizations (Stages 2.5–2.9) keep provenance `generated` and show no notice;
+  // normalizations (Stages 2.5–2.10) keep provenance `generated` and show no notice;
   // they are reported via `sizeRepaired`/`objectsRepaired`/`spawnRepaired`/
   // `exitsRepaired` for logs only. A `repairRoom` pass (Stage 4) is the only
   // thing that yields `repaired`.
@@ -320,6 +336,7 @@ export function assembleRoom(
         sizeRepaired,
         objectsRepaired,
         composed,
+        overlapRepaired,
         lacksAnchor,
         lacksInteractable,
         spawnRepaired,
@@ -361,6 +378,7 @@ export function assembleRoom(
         sizeRepaired,
         objectsRepaired,
         composed,
+        overlapRepaired,
         lacksAnchor,
         lacksInteractable,
         spawnRepaired,
@@ -395,6 +413,7 @@ export function assembleRoom(
       sizeRepaired: false,
       objectsRepaired: false,
       composed: false,
+      overlapRepaired: false,
       lacksAnchor: false,
       lacksInteractable: false,
       spawnRepaired: false,
@@ -432,6 +451,7 @@ function toFallback(
       sizeRepaired: false,
       objectsRepaired: false,
       composed: false,
+      overlapRepaired: false,
       lacksAnchor: false,
       lacksInteractable: false,
       spawnRepaired: false,

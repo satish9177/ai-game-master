@@ -8,6 +8,7 @@ import { buildInteractables } from './ports/interaction'
 import { buildExitLookup } from '../app/exits'
 import { validateRoom } from './validateRoom'
 import { fallbackRoom } from './examples/fallbackRoom'
+import { objectFootprintsOverlap } from './generatedRoomSeparation'
 
 /** The trusted, pre-validated fallback the pipeline falls back to. */
 const fallback: LoadedRoom = loadRoomSpec(fallbackRoom)
@@ -404,6 +405,7 @@ describe('assembleRoom', () => {
       'sizeRepaired',
       'objectsRepaired',
       'composed',
+      'overlapRepaired',
       'lacksAnchor',
       'lacksInteractable',
       'spawnRepaired',
@@ -442,6 +444,7 @@ describe('assembleRoom', () => {
       expect(typeof diagnostics.sizeRepaired).toBe('boolean')
       expect(typeof diagnostics.objectsRepaired).toBe('boolean')
       expect(typeof diagnostics.composed).toBe('boolean')
+      expect(typeof diagnostics.overlapRepaired).toBe('boolean')
       expect(typeof diagnostics.lacksAnchor).toBe('boolean')
       expect(typeof diagnostics.lacksInteractable).toBe('boolean')
       expect(typeof diagnostics.spawnRepaired).toBe('boolean')
@@ -819,6 +822,25 @@ describe('assembleRoom', () => {
     expect(room.objects[0]!.position[0]).not.toBe(0)
   })
 
+  it('runs overlap separation after composition and before spawn repair', () => {
+    const result = assembleRoom(raw(validSpec({
+      shell: { dimensions: { width: 24, depth: 24, height: 4 }, exits: [{ side: 'north', width: 3 }] },
+      spawn: { position: [0, 1.7, 4] },
+      objects: [
+        { type: 'crate', position: [0, 0, 0] },
+        { type: 'crate', position: [0, 0, 0] },
+      ],
+    })), fallback)
+
+    expect(result.diagnostics.composed).toBe(true)
+    expect(result.diagnostics.overlapRepaired).toBe(true)
+    expect(result.diagnostics.spawnRepaired).toBe(false)
+    expect(result.diagnostics.provenance).toBe('generated')
+    expect(result.diagnostics.failedStage).toBeUndefined()
+    expect(objectFootprintsOverlap(result.room.objects[0]!, result.room.objects[1]!)).toBe(false)
+    expect(validateRoom(result.room).ok).toBe(true)
+  })
+
   it('threads missing anchor and interactable diagnostics safely', () => {
     const missing = assembleRoom(RAW_CENTER_CLUTTER, fallback).diagnostics
     expect(missing.lacksAnchor).toBe(true)
@@ -875,6 +897,7 @@ describe('assembleRoom', () => {
       const { room, diagnostics } = assembleRoom(input, fallback)
       expect(room).toBe(fallback)
       expect(diagnostics.composed).toBe(false)
+      expect(diagnostics.overlapRepaired).toBe(false)
       expect(diagnostics.lacksAnchor).toBe(false)
       expect(diagnostics.lacksInteractable).toBe(false)
     }
