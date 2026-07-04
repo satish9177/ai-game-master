@@ -1,13 +1,19 @@
 # Implementation Plan — `feature/npc-memory-dialogue-context-v0`
 
-> Status: **APPROVED FOR SLICE 1 ONLY — pure helper, tests only, unwired.**
-> Runtime wiring (Slice 2), prompt-content tightening, App/RoomViewer/dialogue
-> changes, and FTS are **NOT approved** and are deferred to a separate plan.
+> Status: **IMPLEMENTED — Slice 1 committed; runtime wiring (Slice 2a/2b)
+> committed under the separate
+> [npc-memory-dialogue-context-slice-2-runtime-v0](./npc-memory-dialogue-context-slice-2-runtime-v0.md)
+> plan.** Feature closed.
 >
-> The **first and only approved implementation slice** is:
-> **Slice 1 — a pure room-memory visibility selection helper
-> (`selectVisibleRoomMemories`) plus tests, fully unwired, with no runtime
-> behavior change.**
+> **Slice 1 (this plan) — committed:** the pure room-memory visibility
+> selection helper (`selectVisibleRoomMemories`) plus tests, exactly as
+> designed below.
+>
+> **Closeout note.** `selectVisibleRoomMemories` is now wired at
+> dialogue-request time with the real target NPC id — see the Slice 2 plan's
+> closeout note for the full runtime/behavior summary, evaluation-adapter
+> update, and deferred items. No change was made to this Slice 1 helper itself
+> during Slice 2 wiring; it is reused as-is.
 
 ## 0. Locked decisions (maintainer-approved)
 
@@ -249,16 +255,17 @@ unchanged after it.
 
 ## 14. Deferred to a separate plan (NOT this feature slice)
 
-- **Slice 2 — runtime wiring** of `selectVisibleRoomMemories` into the
-  room-memory→dialogue path. Locked constraint (Q3): do not invent a fake
-  production `npcId`; prefer **dialogue-request-time filtering** where the target
-  NPC is known, or keep runtime wiring deferred. This is where the approved-in-
-  principle prompt-content tightening (Q4) would actually take effect and must be
-  re-reviewed on its own.
-- NPC-memory→dialogue wiring and `npc-known` visibility.
-- FTS `recallRelevant` wiring.
+- ~~**Slice 2 — runtime wiring** of `selectVisibleRoomMemories` into the
+  room-memory→dialogue path.~~ **Committed** under
+  [npc-memory-dialogue-context-slice-2-runtime-v0](./npc-memory-dialogue-context-slice-2-runtime-v0.md)
+  (Slice 2a pure helper + Slice 2b dialogue-request-time gate with the real
+  target `npcId`). See that plan's closeout note for the runtime behavior
+  summary.
+- NPC-memory→dialogue wiring and `npc-known` visibility. **Still deferred.**
+- FTS `recallRelevant` wiring. **Still deferred.**
 - Any `Fact` persistence/store, `world-derived` authority projector, relationship
-  state, semantic dialogue events, or structured dialogue effects.
+  state, semantic dialogue events, or structured dialogue effects. **Still
+  deferred.**
 - Log counters (`visibleCount`/`droppedCount`).
 
 ## 15. Safety / authority analysis (Slice 1)

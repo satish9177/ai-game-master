@@ -1,10 +1,6 @@
 # Implementation Plan — Slice 2 (runtime wiring): `feature/npc-memory-dialogue-context-v0`
 
-> Status: **DESIGN APPROVED FOR DOCS ONLY — NOT IMPLEMENTED.** This plan is a
-> reviewable runtime-wiring design. **No source or test files are changed by
-> saving it.** Implementation is split into a pure, non-behavioral **Slice 2a**
-> and a behavior-changing **Slice 2b** that must be implemented and reviewed
-> separately.
+> Status: **IMPLEMENTED — Slice 2a and Slice 2b committed.** Feature closed.
 >
 > Parent feature plan:
 > [npc-memory-dialogue-context-v0](./npc-memory-dialogue-context-v0.md)
@@ -12,6 +8,56 @@
 > Fact/visibility building blocks:
 > [facts-and-fact-visibility-v0](./facts-and-fact-visibility-v0.md),
 > [facts-and-fact-visibility-slice-2-from-memory-v0](./facts-and-fact-visibility-slice-2-from-memory-v0.md).
+>
+> **Closeout note.** Implemented exactly as designed below:
+>
+> - **Slice 2a (pure, no behavior change):** `RecalledRoomMemory { scope,
+>   records }` type and `buildVisibleRoomMemoryContext(recalled, npcId)` —
+>   composes `selectVisibleRoomMemories` + the dialogue-limit slice + the
+>   `{text, kind}` map, unwired at this point.
+> - **Slice 2b (runtime, behavior-changing):** `recallRoomMemoryContext` now
+>   returns the ranked, unsliced `RecalledRoomMemory`; `App.tsx` holds it in
+>   state (`recalledRoomMemory`) and exposes a stable
+>   `getRoomMemoryContextForNpc(npcId)` callback (memory feedback stays
+>   pre-visibility, per Decision 4); `RoomViewer.handleNPCSay` calls that
+>   callback with the **real** `target.npcId` and forwards the result as
+>   `memoryContext`. `RoomViewer` gained no `domain/facts`/`domain/memory`
+>   import — its memory-decoupling is preserved.
+> - **Runtime behavior change:** `player_claim` and any other
+>   `player-known`/`hidden` room memory can no longer reach an NPC's dialogue
+>   prompt context, for every NPC, unconditionally. `room_observation`,
+>   `room_note`, and `room_summary` still enter the prompt context when visible
+>   (same room, same world/session) — unchanged from today's behavior for those
+>   kinds.
+> - **Evaluation adapter:** existing `evaluation/**` gates that called
+>   `recallRoomMemoryContext` directly and consumed the old `{entries}` shape
+>   were updated to call the new
+>   [`evaluation/recalledRoomMemoryAdapter.ts`](../../../apps/web/src/evaluation/recalledRoomMemoryAdapter.ts)'s
+>   `toUngatedRoomMemoryDialogueContext(recalled)`, which reproduces the old
+>   ranked/sliced/mapped shape exactly. This is a test-harness API-shape
+>   adaptation only — those gates continue measuring the pre-existing
+>   recall/ranking plateau behavior and are **not** routed through the new
+>   visibility gate.
+> - **Unchanged / explicitly deferred, confirmed at closeout:**
+>   `generation/llmDialoguePrompt.ts` (prompt template, hedge map, caps,
+>   system-prompt wording) and all dialogue provider code are untouched; no
+>   FTS/`recallRelevant` runtime wiring; no NPC-memory→dialogue wiring or
+>   `npc-known` visibility; no persistence/schema/server/`WorldState`/event-log
+>   changes; no world/authority change of any kind (memory remains
+>   supporting, non-authoritative context); no new logs or counters beyond the
+>   two pre-existing `recallRoomMemoryContext` lines (`roomId` + a safe count).
+> - **Build caveat.** `npm run build` (`tsc -b`) is currently red on `main`,
+>   but the failing files (`domain/assembleRoom.test.ts`,
+>   `domain/ensureGeneratedNpcPresence.ts`, `domain/npcMovementContract.test.ts`,
+>   `domain/roomVisualTheme.test.ts`,
+>   `generation/OpenAICompatibleNPCDialogueProvider.test.ts`, plus uncommitted
+>   working-tree edits to `renderer/engine/Engine.ts` and
+>   `renderer/engine/builders/lighting.ts`/`.test.ts`) are unrelated to this
+>   feature — none import any symbol this feature added or changed, and
+>   `domain/dialogue/contracts.ts` (`RoomMemoryDialogueContext`) was not
+>   touched. This feature's own targeted tests (`selectVisibleRoomMemories`,
+>   `buildVisibleRoomMemoryContext`, `recallRoomMemoryContext`, `RoomViewer`,
+>   `App.test`, `evaluation`) and `npm run lint` are green.
 
 ## 0. Goal
 
