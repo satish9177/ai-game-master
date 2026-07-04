@@ -1,7 +1,8 @@
 # Implementation Plan — `feature/dialogue-semantic-events-v0`
 
-> Status: **Slice 1 approved for implementation. Slices 2 and 3 are NOT approved
-> — each needs separate maintainer approval.**
+> Status: **Implemented and closed out.** Slice 1 (contracts + validator),
+> Slice 2 (pure deterministic classifier), and Slice 3 (inert runtime
+> derivation + safe structural log + discard) have shipped.
 >
 > Companion docs: [ARCHITECTURE](../ARCHITECTURE.md) · [BOUNDARIES](../BOUNDARIES.md) ·
 > [FAILURE-MODES](../FAILURE-MODES.md) · [CONVENTIONS](../CONVENTIONS.md).
@@ -19,14 +20,11 @@
 
 ## 0. Approval status and scope gates (read first)
 
-This document describes three slices. Only the first is approved.
+This document describes three slices. All three are now implemented.
 
-- **Slice 1 — pure domain contracts + validator + tests. ✅ APPROVED (the only
-  implementation approved now).**
-- **Slice 2 — deterministic local classifier (`classify.ts`) + tests. ⛔ NOT
-  approved. Requires separate maintainer approval.**
-- **Slice 3 — runtime / evaluation wiring at the dialogue call site. ⛔ NOT
-  approved. Requires separate maintainer approval.**
+- **Slice 1 — pure domain contracts + validator + tests. ✅ IMPLEMENTED.**
+- **Slice 2 — deterministic local classifier (`classify.ts`) + tests. ✅ IMPLEMENTED.**
+- **Slice 3 — runtime / evaluation wiring at the dialogue call site. ✅ IMPLEMENTED.**
 
 Locked invariants for **every** slice of this feature (none may be relaxed
 without explicit approval):
@@ -49,11 +47,12 @@ without explicit approval):
 Maintainer decisions locked for this plan:
 
 1. New pure domain folder: `apps/web/src/domain/dialogueEvents/`.
-2. Slice 1 only is approved: `contracts.ts`, `validate.ts`, and co-located tests —
-   **no classifier**, **no runtime wiring**.
+2. Slice 1 added `contracts.ts`, `validate.ts`, and co-located tests.
+   Slice 2 added the pure classifier. Slice 3 added inert runtime derivation,
+   safe structural logging, and immediate discard.
 3. `eventId` is **caller-stamped**; tests may inject fixed ids.
 4. The reserved event kinds stay in the closed enum now, but are **not emitted in
-   Slice 1** (Slice 1 emits nothing — there is no classifier yet).
+   v0**; only `player_asked_question` and `npc_responded` are derived.
 5. **No snippet / free-text field** in v0.
 6. **No ADR stub** yet.
 
@@ -69,8 +68,9 @@ substrate that later features (`structured-dialogue-effects-v0`,
 `npc-relationship-state-v0`) will consume — but only after this
 classification/validation boundary exists and is trusted.
 
-**Slice 1 delivers only the contract and validator** — the vocabulary and its
-fail-closed gate. No classification and no wiring are built in Slice 1.
+The shipped v0 delivers the contract and validator, the pure deterministic
+classifier, and inert runtime derivation. Events are logged only as safe
+structural diagnostics and then discarded.
 
 ## 2. Problem being solved
 
@@ -166,9 +166,8 @@ Design choices and rationale:
 
 ## 5. Closed event-kind taxonomy for v0
 
-The enum is closed and complete up front so the type is stable (decision 4). In
-Slice 1 **nothing is emitted** — there is no classifier. When a classifier is
-built (Slice 2, separate approval) it will emit only the provable subset; the rest
+The enum is closed and complete up front so the type is stable (decision 4).
+The shipped deterministic classifier emits only the provable subset; the rest
 stay reserved for a later structured-output slice.
 
 ```ts
@@ -185,15 +184,14 @@ DialogueSemanticEventKindSchema = z.enum([
 ])
 ```
 
-**Intended deterministically-emittable subset (Slice 2, NOT built here)** — from
-closed signals only:
+**Deterministically-emittable subset shipped in v0** — from closed signals only:
 
 - `player_asked_question` — when the turn carries a known question `promptId`
   (`ask-room`, `ask-help`).
 - `npc_responded` — when the provider returned a reply turn (a structural fact: a
   reply exists), `actor: 'npc'`, no text inspection.
 
-**Reserved but not emitted (require trustworthy structured signal, not
+**Reserved and still not emitted (require trustworthy structured signal, not
 text-sniffing):** `player_shared_claim`, `player_promised_help`,
 `player_threatened_npc`, `npc_warned_player`, `npc_revealed_rumor`,
 `npc_refused_request`, `npc_acknowledged_memory`. They remain in the enum so the
@@ -236,26 +234,28 @@ approved — seed a `player_claim` memory/fact (both already non-authoritative).
   explicitly-approved structured-provider-output slice where the provider emits
   structured fields the backend validates.
 
-None of this is implemented in Slice 1.
+This v0 implementation uses only the closed structural signals above. It does
+not inspect `playerLine`, NPC reply text, provider output, prompts, or memory
+text.
 
 ## 8. Recommended safest first slice
 
-**Slice 1 = pure domain contracts + validator + tests only** (no classifier, no
-wiring). This is the smallest reviewable unit and the only slice approved now.
+The feature shipped in three small reviewable slices: pure contracts/validator,
+pure classifier, then inert runtime derivation/log/discard.
 
 ## 9. Runtime wiring in v0?
 
-**No.** Slice 1 (and the future Slice 2) are pure-domain and unwired. Runtime
-derivation at the dialogue call site is **Slice 3, separate approval**. Even when
-wired, Slice 3 would only *derive and log counts* — consuming nothing and mutating
-nothing.
+**Yes, inertly.** Slice 3 wires runtime derivation at the dialogue call site
+through `RoomViewer` → `App` → `deriveAndLogDialogueSemanticEvents`. It derives
+events from structural values only, logs one safe structural diagnostic, and
+discards the events. It consumes nothing and mutates nothing.
 
 ## 10. Should events be stored anywhere in v0?
 
 **No.** No persistence, no SQLite table, no migration, no save-game field, no
-schema-version bump anywhere. If Slice 3 is later approved, derived events are
-transient in-memory values (discarded, or held in component state at most), never
-parked or persisted.
+schema-version bump anywhere. Derived events are transient runtime values and
+are discarded immediately after safe structural logging; they are not stored in
+React state, world state, memory, persistence, save games, or relationship state.
 
 ## 11. Interaction with facts / memory
 
@@ -288,11 +288,11 @@ parked or persisted.
 
 ## 13. Logging / redaction rules
 
-- Slice 1 is pure domain and **does not log** (problems are returned as data, like
-  `loadRoomSpec` / `validateRoom`).
-- If Slice 3 is later approved, it may log **only** safe structural fields: `kind`
-  (closed enum), `actor`, `target`, `confidence`, a boolean/`count`, and existing
-  safe ids (`sessionId`, `roomId`, `npcId`, `promptId`).
+- Slice 1 and Slice 2 are pure domain and **do not log** (problems are returned
+  as data, like `loadRoomSpec` / `validateRoom`).
+- Slice 3 logs **only** safe structural fields: derived event count, derived
+  kind/actor/target/confidence enums, and existing safe ids (`worldId`,
+  `sessionId`, `roomId`, `npcId`, `promptId`).
 - **Never logged:** `playerLine`, NPC or player text, provider request/response
   bodies, any future `snippet`, prompt text, or PII. **No raw player / NPC /
   provider text is ever logged.**
@@ -303,21 +303,29 @@ parked or persisted.
   never surfaced or thrown to a caller as content.
 - Because nothing consumes events in v0, any failure is inert by construction —
   there is no gameplay, render, memory, or state path to degrade.
-- (Slice 2 intent: malformed/ambiguous classifier input → no event emitted; this
-  is not built in Slice 1.)
+- Malformed/ambiguous classifier input → no event emitted.
+- Runtime derivation failure has no gameplay degradation path because events are
+  not consumed and are discarded after logging.
 
 ## 15. Files likely to change
 
-- **Slice 1 (approved) — new files only:**
+- **Slice 1 (implemented) — new files only:**
   - `apps/web/src/domain/dialogueEvents/contracts.ts`
   - `apps/web/src/domain/dialogueEvents/validate.ts`
   - `apps/web/src/domain/dialogueEvents/contracts.test.ts`
   - `apps/web/src/domain/dialogueEvents/validate.test.ts`
-  - No existing file is edited in Slice 1.
-- **Slice 2 (NOT approved) — would add:** `.../classify.ts`, `classify.test.ts`.
-- **Slice 3 (NOT approved) — would add:** one call site in the app/dialogue
-  composition layer (e.g. after `NPCDialogueService.reply` resolves) + one safe
-  log line + a test. No domain change.
+- **Slice 2 (implemented) — new files only:**
+  - `apps/web/src/domain/dialogueEvents/classify.ts`
+  - `apps/web/src/domain/dialogueEvents/classify.test.ts`
+- **Slice 3 (implemented) — inert runtime wiring:**
+  - `apps/web/src/app/deriveAndLogDialogueSemanticEvents.ts`
+  - `apps/web/src/app/deriveAndLogDialogueSemanticEvents.test.ts`
+  - `apps/web/src/renderer/RoomViewer.tsx`
+  - `apps/web/src/renderer/RoomViewer.test.ts`
+  - `apps/web/src/App.tsx`
+  - `apps/web/src/App.test.tsx`
+  - `apps/web/src/evaluation/logSafety.eval.test.ts`
+  - `apps/web/src/evaluation/noSideEffects.eval.test.ts`
 
 ## 16. Files that must NOT change
 
@@ -325,8 +333,8 @@ parked or persisted.
 `SaveGameSchema`, `world-session/**`, `domain/memory/**`, `domain/facts/**`,
 `dialogue/NPCDialogueService.ts`, `domain/ports/NPCDialogueProvider.ts`, both
 dialogue providers, `persistence/**`, `persistence/migrations/**`, `server/**`,
-`renderer/**`, `eslint.config.js`, `package.json`. **No `schemaVersion` bump
-anywhere.**
+renderer engine internals, `eslint.config.js`, `package.json`. **No
+`schemaVersion` bump anywhere.**
 
 ## 17. Tests to add (Slice 1)
 
@@ -339,48 +347,90 @@ anywhere.**
   malformed event is dropped (returns `null` / empty), not thrown; unknown/extra
   fields fail closed; tests inject fixed `eventId`s (decision 3).
 
-(Classifier and log-safety tests belong to Slices 2 and 3 respectively and are
-not part of this approved slice.)
+- **classify.test.ts** — `ask-room` / `ask-help` emit `player_asked_question`,
+  `hasNpcReply` emits `npc_responded`, unknown/absent prompt ids fail closed,
+  reserved kinds are not emitted, and no free-text fields are inspected.
+- **deriveAndLogDialogueSemanticEvents.test.ts** — app helper classifies with a
+  supplied scope, returns events for tests, logs only safe structural fields, and
+  has no storage/world/memory/persistence/provider seam.
+- **RoomViewer / App / evaluation tests** — runtime callback fires only for
+  live/non-stale dialogue turns, logs no raw text, creates no side effects, and
+  stores/consumes no events.
 
-## 18. Verification commands (from `apps/web`, once Slice 1 is implemented)
+## 18. Verification (closeout)
 
-```bash
-npm run test -- dialogueEvents      # new contracts/validate tests
-npm run lint                        # domain purity / boundary imports intact
-npm run build                       # tsc -b exhaustiveness + browser bundle
-```
+- `npm.cmd run test -- dialogueEvents` passed.
+- `npm.cmd run test -- deriveAndLogDialogueSemanticEvents` passed.
+- `npm.cmd run test -- RoomViewer` passed.
+- `npm.cmd run test -- App` passed.
+- `npm.cmd run test -- evaluation` passed.
+- `npm.cmd run test -- redteam` passed.
+- `npm.cmd run lint` passed.
+- `npm.cmd run build` remains red due to known unrelated TypeScript failures
+  outside this feature.
 
 ## 19. Implementation slices
 
-- **Slice 1 — ✅ APPROVED.** Pure `contracts.ts` + `validate.ts` + tests. Unwired.
-  Emits nothing. The only implementation approved now.
-- **Slice 2 — ⛔ SEPARATE APPROVAL.** Pure deterministic `classify.ts` over closed
-  local inputs + tests. Still unwired.
-- **Slice 3 — ⛔ SEPARATE APPROVAL.** Optional runtime / evaluation wiring at the
-  dialogue call site: derive + safe-log counts only; consume nothing; mutate
-  nothing.
+- **Slice 1 — ✅ IMPLEMENTED.** Pure `contracts.ts` + `validate.ts` + tests.
+- **Slice 2 — ✅ IMPLEMENTED.** Pure deterministic `classify.ts` over closed
+  local inputs + tests.
+- **Slice 3 — ✅ IMPLEMENTED.** Runtime / evaluation wiring at the dialogue call
+  site: derive + safe structural log + discard; consume nothing; mutate nothing.
 
 Non-negotiables across all slices (restated): semantic events are not
 `WorldEvent`s; no `WorldState` mutation; no memory writes; no relationship
 updates; no structured dialogue effects; no provider/LLM behavior change; no
 persistence/schema/migration; no raw player/NPC/provider text logging.
 
-## 20. Open questions before implementing Slice 1
+## 20. Closeout summary
 
-None blocking — decisions 1–6 above resolve the design choices. Slice 2 and Slice
-3 remain gated behind their own approvals.
+Implemented:
 
-## 21. Minimum Safe Change Check
+- Slice 1: pure dialogue semantic event contracts + validator.
+- Slice 2: pure deterministic classifier.
+- Slice 3: inert runtime derivation + safe structural log + discard.
+
+Runtime behavior:
+
+- Dialogue turns now derive non-authoritative semantic events from structural
+  inputs only.
+- `ask-room` / `ask-help` can derive `player_asked_question`.
+- Successful NPC reply presence can derive `npc_responded`.
+- Events are discarded after safe structural logging.
+
+Still unchanged / deferred:
+
+- Semantic events are not `WorldEvent`s.
+- No `WorldState` mutation.
+- No memory writes.
+- No relationship-state updates.
+- No structured dialogue effects.
+- No persistence/schema/migration/save-game changes.
+- No provider/LLM behavior change.
+- No prompt/template change.
+- No raw player/NPC/provider/prompt/memory text logging.
+- Reserved event kinds remain unemitted until a future structured-provider/output
+  slice.
+
+## 21. Open questions before implementing Slice 1
+
+None remaining for v0 closeout. Future structured-provider/output, relationship
+state, structured dialogue effects, and any memory/fact bridge remain deferred
+behind separate plans and approvals.
+
+## 22. Minimum Safe Change Check
 
 - **Reused:** the existing closed `promptId` / bounded `playerLine` request fields
   (ADR-0069); the `(worldId, sessionId, roomId, npcId)` scoping discipline from
   memory/facts; the "returned-as-data, no logging" pure-domain pattern of
   `loadRoomSpec` / `validateRoom`; the existing `domain/**` lint block (no new
   rule).
-- **Minimum new code:** one new pure domain folder (`contracts` + `validate`) plus
-  co-located tests. No existing file is changed in Slice 1.
+- **Minimum new code:** one pure domain folder (`contracts`, `validate`,
+  `classify`) plus co-located tests; one app helper for inert runtime derivation
+  and safe structural logging; a narrow `RoomViewer` structural callback and
+  `App` handler that discards returned events.
 - **Safety boundaries unchanged:** no `WorldEvent`/reducer/`WorldState`; read-only
   dialogue service untouched; memory firewall intact; facts unchanged; no
   persistence/migration/schema bump; logging rules unchanged (structural fields
   only, never dialogue text).
-- **Tests prove it:** §17.
+- **Tests prove it:** §17 and §18.
