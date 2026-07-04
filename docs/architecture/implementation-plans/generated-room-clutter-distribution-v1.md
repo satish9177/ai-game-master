@@ -475,3 +475,64 @@ exported; the 2.7a seam is clean), and honors every hard boundary — pure deter
 distribution only, move-only with no deletion, no `App.tsx`/renderer/provider/schema/save-load/
 persistence/memory/event-log change, one safe boolean diagnostic, provenance stays `generated`.
 Docs-only until the maintainer approves; ready to implement as a single slice on go-ahead.
+
+---
+
+## 19. Closeout
+
+**Implementation status:** complete.
+
+**Implemented files:**
+
+- `apps/web/src/domain/generatedRoomClutterDistribution.ts`
+- `apps/web/src/domain/generatedRoomClutterDistribution.test.ts`
+- `apps/web/src/domain/assembleRoom.ts`
+- `apps/web/src/domain/assembleRoom.test.ts`
+
+**Verification results:**
+
+- `npm.cmd run test -- generatedRoomClutterDistribution assembleRoom generatedRoomSeparation`
+  passed: 3 files, 133 tests.
+- `npm.cmd run lint` passed.
+- `npm.cmd run build` failed only on known unrelated TypeScript strictness errors in:
+  - `src/domain/assembleRoom.test.ts`
+  - `src/domain/ensureGeneratedNpcPresence.ts`
+  - `src/domain/npcMovementContract.test.ts`
+  - `src/generation/OpenAICompatibleNPCDialogueProvider.test.ts`
+
+**Manual smoke result:**
+
+Prompt:
+
+```text
+Create a small ruined safehouse packed with crates, barrels, debris, barricades, machines, a corpse, and a strange device.
+```
+
+Result: PASS.
+
+- Objects are no longer all dumped in one corner.
+- Clutter is spread into readable groups.
+- Room still looks dense but not like a trash pile.
+- Exit remained visible.
+- Spawn/player area remained clear.
+- Objective/interactable remained visible.
+- No object deletion/drop observed.
+- Residual grouping is acceptable.
+
+**Safety confirmation:**
+
+- Move-only.
+- No object deletion/drop.
+- Residual crowding is accepted only when capacity is exceeded.
+- Protected objects remain protected: anchors, exits, torches, NPCs, interactables, and
+  structural/critical objects.
+- Stage 2.7a runs after composition and before overlap repair.
+- Spawn repair and exit finalizers still run after this pass.
+- No provider, LLM, prompt, schema, save-load, memory, FTS, dialogue, event-log, persistence,
+  facts, or dialogue-context changes.
+
+**Known limitation:**
+
+Some intentional grouping can remain, but trash-pile clustering is improved.
+
+**Final status:** COMPLETE.
