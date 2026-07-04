@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { recallRoomMemoryContext } from '../app/recallRoomMemoryContext'
 import { deriveAndLogDialogueSemanticEvents } from '../app/deriveAndLogDialogueSemanticEvents'
+import { deriveAndLogStructuredDialogueEffects } from '../app/deriveAndLogStructuredDialogueEffects'
 import { promoteInteractionMemories } from '../app/promoteInteractionMemories'
 import type { RoomMemoryDraftInput } from '../domain/memory/roomFirewall'
 import {
@@ -90,7 +91,7 @@ describe('Gate E - no raw memory/player/provider text in logs', () => {
     await promoteInteractionMemories([markerEvent], EVAL_WORLD_ID, runtime.service, createSpyLogger(logEntries))
 
     // --- Dialogue semantic event derivation logs structural fields only. ---
-    deriveAndLogDialogueSemanticEvents({
+    const dialogueSemanticEvents = deriveAndLogDialogueSemanticEvents({
       scope: {
         worldId: EVAL_WORLD_ID,
         sessionId: EVAL_SESSION_ID,
@@ -107,6 +108,20 @@ describe('Gate E - no raw memory/player/provider text in logs', () => {
       providerText: evalMarkers.providerBody,
       memoryText: evalMarkers.memoryText,
     } as Parameters<typeof deriveAndLogDialogueSemanticEvents>[0])
+
+    // --- Structured dialogue effect derivation also logs structural fields only. ---
+    deriveAndLogStructuredDialogueEffects({
+      events: dialogueSemanticEvents,
+      makeEffectId: (sourceEvent, indexInTurn) => `eval-structured-effect-${sourceEvent.kind}-${indexInTurn}`,
+      logger: createSpyLogger(logEntries),
+      playerLine: evalMarkers.playerLine,
+      npcText: evalMarkers.memoryText,
+      providerText: evalMarkers.providerBody,
+      promptText: evalMarkers.playerLine,
+      memoryText: evalMarkers.memoryText,
+      rawProviderPayload: evalMarkers.providerBody,
+      generatedText: evalMarkers.memoryText,
+    } as Parameters<typeof deriveAndLogStructuredDialogueEffects>[0])
 
     // --- Memory sidecar save/load (pure domain; no logger, but exercise the path). ---
     const json = buildRoomMemorySaveJson(runtime.store.snapshotAll(), {

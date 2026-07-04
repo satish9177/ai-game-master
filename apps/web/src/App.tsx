@@ -69,6 +69,7 @@ import { recallRoomMemoryContext } from './app/recallRoomMemoryContext'
 import type { RecalledRoomMemory } from './app/recallRoomMemoryContext'
 import { buildVisibleRoomMemoryContext } from './app/buildVisibleRoomMemoryContext'
 import { deriveAndLogDialogueSemanticEvents } from './app/deriveAndLogDialogueSemanticEvents'
+import { deriveAndLogStructuredDialogueEffects } from './app/deriveAndLogStructuredDialogueEffects'
 import type { RoomMemoryDialogueContext } from './domain/dialogue/contracts'
 import { loadRoomSpec, type LoadedRoom } from './domain/loadRoomSpec'
 import { fallbackRoom as fallbackRoomSpec } from './domain/examples/fallbackRoom'
@@ -512,7 +513,7 @@ function App() {
     const state = currentWorldStateRef.current
     if (state === null) return
     const play = activePlayRef.current
-    deriveAndLogDialogueSemanticEvents({
+    const dialogueSemanticEvents = deriveAndLogDialogueSemanticEvents({
       scope: {
         worldId: state.worldId,
         sessionId: state.sessionId,
@@ -523,6 +524,12 @@ function App() {
       turnIndex: event.turnIndex,
       hasNpcReply: event.hasNpcReply,
       makeEventId: (kind, indexInTurn) => `dialogue-semantic-event:${kind}:${indexInTurn}:${idGenerator.newId()}`,
+      logger,
+    })
+    deriveAndLogStructuredDialogueEffects({
+      events: dialogueSemanticEvents,
+      makeEffectId: (sourceEvent, indexInTurn) =>
+        `structured-dialogue-effect:${sourceEvent.kind}:${indexInTurn}:${idGenerator.newId()}`,
       logger,
     })
   }, [])
