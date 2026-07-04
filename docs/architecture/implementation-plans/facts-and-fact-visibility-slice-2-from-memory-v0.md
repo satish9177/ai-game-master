@@ -1,7 +1,7 @@
 # Implementation Plan — Slice 2: `deriveFactsFromMemory` (pure memory→fact classifier)
 
-> Status: **APPROVED for docs-only save. Not implemented.** No source/test files
-> changed, no commit. This is Slice 2 of `feature/facts-and-fact-visibility-v0`
+> Status: **IMPLEMENTED — Slice 1 and Slice 2 committed. Runtime wiring remains
+> deferred/gated.** This is Slice 2 of `feature/facts-and-fact-visibility-v0`
 > (parent plan:
 > [facts-and-fact-visibility-v0](./facts-and-fact-visibility-v0.md)). Slice 1
 > (pure `Fact`/`FactVisibility` contracts + `filterVisibleFacts`) is committed and
@@ -9,6 +9,15 @@
 > records into non-authoritative `Fact` records with conservative default
 > visibility. Still **no runtime wiring, no persistence, no dialogue/prompt/App/UI
 > change**.
+>
+> **Closeout note.** Implemented: Slice 1 (pure `Fact` contracts +
+> `filterVisibleFacts`) and Slice 2 (pure `deriveFactsFromMemory` classifier).
+> Deferred: Slice 3 runtime/dialogue/prompt wiring; persistence/store/migration;
+> a world-derived projector/validator; relationship state; semantic dialogue
+> events; structured dialogue effects. No runtime wiring, no provider/LLM calls,
+> no UI, no persistence/schema changes, no authority path exist as of this
+> closeout. `player_claim` defaults to `player-known` visibility. Facts remain
+> supporting metadata, not world truth.
 
 ## 0. Locked decisions (maintainer-approved, this slice)
 
@@ -143,9 +152,9 @@ forgetting `llm` must never follow.
 
 ## 7. Unknown / ambiguous memory kinds, and invalid mapper output (Q3)
 
-Both memory kind enums are closed and exhaustive in TypeScript, so a `switch`
-over `record.kind` is exhaustive at compile time — a new memory kind added
-later without updating this file is a compile error.
+Unknown future memory kinds currently fail closed to hidden/unverified/low.
+Compile-time exhaustive checking may be added later, but v0 prioritizes
+runtime fail-closed behavior.
 
 At runtime, two distinct fail-closed paths converge on the same fallback shape:
 

@@ -1,8 +1,17 @@
 # Implementation Plan — `feature/facts-and-fact-visibility-v0`
 
-> Status: **APPROVED for docs-only save. Not implemented.** No source/test files
-> changed, no commit. Slice 1 is a **pure domain fact + visibility layer** (types
+> Status: **IMPLEMENTED — Slice 1 and Slice 2 committed. Runtime wiring remains
+> deferred/gated.** Slice 1 is a **pure domain fact + visibility layer** (types
 > + one pure filter), headless and unwired.
+>
+> **Closeout note.** Implemented: Slice 1 (pure `Fact` contracts +
+> `filterVisibleFacts`) and Slice 2 (pure `deriveFactsFromMemory` classifier).
+> Deferred: Slice 3 runtime/dialogue/prompt wiring; persistence/store/migration;
+> a world-derived projector/validator; relationship state; semantic dialogue
+> events; structured dialogue effects. No runtime wiring, no provider/LLM calls,
+> no UI, no persistence/schema changes, no authority path exist as of this
+> closeout. `player_claim` defaults to `player-known` visibility. Facts remain
+> supporting metadata, not world truth.
 >
 > Scope intent: give the future dialogue/memory-retrieval wiring a principled,
 > mandatory *who-may-know-this* gate. Mirrors the established v0 pattern (like
