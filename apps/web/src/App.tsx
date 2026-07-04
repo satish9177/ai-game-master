@@ -70,6 +70,9 @@ import type { RecalledRoomMemory } from './app/recallRoomMemoryContext'
 import { buildVisibleRoomMemoryContext } from './app/buildVisibleRoomMemoryContext'
 import { deriveAndLogDialogueSemanticEvents } from './app/deriveAndLogDialogueSemanticEvents'
 import { deriveAndLogStructuredDialogueEffects } from './app/deriveAndLogStructuredDialogueEffects'
+import { deriveAndReduceRelationship } from './app/deriveAndReduceRelationship'
+import { neutralRelationship } from './domain/npcRelationship/neutral'
+import type { NpcRelationshipState } from './domain/npcRelationship/contracts'
 import type { RoomMemoryDialogueContext } from './domain/dialogue/contracts'
 import { loadRoomSpec, type LoadedRoom } from './domain/loadRoomSpec'
 import { fallbackRoom as fallbackRoomSpec } from './domain/examples/fallbackRoom'
@@ -450,6 +453,12 @@ function App() {
   const [questSpecSnapshot, setQuestSpecSnapshot] = useState<QuestSpec | null>(null)
   const journalSpecRef = useRef<JournalSpec | null>(null)
   const perRoomObjectiveMemoRef = useRef<PerRoomObjectiveMemo>(new Map())
+  // Ephemeral, non-authoritative NPC relationship projection
+  // (npc-relationship-state-v0, Slice 2). Keyed by npcId, held only for the
+  // life of this component/session -- never WorldState, never persisted,
+  // never read by dialogue context yet. Reset alongside
+  // `perRoomObjectiveMemoRef` on every new prompt/load.
+  const relationshipsRef = useRef<Map<string, NpcRelationshipState>>(new Map())
   // Room memory composition (memory-event-promotion-v0 wiring slice). Held in
   // a single ref (not module scope) so the store survives re-renders for the
   // life of this component without being reconstructed on every render; it is
@@ -526,12 +535,21 @@ function App() {
       makeEventId: (kind, indexInTurn) => `dialogue-semantic-event:${kind}:${indexInTurn}:${idGenerator.newId()}`,
       logger,
     })
-    deriveAndLogStructuredDialogueEffects({
+    const structuredEffects = deriveAndLogStructuredDialogueEffects({
       events: dialogueSemanticEvents,
       makeEffectId: (sourceEvent, indexInTurn) =>
         `structured-dialogue-effect:${sourceEvent.kind}:${indexInTurn}:${idGenerator.newId()}`,
       logger,
     })
+    const relationshipScope = { worldId: state.worldId, sessionId: state.sessionId, npcId: event.npcId }
+    const priorRelationship = relationshipsRef.current.get(event.npcId) ?? neutralRelationship(relationshipScope)
+    const relationshipResult = deriveAndReduceRelationship({
+      effects: structuredEffects,
+      prior: priorRelationship,
+      ctx: relationshipScope,
+      logger,
+    })
+    relationshipsRef.current.set(event.npcId, relationshipResult.state)
   }, [])
   // Usage guardrail state (real provider only; fake path stays inert).
   // Refs hold the live values for reading inside stable useCallback closures;
@@ -734,6 +752,7 @@ function App() {
 
     const version = ++requestVersion.current
     perRoomObjectiveMemoRef.current = new Map()
+    relationshipsRef.current = new Map()
     activePlayRef.current = null
     setActivePlay(null)
     setPlayerHud(null)
@@ -964,6 +983,7 @@ function App() {
   const handleLoad = useCallback(() => {
     const version = ++requestVersion.current
     perRoomObjectiveMemoRef.current = new Map()
+    relationshipsRef.current = new Map()
     activePlayRef.current = null
     setSaveLoadStatus('loading')
     setSaveLoadError(null)

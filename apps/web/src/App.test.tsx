@@ -3702,7 +3702,7 @@ describe('memory feedback state wiring - Slice 4', () => {
     expect(render).not.toContain('roomMemoryContext={')
   })
 
-  it('App wires inert dialogue semantic events from structural RoomViewer callback data only', () => {
+  it('App wires inert dialogue semantic events and an ephemeral npc relationship projection from structural RoomViewer callback data only', () => {
     const handler = appSource.slice(
       appSource.indexOf('const handleNpcDialogueResolved = useCallback('),
       appSource.indexOf('// Usage guardrail state'),
@@ -3716,9 +3716,13 @@ describe('memory feedback state wiring - Slice 4', () => {
     expect(appSource).toContain(
       "import { deriveAndLogStructuredDialogueEffects } from './app/deriveAndLogStructuredDialogueEffects'",
     )
+    expect(appSource).toContain("import { deriveAndReduceRelationship } from './app/deriveAndReduceRelationship'")
+    expect(appSource).toContain("import { neutralRelationship } from './domain/npcRelationship/neutral'")
+    expect(appSource).toContain("import type { NpcRelationshipState } from './domain/npcRelationship/contracts'")
     expect(appSource).toContain("import type { NpcDialogueResolvedEvent } from './renderer/RoomViewer'")
     expect(appSource).toContain('const currentWorldStateRef = useRef<WorldState | null>(null)')
     expect(appSource).toContain('currentWorldStateRef.current = state')
+    expect(appSource).toContain('const relationshipsRef = useRef<Map<string, NpcRelationshipState>>(new Map())')
     expect(handler).toContain('const state = currentWorldStateRef.current')
     expect(handler).toContain('const play = activePlayRef.current')
     expect(handler).toContain('const dialogueSemanticEvents = deriveAndLogDialogueSemanticEvents({')
@@ -3730,24 +3734,57 @@ describe('memory feedback state wiring - Slice 4', () => {
     expect(handler).toContain('turnIndex: event.turnIndex')
     expect(handler).toContain('hasNpcReply: event.hasNpcReply')
     expect(handler).toContain('makeEventId: (kind, indexInTurn) =>')
-    expect(handler).toContain('deriveAndLogStructuredDialogueEffects({')
+    expect(handler).toContain('const structuredEffects = deriveAndLogStructuredDialogueEffects({')
     expect(handler).toContain('events: dialogueSemanticEvents')
     expect(handler).toContain('makeEffectId: (sourceEvent, indexInTurn) =>')
     expect(handler).toContain('structured-dialogue-effect:${sourceEvent.kind}:${indexInTurn}:${idGenerator.newId()}')
     expect(handler).toContain('logger,')
     expect(render).toContain('onNpcDialogueResolved={handleNpcDialogueResolved}')
 
-    expect(handler).not.toContain('set')
+    // Relationship reduction seam: consumes only the already-validated
+    // structured effects derived above, holds the result in the ephemeral
+    // relationshipsRef map keyed by npcId -- no WorldState/world-session/save
+    // path is touched.
+    expect(handler).toContain(
+      'const relationshipScope = { worldId: state.worldId, sessionId: state.sessionId, npcId: event.npcId }',
+    )
+    expect(handler).toContain(
+      'const priorRelationship = relationshipsRef.current.get(event.npcId) ?? neutralRelationship(relationshipScope)',
+    )
+    expect(handler).toContain('const relationshipResult = deriveAndReduceRelationship({')
+    expect(handler).toContain('effects: structuredEffects')
+    expect(handler).toContain('prior: priorRelationship')
+    expect(handler).toContain('ctx: relationshipScope')
+    expect(handler).toContain('relationshipsRef.current.set(event.npcId, relationshipResult.state)')
+
+    // No React state setter is called from this handler (Map.set on the
+    // ephemeral ref is fine; a `setXxx(` React state setter is not).
+    expect(handler).not.toMatch(/\bset[A-Z]\w*\(/)
     expect(handler).not.toContain('useState')
-    expect(handler).not.toContain('useRef')
     expect(handler).not.toContain('worldSession.')
     expect(handler).not.toContain('roomMemoryRuntimeRef')
+    expect(handler).not.toContain('appendEvent')
+    expect(handler).not.toContain('WorldCommand')
     expect(handler).not.toContain('save')
     expect(handler).not.toContain('persistence')
     expect(handler).not.toContain('provider')
     expect(handler).not.toContain('playerLine')
     expect(handler).not.toContain('npcText')
     expect(handler).not.toContain('providerText')
+  })
+
+  it('resets the ephemeral npc relationship projection alongside perRoomObjectiveMemoRef on new prompt and load', () => {
+    const firstResetIndex = appSource.indexOf('perRoomObjectiveMemoRef.current = new Map()')
+    const secondResetIndex = appSource.indexOf('perRoomObjectiveMemoRef.current = new Map()', firstResetIndex + 1)
+
+    expect(firstResetIndex).toBeGreaterThan(-1)
+    expect(secondResetIndex).toBeGreaterThan(firstResetIndex)
+
+    const promptReset = appSource.slice(firstResetIndex, firstResetIndex + 120)
+    const loadReset = appSource.slice(secondResetIndex, secondResetIndex + 120)
+
+    expect(promptReset).toContain('relationshipsRef.current = new Map()')
+    expect(loadReset).toContain('relationshipsRef.current = new Map()')
   })
 
   it('App clears memory feedback on every new room entry (enterActivePlay and handleNavigate)', () => {

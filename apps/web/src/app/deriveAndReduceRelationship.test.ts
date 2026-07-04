@@ -1,0 +1,198 @@
+import { describe, expect, it } from 'vitest'
+import { STRUCTURED_DIALOGUE_EFFECT_SCHEMA_VERSION } from '../domain/structuredDialogueEffects/contracts'
+import type { StructuredDialogueEffect } from '../domain/structuredDialogueEffects/contracts'
+import { neutralRelationship } from '../domain/npcRelationship/neutral'
+import type { RelationshipReductionContext } from '../domain/npcRelationship/reducer'
+import type { LogContext, Logger, LogLevel } from '../platform/logger/Logger'
+import {
+  deriveAndReduceRelationship,
+  type DeriveAndReduceRelationshipInput,
+} from './deriveAndReduceRelationship'
+
+type LogEntry = { level: LogLevel; message: string; context: LogContext }
+
+const FORBIDDEN_MARKERS = [
+  'SECRET_PLAYER_LINE',
+  'SECRET_NPC_TEXT',
+  'SECRET_PROVIDER_TEXT',
+  'SECRET_PROMPT_BODY',
+]
+
+const CTX: RelationshipReductionContext = {
+  worldId: 'world-1',
+  sessionId: 'session-1',
+  npcId: 'npc-1',
+}
+
+function createSpyLogger(entries: LogEntry[]): Logger {
+  const record = (level: LogLevel) => (message: string, context: LogContext = {}) => {
+    entries.push({ level, message, context })
+  }
+  return {
+    debug: record('debug'),
+    info: record('info'),
+    warn: record('warn'),
+    error: record('error'),
+    child: () => createSpyLogger(entries),
+  }
+}
+
+function neutralPrior() {
+  return neutralRelationship({ worldId: CTX.worldId, sessionId: CTX.sessionId, npcId: CTX.npcId })
+}
+
+function questionEffect(overrides: Partial<StructuredDialogueEffect> = {}): StructuredDialogueEffect {
+  return {
+    schemaVersion: STRUCTURED_DIALOGUE_EFFECT_SCHEMA_VERSION,
+    effectId: 'structured-dialogue-effect-1',
+    kind: 'player_question_effect_candidate',
+    sourceEventId: 'dialogue-event-1',
+    sourceKind: 'player_asked_question',
+    status: 'candidate',
+    actor: 'player',
+    target: 'npc',
+    scope: {
+      worldId: CTX.worldId,
+      sessionId: CTX.sessionId,
+      roomId: 'room-1',
+      npcId: CTX.npcId,
+    },
+    provenance: {
+      classifier: 'deterministic-local',
+      promptId: 'ask-room',
+      turnIndex: 0,
+    },
+    confidence: 'high',
+    ...overrides,
+  }
+}
+
+function input(overrides: Partial<DeriveAndReduceRelationshipInput> = {}): DeriveAndReduceRelationshipInput {
+  const logs: LogEntry[] = []
+  return {
+    effects: [questionEffect()],
+    prior: neutralPrior(),
+    ctx: CTX,
+    logger: createSpyLogger(logs),
+    ...overrides,
+  }
+}
+
+describe('deriveAndReduceRelationship', () => {
+  it('calls the reducer with the validated effects and returns the updated projection', () => {
+    const result = deriveAndReduceRelationship(input())
+
+    expect(result.reducerInvoked).toBe(true)
+    expect(result.appliedCount).toBe(1)
+    expect(result.ignoredCount).toBe(0)
+    expect(result.state.axes.familiarity).toBe(1)
+  })
+
+  it('does not call the reducer when there are no effects, and returns the same prior reference unchanged', () => {
+    const prior = neutralPrior()
+    const logs: LogEntry[] = []
+    const result = deriveAndReduceRelationship(input({ effects: [], prior, logger: createSpyLogger(logs) }))
+
+    expect(result.reducerInvoked).toBe(false)
+    expect(result.appliedCount).toBe(0)
+    expect(result.ignoredCount).toBe(0)
+    expect(result.clampedAxes).toBe(0)
+    expect(result.state).toBe(prior)
+    expect(logs).toEqual([])
+  })
+
+  it('only ever moves familiarity for the currently emitted neutral candidates', () => {
+    const result = deriveAndReduceRelationship(
+      input({
+        effects: [
+          questionEffect(),
+          questionEffect({ effectId: 'structured-dialogue-effect-2', kind: 'npc_response_effect_candidate', sourceEventId: 'dialogue-event-2', sourceKind: 'npc_responded', actor: 'npc', target: 'player' }),
+        ],
+      }),
+    )
+
+    expect(result.state.axes.familiarity).toBeGreaterThan(0)
+    expect(result.state.axes.trust).toBe(0)
+    expect(result.state.axes.respect).toBe(0)
+    expect(result.state.axes.fear).toBe(0)
+  })
+
+  it('does not throw and does not mutate the prior projection for malformed/rejected effects', () => {
+    const prior = neutralPrior()
+    const malformed = [
+      { ...questionEffect(), extra: 'field' } as unknown as StructuredDialogueEffect,
+      questionEffect({ scope: { ...questionEffect().scope, worldId: 'wrong-world' } }),
+    ]
+
+    expect(() => deriveAndReduceRelationship(input({ effects: malformed, prior }))).not.toThrow()
+
+    const result = deriveAndReduceRelationship(input({ effects: malformed, prior }))
+    expect(result.state.axes).toEqual(prior.axes)
+    expect(result.appliedCount).toBe(0)
+    expect(result.ignoredCount).toBe(2)
+    // Reducer was still invoked (effects.length > 0) even though everything
+    // was rejected -- this is distinct from the "no effects" no-call path.
+    expect(result.reducerInvoked).toBe(true)
+  })
+
+  it('logs only safe counters and a closed familiarity bucket, never raw dialogue text', () => {
+    const logs: LogEntry[] = []
+    // Simulate an attempted text-bearing input field; it must never reach
+    // the log regardless, since the real input type carries no text at all.
+    deriveAndReduceRelationship({
+      ...input({ logger: createSpyLogger(logs) }),
+      playerLine: FORBIDDEN_MARKERS[0],
+      npcText: FORBIDDEN_MARKERS[1],
+    } as DeriveAndReduceRelationshipInput)
+
+    expect(logs).toHaveLength(1)
+    expect(logs[0]).toMatchObject({
+      level: 'info',
+      message: 'npc relationship reduced',
+      context: {
+        processed: 1,
+        applied: 1,
+        rejected: 0,
+        clampedAxes: 0,
+        interactionCount: 1,
+        familiarityBucket: 'low',
+        worldId: CTX.worldId,
+        sessionId: CTX.sessionId,
+        npcId: CTX.npcId,
+      },
+    })
+
+    const serialized = JSON.stringify(logs)
+    for (const marker of FORBIDDEN_MARKERS) {
+      expect(serialized).not.toContain(marker)
+    }
+    for (const value of Object.values(logs[0]!.context)) {
+      expect(['string', 'number', 'boolean', 'undefined']).toContain(typeof value)
+    }
+  })
+
+  it('logs a "none" familiarity bucket at baseline and "high" once familiarity climbs past 66', () => {
+    const noneLogs: LogEntry[] = []
+    deriveAndReduceRelationship(
+      input({
+        effects: [{ ...questionEffect(), target: 'room' }],
+        logger: createSpyLogger(noneLogs),
+      }),
+    )
+    expect(noneLogs[0]?.context.familiarityBucket).toBe('none')
+
+    const highPrior = { ...neutralPrior(), axes: { trust: 0, respect: 0, fear: 0, familiarity: 67 } }
+    const highLogs: LogEntry[] = []
+    deriveAndReduceRelationship(input({ prior: highPrior, logger: createSpyLogger(highLogs) }))
+    expect(highLogs[0]?.context.familiarityBucket).toBe('high')
+  })
+
+  it('does not mutate the effects input array', () => {
+    const effects = [questionEffect()]
+    const before = structuredClone(effects)
+
+    deriveAndReduceRelationship(input({ effects }))
+
+    expect(effects).toEqual(before)
+  })
+})
