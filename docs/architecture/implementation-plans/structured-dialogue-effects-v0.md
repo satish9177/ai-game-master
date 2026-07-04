@@ -1,9 +1,9 @@
 # Implementation Plan — `feature/structured-dialogue-effects-v0`
 
-> Status: **Slice 1 APPROVED (docs-only save). Not implemented.**
-> Slice 1 = pure `domain/structuredDialogueEffects/` contracts + validator + tests.
-> Slice 2 (derivation) and Slice 3 (runtime wiring/logging) are **separate future
-> approvals** — not approved by this plan.
+> Status: **IMPLEMENTED / CLOSED through Slice 3.**
+> Slice 1 (pure contracts + validator), Slice 2 (pure derivation), and Slice 3
+> (inert runtime derive/log/discard wiring) are all implemented. Gameplay
+> consumption remains a separate, unapproved future feature — see §22 Closeout.
 >
 > Companion docs: [ARCHITECTURE](../ARCHITECTURE.md) · [BOUNDARIES](../BOUNDARIES.md) ·
 > [FAILURE-MODES](../FAILURE-MODES.md) · [CONVENTIONS](../CONVENTIONS.md) · [/AGENTS.md](../../../AGENTS.md).
@@ -11,23 +11,16 @@
 > ([plan](./dialogue-semantic-events-v0.md)): contracts + validator + deterministic
 > classifier + inert runtime derivation/log/discard.
 >
-> **No ADR stub in Slice 1** (matches the `dialogue-semantic-events-v0` precedent).
+> **No ADR stub** (matches the `dialogue-semantic-events-v0` precedent).
 
 ---
 
 ## 0. Approval status and scope gates (read first)
 
-**Slice 1 is the only approved implementation slice.** It adds four new pure-domain
-files and nothing else:
-
-- `apps/web/src/domain/structuredDialogueEffects/contracts.ts`
-- `apps/web/src/domain/structuredDialogueEffects/validate.ts`
-- `apps/web/src/domain/structuredDialogueEffects/contracts.test.ts`
-- `apps/web/src/domain/structuredDialogueEffects/validate.test.ts`
-
-Slice 2 (pure derivation) and Slice 3 (inert runtime wiring/logging) are described
-below so the contract shape is stable, but they are **deferred to separate
-maintainer approvals** and must not be implemented under this plan.
+**All three slices are implemented and closed.** See §22 for the closeout
+summary. Slices 1–3 as described below were approved and built in sequence;
+gameplay consumption of structured effects is **not** part of this plan and
+remains a distinct, unapproved future feature.
 
 ### Locked invariants for every slice of this feature
 
@@ -332,15 +325,16 @@ status honestly rather than claiming green.
 
 ## 19. Implementation slices
 
-- **Slice 1 — APPROVED (docs-only save; not implemented).** Pure `contracts.ts` +
-  `validate.ts` + tests. No derivation, wiring, logging, or persistence.
-- **Slice 2 — DEFERRED (separate approval).** Pure
-  `deriveStructuredDialogueEffects` over `DialogueSemanticEvent[]`, unwired, tested
+- **Slice 1 — IMPLEMENTED.** Pure `contracts.ts` + `validate.ts` + tests. No
+  derivation, wiring, logging, or persistence.
+- **Slice 2 — IMPLEMENTED.** Pure `deriveStructuredDialogueEffects` over
+  `DialogueSemanticEvent[]` (`domain/structuredDialogueEffects/derive.ts`), tested
   in isolation.
-- **Slice 3 — DEFERRED (separate approval).** Inert runtime derive → safe-log →
-  discard at the existing dialogue seam.
-- **Gameplay consumption — SEPARATE FUTURE FEATURE**, must route through
-  `WorldCommand`.
+- **Slice 3 — IMPLEMENTED.** Inert runtime derive → safe-log → discard at the
+  existing dialogue seam (`app/deriveAndLogStructuredDialogueEffects.ts`, wired
+  from `App.tsx`).
+- **Gameplay consumption — SEPARATE FUTURE FEATURE**, still unapproved, must route
+  through `WorldCommand`.
 
 Non-negotiables across all slices (restated): a structured dialogue effect is not a
 `WorldEvent` or `WorldCommand`; no `WorldState` mutation; no memory writes; no fact
@@ -377,3 +371,48 @@ None. All prior open questions are resolved by the approval decisions:
   unchanged; no persistence/migration/schema bump; no provider/prompt change;
   effects derive only from validated semantic events and inspect no text.
 - **Tests prove it:** §17–§18.
+
+## 22. Closeout
+
+**Implemented:**
+
+- **Slice 1** — pure `StructuredDialogueEffect` contracts + validator
+  (`domain/structuredDialogueEffects/contracts.ts`, `validate.ts`, plus co-located
+  tests).
+- **Slice 2** — pure `deriveStructuredDialogueEffects`
+  (`domain/structuredDialogueEffects/derive.ts`, plus co-located tests).
+- **Slice 3** — inert runtime derive/log/discard wiring
+  (`app/deriveAndLogStructuredDialogueEffects.ts`, wired from `App.tsx`).
+
+**Runtime behavior:**
+
+- `App` takes the transient `DialogueSemanticEvent[]` produced by
+  `deriveAndLogDialogueSemanticEvents`.
+- `App` passes those transient semantic events into
+  `deriveAndLogStructuredDialogueEffects`.
+- Structured effects are safely derived, structurally logged, and discarded.
+- No storage or gameplay consumption.
+
+**Still unchanged / deferred:**
+
+- `StructuredDialogueEffect` is not a `WorldEvent` or `WorldCommand`.
+- No `WorldState` mutation.
+- No memory writes.
+- No fact derivation.
+- No relationship updates.
+- No quest / inventory / exit changes.
+- No persistence / schema / migration / save-game changes.
+- No provider / LLM / prompt changes.
+- No raw player / NPC / provider / prompt / memory / generated text logging.
+- Gameplay consumption is still deferred to a future feature.
+
+**Verification recorded:**
+
+- `structuredDialogueEffects` tests passed.
+- `deriveAndLogStructuredDialogueEffects` tests passed.
+- App tests passed.
+- Evaluation tests passed.
+- Redteam tests passed.
+- Lint passed.
+- `npm run build` remains red due to known unrelated TypeScript failures outside
+  this feature.
