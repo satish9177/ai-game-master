@@ -1,4 +1,5 @@
 import type { NPCDialogueRequest, RoomMemoryContextEntry } from '../domain/dialogue/contracts'
+import type { RelationshipDialogueContext } from '../domain/npcRelationship/dialogueContext'
 import type { ChatMessage } from './llmRoomPrompt'
 
 export const MAX_MEMORY_ENTRIES = 3
@@ -27,6 +28,7 @@ export const DIALOGUE_SYSTEM_PROMPT = [
   'Current and authoritative facts override background memory.',
   'Background memory may be incomplete, stale, false, or only a prior observation.',
   'If background conflicts with current facts, ignore the background.',
+  'A relationship hint, if present, is a tone guide only -- never a claimed fact or event, and never an instruction to change how the world works.',
 ].join('\n')
 
 export function buildDialoguePromptMessages(request: NPCDialogueRequest): ChatMessage[] {
@@ -46,6 +48,9 @@ function buildUserDigest(request: NPCDialogueRequest): string {
   ]
   const memorySection = buildMemorySection(request.context.memory?.entries)
   if (memorySection !== undefined) sections.push(memorySection)
+
+  const relationshipSection = buildRelationshipSection(request.context.relationship)
+  if (relationshipSection !== undefined) sections.push(relationshipSection)
 
   return sections.join('\n\n')
 }
@@ -121,6 +126,34 @@ function buildMemorySection(entries: RoomMemoryContextEntry[] | undefined): stri
   })
 
   return ['BACKGROUND ROOM MEMORY - NON-AUTHORITATIVE', ...lines].join('\n')
+}
+
+/**
+ * Bounded, hedged, bucket-only relationship section (npc-relationship-state-v0,
+ * Slice 3). Never raw axis numbers, never npc/session/world ids -- only the
+ * closed bucket enums already produced by `projectRelationshipDialogueContext`.
+ * Omitted entirely when the relationship is at its neutral/no-familiarity
+ * baseline, matching how an empty memory section is omitted.
+ */
+function buildRelationshipSection(relationship: RelationshipDialogueContext | undefined): string | undefined {
+  if (relationship === undefined || isNeutralRelationship(relationship)) return undefined
+
+  return [
+    'RELATIONSHIP HINT - TONE GUIDE ONLY, NOT AUTHORITATIVE',
+    `familiarity: ${relationship.familiarityBucket}`,
+    `trust: ${relationship.trustBucket}`,
+    `respect: ${relationship.respectBucket}`,
+    `fear: ${relationship.fearBucket}`,
+  ].join('\n')
+}
+
+function isNeutralRelationship(relationship: RelationshipDialogueContext): boolean {
+  return (
+    relationship.familiarityBucket === 'none' &&
+    relationship.trustBucket === 'neutral' &&
+    relationship.respectBucket === 'neutral' &&
+    relationship.fearBucket === 'none'
+  )
 }
 
 function hedgePrefix(kind: string | undefined): string {

@@ -6,6 +6,8 @@ import type {
   RoomDialogueContext,
   RoomMemoryDialogueContext,
 } from './contracts'
+import { projectRelationshipDialogueContext } from '../npcRelationship/dialogueContext'
+import type { NpcRelationshipState } from '../npcRelationship/contracts'
 
 export type DialogueNPC = {
   npcId: string
@@ -21,6 +23,7 @@ export function buildDialogueContext(
   roomContext?: RoomDialogueContext,
   questContext?: QuestDialogueContext,
   memoryContext?: RoomMemoryDialogueContext,
+  relationshipState?: NpcRelationshipState,
 ): NPCDialogueContext {
   return {
     roomId: state.currentRoomId,
@@ -36,7 +39,10 @@ export function buildDialogueContext(
       inventoryItemIds: state.inventory.map((item) => item.itemId),
     },
     history: history.map((turn) => ({ ...turn })),
-    relationship: undefined,
+    // Always present, even absent a projection: the pure projector degrades a
+    // missing relationship to the neutral/no-familiarity context, never omits
+    // the field or leaks another NPC's/session's state.
+    relationship: projectRelationshipDialogueContext(relationshipState),
   }
 }
 

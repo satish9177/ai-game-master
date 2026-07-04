@@ -7,6 +7,8 @@ import type {
   RoomMemoryDialogueContext,
 } from './contracts'
 import { buildDialogueContext } from './buildDialogueContext'
+import { neutralRelationship } from '../npcRelationship/neutral'
+import type { NpcRelationshipState } from '../npcRelationship/contracts'
 
 const state: WorldState = {
   schemaVersion: 1,
@@ -58,7 +60,15 @@ describe('buildDialogueContext', () => {
         inventoryItemIds: ['coin', 'writ'],
       },
       history,
-      relationship: undefined,
+      relationship: {
+        schemaVersion: 1,
+        subject: 'npc',
+        object: 'player',
+        familiarityBucket: 'none',
+        trustBucket: 'neutral',
+        respectBucket: 'neutral',
+        fearBucket: 'none',
+      },
     })
     expect(JSON.stringify(context)).not.toContain('Gold Coin')
     expect(JSON.stringify(context)).not.toContain('Royal Writ')
@@ -245,5 +255,72 @@ describe('buildDialogueContext', () => {
     expect(memoryOnly).not.toContain('friendly-aide')
     expect(memoryOnly).not.toContain('Hello.')
     expect(memoryOnly).not.toContain('Welcome.')
+  })
+
+  it('projects a bucketed relationship hint from the provided relationship state', () => {
+    const scope = { worldId: state.worldId, sessionId: state.sessionId, npcId: 'aide' }
+    const relationshipState: NpcRelationshipState = {
+      ...neutralRelationship(scope),
+      axes: { ...neutralRelationship(scope).axes, familiarity: 50 },
+    }
+    const context = buildDialogueContext(
+      state,
+      { npcId: 'aide', npcName: 'Asha', persona: 'friendly-aide' },
+      history,
+      undefined,
+      undefined,
+      undefined,
+      relationshipState,
+    )
+
+    expect(context.relationship).toEqual({
+      schemaVersion: 1,
+      subject: 'npc',
+      object: 'player',
+      familiarityBucket: 'medium',
+      trustBucket: 'neutral',
+      respectBucket: 'neutral',
+      fearBucket: 'none',
+    })
+  })
+
+  it('degrades a missing relationship state to the neutral/no-familiarity context', () => {
+    const context = buildDialogueContext(
+      state,
+      { npcId: 'aide', npcName: 'Asha', persona: 'friendly-aide' },
+      history,
+    )
+
+    expect(context.relationship).toEqual({
+      schemaVersion: 1,
+      subject: 'npc',
+      object: 'player',
+      familiarityBucket: 'none',
+      trustBucket: 'neutral',
+      respectBucket: 'neutral',
+      fearBucket: 'none',
+    })
+  })
+
+  it('never leaks raw relationship axis numbers or scope ids into the projected context', () => {
+    const scope = { worldId: state.worldId, sessionId: state.sessionId, npcId: 'aide' }
+    const relationshipState: NpcRelationshipState = {
+      ...neutralRelationship(scope),
+      axes: { ...neutralRelationship(scope).axes, familiarity: 77 },
+    }
+    const context = buildDialogueContext(
+      state,
+      { npcId: 'aide', npcName: 'Asha', persona: 'friendly-aide' },
+      history,
+      undefined,
+      undefined,
+      undefined,
+      relationshipState,
+    )
+    const serialized = JSON.stringify(context.relationship)
+
+    expect(serialized).not.toContain('77')
+    expect(serialized).not.toContain(scope.sessionId)
+    expect(serialized).not.toContain(scope.worldId)
   })
 })

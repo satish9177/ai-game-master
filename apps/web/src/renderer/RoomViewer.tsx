@@ -15,6 +15,7 @@ import type {
   RoomDialogueContext,
   RoomMemoryDialogueContext,
 } from '../domain/dialogue/contracts'
+import type { NpcRelationshipState } from '../domain/npcRelationship/contracts'
 import { normalizePlayerFreeText } from '../domain/dialogue/playerFreeText'
 import type { InteractionService } from '../interactions/InteractionService'
 import type { EncounterService } from '../encounters/EncounterService'
@@ -80,6 +81,7 @@ type RoomViewerProps = {
   onNpcDialogueResolved?: (event: NpcDialogueResolvedEvent) => void
   questStage?: QuestDialogueContext
   getRoomMemoryContextForNpc?: (npcId: string) => RoomMemoryDialogueContext | undefined
+  getRelationshipContextForNpc?: (npcId: string) => NpcRelationshipState | undefined
   resolvedObjectIds?: ReadonlySet<string>
 }
 
@@ -96,6 +98,7 @@ export function RoomViewer({
   onNpcDialogueResolved,
   questStage,
   getRoomMemoryContextForNpc,
+  getRelationshipContextForNpc,
   resolvedObjectIds,
 }: RoomViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null)
@@ -120,6 +123,16 @@ export function RoomViewer({
   useEffect(() => {
     getRoomMemoryContextForNpcRef.current = getRoomMemoryContextForNpc
   }, [getRoomMemoryContextForNpc])
+  // Bounded, non-authoritative relationship hint (npc-relationship-state-v0,
+  // Slice 3): this component only imports the pure `domain/npcRelationship`
+  // state type, never the app-layer reducer wiring; the composition root owns
+  // the ephemeral relationship projection and its bucketing.
+  const getRelationshipContextForNpcRef = useRef<
+    ((npcId: string) => NpcRelationshipState | undefined) | undefined
+  >(undefined)
+  useEffect(() => {
+    getRelationshipContextForNpcRef.current = getRelationshipContextForNpc
+  }, [getRelationshipContextForNpc])
   const onNpcDialogueResolvedRef = useRef<((event: NpcDialogueResolvedEvent) => void) | undefined>(undefined)
   useEffect(() => {
     onNpcDialogueResolvedRef.current = onNpcDialogueResolved
@@ -399,6 +412,7 @@ export function RoomViewer({
         roomContext: roomDialogueContextRef.current,
         questStage: questStageRef.current,
         memoryContext: getRoomMemoryContextForNpcRef.current?.(target.npcId),
+        relationshipState: getRelationshipContextForNpcRef.current?.(target.npcId),
       })).then((result) => {
         if (
           activeNPCDialogueRef.current !== target

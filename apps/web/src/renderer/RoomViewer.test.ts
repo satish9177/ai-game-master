@@ -1260,6 +1260,110 @@ describe('RoomViewer NPC dialogue room context wiring', () => {
     expect(replies[0]).not.toHaveProperty('memoryContext')
   })
 
+  it('gets relationship context with the real target npcId and passes it into NPCDialogueService.reply', async () => {
+    const replies: unknown[] = []
+    const room = loadedRoom()
+    const relationshipState = {
+      schemaVersion: 1,
+      scope: { worldId: 'world-1', sessionId: 'session-1', npcId: 'room-npc' },
+      subject: 'npc',
+      object: 'player',
+      axes: { trust: 0, respect: 0, fear: 0, familiarity: 50 },
+      interactionCount: 3,
+    }
+    const getRelationshipContextForNpc = vi.fn(() => relationshipState)
+
+    const props = {
+      roomSource: { getRoom: async () => ({ ok: true, room }) },
+      sessionId: 'session-1',
+      interactionService: { resolve: async () => ({ status: 'rejected', reason: 'missing-effect' }) },
+      encounterService: { resolve: async () => ({ status: 'failed', reason: 'not-found' }) },
+      npcDialogueService: {
+        reply: async (input: unknown) => {
+          replies.push(input)
+          return { status: 'replied', turn: { speaker: 'npc', text: 'A familiar line.' } }
+        },
+      },
+      onNavigate: async () => ({ status: 'failed', reason: 'not-found' }),
+      getRelationshipContextForNpc,
+    } as unknown as Parameters<typeof RoomViewer>[0]
+    RoomViewer(props)
+
+    await Promise.resolve()
+    await Promise.resolve()
+
+    const engine = mockState.engineInstances[0]
+    engine?.onRequestOpenInteraction?.({
+      id: 'room-npc',
+      type: 'npc',
+      label: 'Secret NPC Object Name',
+      affordance: 'talk',
+      key: 'F',
+      prompt: 'Secret interaction prompt',
+      position: { x: 0, y: 0, z: -3 },
+    })
+
+    await Promise.resolve()
+    expect(replies).toHaveLength(0)
+
+    const handleNPCSay = mockState.callbacks[0] as (promptId: string | undefined) => void
+    handleNPCSay(undefined)
+
+    await Promise.resolve()
+
+    expect(replies).toHaveLength(1)
+    expect(getRelationshipContextForNpc).toHaveBeenCalledWith('room-npc')
+    expect(replies[0]).toMatchObject({
+      npcId: 'room-npc',
+      relationshipState,
+    })
+  })
+
+  it('omits relationshipState when no callback is provided, on the first Continue click after opening NPC dialogue', async () => {
+    const replies: unknown[] = []
+    const room = loadedRoom()
+
+    const props = {
+      roomSource: { getRoom: async () => ({ ok: true, room }) },
+      sessionId: 'session-1',
+      interactionService: { resolve: async () => ({ status: 'rejected', reason: 'missing-effect' }) },
+      encounterService: { resolve: async () => ({ status: 'failed', reason: 'not-found' }) },
+      npcDialogueService: {
+        reply: async (input: unknown) => {
+          replies.push(input)
+          return { status: 'replied', turn: { speaker: 'npc', text: 'A line.' } }
+        },
+      },
+      onNavigate: async () => ({ status: 'failed', reason: 'not-found' }),
+    } as unknown as Parameters<typeof RoomViewer>[0]
+    RoomViewer(props)
+
+    await Promise.resolve()
+    await Promise.resolve()
+
+    const engine = mockState.engineInstances[0]
+    engine?.onRequestOpenInteraction?.({
+      id: 'room-npc',
+      type: 'npc',
+      label: 'Secret NPC Object Name',
+      affordance: 'talk',
+      key: 'F',
+      prompt: 'Secret interaction prompt',
+      position: { x: 0, y: 0, z: -3 },
+    })
+
+    await Promise.resolve()
+    expect(replies).toHaveLength(0)
+
+    const handleNPCSay = mockState.callbacks[0] as (promptId: string | undefined) => void
+    handleNPCSay(undefined)
+
+    await Promise.resolve()
+
+    expect(replies).toHaveLength(1)
+    expect(replies[0]).not.toHaveProperty('relationshipState')
+  })
+
   it('uses authored post-use body for an already-resolved offering coffer', async () => {
     const room = loadRoomSpec({
       schemaVersion: 1,

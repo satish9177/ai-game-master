@@ -518,6 +518,15 @@ function App() {
     const context = buildVisibleRoomMemoryContext(recalledRoomMemory, npcId)
     return context !== undefined && context.entries.length > 0 ? context : undefined
   }, [recalledRoomMemory])
+  // Read-only relationship-context lookup for the active dialogue NPC only
+  // (npc-relationship-state-v0, Slice 3). Reads the same ephemeral
+  // relationshipsRef map handleNpcDialogueResolved writes to; never mutates
+  // it, never reaches across npcId keys, and returns undefined (which
+  // buildDialogueContext degrades to neutral) for an NPC with no held
+  // projection yet.
+  const getRelationshipContextForNpc = useCallback((npcId: string): NpcRelationshipState | undefined => {
+    return relationshipsRef.current.get(npcId)
+  }, [])
   const handleNpcDialogueResolved = useCallback((event: NpcDialogueResolvedEvent): void => {
     const state = currentWorldStateRef.current
     if (state === null) return
@@ -1245,6 +1254,7 @@ function App() {
           onNpcDialogueResolved={handleNpcDialogueResolved}
           questStage={buildQuestStage({ quest, questHints, questSpec: questSpecSnapshot })}
           getRoomMemoryContextForNpc={getRoomMemoryContextForNpc}
+          getRelationshipContextForNpc={getRelationshipContextForNpc}
           {...(activePlay.objectivesPerRoom === true
             ? { resolvedObjectIds: activePlay.entryResolvedObjectIds }
             : {})}

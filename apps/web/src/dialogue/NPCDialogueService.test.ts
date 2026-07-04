@@ -7,6 +7,8 @@ import type {
   RoomDialogueContext,
   RoomMemoryDialogueContext,
 } from '../domain/dialogue/contracts'
+import { neutralRelationship } from '../domain/npcRelationship/neutral'
+import type { NpcRelationshipState } from '../domain/npcRelationship/contracts'
 import type { Logger, LogContext, LogLevel } from '../platform/logger/Logger'
 import { InMemoryWorldStore } from '../world-session/InMemoryWorldStore'
 import { WorldSession } from '../world-session/WorldSession'
@@ -203,6 +205,115 @@ describe('NPCDialogueService', () => {
 
     expect(requests[0]?.context.memory).toBeUndefined()
     expect(requests[0]?.context).not.toHaveProperty('memory')
+  })
+
+  it('projects a bucketed relationship hint from the provided relationshipState', async () => {
+    const requests: NPCDialogueRequest[] = []
+    const harness = createHarness({
+      reply: async (request) => {
+        requests.push(request)
+        return { text: 'A familiar answer.' }
+      },
+    })
+    const state = await start(harness)
+    const scope = { worldId: state.worldId, sessionId: state.sessionId, npcId: 'friendly-aide' }
+    const relationshipState: NpcRelationshipState = {
+      ...neutralRelationship(scope),
+      axes: { ...neutralRelationship(scope).axes, familiarity: 50 },
+    }
+
+    await harness.service.reply({
+      sessionId: state.sessionId,
+      npcId: 'friendly-aide',
+      npcName: 'Asha',
+      dialogue: { persona: 'friendly-aide' },
+      history: [],
+      relationshipState,
+    })
+
+    expect(requests).toHaveLength(1)
+    expect(requests[0]?.context.relationship).toEqual({
+      schemaVersion: 1,
+      subject: 'npc',
+      object: 'player',
+      familiarityBucket: 'medium',
+      trustBucket: 'neutral',
+      respectBucket: 'neutral',
+      fearBucket: 'none',
+    })
+  })
+
+  it('degrades to the neutral/no-familiarity relationship context when relationshipState is absent', async () => {
+    const requests: NPCDialogueRequest[] = []
+    const harness = createHarness({
+      reply: async (request) => {
+        requests.push(request)
+        return { text: 'A plain answer.' }
+      },
+    })
+    const state = await start(harness)
+
+    await harness.service.reply({
+      sessionId: state.sessionId,
+      npcId: 'friendly-aide',
+      npcName: 'Asha',
+      dialogue: { persona: 'friendly-aide' },
+      history: [],
+    })
+
+    expect(requests[0]?.context.relationship).toEqual({
+      schemaVersion: 1,
+      subject: 'npc',
+      object: 'player',
+      familiarityBucket: 'none',
+      trustBucket: 'neutral',
+      respectBucket: 'neutral',
+      fearBucket: 'none',
+    })
+  })
+
+  it('does not leak one npc relationship state into another npc dialogue context', async () => {
+    const requests: NPCDialogueRequest[] = []
+    const harness = createHarness({
+      reply: async (request) => {
+        requests.push(request)
+        return { text: 'ok' }
+      },
+    })
+    const state = await start(harness)
+    const scopeA = { worldId: state.worldId, sessionId: state.sessionId, npcId: 'aide-a' }
+    const relationshipA: NpcRelationshipState = {
+      ...neutralRelationship(scopeA),
+      axes: { ...neutralRelationship(scopeA).axes, familiarity: 90 },
+    }
+
+    await harness.service.reply({
+      sessionId: state.sessionId,
+      npcId: 'aide-a',
+      npcName: 'Asha',
+      dialogue: { persona: 'friendly-aide' },
+      history: [],
+      relationshipState: relationshipA,
+    })
+    await harness.service.reply({
+      sessionId: state.sessionId,
+      npcId: 'aide-b',
+      npcName: 'Bram',
+      dialogue: { persona: 'stern-guard' },
+      history: [],
+    })
+
+    expect(requests).toHaveLength(2)
+    expect(requests[0]?.context.relationship?.familiarityBucket).toBe('high')
+    expect(requests[1]?.context.relationship).toEqual({
+      schemaVersion: 1,
+      subject: 'npc',
+      object: 'player',
+      familiarityBucket: 'none',
+      trustBucket: 'neutral',
+      respectBucket: 'neutral',
+      fearBucket: 'none',
+    })
   })
 
   it('rejects missing dialogue before reading the session or provider', async () => {

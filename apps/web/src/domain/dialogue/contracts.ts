@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import type { Affordance } from '../interactions/affordance'
 import type { RoomObject } from '../roomSpec'
+import type { RelationshipDialogueContext } from '../npcRelationship/dialogueContext'
 
 export const NPCDialoguePromptSchema = z
   .object({
@@ -72,7 +73,12 @@ export type NPCDialogueContext = {
     inventoryItemIds: string[]
   }
   history: NPCDialogueTurn[]
-  relationship?: string
+  /**
+   * Bounded, read-only, bucketed relationship hint (npc-relationship-state-v0,
+   * Slice 3). Never raw scores, never authoritative -- a compact dialogue-tone
+   * hint only. See `RelationshipDialogueContext`.
+   */
+  relationship?: RelationshipDialogueContext
 }
 
 export type NPCDialogueRequest = {

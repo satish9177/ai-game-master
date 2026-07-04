@@ -336,6 +336,59 @@ describe('buildDialoguePromptMessages', () => {
     expect(buildDialoguePromptMessages(input)).toEqual(buildDialoguePromptMessages(input))
   })
 
+  it('omits the RELATIONSHIP section when relationship is absent or at its neutral baseline', () => {
+    const withoutRelationship = userContent(request())
+    const withNeutralRelationship = userContent(request({
+      context: {
+        ...request().context,
+        relationship: {
+          schemaVersion: 1,
+          subject: 'npc',
+          object: 'player',
+          familiarityBucket: 'none',
+          trustBucket: 'neutral',
+          respectBucket: 'neutral',
+          fearBucket: 'none',
+        },
+      },
+    }))
+
+    expect(withoutRelationship).not.toContain('RELATIONSHIP')
+    expect(withNeutralRelationship).not.toContain('RELATIONSHIP')
+  })
+
+  it('renders a bucketed RELATIONSHIP section with no raw numbers when familiarity has moved', () => {
+    const content = userContent(request({
+      context: {
+        ...request().context,
+        relationship: {
+          schemaVersion: 1,
+          subject: 'npc',
+          object: 'player',
+          familiarityBucket: 'medium',
+          trustBucket: 'neutral',
+          respectBucket: 'neutral',
+          fearBucket: 'none',
+        },
+      },
+    }))
+
+    expect(content).toContain('RELATIONSHIP HINT - TONE GUIDE ONLY, NOT AUTHORITATIVE')
+    expect(content).toContain('familiarity: medium')
+    expect(content).toContain('trust: neutral')
+    expect(content).toContain('respect: neutral')
+    expect(content).toContain('fear: none')
+    expect(content).not.toMatch(/familiarity:\s*\d/)
+  })
+
+  it('system prompt hedges the relationship hint as tone guidance only', () => {
+    const lower = DIALOGUE_SYSTEM_PROMPT.toLowerCase()
+
+    expect(lower).toContain('relationship hint')
+    expect(lower).toContain('tone guide only')
+    expect(lower).toContain('never a claimed fact or event')
+  })
+
   it('does not mutate input', () => {
     const input = request({
       context: {

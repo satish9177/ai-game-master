@@ -6,6 +6,7 @@ import type {
   RoomDialogueContext,
   RoomMemoryDialogueContext,
 } from '../domain/dialogue/contracts'
+import type { NpcRelationshipState } from '../domain/npcRelationship/contracts'
 
 export function buildNPCDialogueReplyInput({
   sessionId,
@@ -16,6 +17,7 @@ export function buildNPCDialogueReplyInput({
   roomContext,
   questStage,
   memoryContext,
+  relationshipState,
 }: {
   sessionId: string
   target: NPCDialogueTarget
@@ -25,6 +27,7 @@ export function buildNPCDialogueReplyInput({
   roomContext?: RoomDialogueContext
   questStage?: QuestDialogueContext
   memoryContext?: RoomMemoryDialogueContext
+  relationshipState?: NpcRelationshipState
 }): NPCDialogueInput {
   return {
     sessionId,
@@ -38,5 +41,6 @@ export function buildNPCDialogueReplyInput({
     ...(roomContext !== undefined ? { roomContext } : {}),
     ...(questStage !== undefined ? { quest: questStage } : {}),
     ...(memoryContext !== undefined ? { memoryContext } : {}),
+    ...(relationshipState !== undefined ? { relationshipState } : {}),
   }
 }

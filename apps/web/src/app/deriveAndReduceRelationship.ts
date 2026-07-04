@@ -1,6 +1,7 @@
 import { applyRelationshipEffects } from '../domain/npcRelationship/reducer'
 import type { RelationshipReductionContext } from '../domain/npcRelationship/reducer'
 import type { NpcRelationshipState } from '../domain/npcRelationship/contracts'
+import { familiarityBucket } from '../domain/npcRelationship/dialogueContext'
 import type { StructuredDialogueEffect } from '../domain/structuredDialogueEffects/contracts'
 import type { Logger } from '../platform/logger/Logger'
 
@@ -17,15 +18,6 @@ export interface DeriveAndReduceRelationshipResult {
   appliedCount: number
   ignoredCount: number
   clampedAxes: number
-}
-
-type FamiliarityBucket = 'none' | 'low' | 'medium' | 'high'
-
-function familiarityBucket(familiarity: number): FamiliarityBucket {
-  if (familiarity <= 0) return 'none'
-  if (familiarity <= 33) return 'low'
-  if (familiarity <= 66) return 'medium'
-  return 'high'
 }
 
 /**
