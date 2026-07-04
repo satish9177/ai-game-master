@@ -3702,6 +3702,28 @@ describe('memory feedback state wiring - Slice 4', () => {
     expect(render).not.toContain('roomMemoryContext={')
   })
 
+  it('App exposes the ephemeral relationship projection to dialogue context read-only, for the active npc only', () => {
+    const relationshipContextCallback = appSource.slice(
+      appSource.indexOf('const getRelationshipContextForNpc = useCallback('),
+      appSource.indexOf('const handleNpcDialogueResolved = useCallback('),
+    )
+    const render = appSource.slice(
+      appSource.indexOf('<RoomViewer'),
+      appSource.indexOf('{...(activePlay.objectivesPerRoom === true'),
+    )
+
+    expect(appSource).toContain("import type { NpcRelationshipState } from './domain/npcRelationship/contracts'")
+    expect(relationshipContextCallback).toContain('return relationshipsRef.current.get(npcId)')
+    expect(render).toContain('getRelationshipContextForNpc={getRelationshipContextForNpc}')
+
+    // Read-only: the callback only reads from the ref, it never calls
+    // relationshipsRef.current.set(...) or any React state setter.
+    expect(relationshipContextCallback).not.toContain('relationshipsRef.current.set')
+    expect(relationshipContextCallback).not.toMatch(/\bset[A-Z]\w*\(/)
+    expect(relationshipContextCallback).not.toContain('appendEvent')
+    expect(relationshipContextCallback).not.toContain('WorldCommand')
+  })
+
   it('App wires inert dialogue semantic events and an ephemeral npc relationship projection from structural RoomViewer callback data only', () => {
     const handler = appSource.slice(
       appSource.indexOf('const handleNpcDialogueResolved = useCallback('),
