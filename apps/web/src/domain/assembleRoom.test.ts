@@ -406,6 +406,7 @@ describe('assembleRoom', () => {
       'objectsRepaired',
       'composed',
       'overlapRepaired',
+      'clutterDistributed',
       'lacksAnchor',
       'lacksInteractable',
       'spawnRepaired',
@@ -445,6 +446,7 @@ describe('assembleRoom', () => {
       expect(typeof diagnostics.objectsRepaired).toBe('boolean')
       expect(typeof diagnostics.composed).toBe('boolean')
       expect(typeof diagnostics.overlapRepaired).toBe('boolean')
+      expect(typeof diagnostics.clutterDistributed).toBe('boolean')
       expect(typeof diagnostics.lacksAnchor).toBe('boolean')
       expect(typeof diagnostics.lacksInteractable).toBe('boolean')
       expect(typeof diagnostics.spawnRepaired).toBe('boolean')
@@ -841,6 +843,56 @@ describe('assembleRoom', () => {
     expect(validateRoom(result.room).ok).toBe(true)
   })
 
+  it('runs clutter distribution after composition and before overlap repair', () => {
+    const result = assembleRoom(raw(validSpec({
+      shell: { dimensions: { width: 18, depth: 18, height: 4 }, exits: [{ side: 'north', width: 3 }] },
+      spawn: { position: [0, 1.7, 4] },
+      objects: Array.from({ length: 8 }, (_, i) => ({
+        type: 'crate',
+        id: `corner-crate-${i}`,
+        position: [-7, 0, -7],
+      })),
+    })), fallback)
+
+    expect(result.diagnostics.clutterDistributed).toBe(true)
+    expect(result.diagnostics.overlapRepaired).toBe(true)
+    expect(result.diagnostics.provenance).toBe('generated')
+    expect(result.diagnostics.failedStage).toBeUndefined()
+    const crates = result.room.objects.filter((object) => object.type === 'crate')
+    expect(crates).toHaveLength(8)
+    for (let i = 0; i < crates.length; i += 1) {
+      for (let j = i + 1; j < crates.length; j += 1) {
+        expect(objectFootprintsOverlap(crates[i]!, crates[j]!)).toBe(false)
+      }
+    }
+    expect(validateRoom(result.room).ok).toBe(true)
+  })
+
+  it('reports clutterDistributed only when distribution moves decorative clutter', () => {
+    const crowded = assembleRoom(raw(validSpec({
+      shell: { dimensions: { width: 18, depth: 18, height: 4 }, exits: [{ side: 'north', width: 3 }] },
+      spawn: { position: [0, 1.7, 4] },
+      objects: Array.from({ length: 6 }, (_, i) => ({
+        type: 'crate',
+        id: `crowded-crate-${i}`,
+        position: [-7, 0, -7],
+      })),
+    })), fallback)
+    const distributed = assembleRoom(raw(validSpec({
+      shell: { dimensions: { width: 18, depth: 18, height: 4 }, exits: [{ side: 'north', width: 3 }] },
+      spawn: { position: [0, 1.7, 4] },
+      objects: [
+        { type: 'crate', position: [-7, 0, -7] },
+        { type: 'crate', position: [-6, 0, -6] },
+        { type: 'crate', position: [-5, 0, -5] },
+        { type: 'crate', position: [-4.5, 0, -4.5] },
+      ],
+    })), fallback)
+
+    expect(crowded.diagnostics.clutterDistributed).toBe(true)
+    expect(distributed.diagnostics.clutterDistributed).toBe(false)
+  })
+
   it('threads missing anchor and interactable diagnostics safely', () => {
     const missing = assembleRoom(RAW_CENTER_CLUTTER, fallback).diagnostics
     expect(missing.lacksAnchor).toBe(true)
@@ -898,6 +950,7 @@ describe('assembleRoom', () => {
       expect(room).toBe(fallback)
       expect(diagnostics.composed).toBe(false)
       expect(diagnostics.overlapRepaired).toBe(false)
+      expect(diagnostics.clutterDistributed).toBe(false)
       expect(diagnostics.lacksAnchor).toBe(false)
       expect(diagnostics.lacksInteractable).toBe(false)
     }

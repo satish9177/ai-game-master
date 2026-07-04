@@ -5,6 +5,7 @@ import { validateRoom } from './validateRoom'
 import type { RoomIssueCode, RoomValidationResult } from './validateRoom'
 import { clampGeneratedShell, repairGeneratedObjects, repairGeneratedSpawn, repairGeneratedExits } from './generatedRoomLayout'
 import { composeGeneratedRoom } from './generatedRoomComposition'
+import { distributeGeneratedClutter } from './generatedRoomClutterDistribution'
 import { separateGeneratedObjects } from './generatedRoomSeparation'
 import { repairGeneratedAliases } from './generatedRoomAliases'
 import { repairGeneratedObjectTransforms } from './generatedRoomObjectTransforms'
@@ -91,6 +92,12 @@ export type RoomDiagnostics = {
    * for fallback.
    */
   overlapRepaired: boolean
+  /**
+   * Whether deterministic generated-room clutter distribution moved decorative
+   * overflow between sectors. This is a benign layout normalization and never
+   * deletes objects. Always false for fallback.
+   */
+  clutterDistributed: boolean
   /** Whether the generated room had no story anchor. False for fallback. */
   lacksAnchor: boolean
   /** Whether the generated room had no interactable. False for fallback. */
@@ -251,14 +258,23 @@ export function assembleRoom(
   })
   const { composed, lacksAnchor, lacksInteractable } = composition.diagnostics
 
-  // Stage 2.7b — separate overlapping generated objects by moving only lower
-  // priority movable objects. This never deletes objects and accepts residual
-  // overlap after bounded passes.
-  const overlapFixed = separateGeneratedObjects(composition.room, {
+  // Stage 2.7a - redistribute decorative overflow across coarse room sectors.
+  // This macro pass moves only decorative clutter and leaves overlap micro-repair
+  // to Stage 2.7b.
+  const clutterFixed = distributeGeneratedClutter(composition.room, {
     themePack: options.themePack,
     storyKind: options.storyKind,
   })
-  const overlapRepaired = overlapFixed !== composition.room
+  const clutterDistributed = clutterFixed !== composition.room
+
+  // Stage 2.7b — separate overlapping generated objects by moving only lower
+  // priority movable objects. This never deletes objects and accepts residual
+  // overlap after bounded passes.
+  const overlapFixed = separateGeneratedObjects(clutterFixed, {
+    themePack: options.themePack,
+    storyKind: options.storyKind,
+  })
+  const overlapRepaired = overlapFixed !== clutterFixed
 
   // Stage 2.8 — clamp and nudge the generated spawn into a safe floor position.
   // Handles spawn outside the playable area, too close to wall, or crowded by a
@@ -337,6 +353,7 @@ export function assembleRoom(
         objectsRepaired,
         composed,
         overlapRepaired,
+        clutterDistributed,
         lacksAnchor,
         lacksInteractable,
         spawnRepaired,
@@ -379,6 +396,7 @@ export function assembleRoom(
         objectsRepaired,
         composed,
         overlapRepaired,
+        clutterDistributed,
         lacksAnchor,
         lacksInteractable,
         spawnRepaired,
@@ -414,6 +432,7 @@ export function assembleRoom(
       objectsRepaired: false,
       composed: false,
       overlapRepaired: false,
+      clutterDistributed: false,
       lacksAnchor: false,
       lacksInteractable: false,
       spawnRepaired: false,
@@ -452,6 +471,7 @@ function toFallback(
       objectsRepaired: false,
       composed: false,
       overlapRepaired: false,
+      clutterDistributed: false,
       lacksAnchor: false,
       lacksInteractable: false,
       spawnRepaired: false,
