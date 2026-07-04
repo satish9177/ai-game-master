@@ -1,9 +1,9 @@
 # Implementation Plan — `feature/generated-room-theme-materials-v1`
 
-> Status: **DECISIONS LOCKED — docs-only. No code written.**
-> Open design decisions D1–D3 resolved by the maintainer (see §15). Design first per
-> `AGENTS.md` ("Do not implement until the maintainer approves."). This update records the
-> locked choices; implementation is still gated on plan approval.
+> Status: **COMPLETE.**
+> Open design decisions D1–D3 resolved by the maintainer (see §15). The approved
+> implementation has shipped in three slices: pure theme derivation, themed lighting grade,
+> and themed material finish plus limited accent/emissive.
 >
 > Companion docs: [ARCHITECTURE](../ARCHITECTURE.md) · [BOUNDARIES](../BOUNDARIES.md) ·
 > [CONVENTIONS](../CONVENTIONS.md).
@@ -15,6 +15,68 @@
 > - Generated Room Theme Vocabulary v0 ([ADR-0044](../decisions/ADR-0044-generated-room-theme-vocabulary-v0.md)) —
 >   the `GeneratedRoomThemeVocabulary.palette` (incl. the currently-unused `accent`/`emissive`)
 >   this plan activates at render time.
+
+---
+
+## Implementation closeout
+
+Implementation status: **complete**.
+
+Completed slices:
+
+- **Slice 1:** `deriveRoomVisualTheme` pure domain helper.
+- **Slice 2:** themed lighting grade.
+- **Slice 3:** themed material finish + limited accent/emissive.
+
+Implemented files:
+
+- `apps/web/src/domain/roomVisualTheme.ts`
+- `apps/web/src/domain/roomVisualTheme.test.ts`
+- `apps/web/src/renderer/engine/Engine.ts`
+- `apps/web/src/renderer/engine/builders/lighting.ts`
+- `apps/web/src/renderer/engine/builders/lighting.test.ts`
+- `apps/web/src/renderer/engine/builders/materialTheme.ts`
+- `apps/web/src/renderer/engine/builders/materialTheme.test.ts`
+- `apps/web/src/renderer/engine/builders/index.ts`
+- `apps/web/src/renderer/engine/builders/shell.ts`
+- `apps/web/src/renderer/engine/builders/shell.test.ts`
+- `apps/web/src/renderer/engine/builders/storyAnchors.ts`
+- `apps/web/src/renderer/engine/builders/storyAnchors.test.ts`
+- `apps/web/src/renderer/engine/builders/strangeDevices.ts`
+- `apps/web/src/renderer/engine/builders/strangeDevices.test.ts`
+
+Verification:
+
+- `npm.cmd run test -- roomVisualTheme` passed.
+- `npm.cmd run test -- lighting roomVisualTheme` passed.
+- `npm.cmd run test -- materialTheme shell storyAnchors strangeDevices` passed.
+- `npm.cmd run test -- objectRegistry objectIndicators characters documents practicalProps postApocProps` passed.
+- `npm.cmd run lint` passed.
+- `npm.cmd run build` failed only on known unrelated TypeScript strictness errors in
+  `assembleRoom.test.ts`, `ensureGeneratedNpcPresence.ts`, `npcMovementContract.test.ts`, and
+  `OpenAICompatibleNPCDialogueProvider.test.ts`.
+
+Safety confirmation:
+
+- Renderer/domain-only.
+- No `App.tsx` changes.
+- No provider/LLM/prompt changes.
+- No schema/save-load/`RoomSpec` changes.
+- No gameplay authority change.
+- No event-log mutation.
+- No memory writes.
+- No FTS/persistence/facts/dialogue-context files.
+- No new dependencies/assets.
+- No raw prompt/provider/generated text reads.
+- Deterministic trusted renderer only.
+- `null` theme preserves neutral behavior.
+- Accent/emissive limited to focal anchors and special props.
+- Normal props preserve base/default material behavior.
+
+Slice 3 review fix:
+
+- `buildMachine` null-theme indicators were corrected to remain non-emissive.
+- Regression test added.
 
 ---
 
