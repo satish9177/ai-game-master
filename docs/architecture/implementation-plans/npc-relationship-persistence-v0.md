@@ -1,6 +1,6 @@
 # Implementation Plan - `feature/npc-relationship-persistence-v0`
 
-> Status: **DESIGN APPROVED / DOCS-FIRST / NOT IMPLEMENTED.**
+> Status: **IMPLEMENTED.**
 > ADR: [ADR-0081](../decisions/ADR-0081-npc-relationship-persistence-v0.md).
 > Companion docs: [ARCHITECTURE](../ARCHITECTURE.md) ·
 > [BOUNDARIES](../BOUNDARIES.md) · [AGENTS.md](../../../AGENTS.md).
@@ -17,10 +17,9 @@
 
 ## Status
 
-**DESIGN APPROVED / DOCS-FIRST / NOT IMPLEMENTED.** This plan is written before
-any runtime code, module, or test. No `App.tsx`, `saveSlotStore.ts`, or domain
-runtime file is changed by this docs slice. Implementation begins only after
-maintainer approval and a clean-main confirmation.
+**IMPLEMENTED.** All six slices landed on `main`. See
+[Closeout (Slice 6)](#closeout-slice-6) for the final file list, validated
+behavior summary, and verification results.
 
 ## Problem Statement
 
@@ -367,3 +366,101 @@ Safety / regression (Slice 5):
 The sidecar key is optional. Reverting the feature leaves existing save slots
 loadable because older wrapper readers ignore unknown keys. No database
 migration, authoritative schema change, or backend rollback is required.
+
+## Closeout (Slice 6)
+
+**Feature complete.** All six slices are implemented and committed on `main`.
+
+Implemented files:
+
+- `apps/web/src/domain/npcRelationship/relationshipSaveState.ts` (Slice 1) —
+  `NPC_RELATIONSHIP_SAVE_SCHEMA_VERSION`, `NPC_RELATIONSHIP_SAVE_MAX_RECORDS`,
+  `buildNpcRelationshipSaveJson`, `loadNpcRelationshipSaveState`,
+  `filterRestorableRelationships`; strict per-record validation via the
+  existing `NpcRelationshipStateSchema`; fixed reason codes; deterministic cap.
+- `apps/web/src/domain/npcRelationship/relationshipSaveState.test.ts` (Slices 1, 5).
+- `apps/web/src/app/saveSlotStore.ts` (Slice 2, extended) — optional
+  `npcRelationshipJson` field on `SlotWrapper`/`SlotReadResult`, carried
+  through `write(...)`/`isSlotWrapper`/both bindings as bytes only.
+- `apps/web/src/app/saveSlotStore.test.ts` (Slice 2, extended).
+- `apps/web/src/app/App.helpers.ts` (Slice 3, extended) —
+  `restoreNpcRelationshipsFromSlot(...)`, mirroring
+  `restoreRuntimeRoomMemoryFromSlot`: parses/validates the sidecar,
+  scope-filters, and returns surviving records plus safe counts and status.
+- `apps/web/src/app/App.helpers.test.ts` (Slice 3, extended).
+- `apps/web/src/App.tsx` (Slice 4, extended) — manual-save snapshot of
+  `relationshipsRef` into `npcRelationshipJson`; manual-load re-seed
+  (rekeyed by `npcId`) gated on the existing `requestVersion` guard; safe
+  count-only logging.
+- `apps/web/src/App.test.tsx` (Slice 4, extended).
+- `apps/web/src/evaluation/logSafety.eval.test.ts` (Slice 5, extended).
+- `apps/web/src/evaluation/noSideEffects.eval.test.ts` (Slice 5, extended).
+- `apps/web/src/redteam/relationshipSidecar.redteam.test.ts` (Slice 5) —
+  authority-leak, raw-text-leak, cross-world-leak, feedback-silence, and
+  prompt bucket-only continuity coverage.
+
+Behavior summary:
+
+- Manual save snapshots `relationshipsRef` into validated
+  `NpcRelationshipState` records only; there is no autosave.
+- The sidecar key is `npcRelationshipJson` on the existing `SlotWrapper`.
+- Restore scope-filters surviving records by the restored authoritative
+  `{worldId, sessionId}`; `npcId` is not cross-checked against loaded rooms
+  (mirrors the room-memory sidecar).
+- Hydration re-seeds the non-authoritative `relationshipsRef` directly; it
+  never routes through `applyRelationshipEffects`/`deriveAndReduceRelationship`.
+- Hydration is feedback-silent: re-seeding never emits
+  `RELATIONSHIP_FAMILIARITY_INCREASED_MESSAGE`; only a subsequent live
+  reducer tick can produce feedback.
+- Dialogue projection remains bucketed/tone-only; no raw axis score, delta,
+  or `interactionCount` reaches any prompt.
+- No memory, fact, `fact_visibility`, `WorldEvent`, `WorldCommand`, or
+  broader `WorldState` authority is written or implied by this feature.
+
+Validation summary:
+
+- Per-record validation reuses the existing `NpcRelationshipStateSchema`
+  (no bespoke axes validator).
+- Any record failing schema validation is dropped whole — strict drop,
+  never field-repaired.
+- Malformed JSON, an unsupported envelope `schemaVersion`, or any other
+  corrupt/unsupported sidecar degrades safely to an empty relationship map;
+  the game load still succeeds.
+- The deterministic hard cap is `NPC_RELATIONSHIP_SAVE_MAX_RECORDS = 64`.
+- An empty surviving snapshot omits the sidecar entirely, keeping the
+  wrapper byte-identical to the pre-feature format.
+
+Verification (2026-07-06, from `apps/web`):
+
+```bash
+npx vitest run src/domain/npcRelationship/relationshipSaveState.test.ts \
+  src/app/saveSlotStore.test.ts src/app/App.helpers.test.ts src/App.test.tsx \
+  src/evaluation/logSafety.eval.test.ts src/evaluation/noSideEffects.eval.test.ts \
+  src/redteam/relationshipSidecar.redteam.test.ts
+npm run build
+npm run lint
+```
+
+Results:
+
+- Targeted App/App.helpers/saveSlotStore/relationshipSaveState/evaluation/
+  redteam tests passed: 7 files, 280 tests.
+- Evaluation tests (`logSafety.eval.test.ts`, `noSideEffects.eval.test.ts`)
+  passed as part of the run above.
+- `npm run build` (`tsc -b && vite build`) passed clean.
+- `npm run lint` (`eslint .`) passed clean.
+- The full redteam suite was not run in this slice. A known pre-existing,
+  unrelated stale assertion failure in `feedback.redteam.test.ts` remains
+  outstanding; it predates this feature and is not caused or touched by it,
+  per this slice's scope (docs closeout only, no runtime/test changes).
+
+Known limitations (carried forward):
+
+- Manual-save only; there is no autosave path.
+- The localStorage sidecar is non-authoritative byte parking and
+  tamper-bounded: a hand-edited value is cosmetic (bucket/tone + transient
+  feedback only) and bounded by schema, never authoritative.
+- No NPC-to-NPC relationships.
+- No relationship-driven hostility, chase, or routine behavior.
+- No reason/history persistence — only the current bounded axes/
+  `interactionCount` snapshot survives save/load.

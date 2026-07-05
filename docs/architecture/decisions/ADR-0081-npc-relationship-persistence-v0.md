@@ -1,6 +1,6 @@
 # ADR-0081: NPC Relationship Persistence v0
 
-- **Status:** Proposed - Docs-First (design approved; not implemented)
+- **Status:** Accepted - Implemented
 - **Date:** 2026-07-06
 - **Deciders:** Project owner
 - **Extends:**
@@ -16,7 +16,10 @@
 
 > Full design + slice breakdown lives in
 > [`npc-relationship-persistence-v0`](../implementation-plans/npc-relationship-persistence-v0.md).
-> This ADR documents the approved design direction before implementation.
+> This ADR documents the approved design direction; the full closeout (file
+> list, verification run, results) lives in that plan's
+> [Closeout (Slice 6)](../implementation-plans/npc-relationship-persistence-v0.md#closeout-slice-6)
+> section.
 
 ---
 
@@ -294,5 +297,39 @@ relationship record needs no text normalization because it has no text.
   cosmetic, bounded by schema.
 - The feature does not provide cross-session/global relationships, backend APIs,
   browser-to-SQLite persistence, or relationship history.
-- This ADR is docs-first; implementation, tests, and manual smoke follow after
-  maintainer approval and a clean-main confirmation.
+
+---
+
+## Implementation Outcome
+
+Implemented and verified 2026-07-06. All six planned slices landed on `main`:
+the pure `relationshipSaveState.ts` module (Slice 1), the `npcRelationshipJson`
+`SlotWrapper` sidecar field (Slice 2), the `restoreNpcRelationshipsFromSlot`
+App helper (Slice 3), manual save/load wiring in `App.tsx` (Slice 4),
+authority/log-safety/redteam coverage (Slice 5), and this docs closeout
+(Slice 6).
+
+The implementation matches this decision exactly:
+
+- The sidecar remains **non-authoritative byte parking**, restored only as a
+  **projection re-seed** of the ephemeral `relationshipsRef`. It is still never
+  a `SaveGame` field, `WorldState` field, `WorldEvent`, `WorldCommand`, memory
+  record, or fact, and it still cannot mutate truth.
+- Validation, scope filtering (`worldId`/`sessionId`), the deterministic
+  `NPC_RELATIONSHIP_SAVE_MAX_RECORDS = 64` cap, and the omit-when-empty
+  behavior all shipped as designed, reusing `NpcRelationshipStateSchema` with
+  no bespoke validator.
+- Hydration is silent (no relationship feedback on load) and dialogue
+  projection stayed bucketed/tone-only, exactly as specified.
+- No `SaveGame`/`WorldState`/`NpcRelationshipState` schema, reducer, event,
+  quest, gate, item, flag, dialogue-effect, provider, prompt, or
+  feedback-derivation change was made.
+
+Targeted App/App.helpers/saveSlotStore/relationshipSaveState/evaluation/redteam
+tests (7 files, 280 tests), `npm run build`, and `npm run lint` all passed
+clean. Full verification detail lives in the implementation plan's
+[Closeout (Slice 6)](../implementation-plans/npc-relationship-persistence-v0.md#closeout-slice-6).
+
+A known pre-existing, unrelated stale assertion failure in
+`feedback.redteam.test.ts` remains outstanding; it predates this feature and is
+not caused by it.

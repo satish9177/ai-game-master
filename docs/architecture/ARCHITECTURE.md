@@ -275,6 +275,24 @@ Throughout these docs:
   trusted role/route assignment, day/night selection, and awareness/chase override
   are deferred to v1
   ([ADR-0080](./decisions/ADR-0080-npc-patrol-route-v0.md)).
+- ✅ **Implemented** — NPC Relationship Persistence v0 — browser runtime
+  NPC→player relationship state now survives Save/Continue/Load via a new
+  optional `npcRelationshipJson` `SlotWrapper` sidecar, mirroring the runtime
+  room-memory sidecar pattern. The pure
+  `domain/npcRelationship/relationshipSaveState.ts` module builds/parses a
+  versioned envelope of full `NpcRelationshipState` records, reusing the
+  existing `NpcRelationshipStateSchema` for strict per-record validation
+  (drop-whole-on-invalid, never repaired), scope-filtered to the restored
+  `worldId`/`sessionId`, and bounded by a deterministic
+  `NPC_RELATIONSHIP_SAVE_MAX_RECORDS = 64` cap; an empty snapshot omits the
+  sidecar entirely. Manual save only (no autosave) snapshots
+  `relationshipsRef`; manual load re-seeds it directly (rekeyed by `npcId`,
+  respecting the existing `requestVersion` guard) without calling the
+  reducer or relationship-feedback derivation, so hydration is feedback-silent
+  and dialogue projection stays bucketed/tone-only. No `SaveGame`/`WorldState`/
+  `NpcRelationshipState` schema, `WorldEvent`/`WorldCommand`, memory/fact/
+  `fact_visibility`, reducer, or provider/prompt change
+  ([ADR-0081](./decisions/ADR-0081-npc-relationship-persistence-v0.md)).
 - ❌ **Not built** — future shape only; documented so we don't paint into a corner.
 
 ## Status today (Renderer Foundation v0)
