@@ -248,6 +248,18 @@ Throughout these docs:
   `applyEvent`, schema/save/persistence, `RoomSpec`, UI/renderer, timer/background-
   simulation, or LLM/provider change
   ([ADR-0078](./decisions/ADR-0078-room-environment-transition-model-dry-v0.md)).
+- ✅ **Implemented** — Relationship Visible Feedback v0 — a single generic,
+  closed status line (`RELATIONSHIP_FAMILIARITY_INCREASED_MESSAGE`, "They seem
+  more familiar with you.") surfaces on an upward `familiarity` bucket
+  crossing for the active dialogue NPC, sharing the room-memory-feedback
+  transient slot by explicit precedence (memory-created > memory-recalled >
+  relationship-familiarity) so only one line ever renders. The pure gate
+  `decideRelationshipFeedback` (`app/relationshipFeedback.ts`) reads two
+  closed `FamiliarityBucket` values only; trust/respect/fear stay dry and
+  unreachable per `relationship-valence-reducer-v0`. No new logs, no
+  `WorldState`/`WorldEvent`/`WorldCommand`/memory/fact write, no persistence/
+  provider/prompt change, and no `schemaVersion` bump
+  ([ADR-0079](./decisions/ADR-0079-relationship-visible-feedback-v0.md)).
 - ❌ **Not built** — future shape only; documented so we don't paint into a corner.
 
 ## Status today (Renderer Foundation v0)

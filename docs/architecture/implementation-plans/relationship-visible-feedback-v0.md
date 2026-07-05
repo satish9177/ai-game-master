@@ -3,10 +3,9 @@
 > `relationship-visible-feedback-v0` is the **feature name**, not a Git branch —
 > this work lands directly on `main` (see §1, "Lane").
 
-> Status: **DESIGN LOCKED — NOT YET IMPLEMENTED (docs only).**
-> Design approved by the maintainer; no runtime/source/test code has been
-> written. This document and its ADR are the docs-first deliverable; the code
-> slices in §11 are pending a separate implementation approval.
+> Status: **✅ IMPLEMENTED.** All four required slices (§11.1-§11.4) landed;
+> Slice 5 (component rename) stayed non-blocking and was not taken. See §15
+> for the closeout record.
 > See [ADR-0079](../decisions/ADR-0079-relationship-visible-feedback-v0.md).
 >
 > Companion docs: [ARCHITECTURE](../ARCHITECTURE.md) · [BOUNDARIES](../BOUNDARIES.md) ·
@@ -56,7 +55,7 @@ maintainer approval:
 
 - **Feature:** `relationship-visible-feedback-v0`
 - **Lane:** worked on `main` directly (no feature branch).
-- **Status:** DESIGN LOCKED — NOT YET IMPLEMENTED (docs only).
+- **Status:** ✅ Implemented. See §15 for the closeout record.
 - **ADR:** [ADR-0079](../decisions/ADR-0079-relationship-visible-feedback-v0.md)
   (next free number; ADR-0078 is `room-environment-transition-model-dry-v0`).
 
@@ -262,19 +261,18 @@ decideRelationshipFeedback(
 
 ## 11. Implementation slices
 
-1. **Pure gate + message constant** (`app/relationshipFeedback.ts`) + unit
+1. ✅ **Pure gate + message constant** (`app/relationshipFeedback.ts`) + unit
    tests. No wiring.
-2. **State reducer-set + precedence selector** in `app/App.helpers.ts` + tests.
-   Still inert.
-3. **App wiring:** compute the crossing in `handleNpcDialogueResolved`, single
-   precedence-selected render slot, auto-dismiss effect, resets at the two
-   `= new Map()` points + room entry, plus App seam tests.
-4. **Eval extensions** to `logSafety` and `noSideEffects`.
-5. *(Optional, non-blocking)* rename `MemoryFeedback` → `TransientFeedback` +
-   neutral CSS class.
-6. **Docs closeout** (implemented-only convention): flip this plan and ADR-0079
-   to Implemented and add the ARCHITECTURE.md status line — at implementation
-   time only.
+2. ✅ **State reducer-set + precedence selector** in `app/App.helpers.ts` +
+   tests. Still inert.
+3. ✅ **App wiring:** compute the crossing in `handleNpcDialogueResolved`,
+   single precedence-selected render slot, auto-dismiss effect, resets at the
+   two `= new Map()` points + room entry, plus App seam tests.
+4. ✅ **Eval extensions** to `logSafety` and `noSideEffects`.
+5. ⬜ *(Optional, non-blocking — not taken)* rename `MemoryFeedback` →
+   `TransientFeedback` + neutral CSS class.
+6. ✅ **Docs closeout** (implemented-only convention): flip this plan and
+   ADR-0079 to Implemented and add the ARCHITECTURE.md status line.
 
 Planned verification commands (run during implementation):
 
@@ -334,3 +332,77 @@ item is the optional component rename (Slice 5), which does not block v0.
   only.
 - **Tests prove it:** §10, anchored by the presentational leak-sweep and the two
   eval extensions.
+
+## 15. Closeout record
+
+**Status: ✅ Implemented.** Slices 1-4 (§11) landed as committed; Slice 5 (the
+optional `MemoryFeedback` → `TransientFeedback` rename) was not taken —
+non-blocking, deferred.
+
+### Committed implementation files
+
+- `apps/web/src/app/relationshipFeedback.ts` — the closed
+  `RELATIONSHIP_FAMILIARITY_INCREASED_MESSAGE` constant, the
+  `RelationshipFeedbackMessage` type, and the pure `decideRelationshipFeedback`
+  gate (rank table over `FamiliarityBucket`; fires only on a strictly upward
+  crossing).
+- `apps/web/src/app/relationshipFeedback.test.ts` — pure-gate unit tests.
+- `apps/web/src/app/App.helpers.ts` — `RelationshipFeedbackState`,
+  `INITIAL_RELATIONSHIP_FEEDBACK_STATE`, `relationshipFeedbackAfterReduction`,
+  `relationshipFeedbackOnRoomEntry`, and the precedence selector
+  `selectTransientFeedbackMessage` (memory-created > memory-recalled >
+  relationship-familiarity).
+- `apps/web/src/app/App.helpers.test.ts` — reducer-set + precedence selector
+  tests.
+- `apps/web/src/App.tsx` — `relationshipFeedbackState` slot wired in
+  `handleNpcDialogueResolved` (via `familiarityBucket(prior)` /
+  `familiarityBucket(next)`), its own auto-dismiss `useEffect` on
+  `MEMORY_FEEDBACK_AUTO_DISMISS_MS`, resets at both `relationshipsRef.current =
+  new Map()` points (new prompt, load) and at room entry
+  (`enterActivePlay`, `handleNavigate`), and a single rendered
+  `<MemoryFeedback message={selectTransientFeedbackMessage(...)} />` slot.
+- `apps/web/src/App.test.tsx` — App-seam source-string assertions covering the
+  handler wiring, the two reset points, room-entry clearing, the auto-dismiss
+  effect, and the single precedence-selected render slot.
+- `apps/web/src/evaluation/logSafety.eval.test.ts` — Gate E extension proving
+  deriving/selecting the feedback message adds zero new log lines and that the
+  message text, effect/source kind, and axis names (`trust`/`respect`/`fear`/
+  `delta`) never reach serialized logs.
+- `apps/web/src/evaluation/noSideEffects.eval.test.ts` — Gate F extension
+  proving the feedback path appends no `WorldEvent`, issues no command, writes
+  no memory/fact/`fact_visibility`, and makes no provider/network call.
+
+### Verification run
+
+```bash
+npm run test -- relationshipFeedback
+npm run test -- App.helpers relationshipFeedback
+npm run test -- App relationshipFeedback App.helpers MemoryFeedback
+npm run test -- evaluation relationshipFeedback App.helpers
+npm run lint
+npm run build
+```
+
+### Safety summary
+
+- **Closed generic message only.** The only string this feature can render is
+  `RELATIONSHIP_FAMILIARITY_INCREASED_MESSAGE`; no NPC/room/object name, score,
+  delta, bucket enum value, effect/source kind, or confidence is ever rendered.
+- **Familiarity-only.** Trust/respect/fear stay dry and unreachable, per
+  `relationship-valence-reducer-v0` (ADR-0077); this feature does not touch
+  `dialogueContext.ts`.
+- **One shared transient slot.** Relationship feedback never renders as a
+  second stacked toast — it shares the single `role="status" aria-live="polite"`
+  slot with room memory feedback, selected by explicit precedence.
+- **Memory precedence preserved.** Memory-created and memory-recalled feedback
+  always win over relationship feedback; existing memory-feedback behavior and
+  tests are unchanged.
+- **No new logs.** Zero new log lines; the message text is never logged, and
+  the existing `deriveAndReduceRelationship` log shape (counts +
+  `familiarityBucket` + scope ids only) is unchanged, reaffirmed by the
+  `logSafety` eval extension.
+- **No authoritative state / persistence / provider / prompt change.** No
+  `WorldState`, `WorldEvent`, `WorldCommand`, memory, `Fact`/`fact_visibility`,
+  persistence, migration, save-game, provider, prompt, or `schemaVersion`
+  change. The relationship projection and the feedback state remain
+  ephemeral/in-memory only, reaffirmed by the `noSideEffects` eval extension.

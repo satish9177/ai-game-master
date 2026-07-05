@@ -1,6 +1,6 @@
 # ADR-0079: Relationship Visible Feedback v0
 
-- **Status:** Accepted — Design locked; implementation pending (docs only)
+- **Status:** Accepted — Implemented
 - **Date:** 2026-07-05
 - **Deciders:** Project owner
 - **Builds on:**
@@ -13,10 +13,10 @@
   `App.helpers.ts` state reducer-set, presentational `role="status"` line,
   `roomEntrySeq` anti-spam/reset, and auto-dismiss idiom.
 
-> Full plan, data shape, detection rules, test plan, and slices live in
+> Full plan, data shape, detection rules, test plan, and slices — including the
+> §15 closeout record (committed files + verification commands) — live in
 > [`relationship-visible-feedback-v0`](../implementation-plans/relationship-visible-feedback-v0.md).
-> This ADR records the decision; delivery closeout is added at implementation
-> time.
+> This ADR records the decision.
 
 ---
 
@@ -153,3 +153,15 @@ projection and the feedback state remain ephemeral/in-memory only.
   and screen-reader collisions.
 - **Render the NPC's name** ("Malik seems more familiar…"). Deferred: names are a
   new render surface; v0 stays generic and name-free per the firewall precedent.
+
+## Implementation outcome
+
+Shipped as designed, in four slices: the pure gate + message constant
+(`app/relationshipFeedback.ts`), the `App.helpers.ts` state reducer-set +
+precedence selector, the `App.tsx` wiring (handler computation, single
+render slot, auto-dismiss, resets), and the `logSafety`/`noSideEffects` eval
+extensions. The optional Slice 5 component rename
+(`MemoryFeedback` → `TransientFeedback`) was not taken — it remains a
+non-blocking cosmetic item. No design invariant from §0 of the implementation
+plan was relaxed. See the plan's §15 closeout record for the full file list
+and verification commands.
