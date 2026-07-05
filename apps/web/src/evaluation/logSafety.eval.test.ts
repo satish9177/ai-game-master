@@ -7,6 +7,7 @@ import { promoteInteractionMemories } from '../app/promoteInteractionMemories'
 import {
   INITIAL_RELATIONSHIP_FEEDBACK_STATE,
   relationshipFeedbackAfterReduction,
+  restoreNpcRelationshipsFromSlot,
   selectTransientFeedbackMessage,
 } from '../app/App.helpers'
 import { RELATIONSHIP_FAMILIARITY_INCREASED_MESSAGE } from '../app/relationshipFeedback'
@@ -18,6 +19,7 @@ import {
 import type { RoomMemoryDraftInput } from '../domain/memory/roomFirewall'
 import { familiarityBucket } from '../domain/npcRelationship/dialogueContext'
 import { neutralRelationship } from '../domain/npcRelationship/neutral'
+import { buildNpcRelationshipSaveJson } from '../domain/npcRelationship/relationshipSaveState'
 import {
   buildRoomMemorySaveJson,
   filterRestorableRoomMemories,
@@ -416,5 +418,52 @@ describe('Gate E (relationship feedback) - visible feedback derivation adds no l
     expect(serialized).not.toContain('respect')
     expect(serialized).not.toContain('fear')
     expect(serialized).not.toContain('delta')
+  })
+})
+
+/**
+ * Gate E extension — npc-relationship-persistence-v0 (ADR-0081, Slice 5).
+ * `App.tsx`'s handleLoad logs exactly the `diagnostics` object returned by
+ * `restoreNpcRelationshipsFromSlot` (see `App.helpers.ts`); this proves that
+ * object's shape and content are safe even when the parked blob carries
+ * poisoned npcIds and out-of-range axis values, so nothing new needs to be
+ * logged/scrubbed at the App.tsx call site.
+ */
+describe('Gate E (npc relationship sidecar restore) - diagnostics stay count/status-code only', () => {
+  it('restore diagnostics for a valid scoped sidecar contain only safe counts and status, never npcId or axis values', () => {
+    const scope = { worldId: EVAL_WORLD_ID, sessionId: EVAL_SESSION_ID }
+    const record = neutralRelationship({ ...scope, npcId: evalMarkers.playerLine })
+    const json = buildNpcRelationshipSaveJson(
+      [{ ...record, axes: { ...record.axes, familiarity: 91 }, interactionCount: 77 }],
+      scope,
+    )!
+
+    const restored = restoreNpcRelationshipsFromSlot({ npcRelationshipJson: json, scope })
+
+    expect(restored.diagnostics.status).toBe('restored')
+    expect(Object.keys(restored.diagnostics).sort()).toEqual(
+      ['droppedByCap', 'droppedByScope', 'droppedCount', 'restoredCount', 'status'].sort(),
+    )
+    for (const value of Object.values(restored.diagnostics)) {
+      expect(typeof value === 'number' || typeof value === 'string').toBe(true)
+    }
+
+    const serializedDiagnostics = JSON.stringify(restored.diagnostics)
+    expectNoEvalMarkersInLogs([{ level: 'info', message: 'diagnostics', context: restored.diagnostics }])
+    expect(serializedDiagnostics).not.toContain('91')
+    expect(serializedDiagnostics).not.toContain('77')
+  })
+
+  it('restore diagnostics for an invalid sidecar carry only a fixed reason code, never the raw blob or a poisoned value', () => {
+    const scope = { worldId: EVAL_WORLD_ID, sessionId: EVAL_SESSION_ID }
+    const poisonedJson = `{not-json ${evalMarkers.providerBody}`
+
+    const restored = restoreNpcRelationshipsFromSlot({ npcRelationshipJson: poisonedJson, scope })
+
+    expect(restored.diagnostics.status).toBe('invalid')
+    expect(restored.diagnostics.reason).toBe('invalid-json')
+    const serializedDiagnostics = JSON.stringify(restored.diagnostics)
+    expect(serializedDiagnostics).not.toContain(poisonedJson)
+    expectNoEvalMarkersInLogs([{ level: 'warn', message: 'diagnostics', context: restored.diagnostics }])
   })
 })

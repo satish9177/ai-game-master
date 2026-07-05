@@ -232,7 +232,7 @@ describe('relationshipSaveState safety properties', () => {
     }
   })
 
-  it('does not import app, renderer, providers, persistence, backend, world-session, memory, or dialogue', () => {
+  it('does not import app, renderer, providers, persistence, backend, world-session, memory, facts, world state/events, or dialogue', () => {
     const forbiddenFragments = [
       '/App',
       '../app',
@@ -244,6 +244,8 @@ describe('relationshipSaveState safety properties', () => {
       '../memory',
       '../dialogue',
       '../providers',
+      '../facts',
+      '../world/',
     ]
 
     for (const fragment of forbiddenFragments) {

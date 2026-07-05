@@ -7,9 +7,11 @@ import {
   INITIAL_RELATIONSHIP_FEEDBACK_STATE,
   relationshipFeedbackAfterReduction,
   relationshipFeedbackOnRoomEntry,
+  restoreNpcRelationshipsFromSlot,
   selectTransientFeedbackMessage,
 } from '../app/App.helpers'
 import { RELATIONSHIP_FAMILIARITY_INCREASED_MESSAGE } from '../app/relationshipFeedback'
+import { buildNpcRelationshipSaveJson } from '../domain/npcRelationship/relationshipSaveState'
 import {
   DIALOGUE_SEMANTIC_EVENT_SCHEMA_VERSION,
   type DialogueSemanticEvent,
@@ -27,6 +29,7 @@ import {
   EVAL_ROOM_ID,
   EVAL_SESSION_ID,
   EVAL_WORLD_ID,
+  createRoomMemoryHarness,
   createSpyLogger,
   createWorldSessionHarness,
   evalCanon,
@@ -398,6 +401,51 @@ describe('Gate F - recall/context/prompt at N=1000 has no side effects', () => {
     expect(providerCalls).toEqual([])
     expect(promptState).toEqual({ builtMessages: 0 })
     expect(uiState).toEqual({ relationshipPanelUpdates: 0 })
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+})
+
+/**
+ * Gate F extension — npc-relationship-persistence-v0 (ADR-0081, Slice 5).
+ * Proves behaviorally, against a real in-memory `WorldSession` and room-memory
+ * store, that restoring the `npcRelationshipJson` sidecar is a pure
+ * projection re-seed: no `WorldEvent` append, no `WorldState` mutation, no
+ * memory write, no command/fact/fact-visibility write, and no provider call.
+ */
+describe('Gate F (npc relationship persistence) - sidecar restore is a silent, authority-free re-seed', () => {
+  it('restoring a scoped npcRelationshipJson sidecar appends no WorldEvents, mutates no WorldState, writes no memory, and makes no provider call', async () => {
+    const worldSession = createWorldSessionHarness()
+    const started = await worldSession.session.startSession(evalCanon())
+    if (!started.ok) throw new Error('session start failed')
+    const { worldId, sessionId } = started.state
+    const beforeEvents = await worldSession.store.listEvents(sessionId)
+    const beforeState = await worldSession.session.getWorldState(sessionId)
+
+    const memoryHarness = createRoomMemoryHarness()
+    const beforeMemoryRecords = memoryHarness.store.snapshotAll()
+
+    const fetchSpy = vi.fn(() => Promise.reject(new Error('network is forbidden in evaluation')))
+    vi.stubGlobal('fetch', fetchSpy)
+
+    const record = neutralRelationship({ worldId, sessionId, npcId: 'eval-relationship-npc' })
+    const json = buildNpcRelationshipSaveJson(
+      [{ ...record, axes: { ...record.axes, familiarity: 88 }, interactionCount: 40 }],
+      { worldId, sessionId },
+    )!
+
+    const commandSink: unknown[] = []
+    const facts: unknown[] = []
+    const factVisibility: unknown[] = []
+
+    const restored = restoreNpcRelationshipsFromSlot({ npcRelationshipJson: json, scope: { worldId, sessionId } })
+
+    expect(restored.records).toHaveLength(1) // guard against a vacuous pass
+    expect(await worldSession.store.listEvents(sessionId)).toEqual(beforeEvents)
+    expect(await worldSession.session.getWorldState(sessionId)).toEqual(beforeState)
+    expect(memoryHarness.store.snapshotAll()).toEqual(beforeMemoryRecords)
+    expect(commandSink).toEqual([])
+    expect(facts).toEqual([])
+    expect(factVisibility).toEqual([])
     expect(fetchSpy).not.toHaveBeenCalled()
   })
 })
