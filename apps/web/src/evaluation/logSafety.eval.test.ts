@@ -5,11 +5,18 @@ import { deriveAndLogDialogueSemanticEvents } from '../app/deriveAndLogDialogueS
 import { deriveAndLogStructuredDialogueEffects } from '../app/deriveAndLogStructuredDialogueEffects'
 import { promoteInteractionMemories } from '../app/promoteInteractionMemories'
 import {
+  INITIAL_RELATIONSHIP_FEEDBACK_STATE,
+  relationshipFeedbackAfterReduction,
+  selectTransientFeedbackMessage,
+} from '../app/App.helpers'
+import { RELATIONSHIP_FAMILIARITY_INCREASED_MESSAGE } from '../app/relationshipFeedback'
+import {
   DIALOGUE_SEMANTIC_EVENT_SCHEMA_VERSION,
   type DialogueSemanticEvent,
   type DialogueSemanticEventKind,
 } from '../domain/dialogueEvents/contracts'
 import type { RoomMemoryDraftInput } from '../domain/memory/roomFirewall'
+import { familiarityBucket } from '../domain/npcRelationship/dialogueContext'
 import { neutralRelationship } from '../domain/npcRelationship/neutral'
 import {
   buildRoomMemorySaveJson,
@@ -327,5 +334,87 @@ describe('Gate E (relationship reducer) - signed valenced rows keep reducer logs
     expect(serialized).not.toContain('delta')
     expect(serialized).not.toContain('-3')
     expect(serialized).not.toContain('-2')
+  })
+})
+
+describe('Gate E (relationship feedback) - visible feedback derivation adds no logs', () => {
+  it('deriving and selecting the familiarity feedback message logs nothing beyond the existing reducer shape', () => {
+    const logEntries: LogEntry[] = []
+    const prior = neutralRelationship({ worldId: EVAL_WORLD_ID, sessionId: EVAL_SESSION_ID, npcId: EVAL_NPC_ID })
+    const ctx = { worldId: EVAL_WORLD_ID, sessionId: EVAL_SESSION_ID, npcId: EVAL_NPC_ID }
+    const scope = { worldId: EVAL_WORLD_ID, sessionId: EVAL_SESSION_ID, roomId: EVAL_ROOM_ID, npcId: EVAL_NPC_ID }
+
+    const prevBucket = familiarityBucket(prior.axes.familiarity)
+
+    // A neutral candidate effect (the only kind the classifier can actually emit
+    // at runtime) carrying poisoned provenance fields, to prove the feedback
+    // path leaks none of it.
+    const effect: StructuredDialogueEffect = {
+      schemaVersion: STRUCTURED_DIALOGUE_EFFECT_SCHEMA_VERSION,
+      effectId: 'eval-feedback-effect-0',
+      kind: 'player_question_effect_candidate',
+      sourceEventId: 'eval-feedback-source-event-0',
+      sourceKind: 'player_asked_question',
+      status: 'candidate',
+      actor: 'player',
+      target: 'npc',
+      scope,
+      provenance: {
+        classifier: 'deterministic-local',
+        promptId: evalMarkers.playerLine,
+        turnIndex: 0,
+      },
+      confidence: 'medium',
+    }
+
+    const result = deriveAndReduceRelationship({
+      effects: [effect],
+      prior,
+      ctx,
+      logger: createSpyLogger(logEntries),
+    })
+    const nextBucket = familiarityBucket(result.state.axes.familiarity)
+
+    // Guard against a vacuous pass: this must actually be an upward crossing.
+    expect(prevBucket).toBe('none')
+    expect(nextBucket).toBe('low')
+
+    const feedbackState = relationshipFeedbackAfterReduction(INITIAL_RELATIONSHIP_FEEDBACK_STATE, {
+      prevBucket,
+      nextBucket,
+    })
+    const selected = selectTransientFeedbackMessage(null, feedbackState.message)
+    expect(selected).toBe(RELATIONSHIP_FAMILIARITY_INCREASED_MESSAGE)
+
+    // Computing/selecting the feedback message must add zero new log calls;
+    // only the pre-existing reducer log call is present.
+    expect(logEntries).toHaveLength(1)
+    expect(logEntries[0]?.message).toBe('npc relationship reduced')
+    expect(Object.keys(logEntries[0]!.context).sort()).toEqual(
+      [
+        'applied',
+        'clampedAxes',
+        'familiarityBucket',
+        'interactionCount',
+        'npcId',
+        'processed',
+        'rejected',
+        'sessionId',
+        'worldId',
+      ].sort(),
+    )
+
+    const serialized = JSON.stringify(logEntries)
+    expectNoEvalMarkersInLogs(logEntries)
+    expectSafeLogContextValues(logEntries)
+    // The feedback message text itself, the effect/source kind, and the raw
+    // axis names must never appear in logs.
+    expect(serialized).not.toContain(RELATIONSHIP_FAMILIARITY_INCREASED_MESSAGE)
+    expect(serialized).not.toContain('player_question_effect_candidate')
+    expect(serialized).not.toContain('player_asked_question')
+    expect(serialized).not.toContain('trust')
+    expect(serialized).not.toContain('respect')
+    expect(serialized).not.toContain('fear')
+    expect(serialized).not.toContain('delta')
   })
 })

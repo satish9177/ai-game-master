@@ -4,10 +4,18 @@ import { deriveAndReduceRelationship } from '../app/deriveAndReduceRelationship'
 import { deriveAndLogDialogueSemanticEvents } from '../app/deriveAndLogDialogueSemanticEvents'
 import { deriveAndLogStructuredDialogueEffects } from '../app/deriveAndLogStructuredDialogueEffects'
 import {
+  INITIAL_RELATIONSHIP_FEEDBACK_STATE,
+  relationshipFeedbackAfterReduction,
+  relationshipFeedbackOnRoomEntry,
+  selectTransientFeedbackMessage,
+} from '../app/App.helpers'
+import { RELATIONSHIP_FAMILIARITY_INCREASED_MESSAGE } from '../app/relationshipFeedback'
+import {
   DIALOGUE_SEMANTIC_EVENT_SCHEMA_VERSION,
   type DialogueSemanticEvent,
   type DialogueSemanticEventKind,
 } from '../domain/dialogueEvents/contracts'
+import { familiarityBucket } from '../domain/npcRelationship/dialogueContext'
 import { neutralRelationship } from '../domain/npcRelationship/neutral'
 import { EFFECT_KIND_BY_SOURCE_KIND } from '../domain/structuredDialogueEffects/derive'
 import {
@@ -303,6 +311,84 @@ describe('Gate F - recall/context/prompt at N=1000 has no side effects', () => {
     expect(result.state.axes).not.toEqual(prior.axes)
     expect(await worldSession.store.listEvents(started.state.sessionId)).toEqual(beforeEvents)
     expect(await worldSession.store.listEvents(started.state.sessionId)).toEqual(beforeWorldStoreEvents)
+    expect(await worldSession.session.getWorldState(started.state.sessionId)).toEqual(beforeState)
+    expect(fixture.store.snapshotAll()).toEqual(beforeMemoryRecords)
+    expect(commandSink).toEqual([])
+    expect(facts).toEqual([])
+    expect(factVisibility).toEqual([])
+    expect(persistenceWrites).toEqual([])
+    expect(providerCalls).toEqual([])
+    expect(promptState).toEqual({ builtMessages: 0 })
+    expect(uiState).toEqual({ relationshipPanelUpdates: 0 })
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
+  it('deriving and selecting the relationship familiarity feedback message touches only local ephemeral feedback state', async () => {
+    const worldSession = createWorldSessionHarness()
+    const started = await worldSession.session.startSession(evalCanon())
+    if (!started.ok) throw new Error('session start failed')
+    const beforeEvents = await worldSession.store.listEvents(started.state.sessionId)
+    const beforeState = await worldSession.session.getWorldState(started.state.sessionId)
+
+    const fixture = await longSessionMemoryFixture({ count: 3 })
+    const beforeMemoryRecords = fixture.store.snapshotAll()
+    const fetchSpy = vi.fn(() => Promise.reject(new Error('network is forbidden in evaluation')))
+    vi.stubGlobal('fetch', fetchSpy)
+
+    const commandSink: unknown[] = []
+    const facts: unknown[] = []
+    const factVisibility: unknown[] = []
+    const persistenceWrites: unknown[] = []
+    const providerCalls: unknown[] = []
+    const promptState = { builtMessages: 0 }
+    const uiState = { relationshipPanelUpdates: 0 }
+    const logEntries: LogEntry[] = []
+    const ctx = {
+      worldId: started.state.worldId,
+      sessionId: started.state.sessionId,
+      npcId: 'eval-npc',
+    }
+    const scope = { ...ctx, roomId: EVAL_ROOM_ID }
+    const prior = neutralRelationship(ctx)
+    const prevBucket = familiarityBucket(prior.axes.familiarity)
+
+    // Only the two neutral candidate kinds are runtime-emittable; this is the
+    // only effect kind that can actually drive a familiarity crossing.
+    const effect: StructuredDialogueEffect = {
+      schemaVersion: STRUCTURED_DIALOGUE_EFFECT_SCHEMA_VERSION,
+      effectId: 'eval-feedback-nofx-effect-0',
+      kind: 'player_question_effect_candidate',
+      sourceEventId: 'eval-feedback-nofx-source-event-0',
+      sourceKind: 'player_asked_question',
+      status: 'candidate',
+      actor: 'player',
+      target: 'npc',
+      scope,
+      provenance: { classifier: 'deterministic-local' },
+      confidence: 'medium',
+    }
+
+    const result = deriveAndReduceRelationship({
+      effects: [effect],
+      prior,
+      ctx,
+      logger: createSpyLogger(logEntries),
+    })
+    const nextBucket = familiarityBucket(result.state.axes.familiarity)
+    expect(prevBucket).toBe('none')
+    expect(nextBucket).toBe('low') // guard against a vacuous pass
+
+    const feedbackState = relationshipFeedbackAfterReduction(INITIAL_RELATIONSHIP_FEEDBACK_STATE, {
+      prevBucket,
+      nextBucket,
+    })
+    const selected = selectTransientFeedbackMessage(null, feedbackState.message)
+    expect(selected).toBe(RELATIONSHIP_FAMILIARITY_INCREASED_MESSAGE)
+
+    const clearedOnRoomEntry = relationshipFeedbackOnRoomEntry(feedbackState)
+    expect(clearedOnRoomEntry).toEqual(INITIAL_RELATIONSHIP_FEEDBACK_STATE)
+
+    expect(await worldSession.store.listEvents(started.state.sessionId)).toEqual(beforeEvents)
     expect(await worldSession.session.getWorldState(started.state.sessionId)).toEqual(beforeState)
     expect(fixture.store.snapshotAll()).toEqual(beforeMemoryRecords)
     expect(commandSink).toEqual([])
