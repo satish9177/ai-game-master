@@ -1,6 +1,6 @@
 # ADR-0075: Valenced Dialogue Effect Candidates v0
 
-- **Status:** Accepted — Planned (Option A: contract + dry wiring; not yet implemented)
+- **Status:** Accepted / Implemented (Option A: contract + dry wiring)
 - **Date:** 2026-07-05
 - **Deciders:** Project owner
 - **Builds on (implementation plans; these features shipped without ADRs):**
@@ -9,9 +9,9 @@
   [`npc-relationship-state-v0`](../implementation-plans/npc-relationship-state-v0.md).
 
 > Full plan and closeout live in
-> [`valenced-dialogue-effect-candidates-v0`](../implementation-plans/valenced-dialogue-effect-candidates-v0.md).
-> This ADR records the decision; implementation is a separate, maintainer-approved
-> step and its closeout (status flip + ARCHITECTURE.md status line) is deferred.
+> [`valenced-dialogue-effect-candidates-v0`](../implementation-plans/valenced-dialogue-effect-candidates-v0.md#12-closeout).
+> This ADR records the decision; see the Verification section below for the
+> implementation closeout.
 
 ---
 
@@ -122,7 +122,27 @@ source turns live — with no further schema change.
 
 ## Verification
 
-No verification recorded yet — this ADR is docs-only and Planned. Implementation
-verification (targeted `dialogueEvents`, `structuredDialogueEffects`, and
-`evaluation` test runs plus lint) will be recorded in the implementation-plan
-closeout when the slice is built and approved.
+Implemented and verified 2026-07-05. All three slices (§8 of the plan) landed as
+specified; full file list and boundary confirmations are in the implementation
+plan's [Closeout](../implementation-plans/valenced-dialogue-effect-candidates-v0.md#12-closeout).
+
+Tests run:
+
+```
+npm run test -- dialogueEvents            → 3 files, 35 tests passed
+npm run test -- structuredDialogueEffects → 5 files, 79 tests passed
+npm run test -- evaluation                → 7 files, 37 tests passed
+npm run lint                              → clean, no errors
+```
+
+`npm run build` was not re-run for this docs-only closeout; it remains red for
+known, pre-existing, unrelated reasons already noted in prior dialogue-chain
+closeouts.
+
+The runtime non-emission invariant holds: `classifyDialogueTurn` is unchanged
+(still emits only `player_asked_question` / `npc_responded`, reads only
+`promptId` / `hasNpcReply`), so the now-live 11-entry
+`EFFECT_KIND_BY_SOURCE_KIND` map produces zero valenced candidates at runtime —
+enforced by the dedicated `nonEmission.test.ts`, including adversarial free-text
+cases. No authority, memory, provider, prompt, or UI path was touched; no
+`schemaVersion` bump on either contract.

@@ -216,6 +216,18 @@ Throughout these docs:
   for a future retrieval feature. No runtime behavior, memory-algorithm,
   provider/network, `WorldState` mutation, schema, DB, or UI change
   ([ADR-0074](./decisions/ADR-0074-long-session-memory-evaluation-v0.md)).
+- ✅ **Implemented** — Valenced Dialogue Effect Candidates v0 — 5 new
+  `DialogueSemanticEventKind` values and 9 new `StructuredDialogueEffectKind`
+  candidate values give a future NPC relationship reducer an inert, closed-enum
+  vocabulary for threat/apology/gratitude/insult/refusal/promise/warning/offer
+  signals. The `EFFECT_KIND_BY_SOURCE_KIND` map (`derive.ts`) is wired live (2 →
+  11 entries), but `classifyDialogueTurn` is unchanged and still emits only
+  `player_asked_question`/`npc_responded` from structural signals, so the map
+  stays dry: zero valenced candidates emit at runtime, enforced by a dedicated
+  classify → derive non-emission test. No `valence` field, `WorldState`/
+  `WorldEvent`/`WorldCommand`/relationship-reducer, memory/fact, persistence,
+  provider/prompt/UI, or `schemaVersion` change
+  ([ADR-0075](./decisions/ADR-0075-valenced-dialogue-effect-candidates-v0.md)).
 - ❌ **Not built** — future shape only; documented so we don't paint into a corner.
 
 ## Status today (Renderer Foundation v0)

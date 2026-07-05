@@ -1,8 +1,7 @@
 # Implementation Plan — `feature/valenced-dialogue-effect-candidates-v0`
 
-> Status: **APPROVED / PLANNED — Option A (contract + dry wiring). Not yet implemented.**
-> Docs-only slice: this plan plus [ADR-0075](../decisions/ADR-0075-valenced-dialogue-effect-candidates-v0.md).
-> No runtime/source code is written until the maintainer approves implementation.
+> Status: **COMPLETE / IMPLEMENTED — Option A (contract + dry wiring).**
+> See [Closeout](#12-closeout) below and [ADR-0075](../decisions/ADR-0075-valenced-dialogue-effect-candidates-v0.md).
 >
 > Companion docs: [ARCHITECTURE](../ARCHITECTURE.md) · [BOUNDARIES](../BOUNDARIES.md) ·
 > [FAILURE-MODES](../FAILURE-MODES.md) · [CONVENTIONS](../CONVENTIONS.md) · [/AGENTS.md](../../../AGENTS.md).
@@ -299,3 +298,75 @@ rather than claiming green.
   UI change; valence derives only from validated closed-enum semantic events and
   inspects no text.
 - **Tests prove it:** §7, anchored by the runtime non-emission invariant (§5).
+
+## 12. Closeout
+
+**Status: COMPLETE / IMPLEMENTED.** All three slices from §8 landed as specified;
+no deviation from the approved Option A design.
+
+**Implemented files:**
+
+- `apps/web/src/domain/dialogueEvents/contracts.ts` — 5 new
+  `DialogueSemanticEventKind` members appended.
+- `apps/web/src/domain/dialogueEvents/contracts.test.ts` — coverage for the 5 new
+  kinds.
+- `apps/web/src/domain/structuredDialogueEffects/contracts.ts` — 9 new
+  `StructuredDialogueEffectKind` members appended.
+- `apps/web/src/domain/structuredDialogueEffects/contracts.test.ts` — coverage for
+  the 9 new candidate kinds.
+- `apps/web/src/domain/structuredDialogueEffects/derive.ts` —
+  `EFFECT_KIND_BY_SOURCE_KIND` extended from 2 to 11 entries; derivation logic
+  otherwise unchanged.
+- `apps/web/src/domain/structuredDialogueEffects/derive.test.ts` — map-consistency,
+  shrunk `RESERVED_EVENT_KINDS` (7 → 3), direct-injection, and per-kind
+  actor/target assertions.
+- `apps/web/src/domain/structuredDialogueEffects/deriveAndLogStructuredDialogueEffects.test.ts` —
+  updated for the extended map.
+- `apps/web/src/domain/structuredDialogueEffects/nonEmission.test.ts` (new) — the
+  dedicated classify → derive non-emission test (free text, unknown `promptId`,
+  `ask-room`/`ask-help`, adversarial free text, flooding).
+- `apps/web/src/evaluation/logSafety.eval.test.ts` — extended for the new kinds.
+- `apps/web/src/evaluation/noSideEffects.eval.test.ts` — extended for direct
+  injection of valenced candidates.
+
+**Not touched (confirmed):** `classify.ts`, the relationship reducer
+(`domain/npcRelationship/reducer.ts`, `app/deriveAndReduceRelationship.ts`),
+`WorldState`/`WorldEvent`/`WorldCommand`, memory/facts/`fact_visibility`,
+persistence/provider/prompt/UI. Verified by direct inspection: `classify.ts` still
+emits only `player_asked_question` and `npc_responded`, read via `promptId` /
+`hasNpcReply` only.
+
+**Tests run and results (2026-07-05):**
+
+```
+npm run test -- dialogueEvents            → 3 files, 35 tests passed
+npm run test -- structuredDialogueEffects → 5 files, 79 tests passed
+npm run test -- evaluation                → 7 files, 37 tests passed
+npm run lint                              → clean, no errors
+```
+
+`npm run build` was not re-run for this docs-only closeout; prior slices already
+reported it as remaining red for known, pre-existing, unrelated reasons (see prior
+dialogue-chain closeouts) — that status is unchanged by this feature.
+
+**Safety boundaries confirmed:**
+
+- No `WorldEvent` / `WorldCommand` / reducer / `WorldState` change.
+- No memory / fact / `fact_visibility` write path introduced.
+- No raw text enters classification or the effects layer — `nonEmission.test.ts`
+  proves this adversarially (candidate/kind names as free text still yield zero
+  valenced candidates).
+- No `'llm'` classifier value; `provenance.classifier` stays
+  `'deterministic-local'`.
+- No `schemaVersion` bump on either contract.
+- No provider / prompt / UI change.
+
+**Known invariant confirmed:** the `sourceKind → candidateKind` map in
+`derive.ts` is wired live (11 entries), but `classifyDialogueTurn` is unchanged
+and still emits only `player_asked_question` and `npc_responded`. No runtime code
+path emits a valenced source event, so
+`deriveStructuredDialogueEffects(classifyDialogueTurn(input))` yields **zero**
+valenced candidates for every input today. This is enforced by
+`nonEmission.test.ts`, not merely asserted. The map becomes live for a given
+valenced kind only when a future, separately-approved closed structured-action
+source emits that kind (§9, deferred).
