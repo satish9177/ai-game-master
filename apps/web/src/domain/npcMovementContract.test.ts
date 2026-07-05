@@ -305,7 +305,7 @@ describe('chooseWanderStep', () => {
         z: Math.sin(angle) * length,
       }
     })
-    const first = candidates[0]
+    const first = candidates[0]!
     const crossingField: NpcWanderField = {
       roomId: 'crossing',
       npcId: 'npc',

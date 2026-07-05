@@ -233,7 +233,7 @@ describe('OpenAICompatibleNPCDialogueProvider error message safety', () => {
               kind: 'player_claim',
               flagKey: 'secret-flag-key',
               gateJson: '{"unlockObjectId":"secret-object-id"}',
-            } as unknown as NPCDialogueRequest['context']['memory']['entries'][number],
+            } as unknown as NonNullable<NPCDialogueRequest['context']['memory']>['entries'][number],
           ],
         },
         flags: { 'secret-flag-key': true },

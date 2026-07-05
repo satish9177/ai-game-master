@@ -174,7 +174,7 @@ export function ensureGeneratedNpcDialogue(
     const needsDialogue = object.interaction.dialogue === undefined
     if (!needsId && !needsDialogue) return object
 
-    const id = needsId ? nextNpcIdFromIds(usedIds) : object.id
+    const id = isNonBlankString(object.id) ? object.id : nextNpcIdFromIds(usedIds)
     usedIds.add(id)
     anyChanged = true
 

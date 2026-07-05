@@ -1138,8 +1138,8 @@ describe('assembleRoom', () => {
     const dialogue = npc && 'interaction' in npc ? npc.interaction.dialogue : undefined
     expect(dialogue).toBeDefined()
     expect(GENERATED_NPC_PERSONAS).toContain(dialogue?.persona)
-    expect(dialogue?.greeting.trim().length).toBeGreaterThan(0)
-    expect(dialogue?.prompts.map((prompt) => prompt.id)).toEqual(['ask-room', 'ask-help'])
+    expect(dialogue?.greeting?.trim().length).toBeGreaterThan(0)
+    expect(dialogue?.prompts?.map((prompt) => prompt.id)).toEqual(['ask-room', 'ask-help'])
     expect(validateRoom(result.room).ok).toBe(true)
   })
 
@@ -1153,7 +1153,7 @@ describe('assembleRoom', () => {
 
     expect(result.diagnostics.npcInserted).toBe(true)
     expect(FANTASY_KEEP_GENERATED_NPC_PERSONAS).toContain(dialogue?.persona)
-    expect(dialogue?.prompts.map((prompt) => prompt.id)).toEqual(['ask-room', 'ask-help'])
+    expect(dialogue?.prompts?.map((prompt) => prompt.id)).toEqual(['ask-room', 'ask-help'])
     expect(validateRoom(result.room).ok).toBe(true)
   })
 
@@ -1167,7 +1167,7 @@ describe('assembleRoom', () => {
 
     expect(result.diagnostics.npcInserted).toBe(true)
     expect(POST_APOC_GENERATED_NPC_PERSONAS).toContain(dialogue?.persona)
-    expect(dialogue?.prompts.map((prompt) => prompt.id)).toEqual(['ask-room', 'ask-help'])
+    expect(dialogue?.prompts?.map((prompt) => prompt.id)).toEqual(['ask-room', 'ask-help'])
     expect(validateRoom(result.room).ok).toBe(true)
   })
 
@@ -1225,7 +1225,7 @@ describe('assembleRoom', () => {
 
     expect(npc?.id).toBeTruthy()
     expect(dialogue).toBeDefined()
-    expect(dialogue?.prompts.map((prompt) => prompt.id)).toEqual(['ask-room', 'ask-help'])
+    expect(dialogue?.prompts?.map((prompt) => prompt.id)).toEqual(['ask-room', 'ask-help'])
     expect(result.diagnostics.npcDialogueNormalizedCount).toBeGreaterThanOrEqual(1)
     expect(validateRoom(result.room).ok).toBe(true)
   })
