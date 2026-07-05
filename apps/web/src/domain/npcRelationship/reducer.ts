@@ -31,16 +31,20 @@ type RelationshipAxisDelta = Record<keyof RelationshipAxes, number>
 const ZERO_DELTA: RelationshipAxisDelta = { trust: 0, respect: 0, fear: 0, familiarity: 0 }
 
 /**
- * Frozen, closed integer delta table. The only two kinds emitted by the
- * current dialogue classifier are neutral interaction signals, so both rows
- * move familiarity only; trust/respect/fear stay at baseline until a future,
- * separately approved feature makes valenced effect kinds emittable.
+ * Frozen, closed integer delta table. The current dialogue classifier emits
+ * only the two neutral interaction signals, so the signed valenced rows stay
+ * dry at runtime until a future, separately approved feature makes those
+ * effect kinds emittable.
  */
 export const RELATIONSHIP_EFFECT_DELTA_TABLE: Readonly<
   Partial<Record<StructuredDialogueEffectKind, RelationshipAxisDelta>>
 > = Object.freeze({
   player_question_effect_candidate: { trust: 0, respect: 0, fear: 0, familiarity: 1 },
   npc_response_effect_candidate: { trust: 0, respect: 0, fear: 0, familiarity: 1 },
+  player_threat_candidate: { trust: -3, respect: -2, fear: 3, familiarity: 0 },
+  player_apology_candidate: { trust: 2, respect: 1, fear: -1, familiarity: 0 },
+  player_gratitude_candidate: { trust: 1, respect: 2, fear: 0, familiarity: 0 },
+  player_insult_candidate: { trust: -2, respect: -3, fear: 0, familiarity: 0 },
 })
 
 const AXIS_RANGES: Readonly<Record<keyof RelationshipAxes, { min: number; max: number }>> = {
