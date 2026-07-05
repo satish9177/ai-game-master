@@ -1,6 +1,6 @@
 # ADR-0077: Relationship Valence Reducer v0
 
-- **Status:** Accepted — design locked; implementation deferred (docs-only slice)
+- **Status:** Accepted / Implemented
 - **Date:** 2026-07-05
 - **Deciders:** Project owner
 - **Builds on:**
@@ -11,8 +11,7 @@
 
 > Full plan, test plan, and slices live in
 > [`relationship-valence-reducer-v0`](../implementation-plans/relationship-valence-reducer-v0.md).
-> This ADR records the decision; the plan's Implementation slices (§12) and a later
-> closeout record delivery.
+> This ADR records the decision and delivery closeout.
 
 ---
 
@@ -136,16 +135,41 @@ through the already-wired chain with no further schema change.
 
 ## Verification
 
-Design locked and documented 2026-07-05 (docs-only slice; no runtime, source, or test
-code delivered here). Implementation and its verification are deferred to the plan's
-Implementation slices (§12) in a later session, at which point this ADR and the plan
-flip to Implemented and the ARCHITECTURE.md status line is added (implemented-only
-convention).
+Implemented and verified 2026-07-05.
 
-The runtime non-emission invariant is a design guarantee for the implementation
-slice: `classifyDialogueTurn` is unchanged (still emits only `player_asked_question` /
-`npc_responded`, reads only `promptId` / `hasNpcReply`), so the four new delta rows
-produce zero valenced signed movement at runtime — to be enforced by a live-chain
-`classify → derive → reduce` non-emission test, including adversarial free-text cases.
-No authority, memory, provider, prompt, or UI path is touched; no `schemaVersion` bump
-on any contract.
+Files changed:
+
+- `apps/web/src/domain/npcRelationship/reducer.ts`
+- `apps/web/src/domain/npcRelationship/reducer.test.ts`
+- `apps/web/src/app/deriveAndReduceRelationship.test.ts`
+- `apps/web/src/evaluation/noSideEffects.eval.test.ts`
+- `apps/web/src/evaluation/logSafety.eval.test.ts`
+
+Verification run:
+
+```bash
+npm.cmd run test -- npcRelationship
+npm.cmd run test -- npcRelationship deriveAndReduceRelationship evaluation
+npm.cmd run lint
+```
+
+Results:
+
+- `npm.cmd run test -- npcRelationship` passed: 3 files, 64 tests.
+- `npm.cmd run test -- npcRelationship deriveAndReduceRelationship evaluation`
+  passed: 11 files, 115 tests.
+- `npm.cmd run lint` passed.
+
+Runtime invariant remains true: `classifyDialogueTurn` is unchanged and still emits
+only `player_asked_question` / `npc_responded` from structural signals, so the four
+new signed reducer rows are dry at runtime. Live-chain tests cover normal free text,
+unknown prompt ids, known `ask-room` / `ask-help` prompt ids, and adversarial
+player-line text containing candidate/source kind names; all produce zero signed
+valenced movement.
+
+Safety boundaries remained unchanged: no reducer logic/signature/gate/clamp/dedupe
+change beyond the table rows; no `classify.ts`, `derive.ts`, `dialogueContext.ts`,
+App runtime wiring, provider, prompt, UI, persistence, memory, facts, `WorldState`,
+`WorldEvent`, or `WorldCommand` change; no `valence` field, raw text classifier,
+regex/keyword sniffing, LLM-proposed score, schema bump, or persistence/authority path
+was added.

@@ -228,6 +228,13 @@ Throughout these docs:
   `WorldEvent`/`WorldCommand`/relationship-reducer, memory/fact, persistence,
   provider/prompt/UI, or `schemaVersion` change
   ([ADR-0075](./decisions/ADR-0075-valenced-dialogue-effect-candidates-v0.md)).
+- ✅ **Implemented** — Relationship Valence Reducer v0 — the NPC relationship
+  reducer maps four signed candidate kinds (threat, apology, gratitude, insult)
+  through the closed delta table, keeps five deferred valenced kinds absent/ignored,
+  and leaves runtime signed valence dry because `classifyDialogueTurn` still emits
+  only neutral structural events; no reducer machinery, authority, persistence,
+  memory/fact, provider/prompt/UI, or schema path changed
+  ([ADR-0077](./decisions/ADR-0077-relationship-valence-reducer-v0.md)).
 - ❌ **Not built** — future shape only; documented so we don't paint into a corner.
 
 ## Status today (Renderer Foundation v0)

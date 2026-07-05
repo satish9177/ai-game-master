@@ -1,7 +1,8 @@
 # Implementation Plan — `feature/relationship-valence-reducer-v0`
 
-> Status: **DESIGN LOCKED — implementation blocked / not yet started.**
-> Docs-only slice. No runtime, source, or test code is delivered here.
+> Status: **COMPLETE / IMPLEMENTED.**
+> Runtime change delivered as a table-only reducer slice plus tests; no emission,
+> authority, persistence, provider, prompt, or UI path was added.
 > See [ADR-0077](../decisions/ADR-0077-relationship-valence-reducer-v0.md).
 >
 > Companion docs: [ARCHITECTURE](../ARCHITECTURE.md) · [BOUNDARIES](../BOUNDARIES.md) ·
@@ -15,7 +16,7 @@
 
 ## 0. Approval status and locked invariants (read first)
 
-The design is **approved for a single table-only slice**. These invariants may not
+The design is **implemented as the approved table-only reducer feature**. These invariants may not
 be relaxed without explicit maintainer approval:
 
 - **Closed-table valence only.** Attitude movement is a pure, total function of the
@@ -48,8 +49,7 @@ be relaxed without explicit maintainer approval:
 
 - **Feature:** `relationship-valence-reducer-v0`
 - **Lane:** A (worked on `main` directly; no feature branch).
-- **Status:** DESIGN LOCKED; docs authored in this slice; implementation deferred to
-  a later, separately-sequenced slice.
+- **Status:** COMPLETE / IMPLEMENTED.
 - **ADR:** [ADR-0077](../decisions/ADR-0077-relationship-valence-reducer-v0.md)
   (next free number; ADR-0076 is Lane B's `read-only-timeofday-dialogue-context-v0`).
 
@@ -260,8 +260,7 @@ entirely.
 
 ## 12. Implementation slices
 
-Single slice, committed in this order (at implementation time, in a later
-separately-sequenced session):
+Implemented in the approved slice order:
 
 1. **Table rows** — add the four signed rows to `RELATIONSHIP_EFFECT_DELTA_TABLE`;
    static-invariant test green; no other change.
@@ -274,18 +273,20 @@ separately-sequenced session):
    ARCHITECTURE.md status line, at implementation time only (implemented-only
    convention).
 
-Verification:
+Actual verification run during implementation:
 
 ```bash
 npm.cmd run test -- npcRelationship
-npm.cmd run test -- structuredDialogueEffects
-npm.cmd run test -- evaluation
+npm.cmd run test -- npcRelationship deriveAndReduceRelationship evaluation
 npm.cmd run lint
 ```
 
-`npm.cmd run build` may remain red for known, pre-existing, unrelated TypeScript
-failures noted in prior dialogue-chain closeouts; report status honestly rather than
-claiming green.
+Results:
+
+- `npm.cmd run test -- npcRelationship` passed: 3 files, 64 tests.
+- `npm.cmd run test -- npcRelationship deriveAndReduceRelationship evaluation`
+  passed: 11 files, 115 tests.
+- `npm.cmd run lint` passed.
 
 ## 13. Deferred work
 
@@ -316,14 +317,53 @@ claiming green.
 - **Stale test intent.** The existing "only moves familiarity" test description would
   mislead once other axes move; addressed in slice 2.
 
-## 15. Final recommendation
+## 15. Closeout
 
-**Approve implementation of this single table-only slice as specified.** The change is
-minimal and closed-table-driven: four face-value (≤ 3) signed rows, five no-op kinds
-intentionally absent and proven inert, every gate / clamp / dedupe / scope / signature
-untouched, no emission or authority path added, and the reducer's live status covered
-by a `classify → derive → reduce` non-emission proof. The design satisfies every hard
-boundary and is ready to implement in the slice order of §12 when scheduled.
+Implemented files:
+
+- `apps/web/src/domain/npcRelationship/reducer.ts`
+- `apps/web/src/domain/npcRelationship/reducer.test.ts`
+- `apps/web/src/app/deriveAndReduceRelationship.test.ts`
+- `apps/web/src/evaluation/noSideEffects.eval.test.ts`
+- `apps/web/src/evaluation/logSafety.eval.test.ts`
+
+Closeout summary:
+
+- Added only the four signed rows for `player_threat_candidate`,
+  `player_apology_candidate`, `player_gratitude_candidate`, and
+  `player_insult_candidate` to `RELATIONSHIP_EFFECT_DELTA_TABLE`.
+- Kept `player_refusal_candidate`, `player_promise_candidate`,
+  `npc_warning_candidate`, `npc_offer_candidate`, and `npc_refusal_candidate`
+  absent from the table and covered as ignored/no-op reducer inputs.
+- Added reducer tests for delivered outcomes, fear floor/de-escalation,
+  per-turn clamps, opposing-sign accumulation, absence/no-op behavior, and
+  familiarity staying unchanged for valenced rows.
+- Added live-chain tests proving `classifyDialogueTurn -> deriveStructuredDialogueEffects
+  -> deriveAndReduceRelationship` still produces zero signed valenced movement for
+  normal free text, unknown prompt ids, known prompt ids, and adversarial player text
+  containing candidate/source kind names.
+- Extended `noSideEffects` and `logSafety` evals to cover direct signed valenced
+  injection and unchanged count-only reducer logging.
+
+Safety boundary confirmation:
+
+- `classify.ts`, `derive.ts`, `dialogueContext.ts`, App runtime wiring, provider,
+  prompt, UI, persistence, memory, facts, `WorldState`, `WorldEvent`, and
+  `WorldCommand` code were not changed.
+- Reducer signatures, gates, clamp constants, dedupe, scope logic, status/classifier
+  checks, and axis ranges were not changed.
+- No `valence` field, raw text classifier, regex/keyword sniffing, LLM-proposed score,
+  schema bump, persistence path, memory write, fact/fact-visibility path, provider
+  call, prompt change, or UI state was added.
+- Relationship projection remains ephemeral/in-memory only.
+
+Runtime invariant:
+
+The reducer table now has signed rows, but `classifyDialogueTurn` is unchanged and
+still cannot emit valenced semantic events. In live runtime, signed valence remains
+dry: only the neutral `player_asked_question` / `npc_responded` chain reaches the
+reducer, so trust/respect/fear do not move until a future approved emission source
+exists.
 
 ### Minimum Safe Change Check
 
