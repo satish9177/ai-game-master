@@ -1,8 +1,29 @@
 import type { PlayerHudView } from './playerHud'
+import type { WorldClock } from '../../domain/world/worldClock'
 
-export function StatusHud({ view }: { view: PlayerHudView }) {
+const TIME_OF_DAY_LABEL: Record<WorldClock['timeOfDay'], string> = {
+  dawn: 'Dawn',
+  day: 'Day',
+  dusk: 'Dusk',
+  night: 'Night',
+}
+
+/** Read-only clock line: "Day 1 · 08:00 · Day". Presentational only. */
+function formatWorldClock(clock: WorldClock): string {
+  const hour = String(clock.hour).padStart(2, '0')
+  return `Day ${clock.day} · ${hour}:00 · ${TIME_OF_DAY_LABEL[clock.timeOfDay]}`
+}
+
+export function StatusHud({
+  view,
+  clock = null,
+}: {
+  view: PlayerHudView
+  clock?: WorldClock | null
+}) {
   return (
     <div className="status-hud" role="status" aria-live="polite">
+      {clock && <div className="status-hud-clock">{formatWorldClock(clock)}</div>}
       <div className="status-hud-health">
         <span className="status-hud-health-label">
           {view.health.current} / {view.health.max}

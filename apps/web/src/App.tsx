@@ -22,6 +22,8 @@ import type { JournalSpec } from './domain/journal/journalSpec'
 import type { GeneratedConsequenceJournalInput } from './domain/journal/generatedConsequenceJournal'
 import { demoJournalSpec } from './domain/examples/demoJournal'
 import type { WorldState } from './domain/world/worldState'
+import { computeWorldClock } from './domain/world/worldClock'
+import type { WorldClock } from './domain/world/worldClock'
 import type { RoomSource } from './domain/ports/RoomSource'
 import { GeneratedRoomSource } from './room/GeneratedRoomSource'
 import { RoomRegistry } from './room/RoomRegistry'
@@ -439,6 +441,7 @@ function App() {
   // closed-over state value. Same pattern as `activePlayRef`/`questSpecRef`.
   const roomEntrySeqRef = useRef(0)
   const [playerHud, setPlayerHud] = useState<PlayerHudView | null>(null)
+  const [worldClock, setWorldClock] = useState<WorldClock | null>(null)
   const [quest, setQuest] = useState<QuestView | null>(null)
   const [questHints, setQuestHints] = useState<QuestHintState | null>(null)
   const [journal, setJournal] = useState<JournalView | null>(null)
@@ -662,6 +665,21 @@ function App() {
     })
   }, [])
 
+  // World Clock v0 read-only projection seam. Mirrors the journal seam above:
+  // the only call is the in-memory getEventLog; it derives the pure clock from
+  // the persisted moved-to-room events, never appends or mutates truth, and a
+  // monotonic request id drops a stale async result so a newer refresh wins. On
+  // a not-found / failed read it leaves the last clock untouched.
+  const worldClockRequestRef = useRef(0)
+  const applyWorldClockFromSession = useCallback((sessionId: string) => {
+    const requestId = ++worldClockRequestRef.current
+    void worldSession.getEventLog(sessionId).then((result) => {
+      if (worldClockRequestRef.current !== requestId) return
+      if (!result.ok) return
+      setWorldClock(computeWorldClock(result.events))
+    })
+  }, [])
+
   // Memory promotion seam (memory-event-promotion-v0 wiring slice). Runs only
   // after RoomViewer's interaction commit already succeeded — it never appends
   // events and a promotion failure never surfaces here (promoteInteractionMemories
@@ -730,12 +748,13 @@ function App() {
         enterActivePlay(play)
         refreshDerivedViews(initialState)
         applyEventJournalFromSession(initialState.sessionId)
+        applyWorldClockFromSession(initialState.sessionId)
       } else setFatalMessage(ROOM_UNAVAILABLE)
     })
     return () => {
       requestVersion.current += 1
     }
-  }, [applyEventJournalFromSession, enterActivePlay, refreshDerivedViews, setQuestHintsForView, setQuestSpecForView])
+  }, [applyEventJournalFromSession, applyWorldClockFromSession, enterActivePlay, refreshDerivedViews, setQuestHintsForView, setQuestSpecForView])
 
   const handlePrompt = useCallback((prompt: string) => {
     // In-flight lock: prevent a second call while one is pending.
@@ -889,6 +908,7 @@ function App() {
         })
         refreshDerivedViews(started.state)
         applyEventJournalFromSession(started.state.sessionId)
+        applyWorldClockFromSession(started.state.sessionId)
         // A repaired or fallback room couldn't be built exactly as asked — show the
         // static, prompt-free notice. A clean `generated` room shows nothing.
         if (shouldShowFallbackNotice(result.provenance)) setNotice(FALLBACK_NOTICE)
@@ -903,7 +923,7 @@ function App() {
       logger.error('generated room source threw', { code: 'room-source-failed' })
       setFatalMessage(ROOM_UNAVAILABLE)
     })
-  }, [applyEventJournalFromSession, enterActivePlay, refreshDerivedViews, setQuestHintsForView, setQuestSpecForView])
+  }, [applyEventJournalFromSession, applyWorldClockFromSession, enterActivePlay, refreshDerivedViews, setQuestHintsForView, setQuestSpecForView])
 
   const handleGenerateAnyway = useCallback(() => {
     confirmGrantedRef.current = true
@@ -1123,6 +1143,7 @@ function App() {
       }
       refreshDerivedViews(stateResult.state)
       applyEventJournalFromSession(stateResult.state.sessionId)
+      applyWorldClockFromSession(stateResult.state.sessionId)
       setFatalMessage(null)
       setSaveLoadStatus('idle')
       logger.info('world session restored', {
@@ -1134,7 +1155,7 @@ function App() {
       setSaveLoadStatus('error')
       setSaveLoadError('This save could not be loaded.')
     })
-  }, [applyEventJournalFromSession, enterActivePlay, refreshDerivedViews, setQuestHintsForView, setQuestSpecForView])
+  }, [applyEventJournalFromSession, applyWorldClockFromSession, enterActivePlay, refreshDerivedViews, setQuestHintsForView, setQuestSpecForView])
 
   const handleNavigate = useCallback(async (toRoomId: string): Promise<NavigationResult> => {
     if (!activePlay?.navigation) return { status: 'rejected', reason: 'missing-exit' }
@@ -1210,6 +1231,7 @@ function App() {
       // (ruined-safehouse visited) flips done immediately on entering the room.
       refreshDerivedViews(result.state)
       applyEventJournalFromSession(result.state.sessionId)
+      applyWorldClockFromSession(result.state.sessionId)
       if (shouldAttachObjective) {
         const destinationRoom = result.room
         const destinationSessionId = activePlay.sessionId
@@ -1236,7 +1258,7 @@ function App() {
       }
     }
     return result
-  }, [activePlay, applyEventJournalFromSession, guardConfig, refreshDerivedViews, setQuestHintsForView, setQuestSpecForView])
+  }, [activePlay, applyEventJournalFromSession, applyWorldClockFromSession, guardConfig, refreshDerivedViews, setQuestHintsForView, setQuestSpecForView])
 
   return (
     <ErrorBoundary logger={logger}>
@@ -1264,7 +1286,7 @@ function App() {
           {fatalMessage && <div className="room-message" role="alert">{fatalMessage}</div>}
         </div>
       )}
-      {playerHud && <StatusHud view={playerHud} />}
+      {playerHud && <StatusHud view={playerHud} clock={worldClock} />}
       {quest && <QuestTracker view={quest} />}
       {journal && <JournalPanel view={journal} />}
       <AppRoomEntryOverlay

@@ -458,6 +458,15 @@ body {
   user-select: none;
 }
 
+.status-hud-clock {
+  margin-bottom: 0.55rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid #2c2a36;
+  font-size: 0.8rem;
+  letter-spacing: 0.02em;
+  color: #cfc7b2;
+}
+
 .status-hud-health {
   margin-bottom: 0.55rem;
 }
