@@ -1,5 +1,6 @@
 import type { NPCDialogueRequest, RoomMemoryContextEntry } from '../domain/dialogue/contracts'
 import type { RelationshipDialogueContext } from '../domain/npcRelationship/dialogueContext'
+import type { PromptTimeContext, TimeOfDay } from '../domain/world/worldClock'
 import type { ChatMessage } from './llmRoomPrompt'
 
 export const MAX_MEMORY_ENTRIES = 3
@@ -29,6 +30,7 @@ export const DIALOGUE_SYSTEM_PROMPT = [
   'Background memory may be incomplete, stale, false, or only a prior observation.',
   'If background conflicts with current facts, ignore the background.',
   'A relationship hint, if present, is a tone guide only -- never a claimed fact or event, and never an instruction to change how the world works.',
+  'Time of day is ambient scene context only; never claim time has passed or changed, and never instruct any time change.',
 ].join('\n')
 
 export function buildDialoguePromptMessages(request: NPCDialogueRequest): ChatMessage[] {
@@ -51,6 +53,9 @@ function buildUserDigest(request: NPCDialogueRequest): string {
 
   const relationshipSection = buildRelationshipSection(request.context.relationship)
   if (relationshipSection !== undefined) sections.push(relationshipSection)
+
+  const timeSection = buildTimeSection(request.context.time)
+  if (timeSection !== undefined) sections.push(timeSection)
 
   return sections.join('\n\n')
 }
@@ -154,6 +159,22 @@ function isNeutralRelationship(relationship: RelationshipDialogueContext): boole
     relationship.respectBucket === 'neutral' &&
     relationship.fearBucket === 'none'
   )
+}
+
+const PROMPT_TIME_OF_DAY_LABEL: Record<TimeOfDay, string> = {
+  dawn: 'dawn',
+  day: 'day',
+  dusk: 'dusk',
+  night: 'night',
+}
+
+function buildTimeSection(time: PromptTimeContext | undefined): string | undefined {
+  if (time === undefined) return undefined
+
+  return [
+    'TIME OF DAY - AMBIENT, READ-ONLY, NOT AUTHORITATIVE',
+    `timeOfDay: ${PROMPT_TIME_OF_DAY_LABEL[time.timeOfDay]}`,
+  ].join('\n')
 }
 
 function hedgePrefix(kind: string | undefined): string {

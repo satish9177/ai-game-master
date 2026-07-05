@@ -467,6 +467,22 @@ body {
   color: #cfc7b2;
 }
 
+.status-hud-clock[data-time-of-day="dawn"] {
+  color: #f0c78c;
+}
+
+.status-hud-clock[data-time-of-day="day"] {
+  color: #d8d1b8;
+}
+
+.status-hud-clock[data-time-of-day="dusk"] {
+  color: #d5a4c7;
+}
+
+.status-hud-clock[data-time-of-day="night"] {
+  color: #aeb8df;
+}
+
 .status-hud-health {
   margin-bottom: 0.55rem;
 }

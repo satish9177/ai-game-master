@@ -2,6 +2,7 @@ import { z } from 'zod'
 import type { Affordance } from '../interactions/affordance'
 import type { RoomObject } from '../roomSpec'
 import type { RelationshipDialogueContext } from '../npcRelationship/dialogueContext'
+import type { PromptTimeContext } from '../world/worldClock'
 
 export const NPCDialoguePromptSchema = z
   .object({
@@ -79,6 +80,11 @@ export type NPCDialogueContext = {
    * hint only. See `RelationshipDialogueContext`.
    */
   relationship?: RelationshipDialogueContext
+  /**
+   * Bounded, read-only, ambient time-of-day hint only. Never carries numeric day
+   * or hour; see `PromptTimeContext`.
+   */
+  time?: PromptTimeContext
 }
 
 export type NPCDialogueRequest = {

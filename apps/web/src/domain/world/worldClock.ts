@@ -23,6 +23,10 @@ export type WorldClock = {
   timeOfDay: TimeOfDay
 }
 
+export type PromptTimeContext = {
+  timeOfDay: TimeOfDay
+}
+
 /** A fresh session (or empty log) reads as Day 1, Hour 8 ("day"). */
 export const START_DAY = 1 as const
 export const START_HOUR = 8 as const
@@ -54,4 +58,8 @@ export function computeWorldClock(log: readonly WorldEvent[]): WorldClock {
   const hour = absoluteHours % HOURS_PER_DAY
 
   return { day, hour, timeOfDay: timeOfDayForHour(hour) }
+}
+
+export function toPromptTimeContext(clock: WorldClock): PromptTimeContext {
+  return { timeOfDay: clock.timeOfDay }
 }

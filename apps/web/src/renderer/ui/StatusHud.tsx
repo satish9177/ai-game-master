@@ -23,7 +23,11 @@ export function StatusHud({
 }) {
   return (
     <div className="status-hud" role="status" aria-live="polite">
-      {clock && <div className="status-hud-clock">{formatWorldClock(clock)}</div>}
+      {clock && (
+        <div className="status-hud-clock" data-time-of-day={clock.timeOfDay}>
+          {formatWorldClock(clock)}
+        </div>
+      )}
       <div className="status-hud-health">
         <span className="status-hud-health-label">
           {view.health.current} / {view.health.max}

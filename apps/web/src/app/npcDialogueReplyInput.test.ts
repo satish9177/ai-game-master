@@ -155,6 +155,25 @@ describe('buildNPCDialogueReplyInput', () => {
     expect(input.memoryContext).toBeUndefined()
     expect(input).not.toHaveProperty('memoryContext')
   })
+
+  it('includes prompt time context only when provided', () => {
+    const withTime = buildNPCDialogueReplyInput({
+      sessionId: 's',
+      target: ashaTarget,
+      history: [],
+      timeContext: { timeOfDay: 'night' },
+    })
+    const withoutTime = buildNPCDialogueReplyInput({
+      sessionId: 's',
+      target: ashaTarget,
+      history: [],
+    })
+
+    expect(withTime.timeContext).toEqual({ timeOfDay: 'night' })
+    expect(withTime.timeContext).not.toHaveProperty('day')
+    expect(withTime.timeContext).not.toHaveProperty('hour')
+    expect(withoutTime).not.toHaveProperty('timeContext')
+  })
 })
 
 describe('quest-aware dialogue open path (RoomViewer wiring seam)', () => {

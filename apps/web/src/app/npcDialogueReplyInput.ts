@@ -7,6 +7,7 @@ import type {
   RoomMemoryDialogueContext,
 } from '../domain/dialogue/contracts'
 import type { NpcRelationshipState } from '../domain/npcRelationship/contracts'
+import type { PromptTimeContext } from '../domain/world/worldClock'
 
 export function buildNPCDialogueReplyInput({
   sessionId,
@@ -18,6 +19,7 @@ export function buildNPCDialogueReplyInput({
   questStage,
   memoryContext,
   relationshipState,
+  timeContext,
 }: {
   sessionId: string
   target: NPCDialogueTarget
@@ -28,6 +30,7 @@ export function buildNPCDialogueReplyInput({
   questStage?: QuestDialogueContext
   memoryContext?: RoomMemoryDialogueContext
   relationshipState?: NpcRelationshipState
+  timeContext?: PromptTimeContext
 }): NPCDialogueInput {
   return {
     sessionId,
@@ -42,5 +45,6 @@ export function buildNPCDialogueReplyInput({
     ...(questStage !== undefined ? { quest: questStage } : {}),
     ...(memoryContext !== undefined ? { memoryContext } : {}),
     ...(relationshipState !== undefined ? { relationshipState } : {}),
+    ...(timeContext !== undefined ? { timeContext } : {}),
   }
 }

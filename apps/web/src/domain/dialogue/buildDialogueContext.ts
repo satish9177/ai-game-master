@@ -8,6 +8,7 @@ import type {
 } from './contracts'
 import { projectRelationshipDialogueContext } from '../npcRelationship/dialogueContext'
 import type { NpcRelationshipState } from '../npcRelationship/contracts'
+import type { PromptTimeContext } from '../world/worldClock'
 
 export type DialogueNPC = {
   npcId: string
@@ -24,6 +25,7 @@ export function buildDialogueContext(
   questContext?: QuestDialogueContext,
   memoryContext?: RoomMemoryDialogueContext,
   relationshipState?: NpcRelationshipState,
+  timeContext?: PromptTimeContext,
 ): NPCDialogueContext {
   return {
     roomId: state.currentRoomId,
@@ -43,6 +45,7 @@ export function buildDialogueContext(
     // missing relationship to the neutral/no-familiarity context, never omits
     // the field or leaks another NPC's/session's state.
     relationship: projectRelationshipDialogueContext(relationshipState),
+    ...(timeContext !== undefined ? { time: { ...timeContext } } : {}),
   }
 }
 

@@ -8,6 +8,9 @@ import {
   timeOfDayForHour,
   START_DAY,
   START_HOUR,
+  toPromptTimeContext,
+  type TimeOfDay,
+  type WorldClock,
 } from './worldClock'
 
 const WORLD_ID = '00000000-0000-4000-8000-000000000001'
@@ -141,5 +144,27 @@ describe('timeOfDayForHour', () => {
     expect(timeOfDayForHour(20)).toBe('dusk')
     expect(timeOfDayForHour(21)).toBe('night')
     expect(timeOfDayForHour(23)).toBe('night')
+  })
+})
+
+describe('toPromptTimeContext', () => {
+  it.each<TimeOfDay>(['dawn', 'day', 'dusk', 'night'])(
+    'returns only timeOfDay for %s',
+    (timeOfDay) => {
+      const clock: WorldClock = { day: 42, hour: 23, timeOfDay }
+      const context = toPromptTimeContext(clock)
+
+      expect(context).toEqual({ timeOfDay })
+      expect(context).not.toHaveProperty('day')
+      expect(context).not.toHaveProperty('hour')
+      expect(Object.keys(context)).toEqual(['timeOfDay'])
+    },
+  )
+
+  it('is pure and deterministic', () => {
+    const clock: WorldClock = { day: 2, hour: 18, timeOfDay: 'dusk' }
+
+    expect(toPromptTimeContext(clock)).toEqual(toPromptTimeContext(clock))
+    expect(clock).toEqual({ day: 2, hour: 18, timeOfDay: 'dusk' })
   })
 })

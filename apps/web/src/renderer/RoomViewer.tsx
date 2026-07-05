@@ -16,6 +16,7 @@ import type {
   RoomMemoryDialogueContext,
 } from '../domain/dialogue/contracts'
 import type { NpcRelationshipState } from '../domain/npcRelationship/contracts'
+import type { PromptTimeContext } from '../domain/world/worldClock'
 import { normalizePlayerFreeText } from '../domain/dialogue/playerFreeText'
 import type { InteractionService } from '../interactions/InteractionService'
 import type { EncounterService } from '../encounters/EncounterService'
@@ -82,6 +83,7 @@ type RoomViewerProps = {
   questStage?: QuestDialogueContext
   getRoomMemoryContextForNpc?: (npcId: string) => RoomMemoryDialogueContext | undefined
   getRelationshipContextForNpc?: (npcId: string) => NpcRelationshipState | undefined
+  timeContext?: PromptTimeContext | null
   resolvedObjectIds?: ReadonlySet<string>
 }
 
@@ -99,6 +101,7 @@ export function RoomViewer({
   questStage,
   getRoomMemoryContextForNpc,
   getRelationshipContextForNpc,
+  timeContext,
   resolvedObjectIds,
 }: RoomViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null)
@@ -413,6 +416,7 @@ export function RoomViewer({
         questStage: questStageRef.current,
         memoryContext: getRoomMemoryContextForNpcRef.current?.(target.npcId),
         relationshipState: getRelationshipContextForNpcRef.current?.(target.npcId),
+        timeContext: timeContext ?? undefined,
       })).then((result) => {
         if (
           activeNPCDialogueRef.current !== target
@@ -450,7 +454,7 @@ export function RoomViewer({
         setNPCDialogueMessage('They have nothing to say right now.')
       })
     },
-    [npcDialogueService, npcDialogueTurns, sessionId, requestDialogueAttempt],
+    [npcDialogueService, npcDialogueTurns, sessionId, requestDialogueAttempt, timeContext],
   )
 
   const closeNPCDialogue = useCallback(() => {

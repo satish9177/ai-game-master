@@ -22,7 +22,7 @@ import type { JournalSpec } from './domain/journal/journalSpec'
 import type { GeneratedConsequenceJournalInput } from './domain/journal/generatedConsequenceJournal'
 import { demoJournalSpec } from './domain/examples/demoJournal'
 import type { WorldState } from './domain/world/worldState'
-import { computeWorldClock } from './domain/world/worldClock'
+import { computeWorldClock, toPromptTimeContext } from './domain/world/worldClock'
 import type { WorldClock } from './domain/world/worldClock'
 import type { RoomSource } from './domain/ports/RoomSource'
 import { GeneratedRoomSource } from './room/GeneratedRoomSource'
@@ -1277,6 +1277,7 @@ function App() {
           questStage={buildQuestStage({ quest, questHints, questSpec: questSpecSnapshot })}
           getRoomMemoryContextForNpc={getRoomMemoryContextForNpc}
           getRelationshipContextForNpc={getRelationshipContextForNpc}
+          timeContext={worldClock ? toPromptTimeContext(worldClock) : null}
           {...(activePlay.objectivesPerRoom === true
             ? { resolvedObjectIds: activePlay.entryResolvedObjectIds }
             : {})}

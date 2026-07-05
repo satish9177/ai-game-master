@@ -272,6 +272,53 @@ describe('NPCDialogueService', () => {
     })
   })
 
+  it('passes optional prompt time context through to provider context without day or hour', async () => {
+    const requests: NPCDialogueRequest[] = []
+    const harness = createHarness({
+      reply: async (request) => {
+        requests.push(request)
+        return { text: 'A time-aware answer.' }
+      },
+    })
+    const state = await start(harness)
+
+    await harness.service.reply({
+      sessionId: state.sessionId,
+      npcId: 'friendly-aide',
+      npcName: 'Asha',
+      dialogue: { persona: 'friendly-aide' },
+      history: [],
+      timeContext: { timeOfDay: 'dusk' },
+    })
+
+    expect(requests).toHaveLength(1)
+    expect(requests[0]?.context.time).toEqual({ timeOfDay: 'dusk' })
+    expect(requests[0]?.context.time).not.toHaveProperty('day')
+    expect(requests[0]?.context.time).not.toHaveProperty('hour')
+  })
+
+  it('omits prompt time context when absent', async () => {
+    const requests: NPCDialogueRequest[] = []
+    const harness = createHarness({
+      reply: async (request) => {
+        requests.push(request)
+        return { text: 'A plain answer.' }
+      },
+    })
+    const state = await start(harness)
+
+    await harness.service.reply({
+      sessionId: state.sessionId,
+      npcId: 'friendly-aide',
+      npcName: 'Asha',
+      dialogue: { persona: 'friendly-aide' },
+      history: [],
+    })
+
+    expect(requests[0]?.context.time).toBeUndefined()
+    expect(requests[0]?.context).not.toHaveProperty('time')
+  })
+
   it('does not leak one npc relationship state into another npc dialogue context', async () => {
     const requests: NPCDialogueRequest[] = []
     const harness = createHarness({
@@ -403,6 +450,7 @@ describe('NPCDialogueService', () => {
       history: [{ speaker: 'player', text: 'SECRET HISTORY TEXT' }],
       promptId: 'SECRET PROMPT ID',
       playerLine: 'SECRET PLAYER LINE',
+      timeContext: { timeOfDay: 'night' },
     })
 
     const serialized = JSON.stringify(harness.entries)
@@ -421,6 +469,8 @@ describe('NPCDialogueService', () => {
     expect(serialized).not.toContain('corpse')
     expect(serialized).not.toContain('inspect')
     expect(serialized).not.toContain('talk')
+    expect(serialized).not.toContain('timeContext')
+    expect(serialized).not.toContain('timeOfDay')
   })
 })
 

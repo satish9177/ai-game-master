@@ -7,6 +7,7 @@ import type {
   RoomMemoryDialogueContext,
 } from '../domain/dialogue/contracts'
 import type { NpcRelationshipState } from '../domain/npcRelationship/contracts'
+import type { PromptTimeContext } from '../domain/world/worldClock'
 import type { NPCDialogueProvider } from '../domain/ports/NPCDialogueProvider'
 import type { Logger } from '../platform/logger/Logger'
 import type { WorldSession } from '../world-session/WorldSession'
@@ -31,6 +32,7 @@ export type NPCDialogueInput = {
   quest?: QuestDialogueContext
   memoryContext?: RoomMemoryDialogueContext
   relationshipState?: NpcRelationshipState
+  timeContext?: PromptTimeContext
 }
 
 /** Read-only NPC dialogue coordinator. It has no world-session append capability. */
@@ -68,6 +70,7 @@ export class NPCDialogueService {
       input.quest,
       input.memoryContext,
       input.relationshipState,
+      input.timeContext,
     )
 
     try {

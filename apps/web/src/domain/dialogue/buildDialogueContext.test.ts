@@ -7,6 +7,7 @@ import type {
   RoomMemoryDialogueContext,
 } from './contracts'
 import { buildDialogueContext } from './buildDialogueContext'
+import buildDialogueContextSource from './buildDialogueContext.ts?raw'
 import { neutralRelationship } from '../npcRelationship/neutral'
 import type { NpcRelationshipState } from '../npcRelationship/contracts'
 
@@ -322,5 +323,36 @@ describe('buildDialogueContext', () => {
     expect(serialized).not.toContain('77')
     expect(serialized).not.toContain(scope.sessionId)
     expect(serialized).not.toContain(scope.worldId)
+  })
+
+  it('copies prompt time context when provided and omits it when absent', () => {
+    const withTime = buildDialogueContext(
+      state,
+      { npcId: 'aide', npcName: 'Asha', persona: 'friendly-aide' },
+      history,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { timeOfDay: 'dusk' },
+    )
+    const withoutTime = buildDialogueContext(
+      state,
+      { npcId: 'aide', npcName: 'Asha', persona: 'friendly-aide' },
+      history,
+    )
+
+    expect(withTime.time).toEqual({ timeOfDay: 'dusk' })
+    expect(withTime.time).not.toHaveProperty('day')
+    expect(withTime.time).not.toHaveProperty('hour')
+    expect(withoutTime.time).toBeUndefined()
+    expect(withoutTime).not.toHaveProperty('time')
+  })
+
+  it('does not import session, log, or world-clock projection code to fetch time itself', () => {
+    expect(buildDialogueContextSource).not.toContain('computeWorldClock')
+    expect(buildDialogueContextSource).not.toContain('toPromptTimeContext')
+    expect(buildDialogueContextSource).not.toContain('WorldSession')
+    expect(buildDialogueContextSource).not.toContain('getEventLog')
   })
 })

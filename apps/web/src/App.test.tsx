@@ -3724,6 +3724,17 @@ describe('memory feedback state wiring - Slice 4', () => {
     expect(relationshipContextCallback).not.toContain('WorldCommand')
   })
 
+  it('App projects worldClock through toPromptTimeContext before passing time to RoomViewer', () => {
+    const render = appSource.slice(
+      appSource.indexOf('<RoomViewer'),
+      appSource.indexOf('{...(activePlay.objectivesPerRoom === true'),
+    )
+
+    expect(appSource).toContain("import { computeWorldClock, toPromptTimeContext } from './domain/world/worldClock'")
+    expect(render).toContain('timeContext={worldClock ? toPromptTimeContext(worldClock) : null}')
+    expect(render).not.toContain('timeContext={worldClock}')
+  })
+
   it('App wires inert dialogue semantic events and an ephemeral npc relationship projection from structural RoomViewer callback data only', () => {
     const handler = appSource.slice(
       appSource.indexOf('const handleNpcDialogueResolved = useCallback('),

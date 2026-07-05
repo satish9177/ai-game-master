@@ -92,6 +92,9 @@ describe('buildDialoguePromptMessages', () => {
     expect(lower).toContain('no json')
     expect(lower).toContain('no markdown')
     expect(lower).toContain('do not claim world events or state mutations')
+    expect(lower).toContain('time of day is ambient scene context only')
+    expect(lower).toContain('never claim time has passed or changed')
+    expect(lower).toContain('never instruct any time change')
   })
 
   it('missing or empty memory omits BACKGROUND section', () => {
@@ -387,6 +390,44 @@ describe('buildDialoguePromptMessages', () => {
     expect(lower).toContain('relationship hint')
     expect(lower).toContain('tone guide only')
     expect(lower).toContain('never a claimed fact or event')
+  })
+
+  it.each(['dawn', 'day', 'dusk', 'night'] as const)(
+    'renders a fixed bounded TIME OF DAY section for %s',
+    (timeOfDay) => {
+      const content = userContent(request({
+        context: {
+          ...request().context,
+          time: { timeOfDay },
+        },
+      }))
+      const lines = content.split('\n')
+
+      expect(lines).toContain('TIME OF DAY - AMBIENT, READ-ONLY, NOT AUTHORITATIVE')
+      expect(lines).toContain(`timeOfDay: ${timeOfDay}`)
+      expect(lines.filter((line) => line === `timeOfDay: ${timeOfDay}`)).toHaveLength(1)
+      expect(content).not.toContain('day: 42')
+      expect(content).not.toContain('hour: 18')
+    },
+  )
+
+  it('omits TIME OF DAY when prompt time context is absent', () => {
+    expect(userContent(request())).not.toContain('TIME OF DAY')
+  })
+
+  it('does not serialize extra numeric clock fields if an unsafe caller adds them', () => {
+    const content = userContent(request({
+      context: {
+        ...request().context,
+        time: { timeOfDay: 'dusk', day: 42, hour: 18 } as unknown as NPCDialogueRequest['context']['time'],
+      },
+    }))
+
+    expect(content).toContain('TIME OF DAY - AMBIENT, READ-ONLY, NOT AUTHORITATIVE')
+    expect(content).toContain('timeOfDay: dusk')
+    expect(content).not.toContain('day: 42')
+    expect(content).not.toContain('hour: 18')
+    expect(content.split('\n').filter((line) => line.startsWith('timeOfDay:'))).toHaveLength(1)
   })
 
   it('does not mutate input', () => {
