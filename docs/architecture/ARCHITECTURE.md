@@ -235,6 +235,19 @@ Throughout these docs:
   only neutral structural events; no reducer machinery, authority, persistence,
   memory/fact, provider/prompt/UI, or schema path changed
   ([ADR-0077](./decisions/ADR-0077-relationship-valence-reducer-v0.md)).
+- ✅ **Implemented** — Room Environment Transition Model v0 (dry) —
+  `domain/world/roomEnvironment.ts` adds a closed fire/smoke
+  `RoomEnvironmentState` enum (`burning | smoldering | burned_out`, thresholds
+  `SMOLDER_AFTER_HOURS = 2`, `BURNED_OUT_AFTER_HOURS = 6`), a pure monotonic/
+  saturating `projectRoomEnvironment` reducer, closed `EnvironmentPresentationTag`
+  values (`stale_smoke | cold_ashes`), and a pure `elapsedWorldHoursSinceLastEntered`
+  helper reusing the `world-clock-v0` move-count accounting. No runtime/composition
+  code constructs or applies a `RoomEnvironmentState`, so the model stays dry in
+  live gameplay, enforced by a dedicated dry-at-runtime test that scans both `.ts`
+  and `.tsx` production sources. No `WorldState`/`WorldEvent`/`WorldCommand`/
+  `applyEvent`, schema/save/persistence, `RoomSpec`, UI/renderer, timer/background-
+  simulation, or LLM/provider change
+  ([ADR-0078](./decisions/ADR-0078-room-environment-transition-model-dry-v0.md)).
 - ❌ **Not built** — future shape only; documented so we don't paint into a corner.
 
 ## Status today (Renderer Foundation v0)

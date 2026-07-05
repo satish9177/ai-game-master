@@ -1,6 +1,6 @@
 # Implementation Plan — `feature/lazy-room-environment-transitions-v0`
 
-> Status: **PROPOSED / model-only / dry-at-runtime.**
+> Status: **COMPLETE / IMPLEMENTED — model-only / dry-at-runtime.**
 > This slice adds a pure, closed room-environment transition model plus a pure
 > elapsed-world-hours helper and their tests. It has **no visible runtime
 > behavior**: no code path constructs or applies a `RoomEnvironmentState`, so the
@@ -56,7 +56,7 @@ These invariants may not be relaxed without explicit maintainer approval:
 
 - **Feature:** `lazy-room-environment-transitions-v0`
 - **Lane:** worked on `main` directly; no feature branch.
-- **Status:** PROPOSED / model-only / dry-at-runtime.
+- **Status:** COMPLETE / IMPLEMENTED — model-only / dry-at-runtime.
 - **ADR:** [ADR-0078](../decisions/ADR-0078-room-environment-transition-model-dry-v0.md)
   (next free number; ADR-0077 is `relationship-valence-reducer-v0`).
 
@@ -286,16 +286,42 @@ npm.cmd run lint
 npm.cmd run build
 ```
 
+Actual verification run during implementation:
+
+```bash
+npm.cmd run test -- roomEnvironment
+npm.cmd run lint
+npm.cmd run build
+npm.cmd run test
+git diff --check
+```
+
+Results:
+
+- `npm.cmd run test -- roomEnvironment` passed: 18 tests.
+- `npm.cmd run lint` passed.
+- `npm.cmd run build` passed.
+- `npm.cmd run test` passed: 197 files / 3357 tests (full suite, unaffected).
+- `git diff --check` passed.
+
+The reducer and elapsed helper were implemented as one file
+(`domain/world/roomEnvironment.ts`), so §12's originally separate
+`roomEnvironment.elapsed.test.ts` file was folded into
+`roomEnvironment.test.ts` alongside the reducer/tag tests and the dry-at-runtime
+test, without changing any of the covered behavior.
+
 ## 13. Implementation slices
 
 Only the model slice is in scope now; the rest are named as separate future features
 (see §14).
 
 1. **Pure model + reducer + elapsed helper + tests (dry).** Self-contained; no wiring;
-   no visible change. **This is the whole approved v0.**
+   no visible change. **This is the whole approved v0.** Delivered as
+   `apps/web/src/domain/world/roomEnvironment.ts` and
+   `apps/web/src/domain/world/roomEnvironment.test.ts`.
 2. **Docs closeout** — flip this plan and ADR-0078 to Implemented and add the
    ARCHITECTURE.md status line, at implementation time only (implemented-only
-   convention).
+   convention). Done in this closeout pass.
 
 ## 14. Deferred future features (each its own maintainer-approved feature/ADR)
 
@@ -355,3 +381,50 @@ split, and the deferrals in [ADR-0078](../decisions/ADR-0078-room-environment-tr
   LLM/provider; no raw text or object-name inference or logging; no corpse/blood
   handling; no NPC routines. `world-clock-v0` advancement rules untouched.
 - **Tests prove it:** §12, anchored by the dry-at-runtime non-construction proof.
+
+## 17. Closeout
+
+**Status: COMPLETE.**
+
+Implemented files:
+
+- `apps/web/src/domain/world/roomEnvironment.ts`
+- `apps/web/src/domain/world/roomEnvironment.test.ts`
+
+Threshold constants chosen (final, as implemented):
+
+- `SMOLDER_AFTER_HOURS = 2`
+- `BURNED_OUT_AFTER_HOURS = 6`
+
+Both are exported `as const` and also mirrored read-only in the frozen
+`ROOM_ENVIRONMENT_TRANSITION_THRESHOLDS` object for callers that want the pair
+together.
+
+Verification results:
+
+- `npm.cmd run test -- roomEnvironment` passed: 18 tests.
+- `npm.cmd run lint` passed.
+- `npm.cmd run build` passed.
+- `npm.cmd run test` passed: 197 files / 3357 tests (full suite).
+- `git diff --check` passed.
+
+Dry-at-runtime scan fix: the non-emission test's `import.meta.glob` scans both
+`../../**/*.ts` and `../../**/*.tsx` production sources (excluding the module's own
+file and any `.test.ts` / `.test.tsx` file), not `.ts` alone. Scanning `.tsx` too
+closes the gap where a React component could import `roomEnvironment` and go
+undetected by a `.ts`-only proof.
+
+V0 remains dry at runtime with no visible gameplay behavior: no runtime or
+composition module imports `roomEnvironment.ts`, no `RoomEnvironmentState` is
+constructed or applied outside its own test file, and no room/HUD/renderer output
+changed.
+
+Confirmed boundaries, unchanged:
+
+- No `WorldState` / `WorldEvent` / `WorldCommand` / `applyEvent` change.
+- No schema / save / persistence change.
+- No `RoomSpec` mutation.
+- No UI / renderer / runtime wiring.
+- No timers / background simulation.
+- No LLM / provider involvement.
+- No raw text inference / logging.

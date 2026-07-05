@@ -1,6 +1,6 @@
 # ADR-0078: Room environment transition model is dry until authoritative environment state exists
 
-- **Status:** PROPOSED (design approved, model-only / dry-at-runtime; not yet implemented)
+- **Status:** Accepted / Implemented (model-only / dry-at-runtime)
 - **Date:** 2026-07-05
 - **Deciders:** Project owner
 - **Builds on:**
@@ -15,7 +15,7 @@
 
 > Full plan, transition table, elapsed-time helper design, test plan, and slices live
 > in [`lazy-room-environment-transitions-v0`](../implementation-plans/lazy-room-environment-transitions-v0.md).
-> This ADR records the decision.
+> This ADR records the decision and delivery closeout.
 
 ---
 
@@ -147,3 +147,62 @@ which point a `room-environment-transition-runtime-v0` slice wires the lazy read
 - **Renderer day/night or fire lighting.** Rejected for v0: it touches the trusted
   Three.js renderer (ADR-0001/ADR-0002), a far larger surface with no v0 value;
   presentation, when it lands, will be UI-only.
+
+---
+
+## Verification
+
+Implemented and verified 2026-07-05.
+
+Files changed:
+
+- `apps/web/src/domain/world/roomEnvironment.ts`
+- `apps/web/src/domain/world/roomEnvironment.test.ts`
+
+Threshold constants chosen (final, as implemented — recorded per the decision that
+thresholds are constants in one file, covered by boundary tests):
+
+- `SMOLDER_AFTER_HOURS = 2`
+- `BURNED_OUT_AFTER_HOURS = 6`
+
+Both are exported `as const` and mirrored read-only in the frozen
+`ROOM_ENVIRONMENT_TRANSITION_THRESHOLDS` object; no other threshold or numeric field
+exists.
+
+Verification run:
+
+```bash
+npm.cmd run test -- roomEnvironment
+npm.cmd run lint
+npm.cmd run build
+npm.cmd run test
+git diff --check
+```
+
+Results:
+
+- `npm.cmd run test -- roomEnvironment` passed: 18 tests.
+- `npm.cmd run lint` passed.
+- `npm.cmd run build` passed.
+- `npm.cmd run test` passed: 197 files / 3357 tests (full suite, unaffected).
+- `git diff --check` passed (no whitespace errors).
+
+Dry-at-runtime scan fix: the non-emission test's `import.meta.glob` scans both
+`../../**/*.ts` **and** `../../**/*.tsx` production sources (excluding the module's
+own `.ts` file and any `.test.ts`/`.test.tsx` file) for the strings `roomEnvironment`
+/ `RoomEnvironmentState`. An initial `.ts`-only glob would silently miss a future
+`.tsx` importer and let a live wire-up through the dry-at-runtime proof undetected;
+scanning both extensions closes that gap.
+
+The model remains dry at runtime and has no visible gameplay behavior: no runtime or
+composition module imports `roomEnvironment.ts`, no `RoomEnvironmentState` is
+constructed or applied outside the module's own test, and no room/HUD/renderer output
+changes. Confirmed boundaries, unchanged:
+
+- No `WorldState` / `WorldEvent` / `WorldCommand` / `applyEvent` change.
+- No schema / save / persistence / migration / `schemaVersion` bump.
+- No `RoomSpec` mutation.
+- No UI / renderer / runtime wiring.
+- No timers, `Date.now`, `setInterval`, or background simulation.
+- No LLM / provider involvement.
+- No raw prompt / generated text / object-name inference or logging.
