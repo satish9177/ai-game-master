@@ -19,9 +19,19 @@ import { IDLE_INTENSITY_BY_STATE } from '../../domain/ports/npcBehavior'
 import { NpcBehaviorTracker } from './npc/behaviorTracker'
 import { WanderMotor } from './npc/WanderMotor'
 import { buildNpcWanderField } from '../../domain/npcMovementContract'
+import { buildNpcPatrolRoute } from '../../domain/npcPatrolContract'
+import { stableHash32 } from '../../domain/stableHash'
 
 export type SetRoomOptions = {
   resolvedObjectIds?: ReadonlySet<string>
+  /**
+   * Internal fixture/test seam only (see ADR-0080). NOT user-facing: it is not
+   * RoomSpec/schema/save-game data and is never wired through RoomViewer/App
+   * composition. Real gameplay never sets this, so every real NPC stays on the
+   * existing wander/idle path; only ids in this set may receive a generated
+   * `policy: 'patrol'` route, and only when one validates.
+   */
+  patrolOptInNpcIds?: ReadonlySet<string>
 }
 
 /**
@@ -124,7 +134,13 @@ export class Engine {
     this.movement = new MovementControls()
 
     this.interactables.push(...buildInteractables(room, options.resolvedObjectIds))
-    this.wanderNpcIds.push(...registerWanderNpcs(this.wanderMotor, room, objects, this.interactables))
+    this.wanderNpcIds.push(...registerWanderNpcs(
+      this.wanderMotor,
+      room,
+      objects,
+      this.interactables,
+      options.patrolOptInNpcIds,
+    ))
     window.addEventListener('keydown', this.onInteractKey)
 
     this.logger.info('room received', {
@@ -319,6 +335,7 @@ function registerWanderNpcs(
   room: LoadedRoom,
   group: THREE.Group,
   interactables: readonly Interactable[],
+  patrolOptInNpcIds?: ReadonlySet<string>,
 ): string[] {
   const npcIds: string[] = []
 
@@ -332,15 +349,25 @@ function registerWanderNpcs(
 
     const ring = group.children.find((candidate) => candidate.userData.forObjectId === objectId)
     const interactable = interactables.find((candidate) => candidate.id === objectId)
-    wanderMotor.register({
+    const seed = `${room.id}:${objectId}`
+    const base = {
       npcId: objectId,
       node,
       field,
-      seed: `${room.id}:${objectId}`,
-      home: field.home,
+      seed,
       ...(ring !== undefined ? { ring } : {}),
       ...(interactable !== undefined ? { interactable } : {}),
-    })
+    }
+
+    const route = patrolOptInNpcIds?.has(objectId) === true
+      ? buildNpcPatrolRoute(field, stableHash32(seed))
+      : null
+
+    wanderMotor.register(
+      route !== null
+        ? { ...base, policy: 'patrol', route }
+        : { ...base, home: field.home },
+    )
     npcIds.push(objectId)
   }
 

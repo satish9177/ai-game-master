@@ -1,9 +1,13 @@
 import * as THREE from 'three'
 import { describe, expect, it, vi } from 'vitest'
 import { loadRoomSpec } from '../../domain/loadRoomSpec'
+import type { LoadedRoom } from '../../domain/loadRoomSpec'
 import { buildInteractables } from '../../domain/ports/interaction'
 import { assembleRoom } from '../../domain/assembleRoom'
 import { fallbackRoom } from '../../domain/examples/fallbackRoom'
+import { buildNpcWanderField } from '../../domain/npcMovementContract'
+import { buildNpcPatrolRoute } from '../../domain/npcPatrolContract'
+import { stableHash32 } from '../../domain/stableHash'
 import { Engine } from './Engine'
 import { IDLE_BOB_AMPLITUDE, IdleAnimator, idleOffsets, idlePhase } from './animation/idleAnimation'
 import { NpcBehaviorTracker } from './npc/behaviorTracker'
@@ -795,6 +799,131 @@ describe('Engine local NPC wander wiring', () => {
         Engine.prototype.setRoom.call(fakeEngine as never, wanderRoom())
         updateNpcWander(fakeEngine, 0.1)
       }).not.toThrow()
+    } finally {
+      if (originalWindow === undefined) vi.unstubAllGlobals()
+      else vi.stubGlobal('window', originalWindow)
+    }
+  })
+})
+
+function patrolWiringRoom(id = 'engine-patrol-room'): LoadedRoom {
+  return loadRoomSpec({
+    schemaVersion: 1,
+    id,
+    name: 'Engine Patrol Room',
+    shell: { dimensions: { width: 20, depth: 20, height: 4 } },
+    spawn: { position: [0, 1.6, 0], yaw: 0 },
+    objects: [
+      {
+        id: 'guard',
+        type: 'npc',
+        name: 'Guard',
+        position: [0, 0, 6],
+        interaction: { key: 'F', prompt: 'Talk to Guard' },
+      },
+      {
+        id: 'villager',
+        type: 'npc',
+        name: 'Villager',
+        position: [6, 0, -6],
+        interaction: { key: 'F', prompt: 'Talk to Villager' },
+      },
+    ],
+  })
+}
+
+describe('Engine patrol opt-in seam (ADR-0080)', () => {
+  it('does not assign patrol to any NPC when patrolOptInNpcIds is omitted (no blanket assignment)', () => {
+    const originalWindow = globalThis.window
+    vi.stubGlobal('window', { addEventListener: vi.fn(), removeEventListener: vi.fn() })
+
+    try {
+      const fakeEngine = makeFakeEngine(new IdleAnimator())
+      const registerSpy = vi.spyOn(fakeEngine.wanderMotor, 'register')
+
+      Engine.prototype.setRoom.call(fakeEngine as never, patrolWiringRoom())
+
+      expect(registerSpy).toHaveBeenCalledTimes(2)
+      for (const call of registerSpy.mock.calls) {
+        expect(call[0]).not.toHaveProperty('policy', 'patrol')
+      }
+    } finally {
+      if (originalWindow === undefined) vi.unstubAllGlobals()
+      else vi.stubGlobal('window', originalWindow)
+    }
+  })
+
+  it('leaves ineligible (non-opted-in) NPCs on the existing wander/idle path even when a sibling NPC opts in', () => {
+    const originalWindow = globalThis.window
+    vi.stubGlobal('window', { addEventListener: vi.fn(), removeEventListener: vi.fn() })
+
+    try {
+      const fakeEngine = makeFakeEngine(new IdleAnimator())
+      const registerSpy = vi.spyOn(fakeEngine.wanderMotor, 'register')
+
+      Engine.prototype.setRoom.call(
+        fakeEngine as never,
+        patrolWiringRoom(),
+        { patrolOptInNpcIds: new Set(['guard']) },
+      )
+
+      const villagerCall = registerSpy.mock.calls.find((call) => call[0].npcId === 'villager')!
+      expect(villagerCall[0]).not.toHaveProperty('policy', 'patrol')
+      expect(villagerCall[0]).toMatchObject({ npcId: 'villager' })
+    } finally {
+      if (originalWindow === undefined) vi.unstubAllGlobals()
+      else vi.stubGlobal('window', originalWindow)
+    }
+  })
+
+  it('registers the explicitly opted-in fixture/test-seam NPC with a validated patrol route', () => {
+    const originalWindow = globalThis.window
+    vi.stubGlobal('window', { addEventListener: vi.fn(), removeEventListener: vi.fn() })
+
+    try {
+      const fakeEngine = makeFakeEngine(new IdleAnimator())
+      const registerSpy = vi.spyOn(fakeEngine.wanderMotor, 'register')
+      const room = patrolWiringRoom()
+
+      Engine.prototype.setRoom.call(
+        fakeEngine as never,
+        room,
+        { patrolOptInNpcIds: new Set(['guard']) },
+      )
+
+      const field = buildNpcWanderField(room, 'guard')!
+      const expectedRoute = buildNpcPatrolRoute(field, stableHash32(`${room.id}:guard`))
+      expect(expectedRoute).not.toBeNull()
+
+      const guardCall = registerSpy.mock.calls.find((call) => call[0].npcId === 'guard')!
+      expect(guardCall[0]).toMatchObject({ npcId: 'guard', policy: 'patrol', route: expectedRoute })
+    } finally {
+      if (originalWindow === undefined) vi.unstubAllGlobals()
+      else vi.stubGlobal('window', originalWindow)
+    }
+  })
+
+  it('never mutates room.objects across N patrol ticks (no authoritative mutation)', () => {
+    const originalWindow = globalThis.window
+    vi.stubGlobal('window', { addEventListener: vi.fn(), removeEventListener: vi.fn() })
+
+    try {
+      const fakeEngine = makeFakeEngine(new IdleAnimator())
+      const room = patrolWiringRoom()
+
+      Engine.prototype.setRoom.call(
+        fakeEngine as never,
+        room,
+        { patrolOptInNpcIds: new Set(['guard']) },
+      )
+
+      const before = structuredClone(room.objects)
+
+      for (let tick = 0; tick < 50; tick += 1) {
+        updateNpcWander(fakeEngine, 0.1)
+      }
+
+      expect(room.objects).toEqual(before)
     } finally {
       if (originalWindow === undefined) vi.unstubAllGlobals()
       else vi.stubGlobal('window', originalWindow)
