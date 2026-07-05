@@ -1,21 +1,41 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
   DIALOGUE_SEMANTIC_EVENT_SCHEMA_VERSION,
+  DialogueSemanticEventKindSchema,
   type DialogueSemanticEvent,
+  type DialogueSemanticEventActor,
   type DialogueSemanticEventKind,
+  type DialogueSemanticEventTarget,
 } from '../dialogueEvents/contracts'
-import { StructuredDialogueEffectSchema } from './contracts'
-import { deriveStructuredDialogueEffects } from './derive'
+import { StructuredDialogueEffectKindSchema, StructuredDialogueEffectSchema, type StructuredDialogueEffectKind } from './contracts'
+import { deriveStructuredDialogueEffects, EFFECT_KIND_BY_SOURCE_KIND } from './derive'
 import { validateStructuredDialogueEffect } from './validate'
 
+// The 3 semantic-event kinds with no candidate mapping in v0 (map to no effect).
 const RESERVED_EVENT_KINDS: DialogueSemanticEventKind[] = [
   'player_shared_claim',
-  'player_promised_help',
-  'player_threatened_npc',
-  'npc_warned_player',
   'npc_revealed_rumor',
-  'npc_refused_request',
   'npc_acknowledged_memory',
+]
+
+// The 9 valenced sourceKind -> candidateKind pairs wired in this slice. The map is
+// dry: reachable only by directly injecting one of these semantic-event kinds,
+// since classifyDialogueTurn never emits them.
+const VALENCED_SOURCE_KINDS: ReadonlyArray<{
+  sourceKind: DialogueSemanticEventKind
+  candidateKind: StructuredDialogueEffectKind
+  actor: DialogueSemanticEventActor
+  target: DialogueSemanticEventTarget
+}> = [
+  { sourceKind: 'player_threatened_npc', candidateKind: 'player_threat_candidate', actor: 'player', target: 'npc' },
+  { sourceKind: 'player_apologized', candidateKind: 'player_apology_candidate', actor: 'player', target: 'npc' },
+  { sourceKind: 'player_thanked_npc', candidateKind: 'player_gratitude_candidate', actor: 'player', target: 'npc' },
+  { sourceKind: 'player_insulted_npc', candidateKind: 'player_insult_candidate', actor: 'player', target: 'npc' },
+  { sourceKind: 'player_refused_request', candidateKind: 'player_refusal_candidate', actor: 'player', target: 'npc' },
+  { sourceKind: 'player_promised_help', candidateKind: 'player_promise_candidate', actor: 'player', target: 'npc' },
+  { sourceKind: 'npc_warned_player', candidateKind: 'npc_warning_candidate', actor: 'npc', target: 'player' },
+  { sourceKind: 'npc_offered_help', candidateKind: 'npc_offer_candidate', actor: 'npc', target: 'player' },
+  { sourceKind: 'npc_refused_request', candidateKind: 'npc_refusal_candidate', actor: 'npc', target: 'player' },
 ]
 
 const FORBIDDEN_TEXT_FIELDS = [
@@ -237,5 +257,79 @@ describe('deriveStructuredDialogueEffects', () => {
         }),
       ).toEqual([])
     }
+  })
+})
+
+describe('EFFECT_KIND_BY_SOURCE_KIND (dry map consistency)', () => {
+  it('has exactly 11 entries: the 2 existing plus the 9 valenced additions', () => {
+    expect(Object.keys(EFFECT_KIND_BY_SOURCE_KIND)).toHaveLength(11)
+  })
+
+  it('has every key as a valid DialogueSemanticEventKind', () => {
+    for (const key of Object.keys(EFFECT_KIND_BY_SOURCE_KIND)) {
+      expect(DialogueSemanticEventKindSchema.safeParse(key).success).toBe(true)
+    }
+  })
+
+  it('has every value as a valid StructuredDialogueEffectKind', () => {
+    for (const value of Object.values(EFFECT_KIND_BY_SOURCE_KIND)) {
+      expect(StructuredDialogueEffectKindSchema.safeParse(value).success).toBe(true)
+    }
+  })
+
+  it('reaches every valenced candidate kind from exactly one source kind', () => {
+    const mappedCandidateKinds = Object.values(EFFECT_KIND_BY_SOURCE_KIND)
+
+    for (const { candidateKind } of VALENCED_SOURCE_KINDS) {
+      const occurrences = mappedCandidateKinds.filter((kind) => kind === candidateKind)
+      expect(occurrences).toHaveLength(1)
+    }
+  })
+
+  it('leaves the 3 reserved event kinds unmapped', () => {
+    for (const reservedKind of RESERVED_EVENT_KINDS) {
+      expect(EFFECT_KIND_BY_SOURCE_KIND[reservedKind]).toBeUndefined()
+    }
+  })
+})
+
+describe('valenced candidate direct injection (map is wired, source stays dry)', () => {
+  it.each(VALENCED_SOURCE_KINDS)(
+    'maps directly injected $sourceKind to $candidateKind with the expected actor/target',
+    ({ sourceKind, candidateKind, actor, target }) => {
+      const event = validEvent({
+        eventId: `dialogue-event-${sourceKind}`,
+        kind: sourceKind,
+        actor,
+        target,
+      })
+
+      const [effect] = deriveStructuredDialogueEffects([event], {
+        makeEffectId: () => `effect-${sourceKind}`,
+      })
+
+      expect(effect).toMatchObject({
+        kind: candidateKind,
+        sourceEventId: event.eventId,
+        sourceKind: event.kind,
+        actor,
+        target,
+      })
+      expect(StructuredDialogueEffectSchema.safeParse(effect).success).toBe(true)
+      expect(validateStructuredDialogueEffect(effect)).toEqual(effect)
+    },
+  )
+
+  it('derives all 9 valenced candidates in one pass from directly injected events', () => {
+    const events = VALENCED_SOURCE_KINDS.map(({ sourceKind, actor, target }, index) =>
+      validEvent({ eventId: `dialogue-event-${index}`, kind: sourceKind, actor, target }),
+    )
+
+    const effects = deriveStructuredDialogueEffects(events, {
+      makeEffectId: (sourceEvent) => `effect-for-${sourceEvent.eventId}`,
+    })
+
+    expect(effects).toHaveLength(VALENCED_SOURCE_KINDS.length)
+    expect(effects.map((effect) => effect.kind)).toEqual(VALENCED_SOURCE_KINDS.map((entry) => entry.candidateKind))
   })
 })

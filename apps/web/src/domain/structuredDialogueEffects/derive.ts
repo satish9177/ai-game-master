@@ -11,9 +11,18 @@ export interface StructuredDialogueEffectDerivationOptions {
   makeEffectId: (sourceEvent: DialogueSemanticEvent, indexInTurn: number) => string
 }
 
-const EFFECT_KIND_BY_SOURCE_KIND: Partial<Record<DialogueSemanticEvent['kind'], StructuredDialogueEffectKind>> = {
+export const EFFECT_KIND_BY_SOURCE_KIND: Partial<Record<DialogueSemanticEvent['kind'], StructuredDialogueEffectKind>> = {
   player_asked_question: 'player_question_effect_candidate',
   npc_responded: 'npc_response_effect_candidate',
+  player_threatened_npc: 'player_threat_candidate',
+  player_apologized: 'player_apology_candidate',
+  player_thanked_npc: 'player_gratitude_candidate',
+  player_insulted_npc: 'player_insult_candidate',
+  player_refused_request: 'player_refusal_candidate',
+  player_promised_help: 'player_promise_candidate',
+  npc_warned_player: 'npc_warning_candidate',
+  npc_offered_help: 'npc_offer_candidate',
+  npc_refused_request: 'npc_refusal_candidate',
 }
 
 export function deriveStructuredDialogueEffects(

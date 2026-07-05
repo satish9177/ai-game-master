@@ -13,13 +13,10 @@ import {
 
 type LogEntry = { level: LogLevel; message: string; context: LogContext }
 
+// The 3 semantic-event kinds with no candidate mapping in v0 (map to no effect).
 const RESERVED_EVENT_KINDS: DialogueSemanticEventKind[] = [
   'player_shared_claim',
-  'player_promised_help',
-  'player_threatened_npc',
-  'npc_warned_player',
   'npc_revealed_rumor',
-  'npc_refused_request',
   'npc_acknowledged_memory',
 ]
 
