@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
+import { classifyDialogueTurn, type DialogueTurnClassificationInput } from '../domain/dialogueEvents/classify'
 import { STRUCTURED_DIALOGUE_EFFECT_SCHEMA_VERSION } from '../domain/structuredDialogueEffects/contracts'
 import type { StructuredDialogueEffect } from '../domain/structuredDialogueEffects/contracts'
+import { deriveStructuredDialogueEffects } from '../domain/structuredDialogueEffects/derive'
 import { neutralRelationship } from '../domain/npcRelationship/neutral'
 import type { RelationshipReductionContext } from '../domain/npcRelationship/reducer'
 import type { LogContext, Logger, LogLevel } from '../platform/logger/Logger'
@@ -76,6 +78,36 @@ function input(overrides: Partial<DeriveAndReduceRelationshipInput> = {}): Deriv
     logger: createSpyLogger(logs),
     ...overrides,
   }
+}
+
+function liveChainInput(
+  overrides: Partial<DialogueTurnClassificationInput> = {},
+): DialogueTurnClassificationInput {
+  return {
+    scope: {
+      worldId: CTX.worldId,
+      sessionId: CTX.sessionId,
+      roomId: 'room-1',
+      npcId: CTX.npcId,
+    },
+    hasNpcReply: true,
+    makeEventId: (kind, indexInTurn) => `live-chain-event-${kind}-${indexInTurn}`,
+    ...overrides,
+  }
+}
+
+function runLiveChain(
+  classificationInput: DialogueTurnClassificationInput,
+  prior = neutralPrior(),
+) {
+  const events = classifyDialogueTurn(classificationInput)
+  const effects = deriveStructuredDialogueEffects(events, {
+    makeEffectId: (sourceEvent, indexInTurn) => `live-chain-effect-${sourceEvent.kind}-${indexInTurn}`,
+  })
+  const logs: LogEntry[] = []
+  const result = deriveAndReduceRelationship(input({ effects, prior, logger: createSpyLogger(logs) }))
+
+  return { events, effects, result, logs }
 }
 
 describe('deriveAndReduceRelationship', () => {
@@ -194,5 +226,75 @@ describe('deriveAndReduceRelationship', () => {
     deriveAndReduceRelationship(input({ effects }))
 
     expect(effects).toEqual(before)
+  })
+})
+
+describe('classifyDialogueTurn -> deriveStructuredDialogueEffects -> deriveAndReduceRelationship', () => {
+  it('keeps normal free text dry for signed valenced movement', () => {
+    const { events, effects, result } = runLiveChain(
+      {
+        ...liveChainInput({ promptId: undefined, hasNpcReply: true }),
+        playerLine: 'Could you tell me what happened here?',
+      } as DialogueTurnClassificationInput,
+    )
+
+    expect(events.map((event) => event.kind)).toEqual(['npc_responded'])
+    expect(effects.map((effect) => effect.kind)).toEqual(['npc_response_effect_candidate'])
+    expect(result.state.axes).toEqual({ trust: 0, respect: 0, fear: 0, familiarity: 1 })
+  })
+
+  it('keeps an unknown promptId dry for signed valenced movement', () => {
+    const { events, effects, result } = runLiveChain(
+      {
+        ...liveChainInput({ promptId: 'ask-rumor', hasNpcReply: true }),
+        playerLine: 'This is just ordinary free text.',
+      } as DialogueTurnClassificationInput,
+    )
+
+    expect(events.map((event) => event.kind)).toEqual(['npc_responded'])
+    expect(effects.map((effect) => effect.kind)).toEqual(['npc_response_effect_candidate'])
+    expect(result.state.axes).toEqual({ trust: 0, respect: 0, fear: 0, familiarity: 1 })
+  })
+
+  it.each(['ask-room', 'ask-help'] as const)('keeps %s unchanged: only familiarity moves', (promptId) => {
+    const { events, effects, result } = runLiveChain(liveChainInput({ promptId, hasNpcReply: true }))
+
+    expect(events.map((event) => event.kind)).toEqual(['player_asked_question', 'npc_responded'])
+    expect(effects.map((effect) => effect.kind)).toEqual([
+      'player_question_effect_candidate',
+      'npc_response_effect_candidate',
+    ])
+    expect(result.state.axes.trust).toBe(0)
+    expect(result.state.axes.respect).toBe(0)
+    expect(result.state.axes.fear).toBe(0)
+    expect(result.state.axes.familiarity).toBeGreaterThan(0)
+  })
+
+  it('ignores adversarial playerLine text containing candidate and source kind names', () => {
+    const adversarialLine = [
+      'player_threat_candidate',
+      'player_apology_candidate',
+      'player_gratitude_candidate',
+      'player_insult_candidate',
+      'player_threatened_npc',
+      'player_apologized',
+      'player_thanked_npc',
+      'player_insulted_npc',
+    ].join(' ')
+    const { events, effects, result, logs } = runLiveChain(
+      {
+        ...liveChainInput({ promptId: 'ask-room', hasNpcReply: true }),
+        playerLine: adversarialLine,
+        npcText: adversarialLine,
+      } as DialogueTurnClassificationInput,
+    )
+
+    expect(events.map((event) => event.kind)).toEqual(['player_asked_question', 'npc_responded'])
+    expect(effects.map((effect) => effect.kind)).toEqual([
+      'player_question_effect_candidate',
+      'npc_response_effect_candidate',
+    ])
+    expect(result.state.axes).toEqual({ trust: 0, respect: 0, fear: 0, familiarity: 2 })
+    expect(JSON.stringify(logs)).not.toContain(adversarialLine)
   })
 })

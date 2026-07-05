@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { recallRoomMemoryContext } from '../app/recallRoomMemoryContext'
+import { deriveAndReduceRelationship } from '../app/deriveAndReduceRelationship'
 import { deriveAndLogDialogueSemanticEvents } from '../app/deriveAndLogDialogueSemanticEvents'
 import { deriveAndLogStructuredDialogueEffects } from '../app/deriveAndLogStructuredDialogueEffects'
 import { promoteInteractionMemories } from '../app/promoteInteractionMemories'
@@ -9,18 +10,24 @@ import {
   type DialogueSemanticEventKind,
 } from '../domain/dialogueEvents/contracts'
 import type { RoomMemoryDraftInput } from '../domain/memory/roomFirewall'
+import { neutralRelationship } from '../domain/npcRelationship/neutral'
 import {
   buildRoomMemorySaveJson,
   filterRestorableRoomMemories,
   loadRoomMemorySaveState,
 } from '../domain/memory/roomMemorySaveState'
 import { EFFECT_KIND_BY_SOURCE_KIND } from '../domain/structuredDialogueEffects/derive'
+import {
+  STRUCTURED_DIALOGUE_EFFECT_SCHEMA_VERSION,
+  type StructuredDialogueEffect,
+} from '../domain/structuredDialogueEffects/contracts'
 import type { WorldEvent } from '../domain/world/events'
 import { WORLD_SCHEMA_VERSION } from '../domain/world/worldState'
 import { buildDialoguePromptMessages } from '../generation/llmDialoguePrompt'
 import { InMemoryRoomMemoryStore } from '../memory/InMemoryRoomMemoryStore'
 import {
   EVAL_CANON_WORLD_ID,
+  EVAL_NPC_ID,
   EVAL_ROOM_ID,
   EVAL_SESSION_ID,
   EVAL_WORLD_ID,
@@ -53,6 +60,44 @@ import { toUngatedRoomMemoryDialogueContext } from './recalledRoomMemoryAdapter'
  */
 
 const ROOM_SCOPE = { worldId: EVAL_WORLD_ID, sessionId: EVAL_SESSION_ID, roomId: EVAL_ROOM_ID }
+const SIGNED_VALENCED_EFFECT_KINDS = [
+  'player_threat_candidate',
+  'player_apology_candidate',
+  'player_gratitude_candidate',
+  'player_insult_candidate',
+] as const
+const SOURCE_KIND_BY_SIGNED_EFFECT_KIND: Record<
+  (typeof SIGNED_VALENCED_EFFECT_KINDS)[number],
+  DialogueSemanticEventKind
+> = {
+  player_threat_candidate: 'player_threatened_npc',
+  player_apology_candidate: 'player_apologized',
+  player_gratitude_candidate: 'player_thanked_npc',
+  player_insult_candidate: 'player_insulted_npc',
+}
+
+function signedValencedEffect(
+  kind: (typeof SIGNED_VALENCED_EFFECT_KINDS)[number],
+  index: number,
+): StructuredDialogueEffect {
+  return {
+    schemaVersion: STRUCTURED_DIALOGUE_EFFECT_SCHEMA_VERSION,
+    effectId: `eval-reducer-log-effect-${index}`,
+    kind,
+    sourceEventId: `eval-reducer-log-event-${index}`,
+    sourceKind: SOURCE_KIND_BY_SIGNED_EFFECT_KIND[kind],
+    status: 'candidate',
+    actor: 'player',
+    target: 'npc',
+    scope: { worldId: EVAL_WORLD_ID, sessionId: EVAL_SESSION_ID, roomId: EVAL_ROOM_ID, npcId: EVAL_NPC_ID },
+    provenance: {
+      classifier: 'deterministic-local',
+      promptId: evalMarkers.playerLine,
+      turnIndex: index,
+    },
+    confidence: 'medium',
+  }
+}
 
 describe('Gate E - no raw memory/player/provider text in logs', () => {
   it('sweeps recall, context, prompt, promotion, and save-load logs clean', async () => {
@@ -223,5 +268,64 @@ describe('Gate E (valenced candidates) - no raw text leaks for the 9 new candida
     expect(logEntries.length).toBeGreaterThan(0) // guard against a vacuous pass
     expectNoEvalMarkersInLogs(logEntries)
     expectSafeLogContextValues(logEntries)
+  })
+})
+
+describe('Gate E (relationship reducer) - signed valenced rows keep reducer logs count-only', () => {
+  it('logs the unchanged reducer shape without raw text, candidate kinds, or deltas', () => {
+    const logEntries: LogEntry[] = []
+    const prior = neutralRelationship({ worldId: EVAL_WORLD_ID, sessionId: EVAL_SESSION_ID, npcId: EVAL_NPC_ID })
+
+    deriveAndReduceRelationship({
+      effects: SIGNED_VALENCED_EFFECT_KINDS.map((kind, index) => signedValencedEffect(kind, index)),
+      prior,
+      ctx: { worldId: EVAL_WORLD_ID, sessionId: EVAL_SESSION_ID, npcId: EVAL_NPC_ID },
+      logger: createSpyLogger(logEntries),
+      playerLine: evalMarkers.playerLine,
+      npcText: evalMarkers.memoryText,
+      promptText: evalMarkers.playerLine,
+      providerText: evalMarkers.providerBody,
+    } as Parameters<typeof deriveAndReduceRelationship>[0])
+
+    expect(logEntries).toHaveLength(1)
+    expect(logEntries[0]?.message).toBe('npc relationship reduced')
+    expect(Object.keys(logEntries[0]!.context).sort()).toEqual(
+      [
+        'applied',
+        'clampedAxes',
+        'familiarityBucket',
+        'interactionCount',
+        'npcId',
+        'processed',
+        'rejected',
+        'sessionId',
+        'worldId',
+      ].sort(),
+    )
+    expect(logEntries[0]?.context).toMatchObject({
+      processed: 4,
+      applied: 4,
+      rejected: 0,
+      clampedAxes: 0,
+      interactionCount: 4,
+      familiarityBucket: 'none',
+      worldId: EVAL_WORLD_ID,
+      sessionId: EVAL_SESSION_ID,
+      npcId: EVAL_NPC_ID,
+    })
+
+    const serialized = JSON.stringify(logEntries)
+    expectNoEvalMarkersInLogs(logEntries)
+    expectSafeLogContextValues(logEntries)
+    for (const kind of SIGNED_VALENCED_EFFECT_KINDS) {
+      expect(serialized).not.toContain(kind)
+      expect(serialized).not.toContain(SOURCE_KIND_BY_SIGNED_EFFECT_KIND[kind])
+    }
+    expect(serialized).not.toContain('trust')
+    expect(serialized).not.toContain('respect')
+    expect(serialized).not.toContain('fear')
+    expect(serialized).not.toContain('delta')
+    expect(serialized).not.toContain('-3')
+    expect(serialized).not.toContain('-2')
   })
 })
