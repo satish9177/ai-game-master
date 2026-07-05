@@ -6,6 +6,7 @@ import {
 } from '../../../domain/npcMovementContract'
 import type { NpcWanderField, WanderXZ } from '../../../domain/npcMovementContract'
 import { stableHash01, stableHash32 } from '../../../domain/stableHash'
+import type { PatrolRoute } from '../../../domain/npcPatrolContract'
 import { WanderMotor } from './WanderMotor'
 
 type TestNode = {
@@ -51,6 +52,20 @@ function boxedField(): NpcWanderField {
       reason: 'footprint' as const,
     })),
   }
+}
+
+function patrolField(): NpcWanderField {
+  return {
+    roomId: 'wander-motor-patrol-room',
+    npcId: 'npc',
+    home: { x: 0, z: 0 },
+    bounds: { halfX: 8, halfZ: 8 },
+    exclusions: [],
+  }
+}
+
+function patrolRoute(): PatrolRoute {
+  return { npcId: 'npc', waypoints: [{ x: 1, z: 0 }, { x: -1, z: 0 }], mode: 'ping-pong' }
 }
 
 function makeNode(x = 99, z = 99): TestNode {
@@ -240,5 +255,110 @@ describe('WanderMotor', () => {
       motor.register({ npcId: 'npc', node, field, seed: 'pure', home: field.home })
       motor.update(0.1, { interactionLocked: false, isNpcTalking: () => false })
     }).not.toThrow()
+  })
+
+  it('patrols deterministically toward route waypoints when policy is "patrol"', () => {
+    const field = patrolField()
+    const route = patrolRoute()
+    const motor = new WanderMotor()
+    const node = makeNode()
+    motor.register({ npcId: 'npc', node, field, seed: 'patrol-basic', policy: 'patrol', route })
+
+    expect(node.position.x).toBe(1)
+    expect(node.position.z).toBe(0)
+
+    motor.update(0.25, { interactionLocked: false, isNpcTalking: () => false })
+
+    expect(node.position.x).toBeLessThan(1)
+    expect(isWanderPositionAllowed(field, { x: node.position.x, z: node.position.z })).toBe(true)
+    expect(motor.isWalking('npc')).toBe(true)
+  })
+
+  it('composes wander and patrol entries independently; policy is not inferred from route presence', () => {
+    const wanderField = openField()
+    const patrolFieldValue = patrolField()
+    const route = patrolRoute()
+    const motor = new WanderMotor()
+    const wanderNode = makeNode()
+    const patrolNode = makeNode()
+
+    motor.register({ npcId: 'wanderer', node: wanderNode, field: wanderField, seed: 'compose-wander', home: wanderField.home })
+    motor.register({
+      npcId: 'patroller',
+      node: patrolNode,
+      field: patrolFieldValue,
+      seed: 'compose-patrol',
+      policy: 'patrol',
+      route,
+    })
+
+    motor.update(0.25, { interactionLocked: false, isNpcTalking: () => false })
+
+    expect(isWanderPositionAllowed(wanderField, { x: wanderNode.position.x, z: wanderNode.position.z })).toBe(true)
+    expect(patrolNode.position.x).toBeLessThan(1)
+    expect(motor.isWalking('patroller')).toBe(true)
+  })
+
+  it('freezes patrol position and state when paused by interaction lock', () => {
+    const field = patrolField()
+    const route = patrolRoute()
+    const motor = new WanderMotor()
+    const node = makeNode()
+    motor.register({ npcId: 'npc', node, field, seed: 'patrol-lock', policy: 'patrol', route })
+    motor.update(0.25, { interactionLocked: false, isNpcTalking: () => false })
+    const frozen = { x: node.position.x, z: node.position.z }
+
+    motor.update(3, { interactionLocked: true, isNpcTalking: () => false })
+
+    expect(node.position.x).toBe(frozen.x)
+    expect(node.position.z).toBe(frozen.z)
+  })
+
+  it('freezes patrol position and state when paused by npcTalking', () => {
+    const field = patrolField()
+    const route = patrolRoute()
+    const motor = new WanderMotor()
+    const node = makeNode()
+    motor.register({ npcId: 'npc', node, field, seed: 'patrol-talking', policy: 'patrol', route })
+    motor.update(0.25, { interactionLocked: false, isNpcTalking: () => false })
+    const frozen = { x: node.position.x, z: node.position.z }
+
+    motor.update(3, { interactionLocked: false, isNpcTalking: (npcId) => npcId === 'npc' })
+
+    expect(node.position.x).toBe(frozen.x)
+    expect(node.position.z).toBe(frozen.z)
+  })
+
+  it('has no drift across successive ticks while paused patrol', () => {
+    const field = patrolField()
+    const route = patrolRoute()
+    const motor = new WanderMotor()
+    const node = makeNode()
+    motor.register({ npcId: 'npc', node, field, seed: 'patrol-no-drift', policy: 'patrol', route })
+    motor.update(0.25, { interactionLocked: true, isNpcTalking: () => false })
+    const frozen = { x: node.position.x, z: node.position.z }
+
+    for (let index = 0; index < 5; index += 1) {
+      motor.update(0.25, { interactionLocked: true, isNpcTalking: () => false })
+      expect(node.position.x).toBe(frozen.x)
+      expect(node.position.z).toBe(frozen.z)
+    }
+  })
+
+  it('syncs ring and interactable X/Z refs during patrol', () => {
+    const field = patrolField()
+    const route = patrolRoute()
+    const motor = new WanderMotor()
+    const node = makeNode()
+    const ring = makeNode(-9, -9)
+    const interactable = makeInteractable(-9, -9)
+    motor.register({ npcId: 'npc', node, ring, interactable, field, seed: 'patrol-sync', policy: 'patrol', route })
+
+    motor.update(0.25, { interactionLocked: false, isNpcTalking: () => false })
+
+    expect(ring.position.x).toBe(node.position.x)
+    expect(ring.position.z).toBe(node.position.z)
+    expect(interactable.position.x).toBe(node.position.x)
+    expect(interactable.position.z).toBe(node.position.z)
   })
 })

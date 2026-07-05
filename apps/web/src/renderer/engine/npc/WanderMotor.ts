@@ -1,7 +1,12 @@
 import { shouldPauseWander } from '../../../domain/npcMovementContract'
 import type { NpcWanderField, WanderXZ } from '../../../domain/npcMovementContract'
+import type { PatrolRoute } from '../../../domain/npcPatrolContract'
 import { createInitialWanderState, updateWanderStep } from './wanderStep'
 import type { NpcWanderStepState } from './wanderStep'
+import { createInitialPatrolState, updatePatrolStep } from './patrolStep'
+import type { NpcPatrolStepState } from './patrolStep'
+
+export type WanderMotorPolicy = 'wander' | 'patrol'
 
 export type WanderPositionNode = {
   position: {
@@ -17,46 +22,54 @@ export type WanderInteractableRef = {
   }
 }
 
-export type WanderMotorRegistration = {
+type WanderMotorRegistrationBase = {
   npcId: string
   node: WanderPositionNode
   ring?: WanderPositionNode
   interactable?: WanderInteractableRef
   field: NpcWanderField
   seed: string
-  home: WanderXZ
 }
+
+export type WanderMotorRegistration =
+  | (WanderMotorRegistrationBase & { policy?: 'wander'; home: WanderXZ })
+  | (WanderMotorRegistrationBase & { policy: 'patrol'; route: PatrolRoute })
 
 export type WanderMotorPauseContext = {
   interactionLocked: boolean
   isNpcTalking: (npcId: string) => boolean
 }
 
-type WanderMotorEntry = {
+type WanderMotorEntryBase = {
   node: WanderPositionNode
   ring?: WanderPositionNode
   interactable?: WanderInteractableRef
   field: NpcWanderField
   seed: string
-  state: NpcWanderStepState
 }
+
+type WanderMotorEntry =
+  | (WanderMotorEntryBase & { policy: 'wander'; state: NpcWanderStepState })
+  | (WanderMotorEntryBase & { policy: 'patrol'; route: PatrolRoute; state: NpcPatrolStepState })
 
 export class WanderMotor {
   private readonly entries = new Map<string, WanderMotorEntry>()
 
   register(registration: WanderMotorRegistration): void {
-    const state = createInitialWanderState(registration.home)
-    const entry: WanderMotorEntry = {
+    const base: WanderMotorEntryBase = {
       node: registration.node,
       field: registration.field,
       seed: registration.seed,
-      state,
       ...(registration.ring !== undefined ? { ring: registration.ring } : {}),
       ...(registration.interactable !== undefined ? { interactable: registration.interactable } : {}),
     }
 
+    const entry: WanderMotorEntry = registration.policy === 'patrol'
+      ? { ...base, policy: 'patrol', route: registration.route, state: createInitialPatrolState(registration.route) }
+      : { ...base, policy: 'wander', state: createInitialWanderState(registration.home) }
+
     this.entries.set(registration.npcId, entry)
-    syncXZ(entry, state.position)
+    syncXZ(entry, entry.state.position)
   }
 
   update(dtS: number, context: WanderMotorPauseContext): void {
@@ -69,12 +82,22 @@ export class WanderMotor {
         continue
       }
 
-      entry.state = updateWanderStep({
-        state: entry.state,
-        field: entry.field,
-        dtS,
-        seed: entry.seed,
-      })
+      if (entry.policy === 'patrol') {
+        entry.state = updatePatrolStep({
+          state: entry.state,
+          route: entry.route,
+          field: entry.field,
+          dtS,
+          seed: entry.seed,
+        })
+      } else {
+        entry.state = updateWanderStep({
+          state: entry.state,
+          field: entry.field,
+          dtS,
+          seed: entry.seed,
+        })
+      }
       syncXZ(entry, entry.state.position)
     }
   }
@@ -88,7 +111,7 @@ export class WanderMotor {
   }
 }
 
-function syncXZ(entry: WanderMotorEntry, position: WanderXZ): void {
+function syncXZ(entry: WanderMotorEntryBase, position: WanderXZ): void {
   entry.node.position.x = position.x
   entry.node.position.z = position.z
 
