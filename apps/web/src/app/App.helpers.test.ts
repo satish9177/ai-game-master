@@ -1,14 +1,37 @@
 import { describe, expect, it } from 'vitest'
+import appHelpersSource from './App.helpers.ts?raw'
 import type { FamiliarityBucket } from '../domain/npcRelationship/dialogueContext'
+import { NPC_RELATIONSHIP_SCHEMA_VERSION, type NpcRelationshipState } from '../domain/npcRelationship/contracts'
 import {
   INITIAL_RELATIONSHIP_FEEDBACK_STATE,
   relationshipFeedbackAfterReduction,
   relationshipFeedbackOnRoomEntry,
+  restoreNpcRelationshipsFromSlot,
   selectTransientFeedbackMessage,
   type RelationshipFeedbackState,
 } from './App.helpers'
 import { MEMORY_CREATED_MESSAGE, MEMORY_RECALLED_MESSAGE } from './memoryFeedback'
 import { RELATIONSHIP_FAMILIARITY_INCREASED_MESSAGE } from './relationshipFeedback'
+
+const WORLD_ID = 'world-1'
+const SESSION_ID = 'session-1'
+const SCOPE = { worldId: WORLD_ID, sessionId: SESSION_ID }
+
+function makeRelationshipRecord(overrides: Partial<NpcRelationshipState> = {}): NpcRelationshipState {
+  return {
+    schemaVersion: NPC_RELATIONSHIP_SCHEMA_VERSION,
+    scope: { worldId: WORLD_ID, sessionId: SESSION_ID, npcId: 'npc-1' },
+    subject: 'npc',
+    object: 'player',
+    axes: { trust: 10, respect: 5, fear: 0, familiarity: 20 },
+    interactionCount: 3,
+    ...overrides,
+  }
+}
+
+function relationshipJson(records: NpcRelationshipState[]): string {
+  return JSON.stringify({ schemaVersion: 1, records })
+}
 
 describe('relationshipFeedbackAfterReduction', () => {
   it('sets the message on an upward familiarity bucket crossing', () => {
@@ -86,5 +109,156 @@ describe('selectTransientFeedbackMessage', () => {
 
   it('returns null when both are null', () => {
     expect(selectTransientFeedbackMessage(null, null)).toBeNull()
+  })
+})
+
+describe('restoreNpcRelationshipsFromSlot', () => {
+  it('restores records matching the restored worldId/sessionId', () => {
+    const record = makeRelationshipRecord()
+    const result = restoreNpcRelationshipsFromSlot({
+      npcRelationshipJson: relationshipJson([record]),
+      scope: SCOPE,
+    })
+
+    expect(result.records).toEqual([record])
+    expect(result.diagnostics).toEqual({
+      status: 'restored',
+      restoredCount: 1,
+      droppedCount: 0,
+      droppedByScope: 0,
+      droppedByCap: 0,
+    })
+  })
+
+  it('drops records with a mismatched worldId or sessionId', () => {
+    const keep = makeRelationshipRecord({ scope: { worldId: WORLD_ID, sessionId: SESSION_ID, npcId: 'keep' } })
+    const wrongWorld = makeRelationshipRecord({
+      scope: { worldId: 'other-world', sessionId: SESSION_ID, npcId: 'wrong-world' },
+    })
+    const wrongSession = makeRelationshipRecord({
+      scope: { worldId: WORLD_ID, sessionId: 'other-session', npcId: 'wrong-session' },
+    })
+
+    const result = restoreNpcRelationshipsFromSlot({
+      npcRelationshipJson: relationshipJson([keep, wrongWorld, wrongSession]),
+      scope: SCOPE,
+    })
+
+    expect(result.records.map((record) => record.scope.npcId)).toEqual(['keep'])
+    expect(result.diagnostics.restoredCount).toBe(1)
+    expect(result.diagnostics.droppedByScope).toBe(2)
+  })
+
+  it('returns an empty result safely for corrupt JSON', () => {
+    const result = restoreNpcRelationshipsFromSlot({
+      npcRelationshipJson: 'NOT VALID JSON{{{',
+      scope: SCOPE,
+    })
+
+    expect(result.records).toEqual([])
+    expect(result.diagnostics).toEqual({
+      status: 'invalid',
+      reason: 'invalid-json',
+      restoredCount: 0,
+      droppedCount: 0,
+      droppedByScope: 0,
+      droppedByCap: 0,
+    })
+  })
+
+  it('returns an empty result safely for an unsupported schema version', () => {
+    const result = restoreNpcRelationshipsFromSlot({
+      npcRelationshipJson: JSON.stringify({ schemaVersion: 999, records: [makeRelationshipRecord()] }),
+      scope: SCOPE,
+    })
+
+    expect(result.records).toEqual([])
+    expect(result.diagnostics.status).toBe('invalid')
+    expect(result.diagnostics.reason).toBe('unsupported-version')
+  })
+
+  it('returns an empty result safely for an invalid record shape', () => {
+    const result = restoreNpcRelationshipsFromSlot({
+      npcRelationshipJson: JSON.stringify({ schemaVersion: 1, records: 'not-an-array' }),
+      scope: SCOPE,
+    })
+
+    expect(result.records).toEqual([])
+    expect(result.diagnostics.status).toBe('invalid')
+  })
+
+  it('returns an empty, missing result when npcRelationshipJson is absent', () => {
+    const result = restoreNpcRelationshipsFromSlot({ scope: SCOPE })
+
+    expect(result.records).toEqual([])
+    expect(result.diagnostics).toEqual({
+      status: 'missing',
+      reason: 'missing',
+      restoredCount: 0,
+      droppedCount: 0,
+      droppedByScope: 0,
+      droppedByCap: 0,
+    })
+  })
+
+  it('restores only the valid, scoped records from a mixed valid/malformed sidecar', () => {
+    const valid = makeRelationshipRecord({ scope: { worldId: WORLD_ID, sessionId: SESSION_ID, npcId: 'valid' } })
+    const outOfBounds = {
+      ...makeRelationshipRecord({ scope: { worldId: WORLD_ID, sessionId: SESSION_ID, npcId: 'out-of-bounds' } }),
+      axes: { trust: 999, respect: 5, fear: 0, familiarity: 20 },
+    }
+    const wrongScope = makeRelationshipRecord({
+      scope: { worldId: 'other-world', sessionId: SESSION_ID, npcId: 'wrong-scope' },
+    })
+
+    const result = restoreNpcRelationshipsFromSlot({
+      npcRelationshipJson: relationshipJson([valid, outOfBounds as unknown as NpcRelationshipState, wrongScope]),
+      scope: SCOPE,
+    })
+
+    expect(result.records.map((record) => record.scope.npcId)).toEqual(['valid'])
+    expect(result.diagnostics.restoredCount).toBe(1)
+  })
+
+  it('returned diagnostics carry only counts/status/reason, never raw axis values', () => {
+    const record = makeRelationshipRecord({ axes: { trust: 77, respect: -42, fear: 13, familiarity: 88 } })
+    const result = restoreNpcRelationshipsFromSlot({
+      npcRelationshipJson: relationshipJson([record]),
+      scope: SCOPE,
+    })
+
+    expect(Object.keys(result.diagnostics).sort()).toEqual(
+      ['status', 'restoredCount', 'droppedCount', 'droppedByScope', 'droppedByCap'].sort(),
+    )
+    const serializedDiagnostics = JSON.stringify(result.diagnostics)
+    expect(serializedDiagnostics).not.toContain('77')
+    expect(serializedDiagnostics).not.toContain('-42')
+    expect(serializedDiagnostics).not.toContain('88')
+  })
+
+  it('requires both worldId and sessionId on the scope parameter (type-level contract)', () => {
+    // @ts-expect-error scope.sessionId is required
+    const missingSessionId: Parameters<typeof restoreNpcRelationshipsFromSlot>[0] = { scope: { worldId: WORLD_ID } }
+    // @ts-expect-error scope.worldId is required
+    const missingWorldId: Parameters<typeof restoreNpcRelationshipsFromSlot>[0] = { scope: { sessionId: SESSION_ID } }
+
+    expect(missingSessionId).toBeDefined()
+    expect(missingWorldId).toBeDefined()
+  })
+
+  it('touches no reducer, feedback, memory, fact, event, or world-command path', () => {
+    const restoreFnSource = appHelpersSource.slice(
+      appHelpersSource.indexOf('export function restoreNpcRelationshipsFromSlot'),
+      appHelpersSource.indexOf('export function resolvedObjectIdsForRoom'),
+    )
+
+    expect(restoreFnSource).not.toContain('applyRelationshipEffects')
+    expect(restoreFnSource).not.toContain('deriveAndReduceRelationship')
+    expect(restoreFnSource).not.toContain('relationshipFeedbackAfterReduction')
+    expect(restoreFnSource).not.toContain('decideRelationshipFeedback')
+    expect(restoreFnSource).not.toContain('WorldEvent')
+    expect(restoreFnSource).not.toContain('WorldCommand')
+    expect(restoreFnSource).not.toContain('memory')
+    expect(restoreFnSource).not.toContain('fact')
   })
 })

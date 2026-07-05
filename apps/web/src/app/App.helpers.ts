@@ -21,6 +21,12 @@ import { canAttemptOptional } from '../domain/usage/usageGuard'
 import type { WorldState } from '../domain/world/worldState'
 import type { InMemoryRoomMemoryStore } from '../memory/InMemoryRoomMemoryStore'
 import type { FamiliarityBucket } from '../domain/npcRelationship/dialogueContext'
+import type { NpcRelationshipState } from '../domain/npcRelationship/contracts'
+import {
+  filterRestorableRelationships,
+  loadNpcRelationshipSaveState,
+  type NpcRelationshipSaveLoadCode,
+} from '../domain/npcRelationship/relationshipSaveState'
 import type { Logger } from '../platform/logger/Logger'
 import {
   buildGeneratedObjectiveAttachment,
@@ -253,6 +259,70 @@ export function restoreRuntimeRoomMemoryFromSlot(input: {
     droppedBySource: restorable.droppedBySource,
     droppedByText: restorable.droppedByText,
     droppedByCap: restorable.droppedByCap,
+  }
+}
+
+export type NpcRelationshipRestoreDiagnostics = {
+  status: 'missing' | 'invalid' | 'restored'
+  reason?: 'missing' | NpcRelationshipSaveLoadCode
+  restoredCount: number
+  droppedCount: number
+  droppedByScope: number
+  droppedByCap: number
+}
+
+export type NpcRelationshipRestoreResult = {
+  records: NpcRelationshipState[]
+  diagnostics: NpcRelationshipRestoreDiagnostics
+}
+
+const emptyNpcRelationshipRestoreDiagnostics = {
+  restoredCount: 0,
+  droppedCount: 0,
+  droppedByScope: 0,
+  droppedByCap: 0,
+} as const
+
+/**
+ * Restore helper for the NPC relationship sidecar (npc-relationship-persistence-v0,
+ * Slice 3). Mirrors `restoreRuntimeRoomMemoryFromSlot`, but — unlike that
+ * store-mutating helper — returns surviving records instead of writing them
+ * anywhere: `relationshipsRef` re-seeding is App.tsx wiring (Slice 4), and
+ * this helper must not touch it directly. Never calls the reducer or feedback
+ * derivation; restore is a silent projection re-seed only. `diagnostics` is
+ * deliberately separate from `records` so a caller can log it alone without
+ * risking raw axis values or NPC names.
+ */
+export function restoreNpcRelationshipsFromSlot(input: {
+  npcRelationshipJson?: string
+  scope: { worldId: string; sessionId: string }
+}): NpcRelationshipRestoreResult {
+  if (input.npcRelationshipJson == null) {
+    return {
+      records: [],
+      diagnostics: { status: 'missing', reason: 'missing', ...emptyNpcRelationshipRestoreDiagnostics },
+    }
+  }
+
+  const loaded = loadNpcRelationshipSaveState(input.npcRelationshipJson)
+  if (!loaded.ok) {
+    return {
+      records: [],
+      diagnostics: { status: 'invalid', reason: loaded.code, ...emptyNpcRelationshipRestoreDiagnostics },
+    }
+  }
+
+  const restorable = filterRestorableRelationships(loaded.state.records, input.scope)
+
+  return {
+    records: restorable.records,
+    diagnostics: {
+      status: 'restored',
+      restoredCount: restorable.keptCount,
+      droppedCount: restorable.droppedCount,
+      droppedByScope: restorable.droppedByScope,
+      droppedByCap: restorable.droppedByCap,
+    },
   }
 }
 
