@@ -12,6 +12,15 @@ export const STRUCTURED_DIALOGUE_EFFECT_SCHEMA_VERSION = 1 as const
 export const StructuredDialogueEffectKindSchema = z.enum([
   'player_question_effect_candidate',
   'npc_response_effect_candidate',
+  'player_threat_candidate',
+  'player_apology_candidate',
+  'player_gratitude_candidate',
+  'player_insult_candidate',
+  'player_refusal_candidate',
+  'player_promise_candidate',
+  'npc_warning_candidate',
+  'npc_offer_candidate',
+  'npc_refusal_candidate',
 ])
 
 export const StructuredDialogueEffectActorSchema = z.enum(['player', 'npc'])

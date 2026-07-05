@@ -10,7 +10,28 @@ import type { StructuredDialogueEffect, StructuredDialogueEffectKind } from './c
 const EFFECT_KINDS: StructuredDialogueEffectKind[] = [
   'player_question_effect_candidate',
   'npc_response_effect_candidate',
+  'player_threat_candidate',
+  'player_apology_candidate',
+  'player_gratitude_candidate',
+  'player_insult_candidate',
+  'player_refusal_candidate',
+  'player_promise_candidate',
+  'npc_warning_candidate',
+  'npc_offer_candidate',
+  'npc_refusal_candidate',
 ]
+
+const VALENCED_CANDIDATE_SOURCE_KIND: Partial<Record<StructuredDialogueEffectKind, StructuredDialogueEffect['sourceKind']>> = {
+  player_threat_candidate: 'player_threatened_npc',
+  player_apology_candidate: 'player_apologized',
+  player_gratitude_candidate: 'player_thanked_npc',
+  player_insult_candidate: 'player_insulted_npc',
+  player_refusal_candidate: 'player_refused_request',
+  player_promise_candidate: 'player_promised_help',
+  npc_warning_candidate: 'npc_warned_player',
+  npc_offer_candidate: 'npc_offered_help',
+  npc_refusal_candidate: 'npc_refused_request',
+}
 
 const EXCLUDED_EFFECT_KINDS = [
   'relationship_delta_candidate',
@@ -73,11 +94,22 @@ describe('StructuredDialogueEffectSchema', () => {
     expect(StructuredDialogueEffectSchema.safeParse(validEffect({ schemaVersion: 2 as never })).success).toBe(false)
   })
 
-  it('accepts both allowed effect kinds', () => {
+  it('accepts every allowed effect kind, including the valenced candidate kinds', () => {
     for (const kind of EFFECT_KINDS) {
       expect(StructuredDialogueEffectKindSchema.safeParse(kind).success).toBe(true)
-      expect(StructuredDialogueEffectSchema.safeParse(validEffect({ kind })).success).toBe(true)
+      const sourceKind = VALENCED_CANDIDATE_SOURCE_KIND[kind]
+      expect(
+        StructuredDialogueEffectSchema.safeParse(
+          validEffect(sourceKind !== undefined ? { kind, sourceKind } : { kind }),
+        ).success,
+      ).toBe(true)
     }
+  })
+
+  it('has no valence field: the candidate kind is the sole valence signal', () => {
+    const effect = validEffect({ kind: 'player_threat_candidate', sourceKind: 'player_threatened_npc' })
+    expect(Object.keys(effect)).not.toContain('valence')
+    expect(StructuredDialogueEffectSchema.safeParse({ ...effect, valence: 'negative' }).success).toBe(false)
   })
 
   it('rejects unknown, excluded, and reserved effect kinds', () => {

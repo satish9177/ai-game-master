@@ -16,6 +16,11 @@ const EVENT_KINDS: DialogueSemanticEventKind[] = [
   'npc_revealed_rumor',
   'npc_refused_request',
   'npc_acknowledged_memory',
+  'player_apologized',
+  'player_thanked_npc',
+  'player_insulted_npc',
+  'player_refused_request',
+  'npc_offered_help',
 ]
 
 function validEvent(overrides: Partial<DialogueSemanticEvent> = {}): DialogueSemanticEvent {
