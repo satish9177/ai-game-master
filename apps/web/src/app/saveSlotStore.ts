@@ -23,6 +23,8 @@ type SlotWrapper = SlotMeta & {
   generatedRoomCacheJson?: string
   /** Optional parked blob; never authoritative. Only carried through, never validated here. */
   roomMemoryJson?: string
+  /** Optional parked blob; never authoritative. Only carried through, never validated here. */
+  npcRelationshipJson?: string
 }
 
 export type SlotReadResult =
@@ -33,6 +35,7 @@ export type SlotReadResult =
       generatedQuestJson?: string
       generatedRoomCacheJson?: string
       roomMemoryJson?: string
+      npcRelationshipJson?: string
     }
   | { ok: false; reason: 'empty' | 'corrupt' | 'unavailable' }
 
@@ -57,6 +60,7 @@ export interface SaveSlotStore {
     generatedQuestJson?: string,
     generatedRoomCacheJson?: string,
     roomMemoryJson?: string,
+    npcRelationshipJson?: string,
   ): SlotWriteResult
   /** True when a slot is present (best-effort; false if storage is unavailable). */
   has(): boolean
@@ -132,6 +136,9 @@ function createSaveSlotStoreImpl(kv: KeyValueStore): SaveSlotStore {
         ...(typeof parsed.roomMemoryJson === 'string'
           ? { roomMemoryJson: parsed.roomMemoryJson }
           : {}),
+        ...(typeof parsed.npcRelationshipJson === 'string'
+          ? { npcRelationshipJson: parsed.npcRelationshipJson }
+          : {}),
       }
     },
 
@@ -141,6 +148,7 @@ function createSaveSlotStoreImpl(kv: KeyValueStore): SaveSlotStore {
       generatedQuestJson?: string,
       generatedRoomCacheJson?: string,
       roomMemoryJson?: string,
+      npcRelationshipJson?: string,
     ): SlotWriteResult {
       const wrapper: SlotWrapper = {
         label: meta.label ?? 'Save',
@@ -152,6 +160,7 @@ function createSaveSlotStoreImpl(kv: KeyValueStore): SaveSlotStore {
         ...(generatedQuestJson ? { generatedQuestJson } : {}),
         ...(generatedRoomCacheJson ? { generatedRoomCacheJson } : {}),
         ...(roomMemoryJson ? { roomMemoryJson } : {}),
+        ...(npcRelationshipJson ? { npcRelationshipJson } : {}),
       }
       try {
         kv.set(SLOT_KEY, JSON.stringify(wrapper))
@@ -208,8 +217,16 @@ export class LocalStorageSaveSlotStore implements SaveSlotStore {
     generatedQuestJson?: string,
     generatedRoomCacheJson?: string,
     roomMemoryJson?: string,
+    npcRelationshipJson?: string,
   ): SlotWriteResult {
-    return this.impl.write(json, meta, generatedQuestJson, generatedRoomCacheJson, roomMemoryJson)
+    return this.impl.write(
+      json,
+      meta,
+      generatedQuestJson,
+      generatedRoomCacheJson,
+      roomMemoryJson,
+      npcRelationshipJson,
+    )
   }
 
   has(): boolean {

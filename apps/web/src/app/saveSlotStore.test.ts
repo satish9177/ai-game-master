@@ -540,3 +540,133 @@ describe('saveSlotStore - roomMemoryJson parking', () => {
     }
   })
 })
+
+describe('saveSlotStore - npcRelationshipJson parking', () => {
+  const QUEST_BLOB = '{"schemaVersion":1,"room":{},"objectivesPerRoom":true}'
+  const CACHE_BLOB = '{"schemaVersion":1,"rooms":[{"room":{},"provenance":"generated"}]}'
+  const ROOM_MEMORY_BLOB = '{"schemaVersion":1,"records":[{"memoryId":"m-1"}]}'
+  const RELATIONSHIP_BLOB = '{"schemaVersion":1,"records":[{"scope":{"worldId":"w","sessionId":"s","npcId":"n"}}]}'
+
+  it('write with npcRelationshipJson -> read returns the same string', () => {
+    const { kv } = createMapKv()
+    const slot = createSaveSlotStore(kv)
+    slot.write(FAKE_JSON, { label: 'Relationship' }, undefined, undefined, undefined, RELATIONSHIP_BLOB)
+    const result = slot.read()
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.npcRelationshipJson).toBe(RELATIONSHIP_BLOB)
+      expect(result.roomMemoryJson).toBeUndefined()
+      expect(result.saveGameJson).toBe(FAKE_JSON)
+    }
+  })
+
+  it('write with all sidecars -> read returns all strings', () => {
+    const { kv } = createMapKv()
+    const slot = createSaveSlotStore(kv)
+    slot.write(FAKE_JSON, { label: 'All' }, QUEST_BLOB, CACHE_BLOB, ROOM_MEMORY_BLOB, RELATIONSHIP_BLOB)
+    const result = slot.read()
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.generatedQuestJson).toBe(QUEST_BLOB)
+      expect(result.generatedRoomCacheJson).toBe(CACHE_BLOB)
+      expect(result.roomMemoryJson).toBe(ROOM_MEMORY_BLOB)
+      expect(result.npcRelationshipJson).toBe(RELATIONSHIP_BLOB)
+      expect(result.saveGameJson).toBe(FAKE_JSON)
+    }
+  })
+
+  it('write without npcRelationshipJson -> read returns undefined', () => {
+    const { kv } = createMapKv()
+    const slot = createSaveSlotStore(kv)
+    slot.write(FAKE_JSON, { label: 'Gen' }, QUEST_BLOB, CACHE_BLOB, ROOM_MEMORY_BLOB)
+    const result = slot.read()
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.roomMemoryJson).toBe(ROOM_MEMORY_BLOB)
+      expect(result.npcRelationshipJson).toBeUndefined()
+    }
+  })
+
+  it('write with empty npcRelationshipJson -> omitted (treated as absent)', () => {
+    const { kv, store } = createMapKv()
+    const slot = createSaveSlotStore(kv)
+    slot.write(FAKE_JSON, undefined, QUEST_BLOB, CACHE_BLOB, ROOM_MEMORY_BLOB, '')
+    const raw = store.get(SLOT_KEY)
+    expect(raw).not.toBeNull()
+    if (raw) {
+      const parsed = JSON.parse(raw) as Record<string, unknown>
+      expect(parsed.roomMemoryJson).toBe(ROOM_MEMORY_BLOB)
+      expect('npcRelationshipJson' in parsed).toBe(false)
+    }
+    const result = slot.read()
+    expect(result.ok).toBe(true)
+    if (result.ok) expect(result.npcRelationshipJson).toBeUndefined()
+  })
+
+  it('older wrapper without npcRelationshipJson key reads without error', () => {
+    const { kv, store } = createMapKv()
+    store.set(
+      SLOT_KEY,
+      JSON.stringify({
+        label: 'Old',
+        savedAt: '2026-01-01T00:00:00.000Z',
+        saveGameJson: FAKE_JSON,
+        generatedQuestJson: QUEST_BLOB,
+        generatedRoomCacheJson: CACHE_BLOB,
+        roomMemoryJson: ROOM_MEMORY_BLOB,
+      }),
+    )
+    const result = createSaveSlotStore(kv).read()
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.saveGameJson).toBe(FAKE_JSON)
+      expect(result.roomMemoryJson).toBe(ROOM_MEMORY_BLOB)
+      expect(result.npcRelationshipJson).toBeUndefined()
+    }
+  })
+
+  it('non-string npcRelationshipJson is ignored so authoritative load can continue empty', () => {
+    const { kv, store } = createMapKv()
+    store.set(
+      SLOT_KEY,
+      JSON.stringify({
+        label: 'X',
+        savedAt: '2026-01-01T00:00:00.000Z',
+        saveGameJson: FAKE_JSON,
+        npcRelationshipJson: 42,
+      }),
+    )
+    const result = createSaveSlotStore(kv).read()
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.saveGameJson).toBe(FAKE_JSON)
+      expect(result.npcRelationshipJson).toBeUndefined()
+    }
+  })
+
+  it('invalid npcRelationshipJson content does not break saveGameJson read', () => {
+    const { kv } = createMapKv()
+    const slot = createSaveSlotStore(kv)
+    slot.write(FAKE_JSON, { label: 'Relationship' }, undefined, undefined, undefined, 'NOT VALID JSON{{{')
+    const result = slot.read()
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.saveGameJson).toBe(FAKE_JSON)
+      expect(result.npcRelationshipJson).toBe('NOT VALID JSON{{{')
+    }
+  })
+})
+
+describe('saveSlotStore - clear/delete behavior unchanged with npcRelationshipJson present', () => {
+  it('clear() removes the slot even when npcRelationshipJson was parked', () => {
+    const { kv } = createMapKv()
+    const slot = createSaveSlotStore(kv)
+    slot.write(FAKE_JSON, { label: 'Relationship' }, undefined, undefined, undefined, '{"schemaVersion":1,"records":[]}')
+    expect(slot.has()).toBe(true)
+    expect(slot.clear()).toEqual({ ok: true })
+    expect(slot.has()).toBe(false)
+    const result = slot.read()
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.reason).toBe('empty')
+  })
+})
