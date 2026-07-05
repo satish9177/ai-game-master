@@ -3,12 +3,18 @@ import { recallRoomMemoryContext } from '../app/recallRoomMemoryContext'
 import { deriveAndLogDialogueSemanticEvents } from '../app/deriveAndLogDialogueSemanticEvents'
 import { deriveAndLogStructuredDialogueEffects } from '../app/deriveAndLogStructuredDialogueEffects'
 import { promoteInteractionMemories } from '../app/promoteInteractionMemories'
+import {
+  DIALOGUE_SEMANTIC_EVENT_SCHEMA_VERSION,
+  type DialogueSemanticEvent,
+  type DialogueSemanticEventKind,
+} from '../domain/dialogueEvents/contracts'
 import type { RoomMemoryDraftInput } from '../domain/memory/roomFirewall'
 import {
   buildRoomMemorySaveJson,
   filterRestorableRoomMemories,
   loadRoomMemorySaveState,
 } from '../domain/memory/roomMemorySaveState'
+import { EFFECT_KIND_BY_SOURCE_KIND } from '../domain/structuredDialogueEffects/derive'
 import type { WorldEvent } from '../domain/world/events'
 import { WORLD_SCHEMA_VERSION } from '../domain/world/worldState'
 import { buildDialoguePromptMessages } from '../generation/llmDialoguePrompt'
@@ -156,5 +162,66 @@ describe('Gate E - no raw memory/player/provider text in logs', () => {
     expectSafeLogContextValues(logEntries)
     // The world save JSON itself must never appear in any log line.
     expect(JSON.stringify(logEntries)).not.toContain(saved.json)
+  })
+})
+
+/**
+ * Gate E extension — valenced dialogue effect candidates (Slice 3,
+ * valenced-dialogue-effect-candidates-v0). `classifyDialogueTurn` cannot emit a
+ * valenced semantic-event kind (see `nonEmission.test.ts`), so these events are
+ * constructed directly to exercise the dry map's derive+log path. This proves
+ * the new candidate kinds are the only new strings in the log output and that
+ * marker-laden extra fields (mirroring `playerLine`/NPC-reply text) never leak.
+ */
+const KNOWN_NON_VALENCED_SOURCE_KINDS = new Set<DialogueSemanticEventKind>(['player_asked_question', 'npc_responded'])
+
+function actorTargetForSourceKind(kind: DialogueSemanticEventKind): { actor: 'player' | 'npc'; target: 'player' | 'npc' } {
+  return kind.startsWith('npc_') ? { actor: 'npc', target: 'player' } : { actor: 'player', target: 'npc' }
+}
+
+describe('Gate E (valenced candidates) - no raw text leaks for the 9 new candidate kinds', () => {
+  it('sweeps derive+log output for every valenced candidate kind clean of marker text', () => {
+    const valencedSourceKinds = (Object.keys(EFFECT_KIND_BY_SOURCE_KIND) as DialogueSemanticEventKind[]).filter(
+      (kind) => !KNOWN_NON_VALENCED_SOURCE_KINDS.has(kind),
+    )
+    expect(valencedSourceKinds).toHaveLength(9) // guard against a vacuous sweep
+
+    const valencedEvents: DialogueSemanticEvent[] = valencedSourceKinds.map((kind, index) => {
+      const { actor, target } = actorTargetForSourceKind(kind)
+      return {
+        schemaVersion: DIALOGUE_SEMANTIC_EVENT_SCHEMA_VERSION,
+        eventId: `eval-valenced-event-${index}`,
+        kind,
+        actor,
+        target,
+        scope: { worldId: EVAL_WORLD_ID, sessionId: EVAL_SESSION_ID, roomId: EVAL_ROOM_ID, npcId: 'eval-valenced-npc' },
+        provenance: { classifier: 'deterministic-local' },
+        confidence: 'medium',
+      }
+    })
+
+    const logEntries: LogEntry[] = []
+    const effects = deriveAndLogStructuredDialogueEffects({
+      events: valencedEvents,
+      makeEffectId: (sourceEvent, indexInTurn) => `eval-valenced-effect-${sourceEvent.kind}-${indexInTurn}`,
+      logger: createSpyLogger(logEntries),
+      playerLine: evalMarkers.playerLine,
+      npcText: evalMarkers.memoryText,
+      providerText: evalMarkers.providerBody,
+      promptText: evalMarkers.playerLine,
+      memoryText: evalMarkers.memoryText,
+      rawProviderPayload: evalMarkers.providerBody,
+      generatedText: evalMarkers.memoryText,
+    } as Parameters<typeof deriveAndLogStructuredDialogueEffects>[0])
+
+    expect(effects).toHaveLength(valencedSourceKinds.length)
+    expect(
+      effects.every(
+        (effect) => effect.kind !== 'player_question_effect_candidate' && effect.kind !== 'npc_response_effect_candidate',
+      ),
+    ).toBe(true)
+    expect(logEntries.length).toBeGreaterThan(0) // guard against a vacuous pass
+    expectNoEvalMarkersInLogs(logEntries)
+    expectSafeLogContextValues(logEntries)
   })
 })

@@ -2,6 +2,12 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { recallRoomMemoryContext } from '../app/recallRoomMemoryContext'
 import { deriveAndLogDialogueSemanticEvents } from '../app/deriveAndLogDialogueSemanticEvents'
 import { deriveAndLogStructuredDialogueEffects } from '../app/deriveAndLogStructuredDialogueEffects'
+import {
+  DIALOGUE_SEMANTIC_EVENT_SCHEMA_VERSION,
+  type DialogueSemanticEvent,
+  type DialogueSemanticEventKind,
+} from '../domain/dialogueEvents/contracts'
+import { EFFECT_KIND_BY_SOURCE_KIND } from '../domain/structuredDialogueEffects/derive'
 import { buildDialoguePromptMessages } from '../generation/llmDialoguePrompt'
 import {
   EVAL_ROOM_ID,
@@ -156,5 +162,60 @@ describe('Gate F - recall/context/prompt at N=1000 has no side effects', () => {
     expect(await worldSession.session.getWorldState(started.state.sessionId)).toEqual(beforeState)
     expect(fixture.store.snapshotAll().length).toBe(beforeMemoryCount)
     expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
+  it('valenced candidate derivation (direct injection) creates no world, memory, persistence, or provider side effects', async () => {
+    const worldSession = createWorldSessionHarness()
+    const started = await worldSession.session.startSession(evalCanon())
+    if (!started.ok) throw new Error('session start failed')
+    const beforeEvents = await worldSession.store.listEvents(started.state.sessionId)
+    const beforeState = await worldSession.session.getWorldState(started.state.sessionId)
+
+    const fixture = await longSessionMemoryFixture({ count: 3 })
+    const beforeMemoryCount = fixture.store.snapshotAll().length
+    const fetchSpy = vi.fn(() => Promise.reject(new Error('network is forbidden in evaluation')))
+    vi.stubGlobal('fetch', fetchSpy)
+
+    // classifyDialogueTurn cannot emit a valenced semantic-event kind (see
+    // nonEmission.test.ts), so these events are constructed directly to exercise
+    // the dry EFFECT_KIND_BY_SOURCE_KIND map wired in Slice 2.
+    const knownNonValencedSourceKinds = new Set<DialogueSemanticEventKind>(['player_asked_question', 'npc_responded'])
+    const valencedSourceKinds = (Object.keys(EFFECT_KIND_BY_SOURCE_KIND) as DialogueSemanticEventKind[]).filter(
+      (kind) => !knownNonValencedSourceKinds.has(kind),
+    )
+    const valencedEvents: DialogueSemanticEvent[] = valencedSourceKinds.map((kind, index) => {
+      const isNpc = kind.startsWith('npc_')
+      return {
+        schemaVersion: DIALOGUE_SEMANTIC_EVENT_SCHEMA_VERSION,
+        eventId: `eval-valenced-event-${index}`,
+        kind,
+        actor: isNpc ? 'npc' : 'player',
+        target: isNpc ? 'player' : 'npc',
+        scope: {
+          worldId: started.state.worldId,
+          sessionId: started.state.sessionId,
+          roomId: EVAL_ROOM_ID,
+          npcId: 'eval-npc',
+        },
+        provenance: { classifier: 'deterministic-local' },
+        confidence: 'medium',
+      }
+    })
+
+    const logEntries: LogEntry[] = []
+    const effects = deriveAndLogStructuredDialogueEffects({
+      events: valencedEvents,
+      makeEffectId: (sourceEvent, indexInTurn) => `eval-valenced-effect-${sourceEvent.kind}-${indexInTurn}`,
+      logger: createSpyLogger(logEntries),
+    })
+
+    expect(effects).toHaveLength(valencedSourceKinds.length)
+    expect(await worldSession.store.listEvents(started.state.sessionId)).toEqual(beforeEvents)
+    expect(await worldSession.session.getWorldState(started.state.sessionId)).toEqual(beforeState)
+    expect(fixture.store.snapshotAll().length).toBe(beforeMemoryCount)
+    expect(fetchSpy).not.toHaveBeenCalled()
+    // Relationship reducers are not reachable from this layer: domain/structuredDialogueEffects
+    // cannot import domain/npcRelationship or world-session (lint-enforced boundary), so there is
+    // no relationship state here for this derivation to mutate.
   })
 })
