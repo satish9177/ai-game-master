@@ -1,9 +1,10 @@
 # Implementation Plan — `feature/npc-patrol-route-v0`
 
-> Status: **DESIGN APPROVED / DOCS-FIRST / NOT IMPLEMENTED.**
-> This document is written **before** any code so the later implementation slices
-> can read and follow the approved design. No source, test, or runtime file is
-> changed by landing this plan.
+> Status: **COMPLETE / IMPLEMENTED.**
+> Slices 1–3 delivered a generated deterministic patrol route model, a patrol step
+> reducer, an explicit `WanderMotor` `policy` discriminant, and a gated Engine
+> opt-in seam — no blanket assignment, no authoritative/persistence/schema path
+> touched. Slice 4 (this update) is docs-only closeout.
 > See [ADR-0080](../decisions/ADR-0080-npc-patrol-route-v0.md).
 >
 > Companion docs: [ARCHITECTURE](../ARCHITECTURE.md) · [BOUNDARIES](../BOUNDARIES.md) ·
@@ -47,8 +48,8 @@ These invariants may not be relaxed without explicit maintainer approval:
 
 - **Feature:** `npc-patrol-route-v0` — Generated Deterministic In-Room Patrol Route Foundation.
 - **Lane:** worked on `main` directly; no feature branch.
-- **Status:** DESIGN APPROVED / DOCS-FIRST / NOT IMPLEMENTED.
-- **ADR:** [ADR-0080](../decisions/ADR-0080-npc-patrol-route-v0.md) (next free number).
+- **Status:** COMPLETE / IMPLEMENTED.
+- **ADR:** [ADR-0080](../decisions/ADR-0080-npc-patrol-route-v0.md).
 
 ## 2. Problem statement
 
@@ -361,3 +362,84 @@ assignment are deferred to v1.
   memory / fact / `fact_visibility`; no provider / prompt / UI; presentation/runtime-only.
 - **Tests prove it:** §16, anchored by the eligibility test and the `room.objects`
   no-mutation deep-equal assertion.
+
+## 22. Closeout (Slice 4)
+
+Implemented files:
+
+- `apps/web/src/domain/npcPatrolContract.ts` (Slice 1) — `PatrolRoute`,
+  `buildNpcPatrolRoute`, route validation, reusing `NpcWanderField` +
+  `isWanderPositionAllowed` / `isWanderSegmentAllowed`.
+- `apps/web/src/domain/npcPatrolContract.test.ts` (Slice 1).
+- `apps/web/src/renderer/engine/npc/patrolStep.ts` (Slice 2) — `updatePatrolStep`
+  ping-pong reducer.
+- `apps/web/src/renderer/engine/npc/patrolStep.test.ts` (Slice 2).
+- `apps/web/src/renderer/engine/npc/WanderMotor.ts` (Slice 2, extended) — explicit
+  `policy: 'wander' | 'patrol'` discriminant on registration and entry types; branch
+  in `update()`; shared `shouldPauseWander` / `syncXZ`.
+- `apps/web/src/renderer/engine/npc/WanderMotor.test.ts` (Slice 2, extended).
+- `apps/web/src/renderer/engine/Engine.ts` (Slice 3, extended) — `patrolOptInNpcIds`
+  opt-in seam threaded through `registerWanderNpcs`; only NPCs in that set receive a
+  built `policy: 'patrol'` route, and only when it validates.
+- `apps/web/src/renderer/engine/Engine.test.ts` (Slice 3, extended).
+
+Verification run (2026-07-06, from `apps/web`):
+
+```bash
+npx vitest run src/renderer/engine/Engine.test.ts
+npm.cmd run test -- WanderMotor
+npm.cmd run test -- patrolStep
+npm.cmd run test -- npcPatrolContract
+npm.cmd run test -- npcMovementContract
+npx tsc --noEmit -p tsconfig.json
+npx eslint src/domain/npcPatrolContract.ts src/domain/npcPatrolContract.test.ts \
+  src/renderer/engine/npc/patrolStep.ts src/renderer/engine/npc/patrolStep.test.ts \
+  src/renderer/engine/Engine.ts src/renderer/engine/Engine.test.ts \
+  src/renderer/engine/npc/WanderMotor.ts src/renderer/engine/npc/WanderMotor.test.ts
+```
+
+Results:
+
+- `Engine.test.ts` passed: 1 file, 29 tests (includes the eligibility test and the
+  `room.objects` no-mutation deep-equal assertion, §16).
+- `WanderMotor` passed: 1 file, 18 tests (includes the `policy` branch, ring/
+  interactable sync, and pause no-drift coverage).
+- `patrolStep` passed: 1 file, 10 tests.
+- `npcPatrolContract` passed: 1 file, 7 tests.
+- `npcMovementContract` passed: 1 file, 17 tests (unchanged, confirming no
+  regression to the reused predicates/field).
+- `tsc --noEmit` passed clean.
+- `eslint` on all eight changed/added files passed clean.
+
+Safety boundary confirmation (re-checked at closeout):
+
+- No `WorldState` / `WorldEvent` / `WorldCommand` / `applyEvent` touched.
+- No persistence / schema / save-game / `RoomSpec` mutation; no `schemaVersion` bump.
+- No memory / fact / `fact_visibility` write.
+- No LLM / provider / prompt change.
+- No NPC awareness / chase / combat / damage / encounter triggering.
+- No cross-room movement; no complex pathfinding.
+- No per-frame or coordinate-narrative logging added.
+- No user-facing flag; `patrolOptInNpcIds` is an internal Engine-level seam only,
+  not wired into App/RoomViewer/UI.
+- No blanket patrol assignment: real rooms keep every NPC on the existing
+  wander/idle path (`registerWanderNpcs` default), proven by the Engine eligibility
+  test.
+- Patrol writes only Three.js presentation refs via the existing `syncXZ`;
+  `buildNpcPatrolRoute` reads `room.objects` (home) read-only.
+
+Known limitation (carried forward, not fixed in v0): exclusion discs cover other
+NPCs' **home** positions, not their **live moving** positions, so a patrolling NPC
+can overlap a *moving* NPC's current cell. This is exact wander parity (§19) and is
+recorded, not a patrol regression.
+
+Deferred (each its own maintainer-approved feature/ADR):
+
+- Authored/predefined patrol route metadata (`npc-patrol-route-authored-v1`).
+- Trusted NPC role/route assignment (replacing the fixture/test-seam opt-in with a
+  real gameplay source).
+- Day/night route selection.
+- Awareness / chase override of patrol.
+- Cross-room movement.
+- Rename `WanderMotor` → `NpcMovementMotor` (the class now owns wander + patrol;
+  the rename is cosmetic cleanup, not a behavior change).

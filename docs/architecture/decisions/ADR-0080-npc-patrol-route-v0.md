@@ -1,6 +1,6 @@
 # ADR-0080: NPC patrol is a generated deterministic in-room foundation, opt-in only until authored route metadata exists
 
-- **Status:** Accepted (design) / DOCS-FIRST / Not yet implemented
+- **Status:** Accepted / Implemented
 - **Date:** 2026-07-06
 - **Deciders:** Project owner
 - **Builds on:** the existing presentation-only NPC movement stack
@@ -159,25 +159,39 @@ patrol regression.
 
 ## Verification
 
-**Not yet implemented — this ADR is docs-first.** No source, test, or runtime file is
-changed by landing it.
+Implemented and verified 2026-07-06.
 
-Docs-only change:
+Files changed (Slices 1–3):
 
-- `docs/architecture/implementation-plans/npc-patrol-route-v0.md` (new)
-- `docs/architecture/decisions/ADR-0080-npc-patrol-route-v0.md` (new)
+- `apps/web/src/domain/npcPatrolContract.ts`
+- `apps/web/src/domain/npcPatrolContract.test.ts`
+- `apps/web/src/renderer/engine/npc/patrolStep.ts`
+- `apps/web/src/renderer/engine/npc/patrolStep.test.ts`
+- `apps/web/src/renderer/engine/npc/WanderMotor.ts`
+- `apps/web/src/renderer/engine/npc/WanderMotor.test.ts`
+- `apps/web/src/renderer/engine/Engine.ts`
+- `apps/web/src/renderer/engine/Engine.test.ts`
 
-Verification for this docs step:
+Full test plan, file list, and verification detail live in the closeout section of
+[`npc-patrol-route-v0`](../implementation-plans/npc-patrol-route-v0.md#22-closeout-slice-4).
+
+Verification run:
 
 ```bash
-git diff --stat        # docs files only
-git status --short      # no source/test/runtime files changed
+npx vitest run src/renderer/engine/Engine.test.ts
+npm.cmd run test -- WanderMotor
+npm.cmd run test -- patrolStep
+npm.cmd run test -- npcPatrolContract
+npm.cmd run test -- npcMovementContract
+npx tsc --noEmit -p tsconfig.json
+npx eslint <the eight files above>
 ```
 
-On implementation (Slices 1–3), the plan's test plan will be exercised and this ADR plus
-the implementation plan flipped to Implemented, with the ARCHITECTURE.md status line added
-at that time (implemented-only convention). Boundaries to re-confirm at closeout, all
-unchanged:
+Results: all passed clean (`Engine.test.ts` 29 tests, `WanderMotor` 18 tests,
+`patrolStep` 10 tests, `npcPatrolContract` 7 tests, `npcMovementContract` 17 tests
+unchanged/regression-free, `tsc` clean, `eslint` clean).
+
+Boundaries re-confirmed at closeout, all held:
 
 - No `WorldState` / `WorldEvent` / `WorldCommand` / `applyEvent` change.
 - No schema / save / persistence / migration / `schemaVersion` bump.
@@ -186,3 +200,7 @@ unchanged:
 - No LLM / provider / prompt change.
 - No awareness / chase / combat / damage / cross-room movement / complex pathfinding.
 - Movement remains presentation/runtime-only; existing wander remains the fallback.
+- No blanket patrol assignment; the Engine eligibility test proves ordinary NPCs stay
+  on wander/idle and only the fixture/test-seam-opted NPC patrols.
+- Generated deterministic route only; no authored/predefined route metadata was
+  added (still deferred to v1, §"Deferred" above).

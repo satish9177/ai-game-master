@@ -260,6 +260,21 @@ Throughout these docs:
   `WorldState`/`WorldEvent`/`WorldCommand`/memory/fact write, no persistence/
   provider/prompt change, and no `schemaVersion` bump
   ([ADR-0079](./decisions/ADR-0079-relationship-visible-feedback-v0.md)).
+- ✅ **Implemented** — NPC Patrol Route v0 — a generated deterministic in-room
+  patrol foundation. `domain/npcPatrolContract.ts` builds a seeded, validated
+  `PatrolRoute` (`>= 2` waypoints) from an NPC's RoomSpec `home` and the existing
+  `NpcWanderField`, reusing `isWanderPositionAllowed` / `isWanderSegmentAllowed` and
+  failing closed (`null` → wander → idle). `renderer/engine/npc/patrolStep.ts` adds
+  a pure ping-pong stepping reducer, and `WanderMotor` gains an explicit
+  `policy: 'wander' | 'patrol'` discriminant (never inferred from route presence)
+  sharing `shouldPauseWander` and `syncXZ`. `Engine`'s `patrolOptInNpcIds` is a
+  gated, internal opt-in seam only — real rooms keep every NPC on the existing
+  wander/idle path with no blanket assignment. Presentation/runtime-only: no
+  `WorldState`/`WorldEvent`/`WorldCommand`, persistence/schema/`RoomSpec` mutation,
+  memory/fact write, or `schemaVersion` bump. Authored/predefined route metadata,
+  trusted role/route assignment, day/night selection, and awareness/chase override
+  are deferred to v1
+  ([ADR-0080](./decisions/ADR-0080-npc-patrol-route-v0.md)).
 - ❌ **Not built** — future shape only; documented so we don't paint into a corner.
 
 ## Status today (Renderer Foundation v0)
