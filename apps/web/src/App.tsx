@@ -76,6 +76,7 @@ import { deriveAndReduceRelationship } from './app/deriveAndReduceRelationship'
 import { neutralRelationship } from './domain/npcRelationship/neutral'
 import type { NpcRelationshipState } from './domain/npcRelationship/contracts'
 import { familiarityBucket } from './domain/npcRelationship/dialogueContext'
+import { buildNpcRelationshipSaveJson } from './domain/npcRelationship/relationshipSaveState'
 import type { RoomMemoryDialogueContext } from './domain/dialogue/contracts'
 import { loadRoomSpec, type LoadedRoom } from './domain/loadRoomSpec'
 import { fallbackRoom as fallbackRoomSpec } from './domain/examples/fallbackRoom'
@@ -112,6 +113,7 @@ import {
   relationshipFeedbackAfterReduction,
   relationshipFeedbackOnRoomEntry,
   resolvedObjectIdsForGeneratedPlay,
+  restoreNpcRelationshipsFromSlot,
   restoreRuntimeRoomMemoryFromSlot,
   selectTransientFeedbackMessage,
   shouldStartPerRoomObjectiveAttach,
@@ -999,6 +1001,7 @@ function App() {
       const stateForSidecars = await worldSession.getWorldState(activePlay.sessionId)
       let generatedRoomCacheJson: string | undefined
       let roomMemoryJson: string | undefined
+      let npcRelationshipJson: string | undefined
       if (stateForSidecars.ok) {
         roomMemoryJson = buildRuntimeRoomMemorySaveJson(
           roomMemoryRuntimeRef.current.store,
@@ -1007,6 +1010,17 @@ function App() {
             sessionId: stateForSidecars.state.sessionId,
           },
         )
+        // NPC relationship persistence v0 (Slice 4): snapshot the ephemeral
+        // relationshipsRef map only at this existing manual-save point (no
+        // autosave), scoped to the same authoritative worldId/sessionId as the
+        // room-memory sidecar above.
+        npcRelationshipJson = buildNpcRelationshipSaveJson(
+          Array.from(relationshipsRef.current.values()),
+          {
+            worldId: stateForSidecars.state.worldId,
+            sessionId: stateForSidecars.state.sessionId,
+          },
+        ) ?? undefined
         if (activePlay.objectivesPerRoom === true && activePlay.adjacentPregenerator != null) {
           generatedRoomCacheJson = buildGeneratedRoomCacheSaveJson({
             room: activePlay.room,
@@ -1029,6 +1043,7 @@ function App() {
         generatedQuestJson,
         generatedRoomCacheJson,
         roomMemoryJson,
+        npcRelationshipJson,
       )
       if (!writeResult.ok) {
         setSaveLoadStatus('error')
@@ -1100,6 +1115,39 @@ function App() {
           droppedBySource: roomMemoryRestore.droppedBySource,
           droppedByText: roomMemoryRestore.droppedByText,
           droppedByCap: roomMemoryRestore.droppedByCap,
+        })
+      }
+
+      // NPC relationship persistence v0 (Slice 4): re-seed the ephemeral
+      // relationshipsRef map (already cleared at load start) directly from the
+      // restored records, keyed by record.scope.npcId. Never routes through the
+      // reducer or feedback derivation, so hydration stays feedback-silent; the
+      // existing relationshipFeedbackOnRoomEntry reset above is untouched.
+      const relationshipRestore = restoreNpcRelationshipsFromSlot({
+        npcRelationshipJson: slotResult.npcRelationshipJson,
+        scope: {
+          worldId: stateResult.state.worldId,
+          sessionId: stateResult.state.sessionId,
+        },
+      })
+      if (version === requestVersion.current) {
+        for (const record of relationshipRestore.records) {
+          relationshipsRef.current.set(record.scope.npcId, record)
+        }
+      }
+      if (relationshipRestore.diagnostics.status === 'invalid') {
+        logger.warn('npc relationship save sidecar skipped', {
+          reason: relationshipRestore.diagnostics.reason,
+          restoredCount: relationshipRestore.diagnostics.restoredCount,
+          droppedCount: relationshipRestore.diagnostics.droppedCount,
+        })
+      } else {
+        logger.info('npc relationship save sidecar restored', {
+          status: relationshipRestore.diagnostics.status,
+          restoredCount: relationshipRestore.diagnostics.restoredCount,
+          droppedCount: relationshipRestore.diagnostics.droppedCount,
+          droppedByScope: relationshipRestore.diagnostics.droppedByScope,
+          droppedByCap: relationshipRestore.diagnostics.droppedByCap,
         })
       }
 

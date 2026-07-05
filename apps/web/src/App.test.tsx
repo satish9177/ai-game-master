@@ -20,6 +20,7 @@ import {
   relationshipFeedbackOnRoomEntry,
   resolvedObjectIdsForGeneratedPlay,
   resolvedObjectIdsForRoom,
+  restoreNpcRelationshipsFromSlot,
   restoreRuntimeRoomMemoryFromSlot,
   selectTransientFeedbackMessage,
   shouldStartPerRoomObjectiveAttach,
@@ -86,6 +87,11 @@ import { InMemoryRoomMemoryStore } from './memory/InMemoryRoomMemoryStore'
 import { RoomMemoryService } from './memory/RoomMemoryService'
 import { ROOM_MEMORY_SCHEMA_VERSION, type RoomMemoryRecord } from './domain/memory/roomContracts'
 import { loadRoomMemorySaveState } from './domain/memory/roomMemorySaveState'
+import { NPC_RELATIONSHIP_SCHEMA_VERSION, type NpcRelationshipState } from './domain/npcRelationship/contracts'
+import {
+  buildNpcRelationshipSaveJson,
+  loadNpcRelationshipSaveState,
+} from './domain/npcRelationship/relationshipSaveState'
 
 const noopLogger: Logger = {
   debug() {},
@@ -3970,5 +3976,179 @@ describe('room memory debug viewer App seam - Slice 3', () => {
     expect(render).not.toContain('snapshotAll')
     expect(render).not.toContain('recalledRoomMemory')
     expect(render).not.toContain('JournalPanel')
+  })
+})
+
+describe('npc relationship persistence v0 — handleSave/handleLoad wiring (ADR-0081, Slice 4)', () => {
+  const scope = { worldId: WORLD_ID, sessionId: SESSION_ID }
+
+  function makeRelationshipRecord(overrides: Partial<NpcRelationshipState> = {}): NpcRelationshipState {
+    return {
+      schemaVersion: NPC_RELATIONSHIP_SCHEMA_VERSION,
+      scope: { worldId: WORLD_ID, sessionId: SESSION_ID, npcId: 'npc-1' },
+      subject: 'npc',
+      object: 'player',
+      axes: { trust: 10, respect: 5, fear: 0, familiarity: 20 },
+      interactionCount: 3,
+      ...overrides,
+    }
+  }
+
+  it('manual save includes npcRelationshipJson when relationshipsRef has scoped records', () => {
+    const record = makeRelationshipRecord()
+    const json = buildNpcRelationshipSaveJson([record], scope)
+
+    expect(typeof json).toBe('string')
+    expect(json).not.toBe('')
+    expect(loadNpcRelationshipSaveState(json!).ok).toBe(true)
+  })
+
+  it('manual save omits sidecar when no relationship records exist', () => {
+    expect(buildNpcRelationshipSaveJson([], scope)).toBeNull()
+  })
+
+  it('load restores scoped relationship records keyed by npcId, mirroring the App.tsx seeding loop', () => {
+    const a = makeRelationshipRecord({ scope: { worldId: WORLD_ID, sessionId: SESSION_ID, npcId: 'npc-a' } })
+    const b = makeRelationshipRecord({ scope: { worldId: WORLD_ID, sessionId: SESSION_ID, npcId: 'npc-b' } })
+    const json = buildNpcRelationshipSaveJson([a, b], scope)!
+
+    const result = restoreNpcRelationshipsFromSlot({ npcRelationshipJson: json, scope })
+
+    const relationshipsRef = new Map<string, NpcRelationshipState>()
+    for (const record of result.records) {
+      relationshipsRef.set(record.scope.npcId, record)
+    }
+
+    expect(relationshipsRef.size).toBe(2)
+    expect(relationshipsRef.get('npc-a')).toEqual(a)
+    expect(relationshipsRef.get('npc-b')).toEqual(b)
+  })
+
+  it('load drops records whose worldId/sessionId does not match the restored session', () => {
+    const keep = makeRelationshipRecord({ scope: { worldId: WORLD_ID, sessionId: SESSION_ID, npcId: 'keep' } })
+    const wrongWorld = makeRelationshipRecord({
+      scope: { worldId: 'other-world', sessionId: SESSION_ID, npcId: 'wrong-world' },
+    })
+    const json = JSON.stringify({ schemaVersion: 1, records: [keep, wrongWorld] })
+
+    const result = restoreNpcRelationshipsFromSlot({ npcRelationshipJson: json, scope })
+
+    expect(result.records.map((record) => record.scope.npcId)).toEqual(['keep'])
+    expect(result.diagnostics.droppedByScope).toBe(1)
+  })
+
+  it('corrupt/unsupported/missing sidecar does not crash load and yields an empty relationship map', () => {
+    const corrupt = restoreNpcRelationshipsFromSlot({ npcRelationshipJson: 'NOT VALID JSON{{{', scope })
+    expect(corrupt.records).toEqual([])
+    expect(corrupt.diagnostics.status).toBe('invalid')
+
+    const unsupported = restoreNpcRelationshipsFromSlot({
+      npcRelationshipJson: JSON.stringify({ schemaVersion: 999, records: [] }),
+      scope,
+    })
+    expect(unsupported.records).toEqual([])
+    expect(unsupported.diagnostics.status).toBe('invalid')
+
+    const missing = restoreNpcRelationshipsFromSlot({ scope })
+    expect(missing.records).toEqual([])
+    expect(missing.diagnostics.status).toBe('missing')
+  })
+
+  it('save payload contains only ids/literals/integers -- no dialogue/prompt/provider/effect/feedback text', () => {
+    const record = makeRelationshipRecord()
+    const json = buildNpcRelationshipSaveJson([record], scope)!
+
+    expect(json).not.toContain('SECRET')
+    const parsed = JSON.parse(json) as { records: Record<string, unknown>[] }
+    expect(Object.keys(parsed.records[0]!).sort()).toEqual(
+      ['schemaVersion', 'scope', 'subject', 'object', 'axes', 'interactionCount'].sort(),
+    )
+  })
+
+  it('App.tsx wires the sidecar into the manual save point only (no autosave/per-turn write)', () => {
+    const handleSave = appSource.slice(
+      appSource.indexOf('const handleSave = useCallback('),
+      appSource.indexOf('const handleLoad = useCallback('),
+    )
+
+    expect(appSource).toContain(
+      "import { buildNpcRelationshipSaveJson } from './domain/npcRelationship/relationshipSaveState'",
+    )
+    expect(handleSave).toContain('const stateForSidecars = await worldSession.getWorldState(activePlay.sessionId)')
+    expect(handleSave).toContain('npcRelationshipJson = buildNpcRelationshipSaveJson(')
+    expect(handleSave).toContain('Array.from(relationshipsRef.current.values())')
+    expect(handleSave).toContain('npcRelationshipJson,')
+
+    // buildNpcRelationshipSaveJson is invoked nowhere outside handleSave -- no
+    // autosave/per-turn write path exists.
+    const outsideHandleSave = appSource.replace(handleSave, '')
+    expect(outsideHandleSave).not.toContain('buildNpcRelationshipSaveJson(')
+  })
+
+  it('App.tsx restores after authoritative WorldState is known, keyed by npcId, before the generated-play branch', () => {
+    const handleLoad = appSource.slice(
+      appSource.indexOf('const handleLoad = useCallback('),
+      appSource.indexOf('const handleNavigate = useCallback('),
+    )
+
+    expect(appSource).toContain('restoreNpcRelationshipsFromSlot,')
+    expect(handleLoad).toContain('const relationshipRestore = restoreNpcRelationshipsFromSlot({')
+    expect(handleLoad).toContain('npcRelationshipJson: slotResult.npcRelationshipJson')
+    expect(handleLoad).toContain('relationshipsRef.current.set(record.scope.npcId, record)')
+
+    // Restore runs strictly after stateResult (authoritative worldId/sessionId) is available.
+    expect(
+      handleLoad.indexOf('const stateResult = await worldSession.getWorldState(loadResult.sessionId)'),
+    ).toBeLessThan(handleLoad.indexOf('const relationshipRestore = restoreNpcRelationshipsFromSlot({'))
+
+    // Restore happens before the generated-play restore branch and before derived views refresh.
+    expect(handleLoad.indexOf('const relationshipRestore = restoreNpcRelationshipsFromSlot({')).toBeLessThan(
+      handleLoad.indexOf('restoreGeneratedPlayFromSlot('),
+    )
+    expect(handleLoad.indexOf('const relationshipRestore = restoreNpcRelationshipsFromSlot({')).toBeLessThan(
+      handleLoad.indexOf('refreshDerivedViews(stateResult.state)'),
+    )
+
+    // Respects the existing requestVersion race guard: seeding is gated on it.
+    const restoreBlock = handleLoad.slice(
+      handleLoad.indexOf('const relationshipRestore = restoreNpcRelationshipsFromSlot({'),
+      handleLoad.indexOf("if (relationshipRestore.diagnostics.status === 'invalid')"),
+    )
+    expect(restoreBlock).toContain('if (version === requestVersion.current) {')
+  })
+
+  it('hydration never calls the reducer or feedback derivation, and touches no memory/fact/event/world-command path', () => {
+    const handleLoad = appSource.slice(
+      appSource.indexOf('const handleLoad = useCallback('),
+      appSource.indexOf('const handleNavigate = useCallback('),
+    )
+    const restoreBlock = handleLoad.slice(
+      handleLoad.indexOf('// NPC relationship persistence v0 (Slice 4)'),
+      handleLoad.indexOf('// Generated-play restore (ADR-0059)'),
+    )
+
+    expect(restoreBlock.length).toBeGreaterThan(0)
+    expect(restoreBlock).not.toContain('deriveAndReduceRelationship')
+    expect(restoreBlock).not.toContain('applyRelationshipEffects')
+    expect(restoreBlock).not.toContain('relationshipFeedbackAfterReduction')
+    expect(restoreBlock).not.toContain('decideRelationshipFeedback')
+    expect(restoreBlock).not.toContain('setRelationshipFeedbackState')
+    expect(restoreBlock).not.toContain('WorldEvent')
+    expect(restoreBlock).not.toContain('WorldCommand')
+    expect(restoreBlock).not.toContain('appendEvent')
+    expect(restoreBlock).not.toContain('memory')
+    expect(restoreBlock).not.toContain('fact')
+  })
+
+  it('post-load dialogue context still reads relationshipsRef through the unchanged bucketed/tone-only projection', () => {
+    // getRelationshipContextForNpc is untouched by Slice 4: it still only
+    // reads from the same ref this feature re-seeds, and dialogue context
+    // still projects familiarity through familiarityBucket, never raw scores.
+    const relationshipContextCallback = appSource.slice(
+      appSource.indexOf('const getRelationshipContextForNpc = useCallback('),
+      appSource.indexOf('const handleNpcDialogueResolved = useCallback('),
+    )
+    expect(relationshipContextCallback).toContain('return relationshipsRef.current.get(npcId)')
+    expect(appSource).toContain('familiarityBucket(')
   })
 })
