@@ -20,6 +20,7 @@ import type { UsageGuardConfig } from '../domain/usage/usageGuard'
 import { canAttemptOptional } from '../domain/usage/usageGuard'
 import type { WorldState } from '../domain/world/worldState'
 import type { InMemoryRoomMemoryStore } from '../memory/InMemoryRoomMemoryStore'
+import type { FamiliarityBucket } from '../domain/npcRelationship/dialogueContext'
 import type { Logger } from '../platform/logger/Logger'
 import {
   buildGeneratedObjectiveAttachment,
@@ -31,6 +32,7 @@ import {
   type MemoryFeedbackMessage,
   type PromotionSummary,
 } from './memoryFeedback'
+import { decideRelationshipFeedback, type RelationshipFeedbackMessage } from './relationshipFeedback'
 
 export type QuestHintState = {
   hint: string
@@ -343,6 +345,47 @@ export function memoryFeedbackAfterRecall(
 
 export function memoryFeedbackOnRoomEntry(state: MemoryFeedbackState): MemoryFeedbackState {
   return state.message === null ? state : { ...state, message: null }
+}
+
+/**
+ * App-owned relationship feedback state (relationship-visible-feedback-v0,
+ * Slice 2). Mirrors `MemoryFeedbackState` but needs no anti-spam key: a
+ * familiarity bucket crossing is inherently once-per-crossing because
+ * familiarity is monotonic non-decreasing (see `relationshipFeedback.ts`).
+ */
+export type RelationshipFeedbackState = Readonly<{
+  message: RelationshipFeedbackMessage | null
+}>
+
+export const INITIAL_RELATIONSHIP_FEEDBACK_STATE: RelationshipFeedbackState = {
+  message: null,
+}
+
+export function relationshipFeedbackAfterReduction(
+  state: RelationshipFeedbackState,
+  input: { prevBucket: FamiliarityBucket; nextBucket: FamiliarityBucket },
+): RelationshipFeedbackState {
+  const message = decideRelationshipFeedback(input.prevBucket, input.nextBucket)
+  return message === null ? state : { message }
+}
+
+export function relationshipFeedbackOnRoomEntry(
+  state: RelationshipFeedbackState,
+): RelationshipFeedbackState {
+  return state.message === null ? state : { message: null }
+}
+
+/**
+ * Selects the single transient feedback line to render, precedence
+ * memory-created > memory-recalled > relationship-familiarity (durable-world
+ * signals win). `memoryMessage` already encodes the created/recalled choice,
+ * so this only needs to fall back to the relationship message.
+ */
+export function selectTransientFeedbackMessage(
+  memoryMessage: MemoryFeedbackMessage | null,
+  relationshipMessage: RelationshipFeedbackMessage | null,
+): MemoryFeedbackMessage | RelationshipFeedbackMessage | null {
+  return memoryMessage ?? relationshipMessage
 }
 
 function objectiveForQuestStage(quest: QuestView, questSpec: QuestSpec | null) {
