@@ -11,15 +11,20 @@ import {
   buildGeneratedQuestSaveJson,
   buildQuestStage,
   INITIAL_MEMORY_FEEDBACK_STATE,
+  INITIAL_RELATIONSHIP_FEEDBACK_STATE,
   memoryFeedbackAfterPromotion,
   memoryFeedbackAfterRecall,
   memoryFeedbackOnRoomEntry,
   readPerRoomObjectiveMemo,
+  relationshipFeedbackAfterReduction,
+  relationshipFeedbackOnRoomEntry,
   resolvedObjectIdsForGeneratedPlay,
   resolvedObjectIdsForRoom,
   restoreRuntimeRoomMemoryFromSlot,
+  selectTransientFeedbackMessage,
   shouldStartPerRoomObjectiveAttach,
   type MemoryFeedbackState,
+  type RelationshipFeedbackState,
 } from './app/App.helpers'
 import {
   EMPTY_PROMOTION_SUMMARY,
@@ -27,6 +32,7 @@ import {
   MEMORY_RECALLED_MESSAGE,
   type PromotionSummary,
 } from './app/memoryFeedback'
+import { RELATIONSHIP_FAMILIARITY_INCREASED_MESSAGE } from './app/relationshipFeedback'
 import {
   GENERATED_ROOM_CACHE_MAX,
   loadGeneratedRoomCacheSaveState,
@@ -3790,9 +3796,19 @@ describe('memory feedback state wiring - Slice 4', () => {
     expect(handler).toContain('ctx: relationshipScope')
     expect(handler).toContain('relationshipsRef.current.set(event.npcId, relationshipResult.state)')
 
-    // No React state setter is called from this handler (Map.set on the
-    // ephemeral ref is fine; a `setXxx(` React state setter is not).
-    expect(handler).not.toMatch(/\bset[A-Z]\w*\(/)
+    // Relationship-visible-feedback wiring (relationship-visible-feedback-v0,
+    // Slice 3): the crossing is derived from the same prior/next relationship
+    // state already computed above, via the closed-enum bucket helper only --
+    // never raw axis numbers passed anywhere else.
+    expect(handler).toContain('setRelationshipFeedbackState((current) =>')
+    expect(handler).toContain('relationshipFeedbackAfterReduction(current, {')
+    expect(handler).toContain('prevBucket: familiarityBucket(priorRelationship.axes.familiarity)')
+    expect(handler).toContain('nextBucket: familiarityBucket(relationshipResult.state.axes.familiarity)')
+
+    // The only React state setter this handler calls is the relationship
+    // feedback slot (relationship-visible-feedback-v0, Slice 3); Map.set on
+    // the ephemeral ref is fine, but no other `setXxx(` React state setter is.
+    expect(handler).not.toMatch(/\bset(?!RelationshipFeedbackState\b)[A-Z]\w*\(/)
     expect(handler).not.toContain('useState')
     expect(handler).not.toContain('worldSession.')
     expect(handler).not.toContain('roomMemoryRuntimeRef')
@@ -3813,25 +3829,34 @@ describe('memory feedback state wiring - Slice 4', () => {
     expect(firstResetIndex).toBeGreaterThan(-1)
     expect(secondResetIndex).toBeGreaterThan(firstResetIndex)
 
-    const promptReset = appSource.slice(firstResetIndex, firstResetIndex + 120)
-    const loadReset = appSource.slice(secondResetIndex, secondResetIndex + 120)
+    const promptReset = appSource.slice(firstResetIndex, firstResetIndex + 200)
+    const loadReset = appSource.slice(secondResetIndex, secondResetIndex + 200)
 
     expect(promptReset).toContain('relationshipsRef.current = new Map()')
     expect(loadReset).toContain('relationshipsRef.current = new Map()')
+
+    // relationship-visible-feedback-v0 (Slice 3): clear the visible
+    // relationship feedback line at the same two reset points where the
+    // ephemeral relationship projection itself is reset, so a stale message
+    // can never linger into a fresh prompt/load session.
+    expect(promptReset).toContain('setRelationshipFeedbackState(relationshipFeedbackOnRoomEntry)')
+    expect(loadReset).toContain('setRelationshipFeedbackState(relationshipFeedbackOnRoomEntry)')
   })
 
-  it('App clears memory feedback on every new room entry (enterActivePlay and handleNavigate)', () => {
+  it('App clears memory and relationship feedback on every new room entry (enterActivePlay and handleNavigate)', () => {
     const enterActivePlay = appSource.slice(
       appSource.indexOf('const enterActivePlay = useCallback('),
       appSource.indexOf('const setQuestSpecForView = useCallback('),
     )
     expect(enterActivePlay).toContain('setMemoryFeedbackState(memoryFeedbackOnRoomEntry)')
+    expect(enterActivePlay).toContain('setRelationshipFeedbackState(relationshipFeedbackOnRoomEntry)')
 
     const handleNavigateSetters = appSource.slice(
       appSource.indexOf('activePlayRef.current = nextPlay'),
       appSource.indexOf('activePlay.adjacentPregenerator?.warmAdjacent(result.room)'),
     )
     expect(handleNavigateSetters).toContain('setMemoryFeedbackState(memoryFeedbackOnRoomEntry)')
+    expect(handleNavigateSetters).toContain('setRelationshipFeedbackState(relationshipFeedbackOnRoomEntry)')
   })
 
   it('App auto-dismisses feedback on a timer and cleans it up on message change/unmount', () => {
@@ -3845,9 +3870,60 @@ describe('memory feedback state wiring - Slice 4', () => {
     expect(autoDismissEffect).toContain('return () => window.clearTimeout(timeoutId)')
   })
 
-  it('App renders MemoryFeedback with only the closed message field, never memory record data', () => {
-    expect(appSource).toContain('<MemoryFeedback message={memoryFeedbackState.message} />')
+  it('App auto-dismisses relationship feedback on the same timer idiom, keyed to its own message', () => {
+    const autoDismissEffect = appSource.slice(
+      appSource.indexOf('if (relationshipFeedbackState.message === null) return'),
+      appSource.indexOf("}, [relationshipFeedbackState.message])"),
+    )
+
+    expect(autoDismissEffect).toContain(`window.setTimeout(() => {`)
+    expect(autoDismissEffect).toContain('MEMORY_FEEDBACK_AUTO_DISMISS_MS')
+    expect(autoDismissEffect).toContain('return () => window.clearTimeout(timeoutId)')
+    expect(autoDismissEffect).toContain('setRelationshipFeedbackState((current) =>')
+  })
+
+  it('App renders a single shared feedback slot, precedence-selected, never memory record or relationship data directly', () => {
+    expect(appSource).toContain(
+      'message={selectTransientFeedbackMessage(memoryFeedbackState.message, relationshipFeedbackState.message)}',
+    )
+    expect(appSource).not.toContain('<MemoryFeedback message={memoryFeedbackState.message} />')
     expect(appSource).not.toContain('MemoryFeedback message={roomMemoryContext')
+
+    // Only one `<MemoryFeedback` element is ever rendered -- no second stacked
+    // toast for relationship feedback.
+    const matches = appSource.match(/<MemoryFeedback\b/g) ?? []
+    expect(matches).toHaveLength(1)
+  })
+})
+
+describe('relationship feedback state wiring - Slice 3', () => {
+  it('selectTransientFeedbackMessage keeps memory-created and memory-recalled ahead of relationship familiarity', () => {
+    expect(
+      selectTransientFeedbackMessage(MEMORY_CREATED_MESSAGE, RELATIONSHIP_FAMILIARITY_INCREASED_MESSAGE),
+    ).toBe(MEMORY_CREATED_MESSAGE)
+    expect(
+      selectTransientFeedbackMessage(MEMORY_RECALLED_MESSAGE, RELATIONSHIP_FAMILIARITY_INCREASED_MESSAGE),
+    ).toBe(MEMORY_RECALLED_MESSAGE)
+    expect(selectTransientFeedbackMessage(null, RELATIONSHIP_FAMILIARITY_INCREASED_MESSAGE)).toBe(
+      RELATIONSHIP_FAMILIARITY_INCREASED_MESSAGE,
+    )
+    expect(selectTransientFeedbackMessage(null, null)).toBeNull()
+  })
+
+  it('relationshipFeedbackAfterReduction fires only on an upward bucket crossing and resets to null on room entry', () => {
+    const afterFirstInteraction = relationshipFeedbackAfterReduction(INITIAL_RELATIONSHIP_FEEDBACK_STATE, {
+      prevBucket: 'none',
+      nextBucket: 'low',
+    })
+    expect(afterFirstInteraction).toEqual({ message: RELATIONSHIP_FAMILIARITY_INCREASED_MESSAGE })
+
+    const unchanged: RelationshipFeedbackState = relationshipFeedbackAfterReduction(afterFirstInteraction, {
+      prevBucket: 'low',
+      nextBucket: 'low',
+    })
+    expect(unchanged).toBe(afterFirstInteraction)
+
+    expect(relationshipFeedbackOnRoomEntry(afterFirstInteraction)).toEqual({ message: null })
   })
 })
 

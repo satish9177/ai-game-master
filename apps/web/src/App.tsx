@@ -75,6 +75,7 @@ import { deriveAndLogStructuredDialogueEffects } from './app/deriveAndLogStructu
 import { deriveAndReduceRelationship } from './app/deriveAndReduceRelationship'
 import { neutralRelationship } from './domain/npcRelationship/neutral'
 import type { NpcRelationshipState } from './domain/npcRelationship/contracts'
+import { familiarityBucket } from './domain/npcRelationship/dialogueContext'
 import type { RoomMemoryDialogueContext } from './domain/dialogue/contracts'
 import { loadRoomSpec, type LoadedRoom } from './domain/loadRoomSpec'
 import { fallbackRoom as fallbackRoomSpec } from './domain/examples/fallbackRoom'
@@ -103,16 +104,21 @@ import {
   buildGeneratedQuestSaveJson,
   buildQuestStage,
   INITIAL_MEMORY_FEEDBACK_STATE,
+  INITIAL_RELATIONSHIP_FEEDBACK_STATE,
   memoryFeedbackAfterPromotion,
   memoryFeedbackAfterRecall,
   memoryFeedbackOnRoomEntry,
   readPerRoomObjectiveMemo,
+  relationshipFeedbackAfterReduction,
+  relationshipFeedbackOnRoomEntry,
   resolvedObjectIdsForGeneratedPlay,
   restoreRuntimeRoomMemoryFromSlot,
+  selectTransientFeedbackMessage,
   shouldStartPerRoomObjectiveAttach,
   type MemoryFeedbackState,
   type PerRoomObjectiveMemo,
   type QuestHintState,
+  type RelationshipFeedbackState,
 } from './app/App.helpers'
 import { EMPTY_PROMOTION_SUMMARY, MEMORY_FEEDBACK_AUTO_DISMISS_MS } from './app/memoryFeedback'
 import {
@@ -498,6 +504,11 @@ function App() {
   // which room entry has already surfaced feedback.
   const [memoryFeedbackState, setMemoryFeedbackState] =
     useState<MemoryFeedbackState>(INITIAL_MEMORY_FEEDBACK_STATE)
+  // Single relationship-feedback slot (relationship-visible-feedback-v0,
+  // Slice 3). Mirrors `memoryFeedbackState`; folded into the shared transient
+  // slot via `selectTransientFeedbackMessage` at render time.
+  const [relationshipFeedbackState, setRelationshipFeedbackState] =
+    useState<RelationshipFeedbackState>(INITIAL_RELATIONSHIP_FEEDBACK_STATE)
   const refreshRoomMemoryContext = useCallback((state: WorldState) => {
     const requestId = ++roomMemoryRequestRef.current
     setRecalledRoomMemory(undefined)
@@ -562,6 +573,12 @@ function App() {
       logger,
     })
     relationshipsRef.current.set(event.npcId, relationshipResult.state)
+    setRelationshipFeedbackState((current) =>
+      relationshipFeedbackAfterReduction(current, {
+        prevBucket: familiarityBucket(priorRelationship.axes.familiarity),
+        nextBucket: familiarityBucket(relationshipResult.state.axes.familiarity),
+      }),
+    )
   }, [])
   // Usage guardrail state (real provider only; fake path stays inert).
   // Refs hold the live values for reading inside stable useCallback closures;
@@ -604,6 +621,7 @@ function App() {
     roomEntrySeqRef.current += 1
     setRoomEntrySeq(roomEntrySeqRef.current)
     setMemoryFeedbackState(memoryFeedbackOnRoomEntry)
+    setRelationshipFeedbackState(relationshipFeedbackOnRoomEntry)
   }, [])
   const setQuestSpecForView = useCallback((questSpec: QuestSpec | null) => {
     questSpecRef.current = questSpec
@@ -736,6 +754,18 @@ function App() {
     return () => window.clearTimeout(timeoutId)
   }, [memoryFeedbackState.message])
 
+  // Auto-dismiss the visible relationship feedback line on the same timer
+  // idiom (relationship-visible-feedback-v0, Slice 3).
+  useEffect(() => {
+    if (relationshipFeedbackState.message === null) return
+    const timeoutId = window.setTimeout(() => {
+      setRelationshipFeedbackState((current) =>
+        current.message === null ? current : { ...current, message: null },
+      )
+    }, MEMORY_FEEDBACK_AUTO_DISMISS_MS)
+    return () => window.clearTimeout(timeoutId)
+  }, [relationshipFeedbackState.message])
+
   useEffect(() => {
     const version = ++requestVersion.current
     void bootstrapExamplePlay().then((result) => {
@@ -781,6 +811,7 @@ function App() {
     const version = ++requestVersion.current
     perRoomObjectiveMemoRef.current = new Map()
     relationshipsRef.current = new Map()
+    setRelationshipFeedbackState(relationshipFeedbackOnRoomEntry)
     activePlayRef.current = null
     setActivePlay(null)
     setPlayerHud(null)
@@ -1013,6 +1044,7 @@ function App() {
     const version = ++requestVersion.current
     perRoomObjectiveMemoRef.current = new Map()
     relationshipsRef.current = new Map()
+    setRelationshipFeedbackState(relationshipFeedbackOnRoomEntry)
     activePlayRef.current = null
     setSaveLoadStatus('loading')
     setSaveLoadError(null)
@@ -1225,6 +1257,7 @@ function App() {
       roomEntrySeqRef.current += 1
       setRoomEntrySeq(roomEntrySeqRef.current)
       setMemoryFeedbackState(memoryFeedbackOnRoomEntry)
+      setRelationshipFeedbackState(relationshipFeedbackOnRoomEntry)
       // Warm the next frontier from the room we just entered.
       activePlay.adjacentPregenerator?.warmAdjacent(result.room)
       // Re-project derived views from the post-move WorldState so objective 3
@@ -1297,7 +1330,9 @@ function App() {
         notice={notice}
         onDismissNotice={() => setNotice(null)}
       />
-      <MemoryFeedback message={memoryFeedbackState.message} />
+      <MemoryFeedback
+        message={selectTransientFeedbackMessage(memoryFeedbackState.message, relationshipFeedbackState.message)}
+      />
       {roomMemoryDebugViewerEnabled && (
         <RoomMemoryDebugPanel
           rows={roomMemoryDebugViewer.rows}
