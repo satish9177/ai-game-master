@@ -1,6 +1,6 @@
 # ADR-0083: NPC→player awareness is a deterministic same-room proximity signal — proximity-only tiers, ephemeral, advisory, with no behavior authority
 
-- **Status:** Accepted / Not yet implemented (docs-first)
+- **Status:** Accepted / Implemented (Slices 1-2; Slice 3 UI/debug indicator deferred)
 - **Date:** 2026-07-06
 - **Deciders:** Project owner
 - **Builds on:** the existing presentation-only NPC movement stack and per-frame same-room
@@ -175,18 +175,40 @@ deferral (below), recorded here as a known limitation, not a defect.
 
 ## Verification
 
-Not implemented yet (docs-first). Planned verification at implementation time, per the
-[implementation plan test plan](../implementation-plans/npc-player-awareness-v0.md#11-test-plan):
+Implemented and verified 2026-07-06.
 
-- `domain/npcAwarenessContract.test.ts` — tiers, **exact inclusive boundaries** (1.5 / 3.0 /
-  5.0), monotonic tightest-tier selection, `sameRoom === false` guard, non-finite-position
-  guard, determinism, radii-order assertion.
-- `renderer/engine/npc/npcAwarenessTracker.test.ts` — per-NPC storage, emit-on-change, `clear()`.
-- `renderer/engine/Engine.test.ts` (extend) — tier rises on approach for **moving and static**
-  NPCs, reset on `setRoom`, `room.objects` no-mutation deep-equal, no behavioral side effect.
-- `npx tsc --noEmit` and `eslint` on the new/changed files.
+Files changed (Slices 1-2; note the actual implemented names differ slightly from the
+plan's working names):
 
-Boundaries to re-confirm at closeout (must all hold):
+- `apps/web/src/domain/npcPlayerAwareness.ts` (plan working name: `npcAwarenessContract.ts`)
+- `apps/web/src/domain/npcPlayerAwareness.test.ts`
+- `apps/web/src/renderer/engine/npc/awarenessTracker.ts` (plan working name:
+  `npcAwarenessTracker.ts`)
+- `apps/web/src/renderer/engine/npc/awarenessTracker.test.ts`
+- `apps/web/src/renderer/engine/Engine.ts` (extended)
+- `apps/web/src/renderer/engine/Engine.test.ts` (extended)
+
+Full test plan, file list, and verification detail live in the closeout section of
+[`npc-player-awareness-v0`](../implementation-plans/npc-player-awareness-v0.md#16-closeout-slice-4).
+
+Verification run:
+
+```bash
+npx vitest run src/renderer/engine/npc/awarenessTracker.test.ts
+npx vitest run src/domain/npcPlayerAwareness.test.ts
+npx vitest run src/renderer/engine/Engine.test.ts
+npm.cmd run test -- behaviorTracker
+npm.cmd run test -- WanderMotor
+npx tsc --noEmit -p tsconfig.json
+npx eslint <the six files above>
+```
+
+Results: all passed clean (`awarenessTracker` 11 tests, `npcPlayerAwareness` 14 tests,
+`Engine.test.ts` 35 tests, `behaviorTracker` 10 tests unchanged/regression-free,
+`WanderMotor` 18 tests unchanged/regression-free, `tsc` clean, `eslint` clean).
+
+Boundaries re-confirmed at closeout, all held (per the test plan below and the closeout
+section):
 
 - No `WorldState` / `WorldEvent` / `WorldCommand` / `applyEvent` change.
 - No schema / save / persistence / migration / `schemaVersion` bump; no `RoomSpec` mutation.

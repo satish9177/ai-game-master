@@ -305,6 +305,26 @@ Throughout these docs:
   kind. Trust/respect/fear entries stay deferred until those axes are
   runtime-emittable
   ([ADR-0082](./decisions/ADR-0082-relationship-journal-entries-v0.md)).
+- ✅ **Implemented, presentation/runtime-only, advisory, no consumer** — NPC
+  Player Awareness v0 — a pure detector, `domain/npcPlayerAwareness.ts`
+  (`detectNpcPlayerAwareness`), maps one same-room NPC XZ position + the
+  player's XZ position + fixed, strictly-ordered radii
+  (`ALERTED_RADIUS 1.5 / AWARE_RADIUS 3.0 / NEARBY_RADIUS 5.0`) to one of four
+  proximity-only tiers (`unaware`/`nearby`/`aware`/`alerted`) using inclusive
+  thresholds, tightest tier wins, fail-closed on a different room or a
+  non-finite coordinate. `renderer/engine/npc/awarenessTracker.ts`
+  (`NpcAwarenessTracker`) is an ephemeral in-memory per-NPC tier holder
+  mirroring `NpcBehaviorTracker`, wired into `Engine`'s `renderLoop` via a
+  per-frame `updateAwareness()` over an `npcId -> THREE.Object3D` map covering
+  every same-room NPC node (moving and static alike), with an emit-on-change
+  `onNpcAwarenessChange` callback and `clear()` on `setRoom`/`dispose`. The
+  tiers — including `alerted` — are proximity bands only: **no** chase,
+  combat, damage, encounter triggering, relationship-driven hostility, or any
+  other reaction is attached, and **nothing in v0 consumes the signal**. No
+  `WorldState`/`WorldEvent`/`WorldCommand`, persistence/schema/save-game/
+  `RoomSpec` change, memory/fact/`fact_visibility` write, LLM/provider/prompt
+  change, or UI/debug indicator (Slice 3 deferred)
+  ([ADR-0083](./decisions/ADR-0083-npc-player-awareness-v0.md)).
 - ❌ **Not built** — future shape only; documented so we don't paint into a corner.
 
 ## Status today (Renderer Foundation v0)

@@ -1,9 +1,10 @@
 # Implementation Plan — `feature/npc-player-awareness-v0`
 
-> Status: **DESIGN APPROVED / DOCS-FIRST / NOT IMPLEMENTED.**
-> This plan lands the design for a deterministic, ephemeral, same-room NPC→player
-> proximity signal built on the existing presentation-only movement stack. No code,
-> tests, or runtime behavior exist yet.
+> Status: **COMPLETE / IMPLEMENTED (Slices 1-2; Slice 3 UI/debug indicator deferred).**
+> This plan lands a deterministic, ephemeral, same-room NPC→player
+> proximity signal built on the existing presentation-only movement stack. See the
+> [Slice 4 closeout](#16-closeout-slice-4) for the implemented file list and
+> verification run.
 > See [ADR-0083](../decisions/ADR-0083-npc-player-awareness-v0.md).
 >
 > Companion docs: [ARCHITECTURE](../ARCHITECTURE.md) · [BOUNDARIES](../BOUNDARIES.md) ·
@@ -51,7 +52,7 @@ signal**. These invariants may not be relaxed without explicit maintainer approv
 - **Feature:** `npc-player-awareness-v0` — Deterministic Ephemeral Same-Room NPC→Player
   Proximity Awareness.
 - **Lane:** worked on `main` directly; no feature branch.
-- **Status:** DESIGN APPROVED / DOCS-FIRST / NOT IMPLEMENTED.
+- **Status:** COMPLETE / IMPLEMENTED (Slices 1-2; Slice 3 UI/debug indicator deferred).
 - **ADR:** [ADR-0083](../decisions/ADR-0083-npc-player-awareness-v0.md).
 
 ## 2. Problem statement
@@ -319,8 +320,100 @@ own approved features.
   moving+static Engine coverage, the `room.objects` no-mutation deep-equal assertion, and the
   no-behavioral-side-effect assertion.
 
-## 16. Closeout (Slice 4) — pending
+## 16. Closeout (Slice 4)
 
-_Not implemented yet. This section is filled in at Slice 4 with the implemented file list,
-the verification run, and a re-checked boundary confirmation, following the
-[`npc-patrol-route-v0` closeout](./npc-patrol-route-v0.md#22-closeout-slice-4) format._
+Implemented files:
+
+- `apps/web/src/domain/npcPlayerAwareness.ts` (Slice 1; plan working name was
+  `npcAwarenessContract.ts`) — `NPC_PLAYER_AWARENESS` (`ALERTED_RADIUS 1.5` /
+  `AWARE_RADIUS 3.0` / `NEARBY_RADIUS 5.0`), `NpcPlayerAwarenessLevel`,
+  `NpcPlayerAwarenessReason`, `AwarenessXZ`, `NpcPlayerAwarenessState`, and the
+  pure `detectNpcPlayerAwareness` detector, reusing `distanceXZ` from
+  `npcMovementContract.ts`.
+- `apps/web/src/domain/npcPlayerAwareness.test.ts` (Slice 1).
+- `apps/web/src/renderer/engine/npc/awarenessTracker.ts` (Slice 2; plan
+  working name was `npcAwarenessTracker.ts`) — `NpcAwarenessTracker`
+  (`levelOf`, `update`, `clear`) and `NpcAwarenessChange`, mirroring
+  `NpcBehaviorTracker`'s ephemeral in-memory pattern.
+- `apps/web/src/renderer/engine/npc/awarenessTracker.test.ts` (Slice 2).
+- `apps/web/src/renderer/engine/Engine.ts` (Slice 2, extended) — a private
+  `npcAwareness: NpcAwarenessTracker` and `awarenessNodes: Map<string,
+  THREE.Object3D>`, the `registerAwarenessNodes` helper (mirrors
+  `registerIdleNpcs`'s node identification, covers every top-level
+  `userData.objectType === 'npc'` node — moving and static alike — keyed by
+  `userData.objectId` with the same `npc#index` fallback), a private
+  `updateAwareness()` called from `renderLoop` right after `updateNpcWander(dt)`
+  and before `updateProximity()`, the public advisory-only
+  `onNpcAwarenessChange` callback (fires only on a tier transition, batched
+  per frame), and `clear()`/node-map reset in both `setRoom` and `dispose`.
+- `apps/web/src/renderer/engine/Engine.test.ts` (Slice 2, extended).
+
+Slice 3 (UI/debug indicator): **deferred**, as designed. No visible
+player-facing awareness marker exists in v0; no `App`/`RoomViewer`/UI file
+changed.
+
+Verification run (2026-07-06, from `apps/web`):
+
+```bash
+npx vitest run src/renderer/engine/npc/awarenessTracker.test.ts
+npx vitest run src/domain/npcPlayerAwareness.test.ts
+npx vitest run src/renderer/engine/Engine.test.ts
+npm.cmd run test -- behaviorTracker
+npm.cmd run test -- WanderMotor
+npx tsc --noEmit -p tsconfig.json
+npx eslint src/domain/npcPlayerAwareness.ts src/domain/npcPlayerAwareness.test.ts \
+  src/renderer/engine/npc/awarenessTracker.ts src/renderer/engine/npc/awarenessTracker.test.ts \
+  src/renderer/engine/Engine.ts src/renderer/engine/Engine.test.ts
+```
+
+Results:
+
+- `npcPlayerAwareness` passed: 1 file, 14 tests (tier selection at interior
+  distances, exact-boundary inclusive resolution at 1.5/3.0/5.0, monotonic
+  tightest-tier selection, `sameRoom === false` guard, non-finite-coordinate
+  guard, determinism, radii-order assertion).
+- `awarenessTracker` passed: 1 file, 11 tests (per-NPC storage, emit-on-change
+  only on transition, `clear()`).
+- `Engine.test.ts` passed: 1 file, 35 tests (includes tier rising on approach
+  for both moving and static same-room NPCs, reset on `setRoom`, the
+  `room.objects` no-mutation deep-equal assertion, and no behavioral side
+  effect on movement/dialogue/relationship state).
+- `behaviorTracker` passed: 1 file, 10 tests (unchanged, confirming no
+  regression to the sibling ephemeral tracker).
+- `WanderMotor` passed: 1 file, 18 tests (unchanged, confirming no regression
+  to the reused movement stack).
+- `tsc --noEmit` passed clean.
+- `eslint` on all six changed/added files passed clean.
+
+Safety boundary confirmation (re-checked at closeout):
+
+- No `WorldState` / `WorldEvent` / `WorldCommand` / `applyEvent` touched.
+- No persistence / schema / save-game / `RoomSpec` mutation; no
+  `schemaVersion` bump.
+- No memory / fact / `fact_visibility` read or write.
+- No LLM / provider / prompt change.
+- No chase, combat, damage, NPC attack, or encounter triggering.
+- No relationship-driven hostility; no relationship read or write.
+- No cross-room awareness: `awarenessNodes` holds only current-room nodes,
+  rebuilt in `setRoom`.
+- No facing / line-of-sight / time-of-day / NPC-type / hostility modifier;
+  radii are constants-only.
+- No UI/debug indicator: Slice 3 remains deferred, no `App`/`RoomViewer`/UI
+  file changed.
+- No dialogue or relationship consumer: `onNpcAwarenessChange` has no
+  listener wired anywhere in v0.
+- No raw prompt/provider/dialogue/room-text logging; no per-frame logging was
+  added.
+- Awareness remains ephemeral/runtime-only and advisory: the tracker's map is
+  the only new state, cleared in both `setRoom` and `dispose`; existing
+  movement (idle/wander/patrol) is untouched.
+
+Deferred (each its own maintainer-approved feature/ADR):
+
+- `hostile-npc-chase-lite-v0` — the first consumer of the awareness signal.
+- Per-NPC awareness radii / profiles and NPC type/hostility modifiers.
+- Relationship-driven awareness or hostility.
+- Time-of-day-driven awareness.
+- Facing / line-of-sight / occlusion awareness.
+- UI / debug awareness indicator (Slice 3).
+- Cross-room awareness.
