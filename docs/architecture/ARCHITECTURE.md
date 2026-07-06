@@ -293,6 +293,18 @@ Throughout these docs:
   `NpcRelationshipState` schema, `WorldEvent`/`WorldCommand`, memory/fact/
   `fact_visibility`, reducer, or provider/prompt change
   ([ADR-0081](./decisions/ADR-0081-npc-relationship-persistence-v0.md)).
+- ✅ **Implemented, pure/dry domain contract only** — Relationship Journal
+  Entries v0 — a single pure module,
+  `domain/npcRelationship/relationshipJournalCandidate.ts`, builds a closed
+  candidate on a strictly upward `FamiliarityBucket` crossing only and renders
+  it from a frozen, generic, name-free template table. It is **dry at
+  runtime**: no production source imports it (proven by a dedicated
+  dry-at-runtime scan test), so this is **not** a visible journal — no
+  `JournalView`/`JournalPanel` producer, `App.tsx`, `WorldEvent`/`WorldCommand`/
+  `WorldState`, memory/fact/`fact_visibility`, or persistence change of any
+  kind. Trust/respect/fear entries stay deferred until those axes are
+  runtime-emittable
+  ([ADR-0082](./decisions/ADR-0082-relationship-journal-entries-v0.md)).
 - ❌ **Not built** — future shape only; documented so we don't paint into a corner.
 
 ## Status today (Renderer Foundation v0)

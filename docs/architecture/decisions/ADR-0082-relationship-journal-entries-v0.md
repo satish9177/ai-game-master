@@ -1,7 +1,7 @@
 # ADR-0082: Relationship journal entries are a pure, dry, familiarity-only candidate contract in v0
 
-- **Status:** Accepted / Docs-first — **NOT IMPLEMENTED** (design approved; pure
-  contract, dry-at-runtime, to be built in a separately-approved Slice 1)
+- **Status:** Accepted - Implemented (Slice 1 — pure contract, dry-at-runtime;
+  Slice 2 — docs closeout)
 - **Date:** 2026-07-06
 - **Deciders:** Project owner
 - **Builds on:**
@@ -18,11 +18,10 @@
   [`room-environment-transition-model-dry-v0`](../implementation-plans/lazy-room-environment-transitions-v0.md)
   ([ADR-0078](./ADR-0078-room-environment-transition-model-dry-v0.md)).
 
-> Full plan, candidate/template shapes, rules, test plan, and slices live in
-> [`relationship-journal-entries-v0`](../implementation-plans/relationship-journal-entries-v0.md).
-> This ADR records the decision and the boundary rationale. It documents a
-> **design-start / docs-first** decision; the closeout record will be added when
-> Slice 1 lands.
+> Full plan, candidate/template shapes, rules, test plan, and the closeout
+> record (implemented files, verification results, known limitations) live in
+> [`relationship-journal-entries-v0`](../implementation-plans/relationship-journal-entries-v0.md#closeout-slice-2).
+> This ADR records the decision and the boundary rationale.
 
 ---
 
@@ -209,19 +208,27 @@ Unchanged in v0:
   entries once those axes are live — each separately approved.
 - **Build stays green.** One new pure module + its test; no runtime, schema,
   lint, provider, or UI change.
-- **ARCHITECTURE.md is not updated yet** (implemented-only convention); the
-  status line and this ADR's closeout land with Slice 2.
+- **ARCHITECTURE.md status line added at Slice 2 closeout**, per the
+  implemented-only convention, alongside this ADR's implementation outcome.
+
+## Implementation outcome
+
+Slice 1 landed exactly as decided above: one pure module,
+`domain/npcRelationship/relationshipJournalCandidate.ts`, plus its test file.
+No production source imports it — proven by the dry-at-runtime scan test, not
+merely asserted. No `App.tsx`, journal producer, `JournalPanel`, or
+persistence-load edit exists. This remains a **closed candidate/template
+contract with no visible journal runtime**: no journal entry renders, no
+`WorldEvent`/`WorldCommand`/`WorldState` change was made, and no memory/
+`Fact`/`fact_visibility` authority was introduced or implied. See the
+[Slice 2 closeout](../implementation-plans/relationship-journal-entries-v0.md#closeout-slice-2)
+for the full file list, behavior/safety summary, and verification results.
 
 ## Verification
 
-Not implemented yet — docs-first. Planned verification for Slice 1 (from the
-implementation plan §11–§12):
-
 ```bash
-npm.cmd run test -- relationshipJournalCandidate
-npm.cmd run lint
-npm.cmd run build
+npm run test -- relationshipJournalCandidate   # 1 file, 18 tests passed
+npm run test -- npcRelationship                # 5 files, 104 tests passed
+npm run build                                  # tsc -b && vite build — passed
+npm run lint                                    # eslint . — passed, no findings
 ```
-
-The closeout record (files changed, dry-at-runtime scan result, and confirmed
-unchanged boundaries) will be appended when Slice 1 lands.

@@ -3,11 +3,10 @@
 > `relationship-journal-entries-v0` is the **feature name**, not a Git branch —
 > this work lands directly on `main` (see §1, "Lane").
 
-> Status: **DESIGN APPROVED / DOCS-FIRST / NOT IMPLEMENTED.**
-> No runtime code, no tests, and no `App.tsx`/journal-runtime edits exist yet.
-> This document + [ADR-0082](../decisions/ADR-0082-relationship-journal-entries-v0.md)
-> are the docs-first artifacts; implementation (Slice 1) is deferred until the
-> maintainer approves on a clean `main`.
+> Status: **IMPLEMENTED (Slice 1) — pure, dry-at-runtime candidate contract only.**
+> No `App.tsx`, journal-runtime, or UI edits exist. See
+> [Closeout (Slice 2)](#closeout-slice-2) for the final file list, verification
+> results, and known limitations.
 >
 > Companion docs: [ARCHITECTURE](../ARCHITECTURE.md) · [BOUNDARIES](../BOUNDARIES.md) ·
 > [FAILURE-MODES](../FAILURE-MODES.md) · [CONVENTIONS](../CONVENTIONS.md) · [/AGENTS.md](../../../AGENTS.md).
@@ -61,7 +60,7 @@ explicit maintainer approval:
 
 - **Feature:** `relationship-journal-entries-v0`
 - **Lane:** worked on `main` directly (no feature branch).
-- **Status:** **DESIGN APPROVED / DOCS-FIRST / NOT IMPLEMENTED.**
+- **Status:** **IMPLEMENTED (Slice 1 — pure/dry contract; Slice 2 — docs closeout).**
 - **ADR:** [ADR-0082](../decisions/ADR-0082-relationship-journal-entries-v0.md)
   (next free number; ADR-0081 is `npc-relationship-persistence-v0`).
 
@@ -342,3 +341,84 @@ a clean, separately-reviewable next slice.
   renderer change; no new logs; the module is dry at runtime.
 - **Tests prove it:** §11, anchored by the leak-sweep, dedupe, dry-at-runtime,
   and boundary-import tests.
+
+## Closeout (Slice 2)
+
+**Feature complete for v0.** Slice 1 (pure module + tests) is implemented and
+committed on `main`. Slice 2 (this closeout) is docs-only.
+
+Implemented files:
+
+- `apps/web/src/domain/npcRelationship/relationshipJournalCandidate.ts` (Slice 1)
+  — `NPC_RELATIONSHIP_JOURNAL_CANDIDATE_SCHEMA_VERSION`,
+  `RelationshipJournalCandidate`, `RelationshipJournalCandidateInput`,
+  `RelationshipJournalTemplateId`, `RELATIONSHIP_JOURNAL_TEMPLATES`,
+  `buildRelationshipJournalCandidate`, `renderRelationshipJournalText`.
+- `apps/web/src/domain/npcRelationship/relationshipJournalCandidate.test.ts`
+  (Slice 1) — candidate-builder, closed-template, dedupe, leak-sweep,
+  trust/respect/fear-exclusion, dry-at-runtime scan, and import-boundary tests.
+
+Behavior summary:
+
+- **Pure domain helper only.** The module builds candidate *data* and renders
+  *closed text*; it is total, deterministic, and imports only the sibling
+  `FamiliarityBucket` type plus its own frozen tables.
+- **Familiarity-up bucket crossing only.** `buildRelationshipJournalCandidate`
+  returns exactly one candidate on a strictly upward `FamiliarityBucket`
+  crossing (`none→low`, `low→medium`, `medium→high`), else `null` (same-bucket
+  and downward pairs).
+- **Closed internal candidate shape.** `schemaVersion`, `kind`, `npcId`
+  (internal slug only), `axis: 'familiarity'`, `direction: 'increased'`,
+  `fromBucket`, `toBucket`, `templateId`, and a stable, scope-derived
+  `dedupeKey`. No `worldTime`, numeric axis value, delta, or
+  `interactionCount`.
+- **Closed, generic rendered text.** `renderRelationshipJournalText` returns
+  text exclusively from the frozen `RELATIONSHIP_JOURNAL_TEMPLATES` table;
+  v0 ships one reachable entry
+  (`familiarity_increased → "Someone here seems more familiar with you."`).
+- **No NPC labels.** `npcId` is never rendered; the text is name-free and
+  generic ("someone here").
+- **No trust/respect/fear entries.** The candidate `axis` is always
+  `'familiarity'`; the template table exposes no other template id — those
+  axes stay dry per ADR-0077 until they become runtime-emittable.
+- **No `worldTime`.** No clock/timestamp field exists on the candidate.
+- **No runtime wiring.** Nothing outside the module's own test imports it.
+- **Dry-at-runtime guard proves no production imports.** A dedicated
+  `import.meta.glob` scan over all production `.ts`/`.tsx` sources (excluding
+  the module and any `*.test.ts(x)`) asserts zero references to
+  `relationshipJournalCandidate` / `RelationshipJournalCandidate`.
+
+Safety summary (all unchanged / not introduced):
+
+- No raw scores, no deltas, no `interactionCount` in the candidate or
+  rendered text (leak-sweep test).
+- No raw dialogue/prompt/provider/effect/feedback text anywhere in the
+  module — text is a total function of the closed enum, sourced only from
+  the frozen template table.
+- No memory, `Fact`, or `fact_visibility` write or derivation.
+- No `WorldEvent` or `WorldCommand` minted or read.
+- No `WorldState` mutation of any kind.
+- No persistence, schema, or save-game change; no `schemaVersion` bump on
+  any existing schema (the candidate carries only its own local
+  `NPC_RELATIONSHIP_JOURNAL_CANDIDATE_SCHEMA_VERSION`).
+
+Verification:
+
+```bash
+npm run test -- relationshipJournalCandidate   # 1 file, 18 tests passed
+npm run test -- npcRelationship                # 5 files, 104 tests passed
+npm run build                                  # tsc -b && vite build — passed
+npm run lint                                    # eslint . — passed, no findings
+```
+
+Known limitations (deferred, each its own maintainer-approved feature/ADR
+per §13):
+
+- Not visible to the player yet — no journal panel integration.
+- No persistence — the candidate is not saved/loaded.
+- No NPC name rendering — display-label policy is undecided.
+- Trust/respect/fear entries are deferred until those axes are
+  runtime-emittable (ADR-0077).
+- Any future runtime wiring (ephemeral accumulation store, `JournalView`
+  merge, persistence) must be separately approved — this closeout does not
+  authorize it.
