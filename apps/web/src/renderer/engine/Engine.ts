@@ -18,6 +18,9 @@ import { IdleAnimator, idlePhase } from './animation/idleAnimation'
 import { IDLE_INTENSITY_BY_STATE } from '../../domain/ports/npcBehavior'
 import { NpcBehaviorTracker } from './npc/behaviorTracker'
 import { WanderMotor } from './npc/WanderMotor'
+import { NpcAwarenessTracker } from './npc/awarenessTracker'
+import type { NpcAwarenessChange } from './npc/awarenessTracker'
+import { detectNpcPlayerAwareness } from '../../domain/npcPlayerAwareness'
 import { buildNpcWanderField } from '../../domain/npcMovementContract'
 import { buildNpcPatrolRoute } from '../../domain/npcPatrolContract'
 import { stableHash32 } from '../../domain/stableHash'
@@ -70,6 +73,8 @@ export class Engine {
   private readonly npcBehavior = new NpcBehaviorTracker()
   private readonly wanderMotor = new WanderMotor()
   private readonly wanderNpcIds: string[] = []
+  private readonly npcAwareness = new NpcAwarenessTracker()
+  private readonly awarenessNodes = new Map<string, THREE.Object3D>()
   private activeInteractable: Interactable | null = null
   private readonly interactRange = 2.5 // meters (XZ) to register as "in range"
   private locked = false // true while a dialogue panel owns input
@@ -78,6 +83,12 @@ export class Engine {
   onActiveInteractionChange: ((active: Interactable | null) => void) | null = null
   /** Fired when the player presses the matching key to open an interaction. */
   onRequestOpenInteraction: ((target: Interactable) => void) | null = null
+  /**
+   * Fired when any same-room NPC's proximity tier transitions. Advisory only —
+   * no consumer is wired in v0 (see ADR-0083); movement/dialogue/relationships
+   * are unaffected regardless of whether a listener is attached.
+   */
+  onNpcAwarenessChange: ((changes: readonly NpcAwarenessChange[]) => void) | null = null
 
   constructor(container: HTMLElement, logger: Logger) {
     this.container = container
@@ -114,6 +125,8 @@ export class Engine {
     this.npcBehavior.clear()
     this.wanderMotor.clear()
     this.wanderNpcIds.length = 0
+    this.npcAwareness.clear()
+    this.awarenessNodes.clear()
     this.room = room
     const visualTheme = deriveRoomVisualTheme(room)
     this.scene.add(buildLighting(room.lighting, room.shell.dimensions, visualTheme))
@@ -121,6 +134,7 @@ export class Engine {
     const objects = buildObjects(room, this.logger, options.resolvedObjectIds, visualTheme)
     this.scene.add(objects)
     registerIdleNpcs(this.idleAnimator, this.npcBehavior, room, objects)
+    registerAwarenessNodes(this.awarenessNodes, objects)
     this.placePlayer(room.spawn)
 
     const { width, depth } = room.shell.dimensions
@@ -198,6 +212,7 @@ export class Engine {
       this.movement.update(this.player, dt, this.bounds)
     }
     this.updateNpcWander(dt)
+    this.updateAwareness()
     this.idleAnimator.update(dt)
     this.cameraController.follow(this.player.position)
     this.updateProximity()
@@ -212,6 +227,33 @@ export class Engine {
 
     for (const npcId of this.wanderNpcIds) {
       this.npcBehavior.setWandering(npcId, this.wanderMotor.isWalking(npcId))
+    }
+  }
+
+  /**
+   * Reads the current player/NPC XZ positions and feeds them through the pure
+   * same-room detector into the ephemeral tracker. Read-only advisory output:
+   * it stores a tier per NPC and optionally notifies listeners, and does
+   * nothing else. Covers every same-room NPC node (moving and static), not
+   * only `WanderMotor` entries (see ADR-0083).
+   */
+  private updateAwareness(): void {
+    const { x, z } = this.player.position
+    const changes: NpcAwarenessChange[] = []
+
+    for (const [npcId, node] of this.awarenessNodes) {
+      const result = detectNpcPlayerAwareness({
+        npcId,
+        npcPosition: { x: node.position.x, z: node.position.z },
+        playerPosition: { x, z },
+        sameRoom: true,
+      })
+      const change = this.npcAwareness.update(result)
+      if (change !== null) changes.push(change)
+    }
+
+    if (changes.length > 0) {
+      this.onNpcAwarenessChange?.(changes)
     }
   }
 
@@ -279,10 +321,13 @@ export class Engine {
     this.npcBehavior.clear()
     this.wanderMotor.clear()
     this.wanderNpcIds.length = 0
+    this.npcAwareness.clear()
+    this.awarenessNodes.clear()
     this.activeInteractable = null
     this.locked = false
     this.onActiveInteractionChange = null
     this.onRequestOpenInteraction = null
+    this.onNpcAwarenessChange = null
 
     disposeObject(this.scene) // frees the player marker's geometry/materials too
     this.scene.clear()
@@ -327,6 +372,27 @@ function registerIdleNpcs(
       baseRotY: node.rotation.y,
       intensity: () => IDLE_INTENSITY_BY_STATE[behavior.stateOf(key)],
     })
+  })
+}
+
+/**
+ * Retains an `npcId -> node` entry for every top-level NPC-tagged node in the
+ * room, moving and static alike (mirrors `registerIdleNpcs`'s node
+ * identification exactly, including the same `npc#index` fallback key for an
+ * id-less NPC, so the two registries agree on identity). `clear()` runs first
+ * so a room replacement never retains a stale node from the previous room.
+ */
+function registerAwarenessNodes(
+  nodes: Map<string, THREE.Object3D>,
+  group: THREE.Group,
+): void {
+  nodes.clear()
+  const objectNodes = group.children.filter((node) => node.userData.objectType !== undefined)
+  objectNodes.forEach((node, index) => {
+    if (node.userData.objectType !== 'npc') return
+    const objectId = node.userData.objectId as string | undefined
+    const key = objectId ?? `npc#${index}`
+    nodes.set(key, node)
   })
 }
 

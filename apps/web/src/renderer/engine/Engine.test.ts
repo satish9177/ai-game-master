@@ -12,6 +12,7 @@ import { Engine } from './Engine'
 import { IDLE_BOB_AMPLITUDE, IdleAnimator, idleOffsets, idlePhase } from './animation/idleAnimation'
 import { NpcBehaviorTracker } from './npc/behaviorTracker'
 import { WanderMotor } from './npc/WanderMotor'
+import { NpcAwarenessTracker } from './npc/awarenessTracker'
 
 const fallback = loadRoomSpec(fallbackRoom)
 const INSPECT_BODY = 'You inspect it carefully, but do not take anything.'
@@ -251,6 +252,8 @@ describe('Engine.setRoom options', () => {
       npcBehavior: new NpcBehaviorTracker(),
       wanderMotor: new WanderMotor(),
       wanderNpcIds: [] as string[],
+      npcAwareness: new NpcAwarenessTracker(),
+      awarenessNodes: new Map<string, THREE.Object3D>(),
     }
 
     try {
@@ -297,6 +300,10 @@ function makeFakeEngine(idleAnimator: IdleAnimator) {
     npcBehavior: new NpcBehaviorTracker(),
     wanderMotor: new WanderMotor(),
     wanderNpcIds: [] as string[],
+    npcAwareness: new NpcAwarenessTracker(),
+    awarenessNodes: new Map<string, THREE.Object3D>(),
+    onNpcAwarenessChange: null as ((changes: unknown) => void) | null,
+    player: new THREE.Object3D(),
     locked: false,
   }
 }
@@ -310,6 +317,11 @@ function objectsGroupFrom(sceneAdd: ReturnType<typeof vi.fn>): THREE.Group {
 function updateNpcWander(fakeEngine: unknown, dt: number): void {
   (Engine.prototype as unknown as { updateNpcWander: (dt: number) => void })
     .updateNpcWander.call(fakeEngine, dt)
+}
+
+function updateAwareness(fakeEngine: unknown): void {
+  (Engine.prototype as unknown as { updateAwareness: () => void })
+    .updateAwareness.call(fakeEngine)
 }
 
 function wanderRoom(id = 'engine-wander-room') {
@@ -931,6 +943,217 @@ describe('Engine patrol opt-in seam (ADR-0080)', () => {
   })
 })
 
+function awarenessRoom(id = 'engine-awareness-room'): LoadedRoom {
+  return loadRoomSpec({
+    schemaVersion: 1,
+    id,
+    name: 'Engine Awareness Room',
+    shell: { dimensions: { width: 20, depth: 20, height: 4 } },
+    spawn: { position: [0, 1.6, 0], yaw: 0 },
+    objects: [
+      {
+        id: 'guard',
+        type: 'npc',
+        name: 'Guard',
+        position: [3, 0, 0],
+        interaction: { key: 'F', prompt: 'Talk to Guard' },
+      },
+      {
+        // No `id`: registerWanderNpcs skips it (it needs an objectId to look up
+        // a wander field), so this NPC never joins WanderMotor and never
+        // moves — a fully static NPC. It must still be tracked for awareness.
+        type: 'npc',
+        name: 'Statue Guard',
+        position: [-3, 0, 0],
+        interaction: { key: 'F', prompt: 'Talk to statue guard' },
+      },
+    ],
+  })
+}
+
+describe('Engine NPC-player awareness (ADR-0083)', () => {
+  it('computes a tighter awareness tier as the player approaches an NPC', () => {
+    const originalWindow = globalThis.window
+    vi.stubGlobal('window', { addEventListener: vi.fn(), removeEventListener: vi.fn() })
+
+    try {
+      const fakeEngine = makeFakeEngine(new IdleAnimator())
+      Engine.prototype.setRoom.call(fakeEngine as never, awarenessRoom())
+
+      fakeEngine.player.position.set(20, 0, 0)
+      updateAwareness(fakeEngine)
+      expect(fakeEngine.npcAwareness.levelOf('guard')).toBe('unaware')
+
+      fakeEngine.player.position.set(3, 0, 4)
+      updateAwareness(fakeEngine)
+      expect(fakeEngine.npcAwareness.levelOf('guard')).toBe('nearby')
+
+      fakeEngine.player.position.set(3, 0, 2)
+      updateAwareness(fakeEngine)
+      expect(fakeEngine.npcAwareness.levelOf('guard')).toBe('aware')
+
+      fakeEngine.player.position.set(3, 0, 1)
+      updateAwareness(fakeEngine)
+      expect(fakeEngine.npcAwareness.levelOf('guard')).toBe('alerted')
+    } finally {
+      if (originalWindow === undefined) vi.unstubAllGlobals()
+      else vi.stubGlobal('window', originalWindow)
+    }
+  })
+
+  it('evaluates every same-room NPC node, including one excluded from WanderMotor (static)', () => {
+    const originalWindow = globalThis.window
+    vi.stubGlobal('window', { addEventListener: vi.fn(), removeEventListener: vi.fn() })
+
+    try {
+      const fakeEngine = makeFakeEngine(new IdleAnimator())
+      Engine.prototype.setRoom.call(fakeEngine as never, awarenessRoom())
+
+      expect(fakeEngine.wanderNpcIds).toEqual(['guard'])
+      expect(fakeEngine.awarenessNodes.has('guard')).toBe(true)
+      expect(fakeEngine.awarenessNodes.has('npc#1')).toBe(true)
+
+      fakeEngine.player.position.set(-3, 0, 1)
+      updateAwareness(fakeEngine)
+
+      expect(fakeEngine.npcAwareness.levelOf('npc#1')).toBe('alerted')
+      expect(fakeEngine.npcAwareness.levelOf('guard')).toBe('unaware')
+    } finally {
+      if (originalWindow === undefined) vi.unstubAllGlobals()
+      else vi.stubGlobal('window', originalWindow)
+    }
+  })
+
+  it('resets awareness state and the node map when a room is replaced', () => {
+    const originalWindow = globalThis.window
+    vi.stubGlobal('window', { addEventListener: vi.fn(), removeEventListener: vi.fn() })
+
+    try {
+      const fakeEngine = makeFakeEngine(new IdleAnimator())
+      Engine.prototype.setRoom.call(fakeEngine as never, awarenessRoom('awareness-room-a'))
+
+      fakeEngine.player.position.set(3, 0, 0)
+      updateAwareness(fakeEngine)
+      expect(fakeEngine.npcAwareness.levelOf('guard')).toBe('alerted')
+
+      Engine.prototype.setRoom.call(fakeEngine as never, awarenessRoom('awareness-room-b'))
+
+      expect(fakeEngine.npcAwareness.levelOf('guard')).toBe('unaware')
+      expect(fakeEngine.awarenessNodes.size).toBe(2)
+    } finally {
+      if (originalWindow === undefined) vi.unstubAllGlobals()
+      else vi.stubGlobal('window', originalWindow)
+    }
+  })
+
+  it('never mutates room.objects across repeated awareness ticks (no authoritative mutation)', () => {
+    const originalWindow = globalThis.window
+    vi.stubGlobal('window', { addEventListener: vi.fn(), removeEventListener: vi.fn() })
+
+    try {
+      const fakeEngine = makeFakeEngine(new IdleAnimator())
+      const room = awarenessRoom()
+      Engine.prototype.setRoom.call(fakeEngine as never, room)
+      const before = structuredClone(room.objects)
+
+      for (let tick = 0; tick < 50; tick += 1) {
+        fakeEngine.player.position.set(Math.sin(tick) * 4, 0, Math.cos(tick) * 4)
+        updateAwareness(fakeEngine)
+      }
+
+      expect(room.objects).toEqual(before)
+    } finally {
+      if (originalWindow === undefined) vi.unstubAllGlobals()
+      else vi.stubGlobal('window', originalWindow)
+    }
+  })
+
+  it('does not move or rotate any NPC node when computing awareness (advisory-only, no movement override)', () => {
+    const originalWindow = globalThis.window
+    vi.stubGlobal('window', { addEventListener: vi.fn(), removeEventListener: vi.fn() })
+
+    try {
+      const fakeEngine = makeFakeEngine(new IdleAnimator())
+      Engine.prototype.setRoom.call(fakeEngine as never, awarenessRoom())
+      const group = objectsGroupFrom(fakeEngine.scene.add)
+      const npcNode = group.children.find((node) => node.userData.objectId === 'guard')!
+      const before = {
+        x: npcNode.position.x,
+        y: npcNode.position.y,
+        z: npcNode.position.z,
+        rotY: npcNode.rotation.y,
+      }
+
+      for (let tick = 0; tick < 10; tick += 1) {
+        fakeEngine.player.position.set(3, 0, tick * 0.5)
+        updateAwareness(fakeEngine)
+      }
+
+      expect(npcNode.position.x).toBe(before.x)
+      expect(npcNode.position.y).toBe(before.y)
+      expect(npcNode.position.z).toBe(before.z)
+      expect(npcNode.rotation.y).toBe(before.rotY)
+    } finally {
+      if (originalWindow === undefined) vi.unstubAllGlobals()
+      else vi.stubGlobal('window', originalWindow)
+    }
+  })
+
+  it('clears awareness state and the node map on dispose', () => {
+    const originalWindow = globalThis.window
+    const originalCancelAnimationFrame = globalThis.cancelAnimationFrame
+    vi.stubGlobal('window', { removeEventListener: vi.fn() })
+    vi.stubGlobal('cancelAnimationFrame', vi.fn())
+
+    const npcAwareness = new NpcAwarenessTracker()
+    npcAwareness.update({ npcId: 'guard', level: 'alerted', distance: 0.4, reason: 'proximity' })
+    const clearSpy = vi.spyOn(npcAwareness, 'clear')
+    const fakeEngine = {
+      rafId: 0,
+      resizeObserver: { disconnect: vi.fn() },
+      onInteractKey: () => {},
+      movement: null,
+      bounds: null,
+      interactables: [] as unknown[],
+      activeInteractable: null,
+      locked: false,
+      onActiveInteractionChange: null,
+      onRequestOpenInteraction: null,
+      onNpcAwarenessChange: null,
+      scene: new THREE.Scene(),
+      disposables: { dispose: vi.fn() },
+      cameraController: { dispose: vi.fn() },
+      renderer: {
+        dispose: vi.fn(),
+        forceContextLoss: vi.fn(),
+        domElement: { parentNode: null },
+      },
+      room: null,
+      idleAnimator: new IdleAnimator(),
+      npcBehavior: new NpcBehaviorTracker(),
+      wanderMotor: new WanderMotor(),
+      wanderNpcIds: ['guard'],
+      npcAwareness,
+      awarenessNodes: new Map<string, THREE.Object3D>([['guard', new THREE.Object3D()]]),
+    }
+
+    try {
+      expect(() => Engine.prototype.dispose.call(fakeEngine as never)).not.toThrow()
+    } finally {
+      if (originalWindow === undefined) {
+        vi.unstubAllGlobals()
+      } else {
+        vi.stubGlobal('window', originalWindow)
+        vi.stubGlobal('cancelAnimationFrame', originalCancelAnimationFrame)
+      }
+    }
+
+    expect(clearSpy).toHaveBeenCalledTimes(1)
+    expect(fakeEngine.awarenessNodes.size).toBe(0)
+    expect(fakeEngine.npcAwareness.levelOf('guard')).toBe('unaware')
+  })
+})
+
 describe('Engine dispose', () => {
   it('clears idle and behavior state safely during teardown', () => {
     const originalWindow = globalThis.window
@@ -955,6 +1178,7 @@ describe('Engine dispose', () => {
       locked: false,
       onActiveInteractionChange: null,
       onRequestOpenInteraction: null,
+      onNpcAwarenessChange: null,
       scene: new THREE.Scene(),
       disposables: { dispose: vi.fn() },
       cameraController: { dispose: vi.fn() },
@@ -968,6 +1192,8 @@ describe('Engine dispose', () => {
       npcBehavior,
       wanderMotor,
       wanderNpcIds: ['npc'],
+      npcAwareness: new NpcAwarenessTracker(),
+      awarenessNodes: new Map<string, THREE.Object3D>(),
     }
 
     try {
