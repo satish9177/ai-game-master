@@ -325,6 +325,21 @@ Throughout these docs:
   `RoomSpec` change, memory/fact/`fact_visibility` write, LLM/provider/prompt
   change, or UI/debug indicator (Slice 3 deferred)
   ([ADR-0083](./decisions/ADR-0083-npc-player-awareness-v0.md)).
+- 🔜 **Planned (design approved, docs-first; not yet implemented)** — Hostile NPC
+  Chase Lite v0 — the first consumer of the NPC Player Awareness v0 signal: an
+  eligible NPC (opted in only via the internal `Engine`/`SetRoomOptions.chaseOptInNpcIds`
+  test seam, mirroring `patrolOptInNpcIds` — **no** `RoomSpec`/schema/save-game/`App`/
+  `RoomViewer`/provider change and no real room auto-enabling it) that is `aware`/`alerted`
+  and in the same room moves **toward** the player via a deterministic, non-teleporting,
+  home-leashed pursuit step. Movement/intent only: it reuses the existing wander kernel
+  (`NPC_WANDER.MAX_SPEED`, `MAX_RADIUS_FROM_HOME = 2.5`, `isWanderPositionAllowed`/
+  `isWanderSegmentAllowed`) so chase stays short-range/"lite" and resume-compatible, stops
+  at `CONTACT_STANDOFF = 0.8` with **inert** contact (no combat, damage, HP/injury, item
+  loss, capture, death, encounter, or quest effect), and pauses under the existing
+  interaction/dialogue lock. Non-opted NPCs remain behaviorally unchanged (regression-tested).
+  No `WorldState`/`WorldEvent`/`WorldCommand`, memory/fact/`fact_visibility`, persistence/
+  `schemaVersion`, or cross-room chase
+  ([ADR-0084](./decisions/ADR-0084-hostile-npc-chase-lite-v0.md)).
 - ❌ **Not built** — future shape only; documented so we don't paint into a corner.
 
 ## Status today (Renderer Foundation v0)
