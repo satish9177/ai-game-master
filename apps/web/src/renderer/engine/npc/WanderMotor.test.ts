@@ -81,6 +81,10 @@ function makeInteractable(x = 99, z = 99): TestInteractable {
   }
 }
 
+function distance(a: WanderXZ, b: WanderXZ): number {
+  return Math.hypot(a.x - b.x, a.z - b.z)
+}
+
 function updateOpenMotor(seed = 'motor'): {
   field: NpcWanderField
   motor: WanderMotor
@@ -360,5 +364,198 @@ describe('WanderMotor', () => {
     expect(ring.position.z).toBe(node.position.z)
     expect(interactable.position.x).toBe(node.position.x)
     expect(interactable.position.z).toBe(node.position.z)
+  })
+
+  it('moves a chase-eligible active NPC toward the player', () => {
+    const field = openField()
+    const motor = new WanderMotor()
+    const node = makeNode()
+    motor.register({ npcId: 'npc', node, field, seed: 'chase-active', home: field.home, chaseEligible: true })
+
+    motor.update(0.25, {
+      interactionLocked: false,
+      isNpcTalking: () => false,
+      playerPosition: { x: 2, z: 0 },
+      isChaseActive: () => true,
+    })
+
+    expect(node.position.x).toBeGreaterThan(field.home.x)
+    expect(node.position.z).toBe(0)
+    expect(distance(field.home, node.position)).toBeLessThanOrEqual((NPC_WANDER.MAX_SPEED * 0.25) + 1e-12)
+    expect(motor.isWalking('npc')).toBe(true)
+  })
+
+  it('uses normal wander behavior for chase-eligible NPCs when chase is inactive', () => {
+    const field = openField()
+    const chaseMotor = new WanderMotor()
+    const normalMotor = new WanderMotor()
+    const chaseNode = makeNode()
+    const normalNode = makeNode()
+    chaseMotor.register({ npcId: 'npc', node: chaseNode, field, seed: 'inactive-chase', home: field.home, chaseEligible: true })
+    normalMotor.register({ npcId: 'npc', node: normalNode, field, seed: 'inactive-chase', home: field.home })
+
+    chaseMotor.update(0.25, {
+      interactionLocked: false,
+      isNpcTalking: () => false,
+      playerPosition: { x: 2, z: 0 },
+      isChaseActive: () => false,
+    })
+    normalMotor.update(0.25, { interactionLocked: false, isNpcTalking: () => false })
+
+    expect({ x: chaseNode.position.x, z: chaseNode.position.z })
+      .toEqual({ x: normalNode.position.x, z: normalNode.position.z })
+  })
+
+  it('leaves non-eligible NPC behavior unchanged when chase context is present', () => {
+    const field = openField()
+    const withContextMotor = new WanderMotor()
+    const withoutContextMotor = new WanderMotor()
+    const withContextNode = makeNode()
+    const withoutContextNode = makeNode()
+    const dts = [0.1, 0.2, 0.25, 0.4]
+    withContextMotor.register({ npcId: 'npc', node: withContextNode, field, seed: 'non-eligible', home: field.home })
+    withoutContextMotor.register({ npcId: 'npc', node: withoutContextNode, field, seed: 'non-eligible', home: field.home })
+
+    for (const dtS of dts) {
+      withContextMotor.update(dtS, {
+        interactionLocked: false,
+        isNpcTalking: () => false,
+        playerPosition: { x: 2, z: 0 },
+        isChaseActive: () => true,
+      })
+      withoutContextMotor.update(dtS, { interactionLocked: false, isNpcTalking: () => false })
+
+      expect({ x: withContextNode.position.x, z: withContextNode.position.z })
+        .toEqual({ x: withoutContextNode.position.x, z: withoutContextNode.position.z })
+      expect(withContextMotor.isWalking('npc')).toBe(withoutContextMotor.isWalking('npc'))
+    }
+  })
+
+  it('pauses active chase for interaction lock or npcTalking before movement', () => {
+    const field = openField()
+    const lockedMotor = new WanderMotor()
+    const talkingMotor = new WanderMotor()
+    const lockedNode = makeNode()
+    const talkingNode = makeNode()
+    lockedMotor.register({ npcId: 'npc', node: lockedNode, field, seed: 'chase-lock', home: field.home, chaseEligible: true })
+    talkingMotor.register({ npcId: 'npc', node: talkingNode, field, seed: 'chase-talking', home: field.home, chaseEligible: true })
+
+    lockedMotor.update(1, {
+      interactionLocked: true,
+      isNpcTalking: () => false,
+      playerPosition: { x: 2, z: 0 },
+      isChaseActive: () => true,
+    })
+    talkingMotor.update(1, {
+      interactionLocked: false,
+      isNpcTalking: (npcId) => npcId === 'npc',
+      playerPosition: { x: 2, z: 0 },
+      isChaseActive: () => true,
+    })
+
+    expect({ x: lockedNode.position.x, z: lockedNode.position.z }).toEqual(field.home)
+    expect({ x: talkingNode.position.x, z: talkingNode.position.z }).toEqual(field.home)
+    expect(lockedMotor.isWalking('npc')).toBe(false)
+    expect(talkingMotor.isWalking('npc')).toBe(false)
+  })
+
+  it('resumes wander safely from the current chase position when chase becomes inactive', () => {
+    const field = openField()
+    const motor = new WanderMotor()
+    const node = makeNode()
+    motor.register({ npcId: 'npc', node, field, seed: 'chase-drop-wander', home: field.home, chaseEligible: true })
+    motor.update(0.25, {
+      interactionLocked: false,
+      isNpcTalking: () => false,
+      playerPosition: { x: 2, z: 0 },
+      isChaseActive: () => true,
+    })
+    const chased = { x: node.position.x, z: node.position.z }
+
+    motor.update(0.25, {
+      interactionLocked: false,
+      isNpcTalking: () => false,
+      playerPosition: { x: 2, z: 0 },
+      isChaseActive: () => false,
+    })
+
+    expect(isWanderPositionAllowed(field, node.position)).toBe(true)
+    expect(distance(chased, node.position)).toBeGreaterThan(0)
+    expect(distance(field.home, node.position)).toBeGreaterThan(0)
+  })
+
+  it('resumes patrol safely from the current chase position when chase becomes inactive', () => {
+    const field = patrolField()
+    const route = patrolRoute()
+    const motor = new WanderMotor()
+    const node = makeNode()
+    motor.register({
+      npcId: 'npc',
+      node,
+      field,
+      seed: 'chase-drop-patrol',
+      policy: 'patrol',
+      route,
+      chaseEligible: true,
+    })
+    motor.update(0.25, {
+      interactionLocked: false,
+      isNpcTalking: () => false,
+      playerPosition: { x: 2, z: 0 },
+      isChaseActive: () => true,
+    })
+    const chased = { x: node.position.x, z: node.position.z }
+
+    motor.update(0.25, {
+      interactionLocked: false,
+      isNpcTalking: () => false,
+      playerPosition: { x: 2, z: 0 },
+      isChaseActive: () => false,
+    })
+
+    expect(isWanderPositionAllowed(field, node.position)).toBe(true)
+    expect(distance(chased, node.position)).toBeGreaterThan(0)
+  })
+
+  it('reports walking for chase movement but not for standoff holds', () => {
+    const field = openField()
+    const motor = new WanderMotor()
+    const node = makeNode()
+    motor.register({ npcId: 'npc', node, field, seed: 'chase-walking', home: field.home, chaseEligible: true })
+
+    motor.update(0.25, {
+      interactionLocked: false,
+      isNpcTalking: () => false,
+      playerPosition: { x: 2, z: 0 },
+      isChaseActive: () => true,
+    })
+    expect(motor.isWalking('npc')).toBe(true)
+
+    motor.update(0.25, {
+      interactionLocked: false,
+      isNpcTalking: () => false,
+      playerPosition: { x: node.position.x, z: node.position.z },
+      isChaseActive: () => true,
+    })
+    expect(motor.isWalking('npc')).toBe(false)
+  })
+
+  it('preserves chase max-step behavior at the motor level', () => {
+    const field = openField()
+    const motor = new WanderMotor()
+    const node = makeNode()
+    const dtS = 0.25
+    motor.register({ npcId: 'npc', node, field, seed: 'chase-no-teleport', home: field.home, chaseEligible: true })
+    const before = { x: node.position.x, z: node.position.z }
+
+    motor.update(dtS, {
+      interactionLocked: false,
+      isNpcTalking: () => false,
+      playerPosition: { x: 2, z: 0 },
+      isChaseActive: () => true,
+    })
+
+    expect(distance(before, node.position)).toBeLessThanOrEqual((NPC_WANDER.MAX_SPEED * dtS) + 1e-12)
+    expect(isWanderPositionAllowed(field, node.position)).toBe(true)
   })
 })

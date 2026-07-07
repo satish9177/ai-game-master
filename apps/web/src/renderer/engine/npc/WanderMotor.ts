@@ -5,6 +5,7 @@ import { createInitialWanderState, updateWanderStep } from './wanderStep'
 import type { NpcWanderStepState } from './wanderStep'
 import { createInitialPatrolState, updatePatrolStep } from './patrolStep'
 import type { NpcPatrolStepState } from './patrolStep'
+import { chaseStep } from './chaseStep'
 
 export type WanderMotorPolicy = 'wander' | 'patrol'
 
@@ -29,6 +30,7 @@ type WanderMotorRegistrationBase = {
   interactable?: WanderInteractableRef
   field: NpcWanderField
   seed: string
+  chaseEligible?: boolean
 }
 
 export type WanderMotorRegistration =
@@ -38,6 +40,8 @@ export type WanderMotorRegistration =
 export type WanderMotorPauseContext = {
   interactionLocked: boolean
   isNpcTalking: (npcId: string) => boolean
+  playerPosition?: WanderXZ
+  isChaseActive?: (npcId: string) => boolean
 }
 
 type WanderMotorEntryBase = {
@@ -46,6 +50,8 @@ type WanderMotorEntryBase = {
   interactable?: WanderInteractableRef
   field: NpcWanderField
   seed: string
+  chaseEligible: boolean
+  chaseMoving: boolean
 }
 
 type WanderMotorEntry =
@@ -60,6 +66,8 @@ export class WanderMotor {
       node: registration.node,
       field: registration.field,
       seed: registration.seed,
+      chaseEligible: registration.chaseEligible === true,
+      chaseMoving: false,
       ...(registration.ring !== undefined ? { ring: registration.ring } : {}),
       ...(registration.interactable !== undefined ? { interactable: registration.interactable } : {}),
     }
@@ -78,10 +86,31 @@ export class WanderMotor {
         interactionLocked: context.interactionLocked,
         npcTalking: context.isNpcTalking(npcId),
       })) {
+        entry.chaseMoving = false
         syncXZ(entry, entry.state.position)
         continue
       }
 
+      if (
+        entry.chaseEligible
+        && context.playerPosition !== undefined
+        && context.isChaseActive?.(npcId) === true
+      ) {
+        const previousPosition = entry.state.position
+        const next = chaseStep({
+          field: entry.field,
+          position: previousPosition,
+          playerTarget: context.playerPosition,
+          dtS,
+        })
+
+        entry.chaseMoving = next.position.x !== previousPosition.x || next.position.z !== previousPosition.z
+        resetEntryPosition(entry, next.position)
+        syncXZ(entry, entry.state.position)
+        continue
+      }
+
+      entry.chaseMoving = false
       if (entry.policy === 'patrol') {
         entry.state = updatePatrolStep({
           state: entry.state,
@@ -103,11 +132,32 @@ export class WanderMotor {
   }
 
   isWalking(npcId: string): boolean {
-    return this.entries.get(npcId)?.state.mode === 'moving'
+    const entry = this.entries.get(npcId)
+    return entry !== undefined && (entry.chaseMoving || entry.state.mode === 'moving')
   }
 
   clear(): void {
     this.entries.clear()
+  }
+}
+
+function resetEntryPosition(entry: WanderMotorEntry, position: WanderXZ): void {
+  if (entry.policy === 'patrol') {
+    entry.state = {
+      ...entry.state,
+      mode: 'pausing',
+      position: { x: position.x, z: position.z },
+      pauseRemainingS: 0,
+    }
+    return
+  }
+
+  entry.state = {
+    ...entry.state,
+    mode: 'pausing',
+    position: { x: position.x, z: position.z },
+    target: null,
+    pauseRemainingS: 0,
   }
 }
 
