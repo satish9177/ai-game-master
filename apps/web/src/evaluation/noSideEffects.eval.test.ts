@@ -11,6 +11,13 @@ import {
   selectTransientFeedbackMessage,
 } from '../app/App.helpers'
 import { RELATIONSHIP_FAMILIARITY_INCREASED_MESSAGE } from '../app/relationshipFeedback'
+import {
+  accumulateRelationshipJournal,
+  INITIAL_RELATIONSHIP_JOURNAL_STATE,
+  RELATIONSHIP_JOURNAL_MAX_ENTRIES,
+  toRelationshipJournalView,
+} from '../app/relationshipJournalRuntime'
+import { RELATIONSHIP_JOURNAL_TEMPLATES } from '../domain/npcRelationship/relationshipJournalCandidate'
 import { buildNpcRelationshipSaveJson } from '../domain/npcRelationship/relationshipSaveState'
 import {
   DIALOGUE_SEMANTIC_EVENT_SCHEMA_VERSION,
@@ -447,5 +454,84 @@ describe('Gate F (npc relationship persistence) - sidecar restore is a silent, a
     expect(facts).toEqual([])
     expect(factVisibility).toEqual([])
     expect(fetchSpy).not.toHaveBeenCalled()
+  })
+})
+
+/**
+ * Gate F extension — relationship-journal-runtime-v0 (ADR-0085, Slice 4).
+ * Proves behaviorally, against a real in-memory `WorldSession` and room-memory
+ * store, that accumulating relationship journal entries (including dedupe and
+ * cap-overflow across many NPCs) appends zero `WorldEvent`s, mutates no
+ * `WorldState`, writes no memory record, and makes no provider/network call --
+ * and that the persisted `SaveGame` JSON is byte-identical to, and never
+ * contains any trace of, an accumulated relationship journal.
+ */
+describe('Gate F (relationship journal runtime) - accumulation is side-effect-free and save-game-invisible', () => {
+  it('accumulating to and beyond the cap across many NPCs, with repeated dedupe, causes zero world/memory/provider side effects', async () => {
+    const worldSession = createWorldSessionHarness()
+    const started = await worldSession.session.startSession(evalCanon())
+    if (!started.ok) throw new Error('session start failed')
+    const beforeEvents = await worldSession.store.listEvents(started.state.sessionId)
+    const beforeState = await worldSession.session.getWorldState(started.state.sessionId)
+
+    const memoryHarness = createRoomMemoryHarness()
+    const beforeMemoryRecords = memoryHarness.store.snapshotAll()
+
+    const fetchSpy = vi.fn(() => Promise.reject(new Error('network is forbidden in evaluation')))
+    vi.stubGlobal('fetch', fetchSpy)
+
+    let journalState = INITIAL_RELATIONSHIP_JOURNAL_STATE
+    for (let index = 0; index < RELATIONSHIP_JOURNAL_MAX_ENTRIES + 5; index += 1) {
+      journalState = accumulateRelationshipJournal(journalState, {
+        worldId: started.state.worldId,
+        sessionId: started.state.sessionId,
+        npcId: `eval-relationship-journal-npc-${index}`,
+        prevBucket: 'none',
+        nextBucket: 'low',
+      })
+      // Re-apply the first NPC's crossing every iteration to exercise dedupe
+      // under repeated turns, not just a single accumulation pass.
+      journalState = accumulateRelationshipJournal(journalState, {
+        worldId: started.state.worldId,
+        sessionId: started.state.sessionId,
+        npcId: 'eval-relationship-journal-npc-0',
+        prevBucket: 'none',
+        nextBucket: 'low',
+      })
+    }
+    const view = toRelationshipJournalView(journalState)
+    expect(view.entries).toHaveLength(RELATIONSHIP_JOURNAL_MAX_ENTRIES) // guard against a vacuous pass
+
+    expect(await worldSession.store.listEvents(started.state.sessionId)).toEqual(beforeEvents)
+    expect(await worldSession.session.getWorldState(started.state.sessionId)).toEqual(beforeState)
+    expect(memoryHarness.store.snapshotAll()).toEqual(beforeMemoryRecords)
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
+  it('the saved game JSON is byte-identical whether or not the relationship journal has accumulated entries, and never contains its journal id or template text', async () => {
+    const worldSession = createWorldSessionHarness()
+    const started = await worldSession.session.startSession(evalCanon())
+    if (!started.ok) throw new Error('session start failed')
+
+    const beforeJournalSave = await worldSession.saves.saveSession(started.state.sessionId)
+    if (!beforeJournalSave.ok) throw new Error('save failed')
+
+    // Accumulate relationship journal entries -- this is App-owned React state,
+    // structurally disconnected from SaveGameService; it is never passed in.
+    const journalState = accumulateRelationshipJournal(INITIAL_RELATIONSHIP_JOURNAL_STATE, {
+      worldId: started.state.worldId,
+      sessionId: started.state.sessionId,
+      npcId: 'eval-relationship-journal-save-npc',
+      prevBucket: 'none',
+      nextBucket: 'low',
+    })
+    expect(toRelationshipJournalView(journalState).entries).toHaveLength(1) // guard against a vacuous pass
+
+    const afterJournalSave = await worldSession.saves.saveSession(started.state.sessionId)
+    if (!afterJournalSave.ok) throw new Error('save failed')
+
+    expect(afterJournalSave.json).toBe(beforeJournalSave.json)
+    expect(afterJournalSave.json).not.toContain('relationship-journal')
+    expect(afterJournalSave.json).not.toContain(RELATIONSHIP_JOURNAL_TEMPLATES.familiarity_increased)
   })
 })

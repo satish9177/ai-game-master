@@ -4029,6 +4029,54 @@ describe('App relationship journal runtime panel rendering (relationship-journal
   })
 })
 
+describe('relationship journal runtime safety - Slice 4', () => {
+  it('the relationship journal accumulate call site touches no provider/prompt/LLM/network identifier', () => {
+    const callSite = appSource.slice(
+      appSource.indexOf('setRelationshipJournal((current) =>'),
+      appSource.indexOf('}, [])', appSource.indexOf('setRelationshipJournal((current) =>')),
+    )
+    expect(callSite.length).toBeGreaterThan(0) // guard against a vacuous pass
+
+    for (const forbidden of [
+      'Provider',
+      'prompt',
+      'Prompt',
+      'fetch(',
+      'llmDialoguePrompt',
+      'NPCDialogueProvider',
+      'OpenAI',
+      'generation/',
+    ]) {
+      expect(callSite).not.toContain(forbidden)
+    }
+  })
+
+  it('the relationship journal render block touches no provider/prompt/LLM/network identifier', () => {
+    const renderBlock = appSource.slice(
+      appSource.indexOf('{relationshipJournal.entries.length > 0 && ('),
+      appSource.indexOf('<AppRoomEntryOverlay'),
+    )
+    for (const forbidden of ['Provider', 'prompt', 'Prompt', 'fetch(', 'llmDialoguePrompt', 'OpenAI']) {
+      expect(renderBlock).not.toContain(forbidden)
+    }
+  })
+
+  it('the relationship journal accumulate call passes only worldId/sessionId/npcId/prevBucket/nextBucket -- no effects/dialogue/provider payload', () => {
+    const callSite = appSource.slice(
+      appSource.indexOf('setRelationshipJournal((current) =>'),
+      appSource.indexOf('}, [])', appSource.indexOf('setRelationshipJournal((current) =>')),
+    )
+    expect(callSite).toContain('worldId: state.worldId')
+    expect(callSite).toContain('sessionId: state.sessionId')
+    expect(callSite).toContain('npcId: event.npcId')
+    expect(callSite).toContain('prevBucket,')
+    expect(callSite).toContain('nextBucket,')
+    for (const forbidden of ['structuredEffects', 'dialogueSemanticEvents', 'event.text', 'event.reply']) {
+      expect(callSite).not.toContain(forbidden)
+    }
+  })
+})
+
 describe('relationship feedback state wiring - Slice 3', () => {
   it('selectTransientFeedbackMessage keeps memory-created and memory-recalled ahead of relationship familiarity', () => {
     expect(

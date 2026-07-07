@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { recallRoomMemoryContext } from '../app/recallRoomMemoryContext'
 import { deriveAndReduceRelationship } from '../app/deriveAndReduceRelationship'
 import { deriveAndLogDialogueSemanticEvents } from '../app/deriveAndLogDialogueSemanticEvents'
@@ -11,6 +11,11 @@ import {
   selectTransientFeedbackMessage,
 } from '../app/App.helpers'
 import { RELATIONSHIP_FAMILIARITY_INCREASED_MESSAGE } from '../app/relationshipFeedback'
+import {
+  accumulateRelationshipJournal,
+  INITIAL_RELATIONSHIP_JOURNAL_STATE,
+  toRelationshipJournalView,
+} from '../app/relationshipJournalRuntime'
 import {
   DIALOGUE_SEMANTIC_EVENT_SCHEMA_VERSION,
   type DialogueSemanticEvent,
@@ -465,5 +470,46 @@ describe('Gate E (npc relationship sidecar restore) - diagnostics stay count/sta
     const serializedDiagnostics = JSON.stringify(restored.diagnostics)
     expect(serializedDiagnostics).not.toContain(poisonedJson)
     expectNoEvalMarkersInLogs([{ level: 'warn', message: 'diagnostics', context: restored.diagnostics }])
+  })
+})
+
+/**
+ * Gate E extension — relationship-journal-runtime-v0 (ADR-0085, Slice 4).
+ * `accumulateRelationshipJournal`/`toRelationshipJournalView` are pure and take
+ * no logger parameter at all (see `app/relationshipJournalRuntime.ts`), so this
+ * proves that behaviorally: driving accumulation, dedupe, cap-overflow, and
+ * projection with eval-marker-laden scope ids never calls `console.*` and
+ * never produces a marker-laden string anywhere in the resulting state/view.
+ */
+describe('Gate E (relationship journal runtime) - pure accumulation adds no logs and leaks no markers', () => {
+  it('accumulation/dedupe/projection under marker-laden scope ids calls no console method and leaks no eval marker', () => {
+    const consoleSpy = {
+      log: vi.spyOn(console, 'log').mockImplementation(() => {}),
+      warn: vi.spyOn(console, 'warn').mockImplementation(() => {}),
+      error: vi.spyOn(console, 'error').mockImplementation(() => {}),
+      info: vi.spyOn(console, 'info').mockImplementation(() => {}),
+      debug: vi.spyOn(console, 'debug').mockImplementation(() => {}),
+    }
+
+    try {
+      let state = INITIAL_RELATIONSHIP_JOURNAL_STATE
+      const scope = {
+        worldId: `${evalMarkers.plantedText}-world`,
+        sessionId: `${evalMarkers.playerLine}-session`,
+        npcId: `${evalMarkers.providerBody}-npc`,
+      }
+      state = accumulateRelationshipJournal(state, { ...scope, prevBucket: 'none', nextBucket: 'low' })
+      state = accumulateRelationshipJournal(state, { ...scope, prevBucket: 'none', nextBucket: 'low' }) // dedupe pass
+      state = accumulateRelationshipJournal(state, { ...scope, prevBucket: 'low', nextBucket: 'medium' })
+      const view = toRelationshipJournalView(state)
+      expect(view.entries).toHaveLength(2) // guard against a vacuous pass
+
+      for (const spy of Object.values(consoleSpy)) expect(spy).not.toHaveBeenCalled()
+
+      const serialized = JSON.stringify(view)
+      for (const marker of Object.values(evalMarkers)) expect(serialized).not.toContain(marker)
+    } finally {
+      for (const spy of Object.values(consoleSpy)) spy.mockRestore()
+    }
   })
 })

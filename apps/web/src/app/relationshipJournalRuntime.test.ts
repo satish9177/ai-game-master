@@ -130,6 +130,80 @@ describe('accumulateRelationshipJournal', () => {
   })
 })
 
+/**
+ * Slice 4 safety/eval addition — import boundary + chase/awareness dryness.
+ * Mirrors the sibling `relationshipJournalCandidate.test.ts` "import boundary"
+ * and "dry at runtime" scans: proves the runtime accumulator itself never
+ * reaches into provider/prompt/generation/renderer-engine/chase/awareness
+ * modules, and that those modules never reach back into this feature.
+ */
+describe('import boundary (Slice 4)', () => {
+  const modules = import.meta.glob('./relationshipJournalRuntime.ts', {
+    eager: true,
+    query: '?raw',
+    import: 'default',
+  }) as Record<string, string>
+  const source = Object.values(modules)[0]
+  if (source === undefined) throw new Error('module source not found for import-boundary test')
+
+  it('imports only the candidate contract, the JournalView type, and FamiliarityBucket -- no app/generation/provider/renderer-engine coupling', () => {
+    const forbiddenPatterns = [
+      /from ['"]react['"]/,
+      /from ['"]three['"]/,
+      /from ['"].*\/generation\//,
+      /from ['"].*\/dialogue\//,
+      /from ['"].*\/renderer\/engine\//,
+      /from ['"].*\/world-session\//,
+      /from ['"].*\/memory\//,
+      /from ['"].*\/persistence\//,
+      /NPCDialogueProvider/,
+      /llmDialoguePrompt/,
+      /fetch\(/,
+      /WorldEvent/,
+      /WorldCommand/,
+    ]
+
+    for (const pattern of forbiddenPatterns) {
+      expect(source).not.toMatch(pattern)
+    }
+
+    expect(source).toMatch(/from '\.\.\/domain\/npcRelationship\/relationshipJournalCandidate'/)
+    expect(source).toMatch(/from '\.\.\/domain\/journal\/projectJournal'/)
+  })
+
+  it('the runtime accumulator never imports the chase/awareness engine modules', () => {
+    for (const pattern of [
+      /from ['"].*\/chaseStep['"]/,
+      /from ['"].*\/awarenessTracker['"]/,
+      /from ['"].*\/npcPlayerAwareness['"]/,
+    ]) {
+      expect(source).not.toMatch(pattern)
+    }
+  })
+})
+
+describe('chase/combat/awareness untouched (Slice 4)', () => {
+  const engineModules = import.meta.glob(
+    [
+      '../renderer/engine/npc/chaseStep.ts',
+      '../renderer/engine/npc/awarenessTracker.ts',
+      '../domain/npcPlayerAwareness.ts',
+    ],
+    { eager: true, query: '?raw', import: 'default' },
+  ) as Record<string, string>
+
+  it('chase/awareness engine files exist and none reference the relationship journal feature', () => {
+    const paths = Object.keys(engineModules)
+    expect(paths).toHaveLength(3) // guard against a vacuous pass (glob resolved nothing)
+
+    for (const [path, source] of Object.entries(engineModules)) {
+      expect(source, `${path} must not reference relationshipJournal`).not.toMatch(
+        /relationshipJournal|RelationshipJournal|JournalPanel/,
+      )
+    }
+  })
+})
+
 describe('toRelationshipJournalView', () => {
   it('returns the fixed journal id and title', () => {
     const state = accumulateRelationshipJournal(INITIAL_RELATIONSHIP_JOURNAL_STATE, input('none', 'low'))
