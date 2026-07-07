@@ -5,7 +5,7 @@ import type { LoadedRoom } from '../../domain/loadRoomSpec'
 import { buildInteractables } from '../../domain/ports/interaction'
 import { assembleRoom } from '../../domain/assembleRoom'
 import { fallbackRoom } from '../../domain/examples/fallbackRoom'
-import { buildNpcWanderField } from '../../domain/npcMovementContract'
+import { buildNpcWanderField, NPC_WANDER } from '../../domain/npcMovementContract'
 import { buildNpcPatrolRoute } from '../../domain/npcPatrolContract'
 import { stableHash32 } from '../../domain/stableHash'
 import { Engine } from './Engine'
@@ -1151,6 +1151,284 @@ describe('Engine NPC-player awareness (ADR-0083)', () => {
     expect(clearSpy).toHaveBeenCalledTimes(1)
     expect(fakeEngine.awarenessNodes.size).toBe(0)
     expect(fakeEngine.npcAwareness.levelOf('guard')).toBe('unaware')
+  })
+})
+
+function chaseRoom(id = 'engine-chase-room'): LoadedRoom {
+  return loadRoomSpec({
+    schemaVersion: 1,
+    id,
+    name: 'Engine Chase Room',
+    shell: { dimensions: { width: 20, depth: 20, height: 4 } },
+    spawn: { position: [0, 1.6, 0], yaw: 0 },
+    objects: [
+      {
+        id: 'guard',
+        type: 'npc',
+        name: 'Guard',
+        position: [3, 0, 0],
+        interaction: { key: 'F', prompt: 'Talk to Guard' },
+      },
+      {
+        id: 'villager',
+        type: 'npc',
+        name: 'Villager',
+        position: [-3, 0, 0],
+        interaction: { key: 'F', prompt: 'Talk to Villager' },
+      },
+    ],
+  })
+}
+
+function nodeByObjectId(group: THREE.Group, objectId: string): THREE.Object3D {
+  return group.children.find((node) => node.userData.objectId === objectId)!
+}
+
+function distanceXZ(a: { x: number; z: number }, b: { x: number; z: number }): number {
+  return Math.hypot(a.x - b.x, a.z - b.z)
+}
+
+describe('Engine hostile NPC chase opt-in seam (ADR-0084)', () => {
+  it.each([
+    { level: 'aware' as const, playerX: 1 },
+    { level: 'alerted' as const, playerX: 2 },
+  ])('moves an opted-in NPC toward the player when prior awareness is $level', ({ level, playerX }) => {
+    const originalWindow = globalThis.window
+    vi.stubGlobal('window', { addEventListener: vi.fn(), removeEventListener: vi.fn() })
+
+    try {
+      const fakeEngine = makeFakeEngine(new IdleAnimator())
+      Engine.prototype.setRoom.call(
+        fakeEngine as never,
+        chaseRoom(`chase-${level}`),
+        { chaseOptInNpcIds: new Set(['guard']) },
+      )
+      const group = objectsGroupFrom(fakeEngine.scene.add)
+      const guard = nodeByObjectId(group, 'guard')
+      fakeEngine.player.position.set(playerX, 0, 0)
+      updateAwareness(fakeEngine)
+      expect(fakeEngine.npcAwareness.levelOf('guard')).toBe(level)
+      const before = { x: guard.position.x, z: guard.position.z }
+
+      updateNpcWander(fakeEngine, 0.25)
+
+      expect(guard.position.x).toBeLessThan(before.x)
+      expect(guard.position.z).toBe(before.z)
+      expect(distanceXZ(before, guard.position)).toBeLessThanOrEqual((NPC_WANDER.MAX_SPEED * 0.25) + 1e-12)
+    } finally {
+      if (originalWindow === undefined) vi.unstubAllGlobals()
+      else vi.stubGlobal('window', originalWindow)
+    }
+  })
+
+  it.each([
+    { level: 'nearby' as const, player: { x: 3, z: 4 } },
+    { level: 'unaware' as const, player: { x: 20, z: 0 } },
+  ])('does not activate chase for an opted-in NPC when awareness is $level', ({ level, player }) => {
+    const originalWindow = globalThis.window
+    vi.stubGlobal('window', { addEventListener: vi.fn(), removeEventListener: vi.fn() })
+
+    try {
+      const fakeEngine = makeFakeEngine(new IdleAnimator())
+      Engine.prototype.setRoom.call(
+        fakeEngine as never,
+        chaseRoom(`chase-inactive-${level}`),
+        { chaseOptInNpcIds: new Set(['guard']) },
+      )
+      const updateSpy = vi.spyOn(fakeEngine.wanderMotor, 'update')
+      fakeEngine.player.position.set(player.x, 0, player.z)
+      updateAwareness(fakeEngine)
+      expect(fakeEngine.npcAwareness.levelOf('guard')).toBe(level)
+
+      updateNpcWander(fakeEngine, 0.25)
+
+      const context = updateSpy.mock.calls.at(-1)![1]
+      expect(context.isChaseActive?.('guard')).toBe(false)
+    } finally {
+      if (originalWindow === undefined) vi.unstubAllGlobals()
+      else vi.stubGlobal('window', originalWindow)
+    }
+  })
+
+  it('does not chase a non-opted NPC even when awareness is aware', () => {
+    const originalWindow = globalThis.window
+    vi.stubGlobal('window', { addEventListener: vi.fn(), removeEventListener: vi.fn() })
+
+    try {
+      const chaseContextEngine = makeFakeEngine(new IdleAnimator())
+      const baselineEngine = makeFakeEngine(new IdleAnimator())
+      Engine.prototype.setRoom.call(
+        chaseContextEngine as never,
+        chaseRoom('non-opted-context'),
+        { chaseOptInNpcIds: new Set(['villager']) },
+      )
+      Engine.prototype.setRoom.call(baselineEngine as never, chaseRoom('non-opted-context'))
+      const contextGroup = objectsGroupFrom(chaseContextEngine.scene.add)
+      const baselineGroup = objectsGroupFrom(baselineEngine.scene.add)
+      const contextGuard = nodeByObjectId(contextGroup, 'guard')
+      const baselineGuard = nodeByObjectId(baselineGroup, 'guard')
+
+      chaseContextEngine.player.position.set(1, 0, 0)
+      baselineEngine.player.position.set(1, 0, 0)
+      updateAwareness(chaseContextEngine)
+      updateAwareness(baselineEngine)
+      expect(chaseContextEngine.npcAwareness.levelOf('guard')).toBe('aware')
+
+      updateNpcWander(chaseContextEngine, 0.25)
+      updateNpcWander(baselineEngine, 0.25)
+
+      expect({ x: contextGuard.position.x, z: contextGuard.position.z })
+        .toEqual({ x: baselineGuard.position.x, z: baselineGuard.position.z })
+    } finally {
+      if (originalWindow === undefined) vi.unstubAllGlobals()
+      else vi.stubGlobal('window', originalWindow)
+    }
+  })
+
+  it('keeps interaction lock pause behavior ahead of active chase', () => {
+    const originalWindow = globalThis.window
+    vi.stubGlobal('window', { addEventListener: vi.fn(), removeEventListener: vi.fn() })
+
+    try {
+      const fakeEngine = makeFakeEngine(new IdleAnimator())
+      Engine.prototype.setRoom.call(
+        fakeEngine as never,
+        chaseRoom('chase-lock'),
+        { chaseOptInNpcIds: new Set(['guard']) },
+      )
+      const group = objectsGroupFrom(fakeEngine.scene.add)
+      const guard = nodeByObjectId(group, 'guard')
+      fakeEngine.player.position.set(1, 0, 0)
+      updateAwareness(fakeEngine)
+      fakeEngine.locked = true
+      const before = { x: guard.position.x, z: guard.position.z }
+
+      updateNpcWander(fakeEngine, 1)
+
+      expect({ x: guard.position.x, z: guard.position.z }).toEqual(before)
+      expect(fakeEngine.npcBehavior.stateOf('guard')).toBe('idle')
+    } finally {
+      if (originalWindow === undefined) vi.unstubAllGlobals()
+      else vi.stubGlobal('window', originalWindow)
+    }
+  })
+
+  it('clears chase eligibility when a room is replaced', () => {
+    const originalWindow = globalThis.window
+    vi.stubGlobal('window', { addEventListener: vi.fn(), removeEventListener: vi.fn() })
+
+    try {
+      const fakeEngine = makeFakeEngine(new IdleAnimator())
+      const registerSpy = vi.spyOn(fakeEngine.wanderMotor, 'register')
+      Engine.prototype.setRoom.call(
+        fakeEngine as never,
+        chaseRoom('chase-room-a'),
+        { chaseOptInNpcIds: new Set(['guard']) },
+      )
+      expect(registerSpy.mock.calls.find((call) => call[0].npcId === 'guard')![0])
+        .toMatchObject({ chaseEligible: true })
+
+      fakeEngine.scene.add.mockClear()
+      registerSpy.mockClear()
+      Engine.prototype.setRoom.call(fakeEngine as never, chaseRoom('chase-room-b'))
+
+      expect(registerSpy).toHaveBeenCalledTimes(2)
+      for (const call of registerSpy.mock.calls) {
+        expect(call[0]).toMatchObject({ chaseEligible: false })
+      }
+    } finally {
+      if (originalWindow === undefined) vi.unstubAllGlobals()
+      else vi.stubGlobal('window', originalWindow)
+    }
+  })
+
+  it('clears chase-capable WanderMotor runtime state on dispose', () => {
+    const originalWindow = globalThis.window
+    const originalCancelAnimationFrame = globalThis.cancelAnimationFrame
+    vi.stubGlobal('window', { removeEventListener: vi.fn() })
+    vi.stubGlobal('cancelAnimationFrame', vi.fn())
+
+    const wanderMotor = new WanderMotor()
+    const field = buildNpcWanderField(chaseRoom('dispose-chase'), 'guard')!
+    wanderMotor.register({
+      npcId: 'guard',
+      node: new THREE.Object3D(),
+      field,
+      seed: 'dispose-chase:guard',
+      home: field.home,
+      chaseEligible: true,
+    })
+    const clearSpy = vi.spyOn(wanderMotor, 'clear')
+    const fakeEngine = {
+      rafId: 0,
+      resizeObserver: { disconnect: vi.fn() },
+      onInteractKey: () => {},
+      movement: null,
+      bounds: null,
+      interactables: [] as unknown[],
+      activeInteractable: null,
+      locked: false,
+      onActiveInteractionChange: null,
+      onRequestOpenInteraction: null,
+      onNpcAwarenessChange: null,
+      scene: new THREE.Scene(),
+      disposables: { dispose: vi.fn() },
+      cameraController: { dispose: vi.fn() },
+      renderer: {
+        dispose: vi.fn(),
+        forceContextLoss: vi.fn(),
+        domElement: { parentNode: null },
+      },
+      room: null,
+      idleAnimator: new IdleAnimator(),
+      npcBehavior: new NpcBehaviorTracker(),
+      wanderMotor,
+      wanderNpcIds: ['guard'],
+      npcAwareness: new NpcAwarenessTracker(),
+      awarenessNodes: new Map<string, THREE.Object3D>([['guard', new THREE.Object3D()]]),
+    }
+
+    try {
+      expect(() => Engine.prototype.dispose.call(fakeEngine as never)).not.toThrow()
+    } finally {
+      if (originalWindow === undefined) {
+        vi.unstubAllGlobals()
+      } else {
+        vi.stubGlobal('window', originalWindow)
+        vi.stubGlobal('cancelAnimationFrame', originalCancelAnimationFrame)
+      }
+    }
+
+    expect(clearSpy).toHaveBeenCalledTimes(1)
+    expect(fakeEngine.wanderNpcIds).toEqual([])
+    expect(fakeEngine.awarenessNodes.size).toBe(0)
+  })
+
+  it('never mutates room.objects across chase movement ticks (no authoritative mutation)', () => {
+    const originalWindow = globalThis.window
+    vi.stubGlobal('window', { addEventListener: vi.fn(), removeEventListener: vi.fn() })
+
+    try {
+      const fakeEngine = makeFakeEngine(new IdleAnimator())
+      const room = chaseRoom('chase-no-authority')
+      Engine.prototype.setRoom.call(
+        fakeEngine as never,
+        room,
+        { chaseOptInNpcIds: new Set(['guard']) },
+      )
+      const before = structuredClone(room.objects)
+
+      for (let tick = 0; tick < 20; tick += 1) {
+        fakeEngine.player.position.set(1, 0, 0)
+        updateAwareness(fakeEngine)
+        updateNpcWander(fakeEngine, 0.1)
+      }
+
+      expect(room.objects).toEqual(before)
+    } finally {
+      if (originalWindow === undefined) vi.unstubAllGlobals()
+      else vi.stubGlobal('window', originalWindow)
+    }
   })
 })
 

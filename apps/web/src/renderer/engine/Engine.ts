@@ -35,6 +35,14 @@ export type SetRoomOptions = {
    * `policy: 'patrol'` route, and only when one validates.
    */
   patrolOptInNpcIds?: ReadonlySet<string>
+  /**
+   * Internal fixture/test seam only (see ADR-0084). NOT user-facing: it is not
+   * RoomSpec/schema/save-game data and is never wired through RoomViewer/App
+   * composition. Real gameplay never sets this, so every real NPC stays on the
+   * existing wander/patrol/idle path; only ids in this set may chase, and only
+   * while the existing same-room awareness tier is aware/alerted.
+   */
+  chaseOptInNpcIds?: ReadonlySet<string>
 }
 
 /**
@@ -154,6 +162,7 @@ export class Engine {
       objects,
       this.interactables,
       options.patrolOptInNpcIds,
+      options.chaseOptInNpcIds,
     ))
     window.addEventListener('keydown', this.onInteractKey)
 
@@ -220,9 +229,15 @@ export class Engine {
   }
 
   private updateNpcWander(dt: number): void {
+    const playerPosition = { x: this.player.position.x, z: this.player.position.z }
     this.wanderMotor.update(dt, {
       interactionLocked: this.locked,
       isNpcTalking: (npcId) => this.npcBehavior.stateOf(npcId) === 'talking',
+      playerPosition,
+      isChaseActive: (npcId) => {
+        const level = this.npcAwareness.levelOf(npcId)
+        return level === 'aware' || level === 'alerted'
+      },
     })
 
     for (const npcId of this.wanderNpcIds) {
@@ -402,6 +417,7 @@ function registerWanderNpcs(
   group: THREE.Group,
   interactables: readonly Interactable[],
   patrolOptInNpcIds?: ReadonlySet<string>,
+  chaseOptInNpcIds?: ReadonlySet<string>,
 ): string[] {
   const npcIds: string[] = []
 
@@ -421,6 +437,7 @@ function registerWanderNpcs(
       node,
       field,
       seed,
+      chaseEligible: chaseOptInNpcIds?.has(objectId) === true,
       ...(ring !== undefined ? { ring } : {}),
       ...(interactable !== undefined ? { interactable } : {}),
     }
