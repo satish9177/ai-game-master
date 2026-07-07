@@ -3,10 +3,10 @@
 > `relationship-journal-runtime-v0` is the **feature name**, not a Git branch —
 > this work lands directly on `main`.
 
-> Status: **DOCS-FIRST (Slice 0) — approved design, no code yet.**
-> No `App.tsx`, `relationshipJournalRuntime.ts`, `JournalPanel.tsx`, or test
-> edits exist. Runtime/source/test implementation is deferred to Slices 1–5,
-> each separately approved and landed one at a time.
+> Status: **IMPLEMENTED — Slices 1–5 landed on `main`.**
+> See [§11 Slice 5 closeout](#11-slice-5-closeout) for the final file list,
+> behavior summary, safety boundaries, known limitations, and verification
+> results.
 >
 > Companion docs: [ARCHITECTURE](../ARCHITECTURE.md) · [BOUNDARIES](../BOUNDARIES.md) ·
 > [FAILURE-MODES](../FAILURE-MODES.md) · [CONVENTIONS](../CONVENTIONS.md) · [/AGENTS.md](../../../AGENTS.md).
@@ -483,3 +483,97 @@ Run `npm run dev` in `apps/web` (fake providers, no keys required):
   `JournalEntryView` unsafely.
 - **Shared-slot / unified journal UX** — v0 keeps a dedicated panel; any merge with
   the existing consequence journal is deferred.
+
+---
+
+## 11. Slice 5 closeout
+
+Slices 1–4 landed on `main`, one at a time, each maintainer-approved, with no
+invariant in §0 relaxed. This section is the closeout record required by
+AGENTS.md's design-first/docs-plan-before-code convention.
+
+### 11.1 Implemented files
+
+- `apps/web/src/app/relationshipJournalRuntime.ts` — pure
+  `accumulateRelationshipJournal` reducer + `toRelationshipJournalView`,
+  consuming the unmodified `domain/npcRelationship/relationshipJournalCandidate.ts`.
+- `apps/web/src/app/relationshipJournalRuntime.test.ts` — helper unit tests.
+- `apps/web/src/App.tsx` — new `relationshipJournal` state slot, the single
+  accumulation call inside `handleNpcDialogueResolved`, the two
+  session-boundary resets (`handlePrompt`, `handleLoad`), and the second
+  `JournalPanel` render.
+- `apps/web/src/renderer/ui/JournalPanel.tsx` — additive optional `label` /
+  `className` / `live` props; default rendering for the existing instance is
+  unchanged.
+- `apps/web/src/renderer/ui/JournalPanel.test.tsx` — panel rendering,
+  empty-state degradation, and expanded-DOM leak coverage.
+- `apps/web/src/evaluation/noSideEffects.eval.test.ts`,
+  `apps/web/src/evaluation/logSafety.eval.test.ts` — extended with
+  relationship-journal cases (Slice 4).
+- This plan and [ADR-0085](../decisions/ADR-0085-relationship-journal-runtime-v0.md)
+  (Slice 5 docs closeout).
+
+No changes to `domain/npcRelationship/relationshipJournalCandidate.ts`, the
+`journal` slot/its three producers, schema, save-game, persistence, provider,
+or any chase/awareness/combat file.
+
+### 11.2 Final behavior summary
+
+- The only reachable entry is the frozen line "Someone here seems more
+  familiar with you.", added on a strictly upward `familiarity` bucket
+  crossing for the active dialogue NPC.
+- Dedupe uses the candidate contract's stable `dedupeKey` internally; the
+  rendered `entry.id` is an opaque, scope-free surrogate
+  (`relationship-journal-entry-{a, b, c, …}`).
+- The "Relationships" panel accumulates across rooms within a session
+  (confirmed to survive `enterActivePlay`/room entry) and resets to empty only
+  on a new prompt or a load. A loaded session always starts with an empty
+  relationship journal — no crossing replay on hydration.
+- Zero entries → the panel does not render (safe degradation). The panel is
+  collapsed by default, has no `aria-live`, and cannot double-announce over the
+  transient relationship-feedback line.
+- UI text is closed-template only: no NPC names, raw scores, numeric deltas,
+  bucket words, dialogue text, provider output, effect payloads, or feedback
+  text ever appear.
+
+### 11.3 Safety boundaries (confirmed unchanged at closeout)
+
+- No `WorldState`/`WorldEvent`/`WorldCommand`/`applyEvent`, memory,
+  `Fact`/`fact_visibility` write or derivation.
+- No persistence: no save-game/sidecar/SQLite/`localStorage`/migration/schema
+  change; no `schemaVersion` bump.
+- No provider/prompt/LLM/network/clock/randomness in the accumulation path.
+- No `hostile-npc-chase-lite-v0` (ADR-0084) / `npc-player-awareness-v0`
+  (ADR-0083) / combat/encounter behavior change.
+- Existing `journal` slot, its three producers, and
+  `refreshDerivedViews`/`applyEventJournalFromSession` untouched.
+
+### 11.4 Known limitations (unchanged from §8/§10)
+
+- Session-ephemeral only — no crossing-history persistence in v0.
+- Single template (`familiarity_increased`) — trust/respect/fear remain dry
+  (ADR-0077) and deferred.
+- No NPC display-label policy — entries stay generic/name-free.
+- Richer templates/grouping/timestamps/unified journal UX are deferred to
+  future, separately-approved slices.
+
+### 11.5 Verification results
+
+Run from `apps/web`:
+
+```bash
+npm run test -- relationshipJournalCandidate   # 18 passed
+npm run test -- relationshipJournalRuntime     # 14 passed
+npm run test -- JournalPanel                   # 14 passed
+npm run test -- App                            # 175 passed
+npm run test -- noSideEffects logSafety         # 18 passed (both eval suites)
+npm run lint                                    # eslint . — clean, no new block
+npm run build                                   # tsc -b && vite build — passed
+npm run test                                    # full suite: 3575/3576 passed
+```
+
+The single full-suite failure (`src/redteam/feedback.redteam.test.ts:69`) is a
+pre-existing, unrelated assertion on a literal `MemoryFeedback` JSX wiring
+string that predates this feature's
+`selectTransientFeedbackMessage(memoryFeedbackState.message,
+relationshipFeedbackState.message)` call site.

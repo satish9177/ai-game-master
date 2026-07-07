@@ -340,6 +340,26 @@ Throughout these docs:
   unchanged. No `WorldState`/`WorldEvent`/`WorldCommand`, memory/fact/`fact_visibility`,
   persistence/`schemaVersion`, or cross-room chase
   ([ADR-0084](./decisions/ADR-0084-hostile-npc-chase-lite-v0.md)).
+- ✅ **Implemented, browser/app composition + domain reuse** — Relationship
+  Journal Runtime v0 — makes the dry `relationship-journal-entries-v0`
+  (ADR-0082) candidate contract visible at runtime as an ephemeral,
+  session-scoped, name-free "Relationships" panel. A pure
+  `app/relationshipJournalRuntime.ts` reducer
+  (`accumulateRelationshipJournal`/`toRelationshipJournalView`) consumes the
+  unmodified `buildRelationshipJournalCandidate`/`renderRelationshipJournalText`
+  contract on a strictly upward `familiarity` bucket crossing only, deduping on
+  the candidate's stable `dedupeKey` while rendering an opaque, scope-free
+  `entry.id`. `App.tsx` feeds it from the existing `handleNpcDialogueResolved`
+  bucket derivation and resets it to empty at exactly the two session-boundary
+  sites (`handlePrompt`, `handleLoad`) — never on room entry — so a loaded
+  session always starts with an empty journal and no crossing replay.
+  `JournalPanel` gains optional `label`/`className`/`live` props and renders a
+  second, non-`aria-live` instance only when at least one entry exists; the
+  existing `journal` slot and its three producers are untouched. No
+  `WorldState`/`WorldEvent`/`WorldCommand`, memory/fact/`fact_visibility`,
+  persistence/save-game/schema/`schemaVersion`, provider/prompt/LLM, or
+  chase/awareness/combat change (ADR-0083/ADR-0084 untouched)
+  ([ADR-0085](./decisions/ADR-0085-relationship-journal-runtime-v0.md)).
 - ❌ **Not built** — future shape only; documented so we don't paint into a corner.
 
 ## Status today (Renderer Foundation v0)

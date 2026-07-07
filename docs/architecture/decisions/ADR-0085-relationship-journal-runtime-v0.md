@@ -1,7 +1,7 @@
 # ADR-0085: Relationship journal runtime v0 makes the dry familiarity candidate visible as an ephemeral, session-scoped, name-free panel
 
-- **Status:** Proposed / Accepted-Planned (Slice 0 — docs-first; implementation
-  Slices 1–5 land separately on `main`, each maintainer-approved)
+- **Status:** Accepted - Implemented (Slices 1–5 landed on `main`, each
+  maintainer-approved; this closeout records Slice 5)
 - **Date:** 2026-07-07
 - **Deciders:** Project owner
 - **Builds on:**
@@ -24,9 +24,9 @@
 > Full plan, helper/state shapes, behavior contract, test plan, safety invariants,
 > risks, manual smoke plan, and deferred work live in
 > [`relationship-journal-runtime-v0`](../implementation-plans/relationship-journal-runtime-v0.md).
-> This ADR records the decision and the boundary rationale. It is created **now,
-> as Proposed / Accepted-Planned**, before code; it flips to Accepted-Implemented
-> at Slice 5 closeout.
+> This ADR records the decision and the boundary rationale. It was created **as
+> Proposed / Accepted-Planned**, before code, and now flips to
+> **Accepted-Implemented** at Slice 5 closeout.
 
 ---
 
@@ -207,21 +207,102 @@ Unchanged in v0:
 
 ## Implementation outcome
 
-_Pending._ This ADR is **Proposed / Accepted-Planned** at Slice 0 (docs-first).
-No `App.tsx`, `app/relationshipJournalRuntime.ts`, `JournalPanel`, or test edits
-exist yet. The [implementation plan](../implementation-plans/relationship-journal-runtime-v0.md)
-carries the full behavior contract, test plan, safety invariants, and manual smoke
-plan; the Slice 5 closeout will record the final file list and verification
-results here and flip the status.
+Slices 1–5 landed on `main` exactly as designed in the
+[implementation plan](../implementation-plans/relationship-journal-runtime-v0.md),
+with no invariant relaxed:
+
+- `app/relationshipJournalRuntime.ts` holds the pure, total
+  `accumulateRelationshipJournal` reducer and `toRelationshipJournalView`,
+  consuming `buildRelationshipJournalCandidate` /
+  `renderRelationshipJournalText` from the unmodified
+  `domain/npcRelationship/relationshipJournalCandidate.ts` unchanged. Dedupe is
+  keyed on `candidate.dedupeKey`, kept internally on each entry; the rendered
+  `entry.id` is an opaque `relationship-journal-entry-{a, b, c, …}` surrogate
+  (base-26 ordinal letters) carrying no scope id, npcId, bucket word, or score.
+  The list is bounded to `RELATIONSHIP_JOURNAL_MAX_ENTRIES = 32`, drop-oldest.
+- `App.tsx` adds one `relationshipJournal` state slot
+  (`useState<RelationshipJournalState>`, initialized to
+  `INITIAL_RELATIONSHIP_JOURNAL_STATE`), a single `setRelationshipJournal(prev
+  => accumulateRelationshipJournal(prev, …))` call inside
+  `handleNpcDialogueResolved` immediately after the existing relationship
+  feedback update (reusing the already-computed `prevBucket`/`nextBucket`, no
+  new relationship read), and resets to `INITIAL_RELATIONSHIP_JOURNAL_STATE` at
+  exactly the two session-boundary sites (`handlePrompt`, `handleLoad`) —
+  **not** at `enterActivePlay`/room entry.
+- `renderer/ui/JournalPanel.tsx` gained the optional presentational `label`
+  (default `"Journal"`), `className`, and `live` props with no change to the
+  existing instance's default rendering. A second `JournalPanel` instance
+  renders in `App.tsx` only when `relationshipJournal.entries.length > 0`,
+  titled "Relationships", with `live={false}` so it does not carry
+  `aria-live`/`role="status"` and cannot double-announce over the transient
+  feedback line.
+- Slice 4 safety/eval coverage extends `evaluation/noSideEffects.eval.test.ts`
+  and `evaluation/logSafety.eval.test.ts` with dedicated relationship-journal
+  cases, and `JournalPanel.test.tsx` covers the expanded-DOM leak surface via
+  the hookless `JournalPanelBody` export.
+- The shared `journal` slot, its three producers (`projectJournal`,
+  `generatedConsequenceJournal`, `eventConsequenceJournal`), and
+  `refreshDerivedViews`/`applyEventJournalFromSession` are untouched — the
+  relationship journal never calls `setJournal`.
+
+### Final behavior summary
+
+- The only entry a player can ever see is the frozen line "Someone here seems
+  more familiar with you.", added on a strictly upward `familiarity` bucket
+  crossing for the active dialogue NPC.
+- The "Relationships" panel accumulates across rooms within a session
+  (survives `enterActivePlay`) and resets to empty only on a new prompt or a
+  load — a loaded session always starts with an empty relationship journal, no
+  crossing replay.
+- Repeated crossings at the same bucket, or re-derivation from restored
+  relationship state on load, never produce a duplicate entry.
+- Trust/respect/fear stay dry (ADR-0077); no template or entry path exists for
+  them.
+
+### Safety boundaries (confirmed unchanged)
+
+- No `WorldState` / `WorldEvent` / `WorldCommand` / `applyEvent` write or
+  derivation; no memory / `Fact` / `fact_visibility` write.
+- No persistence: no save-game/sidecar/SQLite/`localStorage`/migration/
+  `RoomSpec`/`QuestSpec` change; no `schemaVersion` bump anywhere.
+- No NPC display name/id, room/object name, raw score/delta/
+  `interactionCount`, bucket enum word, dialogue/provider/prompt text, effect
+  payload, or relationship-feedback line text ever reaches rendered DOM or a
+  log line — only the frozen template string and the opaque entry id.
+- No `hostile-npc-chase-lite-v0` (ADR-0084) / `npc-player-awareness-v0`
+  (ADR-0083) / combat/encounter behavior change.
+- `domain/npcRelationship/relationshipJournalCandidate.ts` is consumed, not
+  modified; the existing `journal` slot and its producers are untouched.
+
+### Known limitations / deferred work (unchanged from the plan)
+
+- Session-ephemeral only: crossing history is not persisted, so it does not
+  survive a page refresh without Save/Load re-crossing; persisting crossing
+  history remains a separate, future decision.
+- Single template: only `familiarity_increased` is reachable; trust/respect/
+  fear entries wait on those axes becoming runtime-emittable.
+- No NPC display-label policy: entries stay generic/name-free by design; a
+  future name-bearing feature needs its own approved safe display-label policy.
+- Richer templates, grouping, timestamps, or a unified journal UX are each
+  deferred to their own approved slice.
 
 ## Verification
 
-_Planned (per slice); to be recorded at closeout._
+All commands below were run from `apps/web` at Slice 5 closeout:
 
 ```bash
-npm run test -- relationshipJournalRuntime   # Slice 1 helper unit
-npm run test -- relationshipJournal          # accumulation + candidate suites
-npm run test -- App                          # Slice 2/3 wiring + render
-npm run lint                                  # eslint . — no new block expected
-npm run build                                 # tsc -b && vite build
+npm run test -- relationshipJournalCandidate   # 18 passed
+npm run test -- relationshipJournalRuntime     # 14 passed
+npm run test -- JournalPanel                   # 14 passed
+npm run test -- App                            # 175 passed
+npm run test -- noSideEffects logSafety         # 18 passed (both eval suites)
+npm run lint                                    # eslint . — clean, no new block
+npm run build                                   # tsc -b && vite build — passed
+npm run test                                    # full suite: 3575/3576 passed
 ```
+
+The one full-suite failure, `src/redteam/feedback.redteam.test.ts:69`, asserts
+a literal `MemoryFeedback` JSX wiring string that predates this feature's
+`selectTransientFeedbackMessage(memoryFeedbackState.message,
+relationshipFeedbackState.message)` call site; it is pre-existing and
+unrelated to the relationship journal runtime.
