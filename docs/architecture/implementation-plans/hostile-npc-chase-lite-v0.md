@@ -1,6 +1,6 @@
 # Implementation Plan — `feature/hostile-npc-chase-lite-v0`
 
-> Status: **APPROVED (design, docs-first); NOT YET IMPLEMENTED.** Worked on `main` directly.
+> Status: **IMPLEMENTED.** Worked on `main` directly.
 > This plan lands a deterministic, home-leashed, same-room chase **movement override** for
 > opt-in "hostile" NPCs, built on the existing presentation/runtime-only movement stack and
 > the advisory awareness signal. It is the first consumer of that signal.
@@ -58,7 +58,7 @@ relaxed without explicit maintainer approval:
 - **Feature:** `hostile-npc-chase-lite-v0` — Deterministic Home-Leashed Same-Room Hostile NPC
   Chase (movement/intent only, opt-in).
 - **Lane:** worked on `main` directly; no feature branch.
-- **Status:** APPROVED (design, docs-first); NOT YET IMPLEMENTED.
+- **Status:** IMPLEMENTED.
 - **ADR:** [ADR-0084](../decisions/ADR-0084-hostile-npc-chase-lite-v0.md).
 
 ## 2. Problem statement
@@ -386,18 +386,21 @@ room/NPC names, or narrative text in notes.
    (presentation only) or keep its current idle-driven rotation. Default: no facing change in
    v0 (movement-only); a facing polish is deferrable.
 
-## 18. Final recommendation
+## 18. Implemented outcome
 
-Proceed to **Slice 1**: a pure `chaseStep` reducer beside `wanderStep`/`patrolStep`, reusing
-`distanceXZ` and the existing legality predicates, with a single `CONTACT_STANDOFF` constant and
-full unit coverage (determinism, step cap, legality/hold, standoff, leash, convergence). Then
-**Slice 2**: give `WanderMotor` an opt-in `chaseEligible` flag and a chase context, branching to
-`chaseStep` when active and otherwise leaving the wander/patrol path untouched, with the
-non-eligible regression test as the guard. Then **Slice 3**: wire `Engine`'s internal
-`chaseOptInNpcIds` seam and the awareness-gated `isChaseActive`. This is the Minimum Safe Change:
-one pure reducer + tests, then one gated motor branch, then one gated Engine seam — no schema, no
-authority, no combat, build stays green. Real hostility sources, longer-range chase, contact
-consequences, LOS, and cross-room pursuit are deferred to their own approved features.
+Slices 1-3 landed as planned. **Slice 1** added the pure `chaseStep` reducer beside
+`wanderStep`/`patrolStep`, reusing `distanceXZ` and the existing legality predicates, with
+`CONTACT_STANDOFF = 0.8` and unit coverage for determinism, step cap, legality/hold, standoff,
+leash, non-finite inputs, and immutability. **Slice 2** added `WanderMotor`'s opt-in
+`chaseEligible` flag and optional chase context, branching to `chaseStep` only when active,
+while preserving normal wander/patrol behavior for inactive or non-eligible NPCs and preserving
+pause behavior. **Slice 3** wired `Engine`'s internal `SetRoomOptions.chaseOptInNpcIds` seam,
+registration marking, and awareness-gated `isChaseActive` using `NpcAwarenessTracker.levelOf`.
+This remained the Minimum Safe Change: one pure reducer + tests, one gated motor branch, then one
+gated Engine seam. There was no schema, authority, combat, provider, prompt, persistence,
+save-game, `App`, or `RoomViewer` change. Real hostility sources, real gameplay consumers,
+longer-range chase, contact consequences, LOS, and cross-room pursuit remain deferred to their own
+approved features.
 
 ### Minimum Safe Change Check
 
@@ -418,7 +421,57 @@ consequences, LOS, and cross-room pursuit are deferred to their own approved fea
 
 ## 19. Closeout (Slice 4)
 
-_To be completed at implementation time._ Will record the implemented file list, the actual
-test counts, the verification run, and a re-confirmation of every safety invariant in §13 —
-including explicit confirmation that non-opted NPCs remained behaviorally unchanged (regression
-tests green) and that no combat/authority/persistence/provider/UI surface was touched.
+Implemented files:
+
+- `apps/web/src/renderer/engine/npc/chaseStep.ts` - pure deterministic chase reducer and
+  `CONTACT_STANDOFF = 0.8`.
+- `apps/web/src/renderer/engine/npc/chaseStep.test.ts` - reducer tests.
+- `apps/web/src/renderer/engine/npc/WanderMotor.ts` - `chaseEligible`, optional chase context,
+  chase write-back/resume behavior, and chase-aware `isWalking`.
+- `apps/web/src/renderer/engine/npc/WanderMotor.test.ts` - motor integration tests.
+- `apps/web/src/renderer/engine/Engine.ts` - internal `chaseOptInNpcIds` room setup seam,
+  registration marking, and awareness-gated chase context.
+- `apps/web/src/renderer/engine/Engine.test.ts` - Engine seam, awareness gating, cleanup, and
+  no-authority regression tests.
+
+Final behavior summary:
+
+- Movement/intent only: chase moves renderer nodes and in-memory movement reducer state only.
+- Eligibility is the internal `Engine`/`SetRoomOptions.chaseOptInNpcIds` seam only; no real room
+  or app composition path auto-enables chase.
+- Same-room awareness gates chase: `aware` and `alerted` activate; `nearby` and `unaware` stop
+  chase and resume existing wander/patrol behavior.
+- Chase is deterministic, capped by `NPC_WANDER.MAX_SPEED * dt`, non-teleporting, and reuses
+  `isWanderPositionAllowed` / `isWanderSegmentAllowed`.
+- Chase is home-leashed through the existing `NPC_WANDER.MAX_RADIUS_FROM_HOME = 2.5`, keeping it
+  short-range/"lite" and resume-compatible.
+- `CONTACT_STANDOFF = 0.8`; contact is inert and produces no combat, damage, HP/injury, item
+  loss, capture, death, encounter, quest, relationship, event, command, memory, or fact effect.
+- Existing interaction-lock and NPC-talking pauses still run before chase movement.
+- The render-loop order was not changed; chase reads the prior frame's awareness tier, then
+  `updateAwareness()` refreshes the tracker later in the frame.
+
+Verification results:
+
+- `npm.cmd run test -- chaseStep` - 9 tests passed.
+- `npm.cmd run test -- WanderMotor` - 26 tests passed.
+- `npm.cmd run test -- Engine` - 23 files, 315 tests passed.
+
+Safety boundaries re-confirmed:
+
+- No `App` / `RoomViewer` / UI wiring.
+- No `RoomSpec` / schema / save-game / persistence change; no `schemaVersion` bump.
+- No provider / prompt / LLM change.
+- No `WorldState`, `WorldEvent`, `WorldCommand`, or `applyEvent` change.
+- No memory, fact, or `fact_visibility` read/write path.
+- No combat, damage, HP, item, encounter, quest, capture, death, or contact consequence.
+- No cross-room chase.
+- Non-opted NPCs remain behaviorally unchanged, proven by regression tests.
+
+Known limitations kept:
+
+- There is still no real gameplay consumer or real hostility source; eligibility is a
+  test/fixture seam.
+- Chase is short-range/"lite" because it reuses the 2.5m home leash.
+- Awareness may be one frame stale by design.
+- There is no combat, damage, encounter, capture, or other contact behavior.

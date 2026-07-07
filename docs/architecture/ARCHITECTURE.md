@@ -305,8 +305,8 @@ Throughout these docs:
   kind. Trust/respect/fear entries stay deferred until those axes are
   runtime-emittable
   ([ADR-0082](./decisions/ADR-0082-relationship-journal-entries-v0.md)).
-- ✅ **Implemented, presentation/runtime-only, advisory, no consumer** — NPC
-  Player Awareness v0 — a pure detector, `domain/npcPlayerAwareness.ts`
+- **Implemented, presentation/runtime-only, advisory; consumed only by ADR-0084 chase** - NPC
+  Player Awareness v0 - a pure detector, `domain/npcPlayerAwareness.ts`
   (`detectNpcPlayerAwareness`), maps one same-room NPC XZ position + the
   player's XZ position + fixed, strictly-ordered radii
   (`ALERTED_RADIUS 1.5 / AWARE_RADIUS 3.0 / NEARBY_RADIUS 5.0`) to one of four
@@ -318,27 +318,27 @@ Throughout these docs:
   per-frame `updateAwareness()` over an `npcId -> THREE.Object3D` map covering
   every same-room NPC node (moving and static alike), with an emit-on-change
   `onNpcAwarenessChange` callback and `clear()` on `setRoom`/`dispose`. The
-  tiers — including `alerted` — are proximity bands only: **no** chase,
-  combat, damage, encounter triggering, relationship-driven hostility, or any
-  other reaction is attached, and **nothing in v0 consumes the signal**. No
+  tiers - including `alerted` - are proximity bands only; Hostile NPC Chase Lite v0
+  (ADR-0084) is the first internal, opt-in movement-only consumer. No
   `WorldState`/`WorldEvent`/`WorldCommand`, persistence/schema/save-game/
   `RoomSpec` change, memory/fact/`fact_visibility` write, LLM/provider/prompt
-  change, or UI/debug indicator (Slice 3 deferred)
+  change, combat/damage/encounter consequence, or UI/debug indicator
   ([ADR-0083](./decisions/ADR-0083-npc-player-awareness-v0.md)).
-- 🔜 **Planned (design approved, docs-first; not yet implemented)** — Hostile NPC
-  Chase Lite v0 — the first consumer of the NPC Player Awareness v0 signal: an
-  eligible NPC (opted in only via the internal `Engine`/`SetRoomOptions.chaseOptInNpcIds`
-  test seam, mirroring `patrolOptInNpcIds` — **no** `RoomSpec`/schema/save-game/`App`/
-  `RoomViewer`/provider change and no real room auto-enabling it) that is `aware`/`alerted`
-  and in the same room moves **toward** the player via a deterministic, non-teleporting,
-  home-leashed pursuit step. Movement/intent only: it reuses the existing wander kernel
-  (`NPC_WANDER.MAX_SPEED`, `MAX_RADIUS_FROM_HOME = 2.5`, `isWanderPositionAllowed`/
-  `isWanderSegmentAllowed`) so chase stays short-range/"lite" and resume-compatible, stops
-  at `CONTACT_STANDOFF = 0.8` with **inert** contact (no combat, damage, HP/injury, item
-  loss, capture, death, encounter, or quest effect), and pauses under the existing
-  interaction/dialogue lock. Non-opted NPCs remain behaviorally unchanged (regression-tested).
-  No `WorldState`/`WorldEvent`/`WorldCommand`, memory/fact/`fact_visibility`, persistence/
-  `schemaVersion`, or cross-room chase
+- **Implemented** - Hostile NPC Chase Lite v0 - the first consumer of the NPC Player
+  Awareness v0 signal. An eligible NPC is opted in only via the internal
+  `Engine`/`SetRoomOptions.chaseOptInNpcIds` test seam, mirroring `patrolOptInNpcIds`:
+  no `RoomSpec`/schema/save-game/`App`/`RoomViewer`/provider/prompt/LLM change and no
+  real room auto-enables it. When same-room awareness is `aware` or `alerted`, the NPC
+  moves toward the player via deterministic, non-teleporting, home-leashed pursuit;
+  `nearby`/`unaware` stops chase and resumes existing wander/patrol behavior. Movement/
+  intent only: it reuses the existing wander kernel (`NPC_WANDER.MAX_SPEED`,
+  `MAX_RADIUS_FROM_HOME = 2.5`, `isWanderPositionAllowed`, `isWanderSegmentAllowed`),
+  stays short-range/"lite", stops at `CONTACT_STANDOFF = 0.8`, and contact is inert
+  (no combat, damage, HP/injury, item loss, capture, death, encounter, or quest effect).
+  Existing interaction/dialogue locks still pause chase; the render loop is unchanged, so
+  chase reads the prior frame's awareness tier. Non-opted NPCs remain behaviorally
+  unchanged. No `WorldState`/`WorldEvent`/`WorldCommand`, memory/fact/`fact_visibility`,
+  persistence/`schemaVersion`, or cross-room chase
   ([ADR-0084](./decisions/ADR-0084-hostile-npc-chase-lite-v0.md)).
 - ❌ **Not built** — future shape only; documented so we don't paint into a corner.
 
