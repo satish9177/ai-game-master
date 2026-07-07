@@ -77,6 +77,11 @@ import { neutralRelationship } from './domain/npcRelationship/neutral'
 import type { NpcRelationshipState } from './domain/npcRelationship/contracts'
 import { familiarityBucket } from './domain/npcRelationship/dialogueContext'
 import { buildNpcRelationshipSaveJson } from './domain/npcRelationship/relationshipSaveState'
+import {
+  accumulateRelationshipJournal,
+  INITIAL_RELATIONSHIP_JOURNAL_STATE,
+  type RelationshipJournalState,
+} from './app/relationshipJournalRuntime'
 import type { RoomMemoryDialogueContext } from './domain/dialogue/contracts'
 import { loadRoomSpec, type LoadedRoom } from './domain/loadRoomSpec'
 import { fallbackRoom as fallbackRoomSpec } from './domain/examples/fallbackRoom'
@@ -511,6 +516,13 @@ function App() {
   // slot via `selectTransientFeedbackMessage` at render time.
   const [relationshipFeedbackState, setRelationshipFeedbackState] =
     useState<RelationshipFeedbackState>(INITIAL_RELATIONSHIP_FEEDBACK_STATE)
+  // Ephemeral, session-scoped relationship journal accumulation
+  // (relationship-journal-runtime-v0, Slice 2). Reset only at handlePrompt and
+  // handleLoad, mirroring relationshipsRef -- never on room entry, so it
+  // accumulates across rooms within a session. No UI renders it yet (Slice 3
+  // wires the read value into a panel), so only the setter is bound here.
+  const [, setRelationshipJournal] =
+    useState<RelationshipJournalState>(INITIAL_RELATIONSHIP_JOURNAL_STATE)
   const refreshRoomMemoryContext = useCallback((state: WorldState) => {
     const requestId = ++roomMemoryRequestRef.current
     setRecalledRoomMemory(undefined)
@@ -575,10 +587,18 @@ function App() {
       logger,
     })
     relationshipsRef.current.set(event.npcId, relationshipResult.state)
+    const prevBucket = familiarityBucket(priorRelationship.axes.familiarity)
+    const nextBucket = familiarityBucket(relationshipResult.state.axes.familiarity)
     setRelationshipFeedbackState((current) =>
-      relationshipFeedbackAfterReduction(current, {
-        prevBucket: familiarityBucket(priorRelationship.axes.familiarity),
-        nextBucket: familiarityBucket(relationshipResult.state.axes.familiarity),
+      relationshipFeedbackAfterReduction(current, { prevBucket, nextBucket }),
+    )
+    setRelationshipJournal((current) =>
+      accumulateRelationshipJournal(current, {
+        worldId: state.worldId,
+        sessionId: state.sessionId,
+        npcId: event.npcId,
+        prevBucket,
+        nextBucket,
       }),
     )
   }, [])
@@ -814,6 +834,7 @@ function App() {
     perRoomObjectiveMemoRef.current = new Map()
     relationshipsRef.current = new Map()
     setRelationshipFeedbackState(relationshipFeedbackOnRoomEntry)
+    setRelationshipJournal(INITIAL_RELATIONSHIP_JOURNAL_STATE)
     activePlayRef.current = null
     setActivePlay(null)
     setPlayerHud(null)
@@ -1060,6 +1081,7 @@ function App() {
     perRoomObjectiveMemoRef.current = new Map()
     relationshipsRef.current = new Map()
     setRelationshipFeedbackState(relationshipFeedbackOnRoomEntry)
+    setRelationshipJournal(INITIAL_RELATIONSHIP_JOURNAL_STATE)
     activePlayRef.current = null
     setSaveLoadStatus('loading')
     setSaveLoadError(null)

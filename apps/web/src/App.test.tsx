@@ -3806,15 +3806,21 @@ describe('memory feedback state wiring - Slice 4', () => {
     // Slice 3): the crossing is derived from the same prior/next relationship
     // state already computed above, via the closed-enum bucket helper only --
     // never raw axis numbers passed anywhere else.
+    expect(handler).toContain('const prevBucket = familiarityBucket(priorRelationship.axes.familiarity)')
+    expect(handler).toContain(
+      'const nextBucket = familiarityBucket(relationshipResult.state.axes.familiarity)',
+    )
     expect(handler).toContain('setRelationshipFeedbackState((current) =>')
-    expect(handler).toContain('relationshipFeedbackAfterReduction(current, {')
-    expect(handler).toContain('prevBucket: familiarityBucket(priorRelationship.axes.familiarity)')
-    expect(handler).toContain('nextBucket: familiarityBucket(relationshipResult.state.axes.familiarity)')
+    expect(handler).toContain('relationshipFeedbackAfterReduction(current, { prevBucket, nextBucket })')
 
-    // The only React state setter this handler calls is the relationship
-    // feedback slot (relationship-visible-feedback-v0, Slice 3); Map.set on
-    // the ephemeral ref is fine, but no other `setXxx(` React state setter is.
-    expect(handler).not.toMatch(/\bset(?!RelationshipFeedbackState\b)[A-Z]\w*\(/)
+    // The only React state setters this handler calls are the relationship
+    // feedback slot (relationship-visible-feedback-v0, Slice 3) and the
+    // relationship journal accumulation slot (relationship-journal-runtime-v0,
+    // Slice 2); Map.set on the ephemeral ref is fine, but no other `setXxx(`
+    // React state setter is.
+    expect(handler).not.toMatch(
+      /\bset(?!RelationshipFeedbackState\b)(?!RelationshipJournal\b)[A-Z]\w*\(/,
+    )
     expect(handler).not.toContain('useState')
     expect(handler).not.toContain('worldSession.')
     expect(handler).not.toContain('roomMemoryRuntimeRef')
@@ -3826,6 +3832,21 @@ describe('memory feedback state wiring - Slice 4', () => {
     expect(handler).not.toContain('playerLine')
     expect(handler).not.toContain('npcText')
     expect(handler).not.toContain('providerText')
+
+    // Relationship journal runtime wiring (relationship-journal-runtime-v0,
+    // Slice 2): a second, pure accumulation call fed from the exact same
+    // prevBucket/nextBucket values already computed above -- no new
+    // relationship read, no raw score/name/dialogue/effect/provider text.
+    expect(appSource).toContain("from './app/relationshipJournalRuntime'")
+    expect(appSource).toContain('accumulateRelationshipJournal,')
+    expect(appSource).toContain('INITIAL_RELATIONSHIP_JOURNAL_STATE,')
+    expect(handler).toContain('setRelationshipJournal((current) =>')
+    expect(handler).toContain('accumulateRelationshipJournal(current, {')
+    expect(handler).toContain('worldId: state.worldId')
+    expect(handler).toContain('sessionId: state.sessionId')
+    expect(handler).toContain('npcId: event.npcId')
+    expect(handler).toContain('prevBucket,')
+    expect(handler).toContain('nextBucket,')
   })
 
   it('resets the ephemeral npc relationship projection alongside perRoomObjectiveMemoRef on new prompt and load', () => {
@@ -3835,8 +3856,8 @@ describe('memory feedback state wiring - Slice 4', () => {
     expect(firstResetIndex).toBeGreaterThan(-1)
     expect(secondResetIndex).toBeGreaterThan(firstResetIndex)
 
-    const promptReset = appSource.slice(firstResetIndex, firstResetIndex + 200)
-    const loadReset = appSource.slice(secondResetIndex, secondResetIndex + 200)
+    const promptReset = appSource.slice(firstResetIndex, firstResetIndex + 300)
+    const loadReset = appSource.slice(secondResetIndex, secondResetIndex + 300)
 
     expect(promptReset).toContain('relationshipsRef.current = new Map()')
     expect(loadReset).toContain('relationshipsRef.current = new Map()')
@@ -3847,6 +3868,39 @@ describe('memory feedback state wiring - Slice 4', () => {
     // can never linger into a fresh prompt/load session.
     expect(promptReset).toContain('setRelationshipFeedbackState(relationshipFeedbackOnRoomEntry)')
     expect(loadReset).toContain('setRelationshipFeedbackState(relationshipFeedbackOnRoomEntry)')
+
+    // relationship-journal-runtime-v0 (Slice 2): the ephemeral relationship
+    // journal resets at exactly these two session-boundary sites, mirroring
+    // relationshipsRef -- never at enterActivePlay/handleNavigate room entry.
+    expect(promptReset).toContain('setRelationshipJournal(INITIAL_RELATIONSHIP_JOURNAL_STATE)')
+    expect(loadReset).toContain('setRelationshipJournal(INITIAL_RELATIONSHIP_JOURNAL_STATE)')
+
+    const journalResetMatches = appSource.match(/setRelationshipJournal\(INITIAL_RELATIONSHIP_JOURNAL_STATE\)/g) ?? []
+    expect(journalResetMatches).toHaveLength(2)
+  })
+
+  it('does not reset the relationship journal on room entry (enterActivePlay and handleNavigate)', () => {
+    const enterActivePlay = appSource.slice(
+      appSource.indexOf('const enterActivePlay = useCallback('),
+      appSource.indexOf('const setQuestSpecForView = useCallback('),
+    )
+    expect(enterActivePlay).not.toContain('setRelationshipJournal')
+
+    const handleNavigateSetters = appSource.slice(
+      appSource.indexOf('activePlayRef.current = nextPlay'),
+      appSource.indexOf('activePlay.adjacentPregenerator?.warmAdjacent(result.room)'),
+    )
+    expect(handleNavigateSetters).not.toContain('setRelationshipJournal')
+  })
+
+  it('does not re-seed or replay the relationship journal from the restored npc relationship sidecar on load', () => {
+    const restoreBlock = appSource.slice(
+      appSource.indexOf('re-seed the ephemeral'),
+      appSource.indexOf('const relationshipRestore = restoreNpcRelationshipsFromSlot('),
+    )
+    expect(restoreBlock.length).toBeGreaterThan(0)
+    expect(restoreBlock).not.toContain('setRelationshipJournal')
+    expect(restoreBlock).not.toContain('accumulateRelationshipJournal')
   })
 
   it('App clears memory and relationship feedback on every new room entry (enterActivePlay and handleNavigate)', () => {
