@@ -178,7 +178,7 @@ describe('relationship journal candidate module is dry at runtime', () => {
     import: 'default',
   }) as Record<string, string>
 
-  it('has no production runtime or composition importer yet', () => {
+  it('is imported only by the approved runtime accumulator', () => {
     const productionReferences = Object.entries(sourceModules).filter(([path, source]) => {
       if (path.endsWith('/relationshipJournalCandidate.ts')) return false
       if (path.endsWith('/relationshipJournalCandidate.test.ts')) return false
@@ -186,7 +186,7 @@ describe('relationship journal candidate module is dry at runtime', () => {
       return source.includes('relationshipJournalCandidate') || source.includes('RelationshipJournalCandidate')
     })
 
-    expect(productionReferences).toEqual([])
+    expect(productionReferences.map(([path]) => path)).toEqual(['../../app/relationshipJournalRuntime.ts'])
   })
 })
 
