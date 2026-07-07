@@ -64,8 +64,13 @@ import type { RoomGenerator } from './domain/ports/RoomGenerator'
 import type { Logger } from './platform/logger/Logger'
 import type { LogContext } from './platform/logger/Logger'
 import { computeDerivedViews } from './app/derivedViews'
+import {
+  accumulateRelationshipJournal,
+  INITIAL_RELATIONSHIP_JOURNAL_STATE,
+  toRelationshipJournalView,
+} from './app/relationshipJournalRuntime'
 import { QuestTracker } from './renderer/ui/QuestTracker'
-import { JournalPanel } from './renderer/ui/JournalPanel'
+import { JournalPanel, JournalPanelBody } from './renderer/ui/JournalPanel'
 import { FakeObjectiveGenerator } from './generation/FakeObjectiveGenerator'
 import { FakeRoomGenerator } from './generation/FakeRoomGenerator'
 import { FakeWorldBibleSeeder } from './generation/FakeWorldBibleSeeder'
@@ -906,10 +911,12 @@ describe('App event-consequence-journal seam wiring (Slice 2)', () => {
     expect(appSource).toContain('eventJournalRequestRef')
   })
 
-  it('reuses the existing JournalPanel and adds no new journal UI', () => {
+  it('reuses the existing JournalPanel for the authored/generated journal slot, unchanged', () => {
     expect(appSource).toContain('{journal && <JournalPanel view={journal} />}')
-    // Exactly one journal panel is rendered (single render slot).
-    expect(appSource.match(/<JournalPanel/g)?.length).toBe(1)
+    // The only other `<JournalPanel` usage is the relationship journal panel
+    // added by relationship-journal-runtime-v0 (Slice 3); this slot's own
+    // render call stays byte-identical.
+    expect(appSource.match(/<JournalPanel/g)?.length).toBe(2)
   })
 
   it('adds no polling, no subscriptions, and no event-log writes', () => {
@@ -3901,6 +3908,72 @@ describe('memory feedback state wiring - Slice 4', () => {
     expect(restoreBlock.length).toBeGreaterThan(0)
     expect(restoreBlock).not.toContain('setRelationshipJournal')
     expect(restoreBlock).not.toContain('accumulateRelationshipJournal')
+  })
+})
+
+describe('App relationship journal runtime panel rendering (relationship-journal-runtime-v0, Slice 3)', () => {
+  it('reads the relationshipJournal state value instead of discarding it', () => {
+    expect(appSource).toContain('const [relationshipJournal, setRelationshipJournal] =')
+    expect(appSource).toContain('useState<RelationshipJournalState>(INITIAL_RELATIONSHIP_JOURNAL_STATE)')
+    expect(appSource).not.toContain('const [, setRelationshipJournal] =')
+  })
+
+  it('imports toRelationshipJournalView and renders a second JournalPanel titled Relationships only when entries exist', () => {
+    expect(appSource).toContain("from './app/relationshipJournalRuntime'")
+    expect(appSource).toContain('toRelationshipJournalView,')
+    expect(appSource).toContain('type RelationshipJournalState,')
+    const render = appSource.slice(
+      appSource.indexOf('{journal && <JournalPanel view={journal} />}'),
+      appSource.indexOf('<AppRoomEntryOverlay'),
+    )
+    expect(render).toContain('{relationshipJournal.entries.length > 0 && (')
+    expect(render).toContain('view={toRelationshipJournalView(relationshipJournal)}')
+    expect(render).toContain('label="Relationships"')
+    expect(render).toContain('className="relationship-journal-panel"')
+  })
+
+  it('does not enable aria-live on the relationship journal panel, so it never double-announces over the transient feedback line', () => {
+    const render = appSource.slice(
+      appSource.indexOf('{relationshipJournal.entries.length > 0 && ('),
+      appSource.indexOf('<AppRoomEntryOverlay'),
+    )
+    expect(render).toContain('live={false}')
+  })
+
+  it('never calls setJournal/refreshDerivedViews from the relationship journal render or its accumulation seam', () => {
+    const render = appSource.slice(
+      appSource.indexOf('{relationshipJournal.entries.length > 0 && ('),
+      appSource.indexOf('<AppRoomEntryOverlay'),
+    )
+    expect(render).not.toContain('setJournal')
+    expect(render).not.toContain('refreshDerivedViews')
+  })
+
+  it('renders the Relationships panel with the frozen safe entry once an entry accumulates, and renders nothing when empty', () => {
+    const empty = INITIAL_RELATIONSHIP_JOURNAL_STATE
+    expect(empty.entries.length > 0).toBe(false)
+
+    const withEntry = accumulateRelationshipJournal(empty, {
+      worldId: WORLD_ID,
+      sessionId: SESSION_ID,
+      npcId: 'npc-relationship-panel',
+      prevBucket: 'none',
+      nextBucket: 'low',
+    })
+    expect(withEntry.entries.length > 0).toBe(true)
+
+    const view = toRelationshipJournalView(withEntry)
+    expect(view.title).toBe('Relationships')
+    expect(view.entries).toEqual([
+      { id: view.entries[0]?.id, text: 'Someone here seems more familiar with you.' },
+    ])
+
+    const html = renderToStaticMarkup(<JournalPanelBody view={view} />)
+    expect(html).toContain('Someone here seems more familiar with you.')
+    expect(html).not.toContain('npc-relationship-panel')
+    expect(html).not.toContain(WORLD_ID)
+    expect(html).not.toContain(SESSION_ID)
+    expect(html).not.toMatch(/none|low|medium|high/i)
   })
 
   it('App clears memory and relationship feedback on every new room entry (enterActivePlay and handleNavigate)', () => {

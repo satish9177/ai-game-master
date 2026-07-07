@@ -80,6 +80,7 @@ import { buildNpcRelationshipSaveJson } from './domain/npcRelationship/relations
 import {
   accumulateRelationshipJournal,
   INITIAL_RELATIONSHIP_JOURNAL_STATE,
+  toRelationshipJournalView,
   type RelationshipJournalState,
 } from './app/relationshipJournalRuntime'
 import type { RoomMemoryDialogueContext } from './domain/dialogue/contracts'
@@ -519,9 +520,9 @@ function App() {
   // Ephemeral, session-scoped relationship journal accumulation
   // (relationship-journal-runtime-v0, Slice 2). Reset only at handlePrompt and
   // handleLoad, mirroring relationshipsRef -- never on room entry, so it
-  // accumulates across rooms within a session. No UI renders it yet (Slice 3
-  // wires the read value into a panel), so only the setter is bound here.
-  const [, setRelationshipJournal] =
+  // accumulates across rooms within a session. Rendered read-only via a second
+  // JournalPanel instance (Slice 3) whenever it holds at least one entry.
+  const [relationshipJournal, setRelationshipJournal] =
     useState<RelationshipJournalState>(INITIAL_RELATIONSHIP_JOURNAL_STATE)
   const refreshRoomMemoryContext = useCallback((state: WorldState) => {
     const requestId = ++roomMemoryRequestRef.current
@@ -1393,6 +1394,14 @@ function App() {
       {playerHud && <StatusHud view={playerHud} clock={worldClock} />}
       {quest && <QuestTracker view={quest} />}
       {journal && <JournalPanel view={journal} />}
+      {relationshipJournal.entries.length > 0 && (
+        <JournalPanel
+          view={toRelationshipJournalView(relationshipJournal)}
+          label="Relationships"
+          className="relationship-journal-panel"
+          live={false}
+        />
+      )}
       <AppRoomEntryOverlay
         room={activePlay?.room ?? null}
         sessionId={activePlay?.sessionId ?? ''}
