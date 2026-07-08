@@ -2,6 +2,12 @@
 
 - **Status:** Accepted - Implemented
 - **Date:** 2026-07-07
+- **Amended by:** [ADR-0086](./ADR-0086-hostile-npc-chase-demo-opt-in-v0.md) — this
+  ADR's statement below that eligibility "is never wired through App/RoomViewer
+  composition" remains true in the general case (no real room or content signal ever
+  auto-enables chase). ADR-0086 introduces the sole, narrow, documented exception: a
+  default-off, closed-allowlist, id-only demo/dev visibility path. See ADR-0086's
+  "Amendment to ADR-0084" section for the full statement.
 - **Deciders:** Project owner
 - **Builds on:** the existing presentation/runtime-only NPC movement stack and the two
   foundations landed directly ahead of it —
