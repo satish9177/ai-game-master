@@ -5,6 +5,7 @@ import type {
   QuestDialogueContext,
   RoomDialogueContext,
   RoomMemoryDialogueContext,
+  RoutineDialogueContext,
 } from './contracts'
 import { projectRelationshipDialogueContext } from '../npcRelationship/dialogueContext'
 import type { NpcRelationshipState } from '../npcRelationship/contracts'
@@ -26,6 +27,7 @@ export function buildDialogueContext(
   memoryContext?: RoomMemoryDialogueContext,
   relationshipState?: NpcRelationshipState,
   timeContext?: PromptTimeContext,
+  routineContext?: RoutineDialogueContext,
 ): NPCDialogueContext {
   return {
     roomId: state.currentRoomId,
@@ -46,6 +48,7 @@ export function buildDialogueContext(
     // the field or leaks another NPC's/session's state.
     relationship: projectRelationshipDialogueContext(relationshipState),
     ...(timeContext !== undefined ? { time: { ...timeContext } } : {}),
+    ...(routineContext != null ? { routine: { ...routineContext } } : {}),
   }
 }
 

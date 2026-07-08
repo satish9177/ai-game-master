@@ -9,6 +9,7 @@ import { NPCDialoguePanel } from './ui/NPCDialoguePanel'
 import { createConsoleLogger } from '../platform/logger/consoleLogger'
 import { isWebGL2Available } from '../platform/browser/webglSupport'
 import { buildRoomDialogueContext } from '../domain/dialogue/buildRoomDialogueContext'
+import { buildRoutineDialogueContext } from '../domain/dialogue/buildRoutineDialogueContext'
 import type { EncounterSpec } from '../domain/encounters/encounterSpec'
 import type {
   NPCDialogueTurn,
@@ -447,6 +448,10 @@ export function RoomViewer({
         memoryContext: getRoomMemoryContextForNpcRef.current?.(target.npcId),
         relationshipState: getRelationshipContextForNpcRef.current?.(target.npcId),
         timeContext: timeContext ?? undefined,
+        routineContext: buildRoutineDialogueContext({
+          mode: npcRoutineModes?.get(target.npcId),
+          timeOfDay: timeContext?.timeOfDay,
+        }) ?? undefined,
       })).then((result) => {
         if (
           activeNPCDialogueRef.current !== target
@@ -484,7 +489,7 @@ export function RoomViewer({
         setNPCDialogueMessage('They have nothing to say right now.')
       })
     },
-    [npcDialogueService, npcDialogueTurns, sessionId, requestDialogueAttempt, timeContext],
+    [npcDialogueService, npcDialogueTurns, sessionId, requestDialogueAttempt, timeContext, npcRoutineModes],
   )
 
   const closeNPCDialogue = useCallback(() => {

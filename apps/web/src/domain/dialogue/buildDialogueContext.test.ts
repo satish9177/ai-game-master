@@ -5,6 +5,7 @@ import type {
   QuestDialogueContext,
   RoomDialogueContext,
   RoomMemoryDialogueContext,
+  RoutineDialogueContext,
 } from './contracts'
 import { buildDialogueContext } from './buildDialogueContext'
 import buildDialogueContextSource from './buildDialogueContext.ts?raw'
@@ -354,5 +355,70 @@ describe('buildDialogueContext', () => {
     expect(buildDialogueContextSource).not.toContain('toPromptTimeContext')
     expect(buildDialogueContextSource).not.toContain('WorldSession')
     expect(buildDialogueContextSource).not.toContain('getEventLog')
+  })
+
+  it('copies routine dialogue context when provided and omits it when absent', () => {
+    const routineContext: RoutineDialogueContext = {
+      mode: 'patrol',
+      activity: 'patrolling',
+      timeOfDay: 'dusk',
+    }
+    const withRoutine = buildDialogueContext(
+      state,
+      { npcId: 'aide', npcName: 'Asha', persona: 'friendly-aide' },
+      history,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      routineContext,
+    )
+    const withoutRoutine = buildDialogueContext(
+      state,
+      { npcId: 'aide', npcName: 'Asha', persona: 'friendly-aide' },
+      history,
+    )
+
+    expect(withRoutine.routine).toEqual(routineContext)
+    expect(withRoutine.routine).not.toBe(routineContext)
+    expect(withoutRoutine.routine).toBeUndefined()
+    expect(withoutRoutine).not.toHaveProperty('routine')
+  })
+
+  it('does not mutate the routine context input and returns a fresh copy each call', () => {
+    const routineContext: RoutineDialogueContext = {
+      mode: 'rest',
+      activity: 'resting',
+      timeOfDay: 'night',
+    }
+    const routineContextBefore = structuredClone(routineContext)
+
+    const first = buildDialogueContext(
+      state,
+      { npcId: 'aide', npcName: 'Asha' },
+      history,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      routineContext,
+    )
+    const second = buildDialogueContext(
+      state,
+      { npcId: 'aide', npcName: 'Asha' },
+      history,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      routineContext,
+    )
+
+    expect(routineContext).toEqual(routineContextBefore)
+    expect(first.routine).toEqual(second.routine)
+    expect(first.routine).not.toBe(second.routine)
   })
 })

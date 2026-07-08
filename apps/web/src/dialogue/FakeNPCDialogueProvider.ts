@@ -1,6 +1,7 @@
 import type { NPCDialogueProvider } from '../domain/ports/NPCDialogueProvider'
 import type { NPCDialogueRequest, NPCDialogueResponse, NPCObjectiveKind } from '../domain/dialogue/contracts'
 import type { RoomObject } from '../domain/roomSpec'
+import type { NpcRoutineMode } from '../domain/npcRoutine'
 
 const PERSONA_LINES: Readonly<Record<string, readonly string[]>> = {
   'friendly-aide': [
@@ -130,6 +131,21 @@ export const MEMORY_AWARENESS_LINES: Readonly<Record<string, readonly string[]>>
   ],
 }
 
+/**
+ * Lowest-priority ambient routine tier (npc-routine-dialogue-context-v0, Slice 2).
+ *
+ * Keyed by the closed `RoutineDialogueContext.mode` only -- never the routine's
+ * `activity` string, `timeOfDay`, or any player-text/free-text signal. Below
+ * every persona/quest/objective/room/memory tier so existing specific
+ * fallbacks keep winning.
+ */
+export const ROUTINE_AMBIENT_LINES: Readonly<Record<NpcRoutineMode, string>> = {
+  idle: 'For now they are standing by.',
+  patrol: 'For now they are patrolling.',
+  rest: 'For now they are resting.',
+  passive: 'For now they are keeping a quiet watch.',
+}
+
 const ROOM_FOCUS_LINES: Partial<Record<RoomObject['type'], string>> = {
   corpse: 'A body lies here. Watch your step.',
   altar: 'That altar makes this place feel important.',
@@ -175,6 +191,9 @@ export class FakeNPCDialogueProvider implements NPCDialogueProvider {
     const memoryAware = memoryAwarenessLine(request)
     if (memoryAware) return { text: memoryAware }
 
+    const routineAware = routineAmbientLine(request)
+    if (routineAware) return { text: routineAware }
+
     const lines = FALLBACK_LINES
     const promptOffset = routeKey ? stableIndex(routeKey, lines.length) : 0
     const identityOffset = stableIndex(key, lines.length)
@@ -219,6 +238,11 @@ function memoryAwarenessLine(request: NPCDialogueRequest): string | undefined {
     }
   }
   return undefined
+}
+
+function routineAmbientLine(request: NPCDialogueRequest): string | undefined {
+  const mode = request.context.routine?.mode
+  return mode ? ROUTINE_AMBIENT_LINES[mode] : undefined
 }
 
 function objectiveAwarenessLine(request: NPCDialogueRequest): string | undefined {

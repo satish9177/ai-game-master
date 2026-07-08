@@ -1563,6 +1563,191 @@ describe('RoomViewer NPC dialogue room context wiring', () => {
     })
   })
 
+  it('derives routine context from npcRoutineModes and timeContext.timeOfDay for the active NPC', async () => {
+    const replies: unknown[] = []
+    const room = loadedRoom()
+
+    const props = {
+      roomSource: { getRoom: async () => ({ ok: true, room }) },
+      sessionId: 'session-1',
+      interactionService: { resolve: async () => ({ status: 'rejected', reason: 'missing-effect' }) },
+      encounterService: { resolve: async () => ({ status: 'failed', reason: 'not-found' }) },
+      npcDialogueService: {
+        reply: async (input: unknown) => {
+          replies.push(input)
+          return { status: 'replied', turn: { speaker: 'npc', text: 'A routine-aware line.' } }
+        },
+      },
+      onNavigate: async () => ({ status: 'failed', reason: 'not-found' }),
+      timeContext: { timeOfDay: 'dusk' },
+      npcRoutineModes: new Map([['room-npc', 'patrol']]),
+    } as unknown as Parameters<typeof RoomViewer>[0]
+    RoomViewer(props)
+
+    await Promise.resolve()
+    await Promise.resolve()
+
+    const engine = mockState.engineInstances[0]
+    engine?.onRequestOpenInteraction?.({
+      id: 'room-npc',
+      type: 'npc',
+      label: 'Secret NPC Object Name',
+      affordance: 'talk',
+      key: 'F',
+      prompt: 'Secret interaction prompt',
+      position: { x: 0, y: 0, z: -3 },
+    })
+
+    await Promise.resolve()
+
+    const handleNPCSay = mockState.callbacks[0] as (promptId: string | undefined) => void
+    handleNPCSay(undefined)
+
+    await Promise.resolve()
+
+    expect(replies).toHaveLength(1)
+    expect(replies[0]).toMatchObject({
+      npcId: 'room-npc',
+      routineContext: { mode: 'patrol', activity: 'patrolling', timeOfDay: 'dusk' },
+    })
+  })
+
+  it('omits routine context when npcRoutineModes has no entry for the active NPC', async () => {
+    const replies: unknown[] = []
+    const room = loadedRoom()
+
+    const props = {
+      roomSource: { getRoom: async () => ({ ok: true, room }) },
+      sessionId: 'session-1',
+      interactionService: { resolve: async () => ({ status: 'rejected', reason: 'missing-effect' }) },
+      encounterService: { resolve: async () => ({ status: 'failed', reason: 'not-found' }) },
+      npcDialogueService: {
+        reply: async (input: unknown) => {
+          replies.push(input)
+          return { status: 'replied', turn: { speaker: 'npc', text: 'A plain line.' } }
+        },
+      },
+      onNavigate: async () => ({ status: 'failed', reason: 'not-found' }),
+      timeContext: { timeOfDay: 'dusk' },
+      npcRoutineModes: new Map([['some-other-npc', 'patrol']]),
+    } as unknown as Parameters<typeof RoomViewer>[0]
+    RoomViewer(props)
+
+    await Promise.resolve()
+    await Promise.resolve()
+
+    const engine = mockState.engineInstances[0]
+    engine?.onRequestOpenInteraction?.({
+      id: 'room-npc',
+      type: 'npc',
+      label: 'Secret NPC Object Name',
+      affordance: 'talk',
+      key: 'F',
+      prompt: 'Secret interaction prompt',
+      position: { x: 0, y: 0, z: -3 },
+    })
+
+    await Promise.resolve()
+
+    const handleNPCSay = mockState.callbacks[0] as (promptId: string | undefined) => void
+    handleNPCSay(undefined)
+
+    await Promise.resolve()
+
+    expect(replies).toHaveLength(1)
+    expect(replies[0]).not.toHaveProperty('routineContext')
+  })
+
+  it('omits routine context when timeContext is absent', async () => {
+    const replies: unknown[] = []
+    const room = loadedRoom()
+
+    const props = {
+      roomSource: { getRoom: async () => ({ ok: true, room }) },
+      sessionId: 'session-1',
+      interactionService: { resolve: async () => ({ status: 'rejected', reason: 'missing-effect' }) },
+      encounterService: { resolve: async () => ({ status: 'failed', reason: 'not-found' }) },
+      npcDialogueService: {
+        reply: async (input: unknown) => {
+          replies.push(input)
+          return { status: 'replied', turn: { speaker: 'npc', text: 'A plain line.' } }
+        },
+      },
+      onNavigate: async () => ({ status: 'failed', reason: 'not-found' }),
+      npcRoutineModes: new Map([['room-npc', 'patrol']]),
+    } as unknown as Parameters<typeof RoomViewer>[0]
+    RoomViewer(props)
+
+    await Promise.resolve()
+    await Promise.resolve()
+
+    const engine = mockState.engineInstances[0]
+    engine?.onRequestOpenInteraction?.({
+      id: 'room-npc',
+      type: 'npc',
+      label: 'Secret NPC Object Name',
+      affordance: 'talk',
+      key: 'F',
+      prompt: 'Secret interaction prompt',
+      position: { x: 0, y: 0, z: -3 },
+    })
+
+    await Promise.resolve()
+
+    const handleNPCSay = mockState.callbacks[0] as (promptId: string | undefined) => void
+    handleNPCSay(undefined)
+
+    await Promise.resolve()
+
+    expect(replies).toHaveLength(1)
+    expect(replies[0]).not.toHaveProperty('routineContext')
+  })
+
+  it('omits routine context when npcRoutineModes is absent', async () => {
+    const replies: unknown[] = []
+    const room = loadedRoom()
+
+    const props = {
+      roomSource: { getRoom: async () => ({ ok: true, room }) },
+      sessionId: 'session-1',
+      interactionService: { resolve: async () => ({ status: 'rejected', reason: 'missing-effect' }) },
+      encounterService: { resolve: async () => ({ status: 'failed', reason: 'not-found' }) },
+      npcDialogueService: {
+        reply: async (input: unknown) => {
+          replies.push(input)
+          return { status: 'replied', turn: { speaker: 'npc', text: 'A plain line.' } }
+        },
+      },
+      onNavigate: async () => ({ status: 'failed', reason: 'not-found' }),
+      timeContext: { timeOfDay: 'dusk' },
+    } as unknown as Parameters<typeof RoomViewer>[0]
+    RoomViewer(props)
+
+    await Promise.resolve()
+    await Promise.resolve()
+
+    const engine = mockState.engineInstances[0]
+    engine?.onRequestOpenInteraction?.({
+      id: 'room-npc',
+      type: 'npc',
+      label: 'Secret NPC Object Name',
+      affordance: 'talk',
+      key: 'F',
+      prompt: 'Secret interaction prompt',
+      position: { x: 0, y: 0, z: -3 },
+    })
+
+    await Promise.resolve()
+
+    const handleNPCSay = mockState.callbacks[0] as (promptId: string | undefined) => void
+    handleNPCSay(undefined)
+
+    await Promise.resolve()
+
+    expect(replies).toHaveLength(1)
+    expect(replies[0]).not.toHaveProperty('routineContext')
+  })
+
   it('omits relationshipState when no callback is provided, on the first Continue click after opening NPC dialogue', async () => {
     const replies: unknown[] = []
     const room = loadedRoom()

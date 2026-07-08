@@ -5,7 +5,13 @@ import type {
   QuestDialogueContext,
   RoomDialogueContext,
 } from '../domain/dialogue/contracts'
-import { FakeNPCDialogueProvider, MEMORY_AWARENESS_LINES, OBJECTIVE_LINES } from './FakeNPCDialogueProvider'
+import type { NpcRoutineMode } from '../domain/npcRoutine'
+import {
+  FakeNPCDialogueProvider,
+  MEMORY_AWARENESS_LINES,
+  OBJECTIVE_LINES,
+  ROUTINE_AMBIENT_LINES,
+} from './FakeNPCDialogueProvider'
 
 function request(overrides: Partial<NPCDialogueRequest['context']> = {}): NPCDialogueRequest {
   return {
@@ -724,5 +730,125 @@ describe('FakeNPCDialogueProvider', () => {
     // Explicit prompt wins.
     const withPrompt = await provider.reply({ ...fallbackReaching(memory, { persona: 'friendly-aide' }), playerLine: 'ask-hall' })
     expect(withPrompt.text).toBe('The court scattered when the roads fell silent.')
+  })
+
+  // Slice 2 (npc-routine-dialogue-context-v0) — lowest-priority ambient routine tier.
+  it.each([
+    ['idle', ROUTINE_AMBIENT_LINES.idle],
+    ['patrol', ROUTINE_AMBIENT_LINES.patrol],
+    ['rest', ROUTINE_AMBIENT_LINES.rest],
+    ['passive', ROUTINE_AMBIENT_LINES.passive],
+  ] satisfies Array<[NpcRoutineMode, string]>)(
+    'returns a deterministic ambient routine line for mode %s at the fallback tier',
+    async (mode, expected) => {
+      const provider = new FakeNPCDialogueProvider()
+      const input = request({
+        persona: undefined,
+        npcId: 'npc-a',
+        routine: { mode, activity: 'standing by', timeOfDay: 'day' },
+      })
+
+      const response = await provider.reply(input)
+
+      expect(response).toEqual({ text: expected })
+      expect(await provider.reply(input)).toEqual(response)
+    },
+  )
+
+  it('keeps persona, quest, objective, room-grounded, and memory tiers ahead of the ambient routine line', async () => {
+    const provider = new FakeNPCDialogueProvider()
+    const routine = { mode: 'patrol', activity: 'patrolling', timeOfDay: 'day' } satisfies NPCDialogueRequest['context']['routine']
+
+    const withPersona = await provider.reply(request({ persona: 'survivor', routine }))
+    expect(withPersona.text).toBe('You made it inside. That is more than most manage.')
+
+    const withRoom = await provider.reply(request({
+      persona: undefined,
+      npcId: 'unknown-npc',
+      room: altarRoomContext,
+      routine,
+    }))
+    expect(withRoom.text).toBe('That altar makes this place feel important.')
+
+    const withMemory = await provider.reply(request({
+      persona: undefined,
+      npcId: 'npc-a',
+      memory: { entries: [{ text: 'inert', kind: 'room_note' }] },
+      routine,
+    }))
+    expect(MEMORY_AWARENESS_LINES.room_note).toContain(withMemory.text)
+    expect(withMemory.text).not.toBe(ROUTINE_AMBIENT_LINES.patrol)
+
+    const withQuest = await provider.reply(request({
+      persona: 'friendly-aide',
+      routine,
+      quest: { activeObjectiveId: 'claim-tribute-coin', status: 'active' },
+    }))
+    expect(withQuest.text).toContain('tribute coffer')
+
+    const withObjective = await provider.reply(request({
+      persona: undefined,
+      npcId: 'npc-a',
+      routine,
+      quest: objectiveQuest({ kind: 'inspect', status: 'active' }),
+    }))
+    expect(OBJECTIVE_LINES.inspect.active).toContain(withObjective.text)
+
+    const withPrompt = await provider.reply({
+      ...request({ persona: 'friendly-aide', routine }),
+      playerLine: 'ask-hall',
+    })
+    expect(withPrompt.text).toBe('The court scattered when the roads fell silent.')
+  })
+
+  it('falls back to the generic line when routine is absent, and derives the ambient line from mode only', async () => {
+    const provider = new FakeNPCDialogueProvider()
+    const noRoutine = await provider.reply(request({ persona: undefined, npcId: 'npc-a' }))
+    expect(noRoutine).toEqual({ text: 'For now, there is little more to tell.' })
+
+    const withRoutine = await provider.reply(request({
+      persona: undefined,
+      npcId: 'npc-a',
+      routine: { mode: 'rest', activity: 'resting', timeOfDay: 'night' },
+    }))
+    const withDifferentTimeOfDay = await provider.reply(request({
+      persona: undefined,
+      npcId: 'npc-a',
+      routine: { mode: 'rest', activity: 'resting', timeOfDay: 'dawn' },
+    }))
+
+    expect(withRoutine.text).toBe(ROUTINE_AMBIENT_LINES.rest)
+    expect(withDifferentTimeOfDay.text).toBe(withRoutine.text)
+  })
+
+  it('does not parse player text for routine intent and never leaks routine timeOfDay/mode strings', async () => {
+    const provider = new FakeNPCDialogueProvider()
+    const response = await provider.reply({
+      ...request({
+        persona: undefined,
+        npcId: 'npc-a',
+        routine: { mode: 'idle', activity: 'standing by', timeOfDay: 'night' },
+        history: [{ speaker: 'player', text: 'are you resting? are you on patrol at night?' }],
+      }),
+      playerLine: 'are you resting right now',
+    })
+
+    expect(response.text).toBe(ROUTINE_AMBIENT_LINES.idle)
+    expect(response.text).not.toContain('resting')
+    expect(response.text).not.toContain('patrol')
+    expect(response.text).not.toContain('night')
+  })
+
+  it('does not mutate the request context while producing the ambient routine line', async () => {
+    const input = request({
+      persona: undefined,
+      npcId: 'npc-a',
+      routine: { mode: 'passive', activity: 'keeping a quiet watch', timeOfDay: 'dawn' },
+    })
+    const snapshot = structuredClone(input)
+
+    await new FakeNPCDialogueProvider().reply(input)
+
+    expect(input).toEqual(snapshot)
   })
 })

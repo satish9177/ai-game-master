@@ -6,6 +6,7 @@ import type {
   NPCDialogueRequest,
   RoomDialogueContext,
   RoomMemoryDialogueContext,
+  RoutineDialogueContext,
 } from '../domain/dialogue/contracts'
 import { neutralRelationship } from '../domain/npcRelationship/neutral'
 import type { NpcRelationshipState } from '../domain/npcRelationship/contracts'
@@ -319,6 +320,57 @@ describe('NPCDialogueService', () => {
     expect(requests[0]?.context).not.toHaveProperty('time')
   })
 
+  it('passes optional routine context through to provider context', async () => {
+    const requests: NPCDialogueRequest[] = []
+    const harness = createHarness({
+      reply: async (request) => {
+        requests.push(request)
+        return { text: 'A routine-aware answer.' }
+      },
+    })
+    const state = await start(harness)
+    const routineContext: RoutineDialogueContext = {
+      mode: 'patrol',
+      activity: 'patrolling',
+      timeOfDay: 'dusk',
+    }
+
+    await harness.service.reply({
+      sessionId: state.sessionId,
+      npcId: 'friendly-aide',
+      npcName: 'Asha',
+      dialogue: { persona: 'friendly-aide' },
+      history: [],
+      routineContext,
+    })
+
+    expect(requests).toHaveLength(1)
+    expect(requests[0]?.context.routine).toEqual(routineContext)
+    expect(requests[0]?.context.routine).not.toBe(routineContext)
+  })
+
+  it('omits routine context when absent', async () => {
+    const requests: NPCDialogueRequest[] = []
+    const harness = createHarness({
+      reply: async (request) => {
+        requests.push(request)
+        return { text: 'A plain answer.' }
+      },
+    })
+    const state = await start(harness)
+
+    await harness.service.reply({
+      sessionId: state.sessionId,
+      npcId: 'friendly-aide',
+      npcName: 'Asha',
+      dialogue: { persona: 'friendly-aide' },
+      history: [],
+    })
+
+    expect(requests[0]?.context.routine).toBeUndefined()
+    expect(requests[0]?.context).not.toHaveProperty('routine')
+  })
+
   it('does not leak one npc relationship state into another npc dialogue context', async () => {
     const requests: NPCDialogueRequest[] = []
     const harness = createHarness({
@@ -451,6 +503,7 @@ describe('NPCDialogueService', () => {
       promptId: 'SECRET PROMPT ID',
       playerLine: 'SECRET PLAYER LINE',
       timeContext: { timeOfDay: 'night' },
+      routineContext: { mode: 'patrol', activity: 'patrolling', timeOfDay: 'night' },
     })
 
     const serialized = JSON.stringify(harness.entries)
@@ -471,6 +524,9 @@ describe('NPCDialogueService', () => {
     expect(serialized).not.toContain('talk')
     expect(serialized).not.toContain('timeContext')
     expect(serialized).not.toContain('timeOfDay')
+    expect(serialized).not.toContain('routineContext')
+    expect(serialized).not.toContain('patrol')
+    expect(serialized).not.toContain('patrolling')
   })
 })
 

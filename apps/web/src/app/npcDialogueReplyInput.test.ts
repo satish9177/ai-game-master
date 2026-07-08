@@ -174,6 +174,24 @@ describe('buildNPCDialogueReplyInput', () => {
     expect(withTime.timeContext).not.toHaveProperty('hour')
     expect(withoutTime).not.toHaveProperty('timeContext')
   })
+
+  it('includes routine context only when provided', () => {
+    const withRoutine = buildNPCDialogueReplyInput({
+      sessionId: 's',
+      target: ashaTarget,
+      history: [],
+      routineContext: { mode: 'patrol', activity: 'patrolling', timeOfDay: 'dusk' },
+    })
+    const withoutRoutine = buildNPCDialogueReplyInput({
+      sessionId: 's',
+      target: ashaTarget,
+      history: [],
+    })
+
+    expect(withRoutine.routineContext).toEqual({ mode: 'patrol', activity: 'patrolling', timeOfDay: 'dusk' })
+    expect(withoutRoutine.routineContext).toBeUndefined()
+    expect(withoutRoutine).not.toHaveProperty('routineContext')
+  })
 })
 
 describe('quest-aware dialogue open path (RoomViewer wiring seam)', () => {
