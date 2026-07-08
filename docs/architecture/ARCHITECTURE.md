@@ -380,6 +380,28 @@ Throughout these docs:
   transition was directly observable without one. Amends ADR-0084's "never wired
   through App/RoomViewer" statement with this sole, narrow, documented exception
   ([ADR-0086](./decisions/ADR-0086-hostile-npc-chase-demo-opt-in-v0.md)).
+- 🔜 **Planned / In Progress — Slice 0 (docs only), no code yet** — NPC Day/Night
+  Routine v0 — a proposed deterministic, same-room, movement-only routine layer
+  composing the existing world-clock time buckets
+  (`domain/world/worldClock.ts`), the `WanderMotor` policy discriminant, generated
+  patrol (ADR-0080), and the awareness-driven chase override (ADR-0083/ADR-0084).
+  Routine metadata would come only from a trusted static authored config keyed by
+  explicit NPC id — never derived from NPC name/type/prompt/room text/provider
+  output/dialogue/relationship/journal state — behind a default-off
+  `VITE_AIGM_DEMO_ROUTINE` gate mirroring `VITE_AIGM_DEMO_CHASE`
+  ([ADR-0086](./decisions/ADR-0086-hostile-npc-chase-demo-opt-in-v0.md)). Closed
+  modes `idle | patrol | rest | passive`; `rest` maps to a stationary hold
+  identical to `idle` in v0; `passive` is movement/presentation-only and must not
+  block dialogue, imply unavailability, trigger hostility, or change gameplay
+  consequences. Dialogue/interaction lock would still pause movement first, and
+  chase would still pre-empt routine exactly as it pre-empts patrol/wander today.
+  No `WorldState`/`WorldEvent`/`WorldCommand`, persistence/schema/save-game/
+  `RoomSpec` change, memory/fact/`fact_visibility` write, LLM/provider/prompt
+  change, cross-room movement, background simulation, or timer of any kind is
+  proposed. No code has been written; this line reflects the approved design
+  only
+  ([ADR-0087](./decisions/ADR-0087-npc-day-night-routine-v0.md),
+  [implementation plan](./implementation-plans/npc-day-night-routine-v0.md)).
 - ❌ **Not built** — future shape only; documented so we don't paint into a corner.
 
 ## Status today (Renderer Foundation v0)
