@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { readDemoChaseEnabled, selectDemoChaseOptInNpcIds } from '../app/demoChaseOptIn'
 import { recallRoomMemoryContext } from '../app/recallRoomMemoryContext'
 import { deriveAndReduceRelationship } from '../app/deriveAndReduceRelationship'
 import { deriveAndLogDialogueSemanticEvents } from '../app/deriveAndLogDialogueSemanticEvents'
@@ -533,5 +534,69 @@ describe('Gate F (relationship journal runtime) - accumulation is side-effect-fr
     expect(afterJournalSave.json).toBe(beforeJournalSave.json)
     expect(afterJournalSave.json).not.toContain('relationship-journal')
     expect(afterJournalSave.json).not.toContain(RELATIONSHIP_JOURNAL_TEMPLATES.familiarity_increased)
+  })
+})
+
+/**
+ * Gate F extension — hostile-npc-chase-demo-opt-in-v0 (ADR-0086, Slice 4).
+ * Proves behaviorally, against a real in-memory `WorldSession` and room-memory
+ * store, that the demo chase opt-in gate/selector append zero `WorldEvent`s,
+ * mutate no `WorldState`, write no memory record, and make no provider/network
+ * call at volume -- including when every candidate id is a poisoned,
+ * content-shaped string and the env carries poisoned adjacent keys.
+ */
+describe('Gate F (demo chase opt-in) - gate/selector at volume create no side effects', () => {
+  it('selecting from 1000 present ids (allowlisted, absent, and content-shaped poison mixed) touches no world/memory/network state', async () => {
+    const worldSession = createWorldSessionHarness()
+    const started = await worldSession.session.startSession(evalCanon())
+    if (!started.ok) throw new Error('session start failed')
+    const beforeEvents = await worldSession.store.listEvents(started.state.sessionId)
+    const beforeState = await worldSession.session.getWorldState(started.state.sessionId)
+
+    const memoryHarness = createRoomMemoryHarness()
+    const beforeMemoryRecords = memoryHarness.store.snapshotAll()
+
+    const fetchSpy = vi.fn(() => Promise.reject(new Error('network is forbidden in evaluation')))
+    vi.stubGlobal('fetch', fetchSpy)
+
+    const presentNpcIds = new Set<string>(['herald-asha'])
+    for (let index = 0; index < 999; index += 1) {
+      presentNpcIds.add(`eval-chase-poison-${index}-${index % 2 === 0 ? 'relationship' : 'prompt'}`)
+    }
+    expect(presentNpcIds.size).toBe(1000) // guard against a vacuous pass
+
+    const result = selectDemoChaseOptInNpcIds({ enabled: true, presentNpcIds })
+
+    expect([...result]).toEqual(['herald-asha'])
+    expect(await worldSession.store.listEvents(started.state.sessionId)).toEqual(beforeEvents)
+    expect(await worldSession.session.getWorldState(started.state.sessionId)).toEqual(beforeState)
+    expect(memoryHarness.store.snapshotAll()).toEqual(beforeMemoryRecords)
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
+  it('reading the env gate with 1000 poisoned/adjacent keys touches no world/memory/network state and stays false', async () => {
+    const worldSession = createWorldSessionHarness()
+    const started = await worldSession.session.startSession(evalCanon())
+    if (!started.ok) throw new Error('session start failed')
+    const beforeEvents = await worldSession.store.listEvents(started.state.sessionId)
+    const beforeState = await worldSession.session.getWorldState(started.state.sessionId)
+
+    const memoryHarness = createRoomMemoryHarness()
+    const beforeMemoryRecords = memoryHarness.store.snapshotAll()
+
+    const fetchSpy = vi.fn(() => Promise.reject(new Error('network is forbidden in evaluation')))
+    vi.stubGlobal('fetch', fetchSpy)
+
+    const poisonedEnv: Record<string, string | undefined> = {}
+    for (let index = 0; index < 1000; index += 1) {
+      poisonedEnv[`VITE_AIGM_DEMO_CHASE_${index}`] = 'true'
+    }
+    expect(Object.keys(poisonedEnv).length).toBe(1000) // guard against a vacuous pass
+
+    expect(readDemoChaseEnabled(poisonedEnv)).toBe(false)
+    expect(await worldSession.store.listEvents(started.state.sessionId)).toEqual(beforeEvents)
+    expect(await worldSession.session.getWorldState(started.state.sessionId)).toEqual(beforeState)
+    expect(memoryHarness.store.snapshotAll()).toEqual(beforeMemoryRecords)
+    expect(fetchSpy).not.toHaveBeenCalled()
   })
 })
