@@ -40,6 +40,7 @@ import {
 import type { WorldEvent } from '../domain/world/events'
 import { WORLD_SCHEMA_VERSION } from '../domain/world/worldState'
 import { buildDialoguePromptMessages } from '../generation/llmDialoguePrompt'
+import type { NPCDialogueContext } from '../domain/dialogue/contracts'
 import { InMemoryRoomMemoryStore } from '../memory/InMemoryRoomMemoryStore'
 import {
   EVAL_CANON_WORLD_ID,
@@ -602,6 +603,70 @@ describe('Gate E (npc day/night routine) - pure gate/selector adds no logs and l
 
       const serialized = JSON.stringify([...selected])
       for (const marker of Object.values(evalMarkers)) expect(serialized).not.toContain(marker)
+    } finally {
+      for (const spy of Object.values(consoleSpy)) spy.mockRestore()
+    }
+  })
+})
+
+/**
+ * Gate E extension — npc-routine-dialogue-context-v0 (ADR-0089, Slice 4).
+ * `buildDialoguePromptMessages` takes no logger parameter at all, so this
+ * proves behaviorally: building the routine-aware prompt at volume, including
+ * with marker-laden poisoned extra fields on an unsafe caller's routine
+ * context, never calls `console.*` and never leaks a marker into the rendered
+ * prompt string. The `CURRENT ACTIVITY` section renders only the closed
+ * `activity`/`timeOfDay` labels, mirroring the existing `buildRoutineSection`
+ * unit coverage in `generation/llmDialoguePrompt.test.ts`, now proven at
+ * volume against a marker sweep instead of hand-picked cases.
+ */
+describe('Gate E extension (npc routine dialogue context) - prompt build adds no logs and leaks no markers', () => {
+  it('building 1000 routine-aware prompts under marker-laden poisoned extra fields calls no console method and leaks no marker into the prompt', () => {
+    const consoleSpy = {
+      log: vi.spyOn(console, 'log').mockImplementation(() => {}),
+      warn: vi.spyOn(console, 'warn').mockImplementation(() => {}),
+      error: vi.spyOn(console, 'error').mockImplementation(() => {}),
+      info: vi.spyOn(console, 'info').mockImplementation(() => {}),
+      debug: vi.spyOn(console, 'debug').mockImplementation(() => {}),
+    }
+
+    try {
+      const modes = ['idle', 'patrol', 'rest', 'passive'] as const
+      const activities = {
+        idle: 'standing by',
+        patrol: 'patrolling',
+        rest: 'resting',
+        passive: 'keeping a quiet watch',
+      } as const
+      const timesOfDay = ['dawn', 'day', 'dusk', 'night'] as const
+
+      for (let index = 0; index < 1000; index += 1) {
+        const mode = modes[index % modes.length]!
+        const timeOfDay = timesOfDay[index % timesOfDay.length]!
+        const [systemMessage, userMessage] = buildDialoguePromptMessages(
+          evalDialogueRequest({
+            routine: {
+              mode,
+              activity: activities[mode],
+              timeOfDay,
+              // Poisoned extra fields an unsafe caller might add -- must
+              // never reach the rendered prompt regardless.
+              npcId: `${evalMarkers.plantedText}-${index}`,
+              schedule: [`dawn:${evalMarkers.memoryText}`, `day:${evalMarkers.providerBody}`],
+            } as unknown as NPCDialogueContext['routine'],
+          }),
+        )
+
+        for (const marker of Object.values(evalMarkers)) {
+          expect(systemMessage!.content).not.toContain(marker)
+          expect(userMessage!.content).not.toContain(marker)
+        }
+        expect(userMessage!.content).toContain('CURRENT ACTIVITY - AMBIENT CONTEXT ONLY')
+        expect(userMessage!.content).toContain(`activity: ${activities[mode]}`)
+        expect(userMessage!.content).toContain(`timeOfDay: ${timeOfDay}`)
+      }
+
+      for (const spy of Object.values(consoleSpy)) expect(spy).not.toHaveBeenCalled()
     } finally {
       for (const spy of Object.values(consoleSpy)) spy.mockRestore()
     }

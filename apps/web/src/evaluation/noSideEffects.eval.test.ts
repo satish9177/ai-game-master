@@ -34,6 +34,7 @@ import {
   type StructuredDialogueEffect,
 } from '../domain/structuredDialogueEffects/contracts'
 import { buildDialoguePromptMessages } from '../generation/llmDialoguePrompt'
+import type { NPCDialogueContext } from '../domain/dialogue/contracts'
 import {
   EVAL_ROOM_ID,
   EVAL_SESSION_ID,
@@ -659,6 +660,63 @@ describe('Gate F (npc day/night routine) - gate/selector at volume create no sid
     expect(Object.keys(poisonedEnv).length).toBe(1000) // guard against a vacuous pass
 
     expect(readRoutineEnabled(poisonedEnv)).toBe(false)
+    expect(await worldSession.store.listEvents(started.state.sessionId)).toEqual(beforeEvents)
+    expect(await worldSession.session.getWorldState(started.state.sessionId)).toEqual(beforeState)
+    expect(memoryHarness.store.snapshotAll()).toEqual(beforeMemoryRecords)
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+})
+
+/**
+ * Gate F extension — npc-routine-dialogue-context-v0 (ADR-0089, Slice 4).
+ * Proves behaviorally, against a real in-memory `WorldSession` and room-memory
+ * store, that building the dialogue prompt with a routine context present (all
+ * four closed modes, rotated at volume) appends zero `WorldEvent`s, mutates no
+ * `WorldState`, writes no memory record, and makes no provider/network call --
+ * mirroring Gate F's existing memory/context/prompt proof, now extended to the
+ * new `CURRENT ACTIVITY` prompt section.
+ */
+describe('Gate F (npc routine dialogue context) - prompt build with routine context at volume creates no side effects', () => {
+  it('building 1000 routine-aware prompts (rotating mode/timeOfDay, some with poisoned extra fields) touches no world/memory/network state', async () => {
+    const worldSession = createWorldSessionHarness()
+    const started = await worldSession.session.startSession(evalCanon())
+    if (!started.ok) throw new Error('session start failed')
+    const beforeEvents = await worldSession.store.listEvents(started.state.sessionId)
+    const beforeState = await worldSession.session.getWorldState(started.state.sessionId)
+
+    const memoryHarness = createRoomMemoryHarness()
+    const beforeMemoryRecords = memoryHarness.store.snapshotAll()
+
+    const fetchSpy = vi.fn(() => Promise.reject(new Error('network is forbidden in evaluation')))
+    vi.stubGlobal('fetch', fetchSpy)
+
+    const modes = ['idle', 'patrol', 'rest', 'passive'] as const
+    const activities = {
+      idle: 'standing by',
+      patrol: 'patrolling',
+      rest: 'resting',
+      passive: 'keeping a quiet watch',
+    } as const
+    const timesOfDay = ['dawn', 'day', 'dusk', 'night'] as const
+
+    for (let index = 0; index < 1000; index += 1) {
+      const mode = modes[index % modes.length]!
+      const timeOfDay = timesOfDay[index % timesOfDay.length]!
+      buildDialoguePromptMessages(
+        evalDialogueRequest({
+          routine: {
+            mode,
+            activity: activities[mode],
+            timeOfDay,
+            // Poisoned extra fields an unsafe caller might add -- must never
+            // reach `WorldSession`/memory/network regardless.
+            npcId: `eval-routine-poison-${index}`,
+            schedule: ['dawn:idle', 'day:patrol', 'dusk:rest', 'night:passive'],
+          } as unknown as NPCDialogueContext['routine'],
+        }),
+      )
+    }
+
     expect(await worldSession.store.listEvents(started.state.sessionId)).toEqual(beforeEvents)
     expect(await worldSession.session.getWorldState(started.state.sessionId)).toEqual(beforeState)
     expect(memoryHarness.store.snapshotAll()).toEqual(beforeMemoryRecords)
