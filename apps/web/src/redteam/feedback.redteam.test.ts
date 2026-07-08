@@ -66,7 +66,13 @@ describe('redteam memory feedback leak boundary', () => {
   })
 
   it('App wiring passes only the closed feedback state message to MemoryFeedback', () => {
-    expect(appSource).toContain('<MemoryFeedback message={memoryFeedbackState.message} />')
+    // MemoryFeedback receives the output of `selectTransientFeedbackMessage`,
+    // whose domain is the closed union of the memory constants and the single
+    // relationship-familiarity constant -- no raw field can reach the slot.
+    expect(appSource).toContain(
+      'message={selectTransientFeedbackMessage(memoryFeedbackState.message, relationshipFeedbackState.message)}',
+    )
+    expect(appSource).not.toContain('<MemoryFeedback message={memoryFeedbackState.message} />')
     expect(appSource).toContain('memoryFeedbackAfterPromotion')
     expect(appSource).toContain('memoryFeedbackAfterRecall')
     expect(appHelpersSource).toContain('decideMemoryFeedback')
