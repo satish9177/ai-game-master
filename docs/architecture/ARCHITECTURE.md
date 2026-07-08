@@ -435,6 +435,23 @@ Throughout these docs:
   is unchanged
   ([ADR-0088](./decisions/ADR-0088-npc-routine-presets-v0.md),
   [implementation plan](./implementation-plans/npc-routine-presets-v0.md)).
+- 🔜 **Planned — Slice 0 only, no code yet** — NPC Routine Dialogue Context v0 — adds a
+  closed, read-only, advisory `routine` field to `NPCDialogueContext`
+  (`{ mode: idle | patrol | rest | passive; activity: standing by | patrolling |
+  resting | keeping a quiet watch; timeOfDay: dawn | day | dusk | night }`), sourced
+  directly from the existing movement-side resolved-mode map
+  (`app/npcRoutine.ts`'s `selectNpcRoutineModes`, ADR-0087/ADR-0088) with **no second
+  routine resolver**. Present only when a valid mode and time bucket resolve for the
+  active NPC (i.e. absent whenever `VITE_AIGM_DEMO_ROUTINE` is off, matching existing
+  gate behavior). The planned `FakeNPCDialogueProvider` addition is ambient surfacing
+  only from the closed `mode` value — no player free-text parsing; the planned real-
+  provider (`llmDialoguePrompt.ts`) addition is one small hedged closed section
+  mirroring the existing `time`/`relationship` sections. No schedule details, no
+  provider/dialogue control of routine mode, no dialogue-availability coupling in
+  either direction, no `WorldState`/`WorldEvent`/`WorldCommand`, memory/fact,
+  persistence/schema/save-game, or logging change
+  ([ADR-0089](./decisions/ADR-0089-npc-routine-dialogue-context-v0.md),
+  [implementation plan](./implementation-plans/npc-routine-dialogue-context-v0.md)).
 - ❌ **Not built** — future shape only; documented so we don't paint into a corner.
 
 ## Status today (Renderer Foundation v0)
