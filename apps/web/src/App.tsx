@@ -33,6 +33,7 @@ import { FakeWorldBibleSeeder } from './generation/FakeWorldBibleSeeder'
 import { readLlmConfig } from './app/llmConfig'
 import { readDebugConfig } from './app/debugConfig'
 import { readDemoChaseEnabled, selectDemoChaseOptInNpcIds } from './app/demoChaseOptIn'
+import { readRoutineEnabled, selectNpcRoutineModes } from './app/npcRoutine'
 import { selectRoomGenerator } from './app/selectRoomGenerator'
 import { selectObjectiveGenerator } from './app/selectObjectiveGenerator'
 import { selectGateGenerator } from './app/selectGateGenerator'
@@ -153,6 +154,11 @@ const eventConsequenceJournalFromEventsEnabled = readEventConsequenceJournalEnab
 // `SetRoomOptions.chaseOptInNpcIds` seam. Off by default; no behavior change
 // for any normal player, CI run, or default/deployed build.
 const demoChaseEnabled = readDemoChaseEnabled()
+// Demo/dev-only day/night routine gate (ADR-0087): mirrors `demoChaseEnabled`
+// above onto the existing, unchanged `SetRoomOptions.npcRoutineModes` seam.
+// Off by default; no behavior change for any normal player, CI run, or
+// default/deployed build.
+const routineEnabled = readRoutineEnabled()
 // The PromptBar-generated room path uses the configured generator: the
 // FakeRoomGenerator by default, or a real OpenAI-compatible provider when the
 // env config is complete (real-room-generator-provider v0; ADR-0023). The
@@ -1390,6 +1396,26 @@ function App() {
     })
   }, [activePlay?.room])
 
+  // Demo day/night routine opt-in (ADR-0087): ids only, derived from the same
+  // present-NPC-ids pattern as `demoChaseOptInNpcIds` above, plus the existing
+  // `worldClock` time bucket. Never reads NPC name, prompt/generated text,
+  // dialogue, or relationship state. Memoized on the active room and the
+  // resolved time bucket (not on every render) for the same engine-remount-
+  // stability reason as `demoChaseOptInNpcIds`.
+  const npcRoutineModes = useMemo(() => {
+    const presentNpcIds = new Set<string>()
+    for (const object of activePlay?.room.objects ?? []) {
+      if (object.type === 'npc' && object.id !== undefined) {
+        presentNpcIds.add(object.id)
+      }
+    }
+    return selectNpcRoutineModes({
+      enabled: routineEnabled,
+      presentNpcIds,
+      timeOfDay: worldClock?.timeOfDay,
+    })
+  }, [activePlay?.room, worldClock?.timeOfDay])
+
   return (
     <ErrorBoundary logger={logger}>
       {activePlay ? (
@@ -1412,6 +1438,7 @@ function App() {
             ? { resolvedObjectIds: activePlay.entryResolvedObjectIds }
             : {})}
           {...(demoChaseOptInNpcIds.size > 0 ? { chaseOptInNpcIds: demoChaseOptInNpcIds } : {})}
+          {...(npcRoutineModes.size > 0 ? { npcRoutineModes } : {})}
         />
       ) : (
         <div className="room-viewer-root">

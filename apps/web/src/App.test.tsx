@@ -40,6 +40,7 @@ import {
 } from './domain/quests/generatedRoomCacheSaveState'
 import { loadGeneratedQuestSaveState } from './domain/quests/generatedQuestSaveState'
 import { selectDemoChaseOptInNpcIds } from './app/demoChaseOptIn'
+import { selectNpcRoutineModes } from './app/npcRoutine'
 import { restoreGeneratedQuestPlay } from './app/restoreGeneratedQuestPlay'
 import { restoreGeneratedRoomCache } from './app/restoreGeneratedRoomCache'
 import { AdjacentRoomPregenerator } from './app/AdjacentRoomPregenerator'
@@ -796,6 +797,119 @@ describe('App resolved object projection wiring', () => {
     // Gate on + herald-asha absent (no allowlisted npc in the room): no opt-in.
     const noNpcRoom = resolvedRoom()
     expect(selectDemoChaseOptInNpcIds({ enabled: true, presentNpcIds: npcPresentIds(noNpcRoom) }).size).toBe(0)
+  })
+
+  it('App wires the demo day/night routine opt-in (ADR-0087) as a default-off, id-only, non-empty-only prop', () => {
+    expect(appSource).toContain(
+      "import { readRoutineEnabled, selectNpcRoutineModes } from './app/npcRoutine'",
+    )
+    expect(appSource).toContain('const routineEnabled = readRoutineEnabled()')
+
+    // Memoized on the active room and the resolved time bucket (not on every
+    // render), for the same engine-remount-stability reason as
+    // demoChaseOptInNpcIds: a fresh Map identity on an unrelated re-render
+    // would otherwise remount the engine mid-conversation.
+    const memoStart = appSource.indexOf('const npcRoutineModes = useMemo(() => {')
+    expect(memoStart).toBeGreaterThan(-1)
+    const memoEnd = appSource.indexOf(
+      '}, [activePlay?.room, worldClock?.timeOfDay])',
+      memoStart,
+    )
+    expect(memoEnd).toBeGreaterThan(memoStart)
+
+    const computed = appSource.slice(memoStart, memoEnd)
+    expect(computed).toContain('const presentNpcIds = new Set<string>()')
+    expect(computed).toContain("object.type === 'npc' && object.id !== undefined")
+    expect(computed).toContain('presentNpcIds.add(object.id)')
+    expect(computed).toContain('enabled: routineEnabled')
+    expect(computed).toContain('presentNpcIds,')
+    expect(computed).toContain('timeOfDay: worldClock?.timeOfDay')
+    // Id-only: the computed block never reads name, dialogue, or room/prompt text.
+    expect(computed).not.toMatch(/\.name\b/)
+    expect(computed).not.toContain('dialogue')
+    expect(computed).not.toContain('roomContext')
+
+    // The dependency array is exactly [activePlay?.room, worldClock?.timeOfDay] —
+    // not any dialogue, feedback, quest, or journal state that changes while a
+    // conversation is in progress.
+    expect(appSource).toContain('}, [activePlay?.room, worldClock?.timeOfDay])')
+
+    const render = appSource.slice(
+      appSource.indexOf('<RoomViewer'),
+      appSource.indexOf('/>', appSource.indexOf('<RoomViewer')),
+    )
+    expect(render).toContain(
+      '{...(npcRoutineModes.size > 0 ? { npcRoutineModes } : {})}',
+    )
+
+    // Only the module-level gate read and the derived map are used — no direct
+    // import.meta.env access and no raw env var name in the render.
+    expect(render).not.toContain('import.meta.env')
+    expect(render).not.toContain('VITE_AIGM_DEMO_ROUTINE')
+  })
+
+  it('demo routine opt-in selection matches App wiring: off by default, id-only, config-gated, time-bucket-derived', () => {
+    const npcRoom = makeRoom([
+      {
+        type: 'npc',
+        id: 'herald-asha',
+        name: 'Asha',
+        position: [0, 0, -2],
+        interaction: { key: 'F', prompt: 'Talk', dialogue: { persona: 'herald' } },
+      },
+    ], 'throne-room')
+    const npcPresentIds = (room: LoadedRoom) => {
+      const ids = new Set<string>()
+      for (const object of room.objects) {
+        if (object.type === 'npc' && object.id !== undefined) ids.add(object.id)
+      }
+      return ids
+    }
+
+    // Gate off: no routine map even though herald-asha is present and a time
+    // bucket is known (App's default state).
+    expect(
+      selectNpcRoutineModes({
+        enabled: false,
+        presentNpcIds: npcPresentIds(npcRoom),
+        timeOfDay: 'day',
+      }).size,
+    ).toBe(0)
+
+    // Gate on + herald-asha present + known time bucket: routine map contains
+    // herald-asha with the expected configured mode for that bucket.
+    const dayResult = selectNpcRoutineModes({
+      enabled: true,
+      presentNpcIds: npcPresentIds(npcRoom),
+      timeOfDay: 'day',
+    })
+    expect(dayResult.get('herald-asha')).toBe('patrol')
+
+    const nightResult = selectNpcRoutineModes({
+      enabled: true,
+      presentNpcIds: npcPresentIds(npcRoom),
+      timeOfDay: 'night',
+    })
+    expect(nightResult.get('herald-asha')).toBe('rest')
+
+    // Gate on + no configured NPC present: no usable routine map.
+    const noNpcRoom = resolvedRoom()
+    expect(
+      selectNpcRoutineModes({
+        enabled: true,
+        presentNpcIds: npcPresentIds(noNpcRoom),
+        timeOfDay: 'day',
+      }).size,
+    ).toBe(0)
+
+    // Gate on + herald-asha present + unknown/missing time bucket: no usable map.
+    expect(
+      selectNpcRoutineModes({
+        enabled: true,
+        presentNpcIds: npcPresentIds(npcRoom),
+        timeOfDay: null,
+      }).size,
+    ).toBe(0)
   })
 
   it('projects a B-room object after A to B interaction, C travel, and return to B state shape', () => {

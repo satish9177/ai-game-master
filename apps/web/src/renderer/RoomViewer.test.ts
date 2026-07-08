@@ -1111,6 +1111,107 @@ describe('RoomViewer NPC dialogue room context wiring', () => {
     expect(engine?.setRoom).toHaveBeenCalledWith(room, { resolvedObjectIds, chaseOptInNpcIds })
   })
 
+  it('omits npcRoutineModes from engine.setRoom when the prop is absent', async () => {
+    const room = loadedRoom()
+
+    const props = {
+      roomSource: { getRoom: async () => ({ ok: true, room }) },
+      sessionId: 'session-1',
+      interactionService: { resolve: async () => ({ status: 'rejected', reason: 'missing-effect' }) },
+      encounterService: { resolve: async () => ({ status: 'failed', reason: 'not-found' }) },
+      npcDialogueService: {
+        reply: async () => ({ status: 'replied', turn: { speaker: 'npc', text: 'A line.' } }),
+      },
+      onNavigate: async () => ({ status: 'failed', reason: 'not-found' }),
+    } as unknown as Parameters<typeof RoomViewer>[0]
+    RoomViewer(props)
+
+    await Promise.resolve()
+    await Promise.resolve()
+
+    const engine = mockState.engineInstances[0]
+    expect(engine?.setRoom).toHaveBeenCalledWith(room)
+  })
+
+  it('omits npcRoutineModes from engine.setRoom when the prop is an empty map', async () => {
+    const room = loadedRoom()
+
+    const props = {
+      roomSource: { getRoom: async () => ({ ok: true, room }) },
+      sessionId: 'session-1',
+      interactionService: { resolve: async () => ({ status: 'rejected', reason: 'missing-effect' }) },
+      encounterService: { resolve: async () => ({ status: 'failed', reason: 'not-found' }) },
+      npcDialogueService: {
+        reply: async () => ({ status: 'replied', turn: { speaker: 'npc', text: 'A line.' } }),
+      },
+      onNavigate: async () => ({ status: 'failed', reason: 'not-found' }),
+      npcRoutineModes: new Map<string, string>(),
+    } as unknown as Parameters<typeof RoomViewer>[0]
+    RoomViewer(props)
+
+    await Promise.resolve()
+    await Promise.resolve()
+
+    const engine = mockState.engineInstances[0]
+    expect(engine?.setRoom).toHaveBeenCalledWith(room)
+  })
+
+  it('passes a non-empty npcRoutineModes through to engine.setRoom', async () => {
+    const room = loadedRoom()
+    const npcRoutineModes = new Map([['room-npc', 'patrol']])
+
+    const props = {
+      roomSource: { getRoom: async () => ({ ok: true, room }) },
+      sessionId: 'session-1',
+      interactionService: { resolve: async () => ({ status: 'rejected', reason: 'missing-effect' }) },
+      encounterService: { resolve: async () => ({ status: 'failed', reason: 'not-found' }) },
+      npcDialogueService: {
+        reply: async () => ({ status: 'replied', turn: { speaker: 'npc', text: 'A line.' } }),
+      },
+      onNavigate: async () => ({ status: 'failed', reason: 'not-found' }),
+      npcRoutineModes,
+    } as unknown as Parameters<typeof RoomViewer>[0]
+    RoomViewer(props)
+
+    await Promise.resolve()
+    await Promise.resolve()
+
+    const engine = mockState.engineInstances[0]
+    expect(engine?.setRoom).toHaveBeenCalledWith(room, { npcRoutineModes })
+  })
+
+  it('passes resolvedObjectIds, chaseOptInNpcIds, and npcRoutineModes together in the same SetRoomOptions', async () => {
+    const room = loadedRoom()
+    const resolvedObjectIds = new Set(['room-npc'])
+    const chaseOptInNpcIds = new Set(['room-npc'])
+    const npcRoutineModes = new Map([['room-npc', 'patrol']])
+
+    const props = {
+      roomSource: { getRoom: async () => ({ ok: true, room }) },
+      sessionId: 'session-1',
+      interactionService: { resolve: async () => ({ status: 'rejected', reason: 'missing-effect' }) },
+      encounterService: { resolve: async () => ({ status: 'failed', reason: 'not-found' }) },
+      npcDialogueService: {
+        reply: async () => ({ status: 'replied', turn: { speaker: 'npc', text: 'A line.' } }),
+      },
+      onNavigate: async () => ({ status: 'failed', reason: 'not-found' }),
+      resolvedObjectIds,
+      chaseOptInNpcIds,
+      npcRoutineModes,
+    } as unknown as Parameters<typeof RoomViewer>[0]
+    RoomViewer(props)
+
+    await Promise.resolve()
+    await Promise.resolve()
+
+    const engine = mockState.engineInstances[0]
+    expect(engine?.setRoom).toHaveBeenCalledWith(room, {
+      resolvedObjectIds,
+      chaseOptInNpcIds,
+      npcRoutineModes,
+    })
+  })
+
   it('passes the current quest stage into NPCDialogueService.reply on the first Continue click after opening NPC dialogue', async () => {
     const replies: unknown[] = []
     const room = loadedRoom()

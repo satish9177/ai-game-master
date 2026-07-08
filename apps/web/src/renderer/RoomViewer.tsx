@@ -18,6 +18,7 @@ import type {
 } from '../domain/dialogue/contracts'
 import type { NpcRelationshipState } from '../domain/npcRelationship/contracts'
 import type { PromptTimeContext } from '../domain/world/worldClock'
+import type { NpcRoutineMode } from '../domain/npcRoutine'
 import { normalizePlayerFreeText } from '../domain/dialogue/playerFreeText'
 import type { InteractionService } from '../interactions/InteractionService'
 import type { EncounterService } from '../encounters/EncounterService'
@@ -93,6 +94,13 @@ type RoomViewerProps = {
    * behaves identically to omitting it.
    */
   chaseOptInNpcIds?: ReadonlySet<string>
+  /**
+   * Demo/dev-only day/night routine opt-in (ADR-0087), threaded verbatim into
+   * the existing, unchanged `Engine.SetRoomOptions.npcRoutineModes` seam.
+   * Populated only by `App`'s default-off, id-only selector; absent/empty
+   * here behaves identically to omitting it.
+   */
+  npcRoutineModes?: ReadonlyMap<string, NpcRoutineMode>
 }
 
 export function RoomViewer({
@@ -112,6 +120,7 @@ export function RoomViewer({
   timeContext,
   resolvedObjectIds,
   chaseOptInNpcIds,
+  npcRoutineModes,
 }: RoomViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const engineRef = useRef<Engine | null>(null)
@@ -336,6 +345,9 @@ export function RoomViewer({
         if (chaseOptInNpcIds !== undefined && chaseOptInNpcIds.size > 0) {
           setRoomOptions.chaseOptInNpcIds = chaseOptInNpcIds
         }
+        if (npcRoutineModes !== undefined && npcRoutineModes.size > 0) {
+          setRoomOptions.npcRoutineModes = npcRoutineModes
+        }
         if (Object.keys(setRoomOptions).length > 0) {
           engine.setRoom(result.room, setRoomOptions)
         } else {
@@ -386,6 +398,7 @@ export function RoomViewer({
     onCommittedInteractionEvents,
     resolvedObjectIds,
     chaseOptInNpcIds,
+    npcRoutineModes,
     roomSource,
     sessionId,
     webgl2Available,
