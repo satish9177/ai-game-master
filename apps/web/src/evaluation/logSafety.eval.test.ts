@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { readDemoChaseEnabled, selectDemoChaseOptInNpcIds } from '../app/demoChaseOptIn'
+import { readRoutineEnabled, selectNpcRoutineModes } from '../app/npcRoutine'
 import { recallRoomMemoryContext } from '../app/recallRoomMemoryContext'
 import { deriveAndReduceRelationship } from '../app/deriveAndReduceRelationship'
 import { deriveAndLogDialogueSemanticEvents } from '../app/deriveAndLogDialogueSemanticEvents'
@@ -549,6 +550,53 @@ describe('Gate E (demo chase opt-in) - pure gate/selector adds no logs and leaks
       ])
       const selected = selectDemoChaseOptInNpcIds({ enabled: true, presentNpcIds })
       expect([...selected]).toEqual(['herald-asha']) // guard against a vacuous pass
+
+      for (const spy of Object.values(consoleSpy)) expect(spy).not.toHaveBeenCalled()
+
+      const serialized = JSON.stringify([...selected])
+      for (const marker of Object.values(evalMarkers)) expect(serialized).not.toContain(marker)
+    } finally {
+      for (const spy of Object.values(consoleSpy)) spy.mockRestore()
+    }
+  })
+})
+
+/**
+ * Gate E extension — npc-day-night-routine-v0 (ADR-0087, Slice 5).
+ * `readRoutineEnabled`/`selectNpcRoutineModes` are pure and take no logger
+ * parameter at all (see `app/npcRoutine.ts`), so this proves behaviorally:
+ * driving the gate and selector with marker-laden env keys and candidate ids
+ * never calls `console.*` and never leaks a marker into the returned value.
+ * The selected modes are also a closed enum, so no NPC name, prompt, or
+ * provider text can ride along even indirectly.
+ */
+describe('Gate E (npc day/night routine) - pure gate/selector adds no logs and leaks no markers', () => {
+  it('reading the env gate and selecting modes under marker-laden poison calls no console method and leaks no eval marker', () => {
+    const consoleSpy = {
+      log: vi.spyOn(console, 'log').mockImplementation(() => {}),
+      warn: vi.spyOn(console, 'warn').mockImplementation(() => {}),
+      error: vi.spyOn(console, 'error').mockImplementation(() => {}),
+      info: vi.spyOn(console, 'info').mockImplementation(() => {}),
+      debug: vi.spyOn(console, 'debug').mockImplementation(() => {}),
+    }
+
+    try {
+      const poisonedEnv = {
+        VITE_AIGM_DEMO_ROUTINE: `true-${evalMarkers.providerBody}`, // not an exact match -> off
+        [`VITE_AIGM_DEMO_ROUTINE_${evalMarkers.plantedText}`]: 'true',
+      }
+      expect(readRoutineEnabled(poisonedEnv)).toBe(false) // guard against a vacuous pass
+
+      const presentNpcIds = new Set([
+        'herald-asha',
+        evalMarkers.memoryText,
+        evalMarkers.playerLine,
+        evalMarkers.providerBody,
+        `${evalMarkers.plantedText}-npc`,
+      ])
+      const selected = selectNpcRoutineModes({ enabled: true, presentNpcIds, timeOfDay: 'day' })
+      expect([...selected.keys()]).toEqual(['herald-asha']) // guard against a vacuous pass
+      expect(['idle', 'patrol', 'rest', 'passive']).toContain(selected.get('herald-asha'))
 
       for (const spy of Object.values(consoleSpy)) expect(spy).not.toHaveBeenCalled()
 
