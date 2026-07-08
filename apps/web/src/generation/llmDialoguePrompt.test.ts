@@ -430,6 +430,76 @@ describe('buildDialoguePromptMessages', () => {
     expect(content.split('\n').filter((line) => line.startsWith('timeOfDay:'))).toHaveLength(1)
   })
 
+  it.each(['idle', 'patrol', 'rest', 'passive'] as const)(
+    'renders a fixed bounded CURRENT ACTIVITY section for mode %s',
+    (mode) => {
+      const activityByMode = {
+        idle: 'standing by',
+        patrol: 'patrolling',
+        rest: 'resting',
+        passive: 'keeping a quiet watch',
+      } as const
+      const content = userContent(request({
+        context: {
+          ...request().context,
+          routine: { mode, activity: activityByMode[mode], timeOfDay: 'dusk' },
+        },
+      }))
+      const lines = content.split('\n')
+
+      expect(lines).toContain('CURRENT ACTIVITY - AMBIENT CONTEXT ONLY')
+      expect(lines).toContain(`activity: ${activityByMode[mode]}`)
+      expect(lines).toContain('timeOfDay: dusk')
+    },
+  )
+
+  it('omits CURRENT ACTIVITY when routine context is absent', () => {
+    expect(userContent(request())).not.toContain('CURRENT ACTIVITY')
+  })
+
+  it('CURRENT ACTIVITY section never renders the raw mode enum, npc id/name/persona, or schedule details', () => {
+    const content = userContent(request({
+      context: {
+        ...request().context,
+        routine: { mode: 'rest', activity: 'resting', timeOfDay: 'night' },
+      },
+    }))
+
+    expect(content).not.toContain('mode: rest')
+    expect(content).not.toContain('mode:rest')
+    expect(content).not.toMatch(/\brest\b(?!ing)/)
+    expect(content).not.toContain('schedule')
+    expect(content).not.toContain('dawn, day, dusk, night')
+  })
+
+  it('does not serialize extra fields on routine context if an unsafe caller adds them', () => {
+    const content = userContent(request({
+      context: {
+        ...request().context,
+        routine: {
+          mode: 'patrol',
+          activity: 'patrolling',
+          timeOfDay: 'day',
+          npcId: 'raw-npc-id-must-not-leak',
+          schedule: ['dawn:idle', 'day:patrol', 'dusk:rest', 'night:passive'],
+        } as unknown as NPCDialogueRequest['context']['routine'],
+      },
+    }))
+
+    expect(content).toContain('CURRENT ACTIVITY - AMBIENT CONTEXT ONLY')
+    expect(content).toContain('activity: patrolling')
+    expect(content).not.toContain('raw-npc-id-must-not-leak')
+    expect(content).not.toContain('dawn:idle')
+    expect(content).not.toContain('schedule')
+  })
+
+  it('system prompt hedges current activity as ambient scene context only', () => {
+    const lower = DIALOGUE_SYSTEM_PROMPT.toLowerCase()
+
+    expect(lower).toContain('current activity is ambient scene context only')
+    expect(lower).toContain("must never be used to claim the world or the npc's routine has changed")
+  })
+
   it('does not mutate input', () => {
     const input = request({
       context: {
