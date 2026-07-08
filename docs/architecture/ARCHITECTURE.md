@@ -410,6 +410,23 @@ Throughout these docs:
   added
   ([ADR-0087](./decisions/ADR-0087-npc-day-night-routine-v0.md),
   [implementation plan](./implementation-plans/npc-day-night-routine-v0.md)).
+- 🔜 **Planned** — NPC Routine Presets v0 — extends `npc-day-night-routine-v0`
+  (ADR-0087) with a reusable, closed authored id → closed NPC type
+  (`guard | merchant | villager | noble | servant | wanderer | static_npc`) → closed
+  routine preset (`stationary | day_patrol_night_rest | day_idle_night_rest |
+  wander_day_rest_night | patrol_morning_day_rest_night`) → closed time-bucket schedule
+  lookup, so authored/demo NPCs can share a routine by type instead of each needing a
+  hand-written per-id schedule. Explicit `NPC_ROUTINE_CONFIG` id entries (e.g.
+  `herald-asha`) still win over any type-derived preset. No RoomSpec/schema/save-game
+  change; no generated-NPC classification (a generated NPC id gets a routine only if a
+  maintainer explicitly authors it into the id-keyed maps) — the option that would
+  scale to generated NPCs (an optional closed `npcType` enum field on the RoomSpec
+  `Npc` schema, set only by trusted generated assembly) is recorded as a deferred,
+  separately-approved future V1, not started here; LLM/provider-generated routine
+  schedules are permanently rejected. Slice 0 (docs/ADR) only — no `.ts`/`.tsx` change
+  yet
+  ([ADR-0088](./decisions/ADR-0088-npc-routine-presets-v0.md),
+  [implementation plan](./implementation-plans/npc-routine-presets-v0.md)).
 - ❌ **Not built** — future shape only; documented so we don't paint into a corner.
 
 ## Status today (Renderer Foundation v0)
