@@ -1,6 +1,7 @@
 # Implementation Plan — `feature/hostile-npc-chase-demo-opt-in-v0`
 
-> Status: **PLANNED. Slice 0 (this doc) only.**
+> Status: **IMPLEMENTED. All slices complete; Slice 3 (debug indicator) intentionally
+> skipped.**
 > This plan exposes the already-implemented `hostile-npc-chase-lite-v0` foundation
 > through a controlled, default-off, demo/dev-safe opt-in path so chase can be
 > visibly tested in real gameplay (`npm run dev`) without making chase global,
@@ -65,7 +66,8 @@ if any, get passed into the seam that already exists," under a default-off gate.
   path for `hostile-npc-chase-lite-v0`, gated by a default-off env flag and a closed,
   id-only allowlist.
 - **Lane:** worked on `main` directly; no feature branch.
-- **Status:** PLANNED — Slice 0 (docs) only in this commit.
+- **Status:** IMPLEMENTED — Slices 1, 2, 4, and 5 shipped; Slice 3 (debug indicator)
+  skipped by design (see §12).
 - **ADR:** [ADR-0086](../decisions/ADR-0086-hostile-npc-chase-demo-opt-in-v0.md).
 
 ## 2. Problem statement
@@ -350,25 +352,28 @@ npm run test        # full suite; must remain green (baseline 3576/3576)
 
 ## 12. Implementation slices
 
-1. **Slice 1 — Pure demo opt-in selector + tests.** `app/demoChaseOptIn.ts`
+1. **Slice 1 — Pure demo opt-in selector + tests. DONE.** `app/demoChaseOptIn.ts`
    (`DEMO_CHASE_NPC_IDS`, `readDemoChaseEnabled`, `selectDemoChaseOptInNpcIds`) and
    `app/demoChaseOptIn.test.ts`. No `App`/`RoomViewer`/`Engine` change.
 2. **Slice 2 — App/RoomViewer wiring using the existing `chaseOptInNpcIds` seam +
-   tests.** `RoomViewer.tsx` optional prop + `setRoom` options merge; `App.tsx`
-   computes and conditionally passes the set. Extend `RoomViewer`/`App` tests. No
-   `Engine.ts` code change (the seam already exists).
-3. **Slice 3 — Optional debug indicator, only if needed.** Go/no-go decision made at
-   Slice 2 closeout based on manual smoke-test difficulty. If skipped, this plan is
-   updated to say so at closeout.
-4. **Slice 4 — Safety/eval tests.** Dedicated regression pass: gate-off parity,
-   allowlist-cannot-exceed, log-safety scan, and a confirmation run of the unmodified
-   `chaseStep`/`WanderMotor`/`Engine`/`awarenessTracker` suites.
-5. **Slice 5 — Docs closeout only.** Flip this plan and ADR-0086 to Implemented; amend
-   the `SetRoomOptions.chaseOptInNpcIds` doc comment in `Engine.ts` to describe the
-   gated demo caller precisely; move the ARCHITECTURE.md status line from planned to
-   implemented. No behavior code in this slice.
+   tests. DONE.** `RoomViewer.tsx` optional prop + `setRoom` options merge; `App.tsx`
+   computes and conditionally passes the set. Extended `RoomViewer`/`App` tests. No
+   `Engine.ts` code change (the seam already existed).
+3. **Slice 3 — Optional debug indicator, only if needed. SKIPPED.** At Slice 2
+   closeout, manual smoke testing showed the demo path was easy to visually confirm
+   (the allowlisted NPC's wander-vs-chase transition is directly observable) without a
+   dedicated indicator, so the optional slice was not built. No new UI/presentation
+   surface was added for this feature.
+4. **Slice 4 — Safety/eval tests. DONE.** Dedicated regression pass: gate-off parity,
+   allowlist-cannot-exceed, log-safety scan (`src/redteam/demoChase.redteam.test.ts`),
+   and a confirmation run of the unmodified `chaseStep`/`WanderMotor`/`Engine`/
+   `awarenessTracker` suites.
+5. **Slice 5 — Docs closeout only. DONE (this update).** Flipped this plan and
+   ADR-0086 to Implemented; moved the ARCHITECTURE.md status line from planned to
+   implemented. No behavior code in this slice — see §18 for a note on the
+   `Engine.ts` doc-comment amendment originally scoped here.
 
-Each slice is independently reviewable and keeps the full suite green.
+Each slice was independently reviewable and kept the full suite green.
 
 ## 13. Safety invariants (must hold at every slice)
 
@@ -435,5 +440,30 @@ room/NPC names, or narrative text):
 
 ## 17. Open questions
 
-None blocking Slice 0. Slice 3 (debug indicator) is explicitly conditional and will be
-re-scoped at Slice 2 closeout based on manual smoke-test experience.
+None. Slice 3 (debug indicator) was resolved at Slice 2 closeout — skipped, see §12.
+
+## 18. Slice 5 closeout — verification results
+
+All commands run from `apps/web` against the state at commit `f2ac1775` (tip of the
+work described by this plan, still on `main`):
+
+- `npx vitest run src/app/demoChaseOptIn.test.ts` — 1 file, 14 tests passed.
+- `npx vitest run src/App.test.tsx` — 1 file, 177 tests passed.
+- `npx vitest run src/renderer/RoomViewer.test.ts` — 1 file, 33 tests passed.
+- `npx vitest run src/renderer/engine/npc/chaseStep.test.ts src/renderer/engine/npc/WanderMotor.test.ts src/renderer/engine/Engine.test.ts src/renderer/engine/npc/awarenessTracker.test.ts` —
+  4 files, 90 tests passed, unmodified.
+- `npx vitest run src/redteam/demoChase.redteam.test.ts` — 1 file, 8 tests passed
+  (gate-off parity, allowlist-cannot-exceed, log-safety boundaries).
+- `npm run lint` — clean, no errors/warnings.
+- `npm run build` — succeeded (`tsc -b && vite build`).
+- `npm run test` (full suite) — 210 files, 3607 tests passed.
+
+**Deferred item:** §9/§12 of this plan originally scoped a Slice 5 update to the
+`SetRoomOptions.chaseOptInNpcIds` doc comment in `Engine.ts` (production code) to
+describe the new gated demo caller. The Slice 5 closeout instructions given to the
+implementing agent restricted this pass to docs files only, so that comment update was
+**not** made. `Engine.ts`'s doc comment still reads "never wired through
+RoomViewer/App composition," which is now imprecise in light of ADR-0086's narrow
+exception (ADR-0086 and this plan are the source of truth in the meantime). This is a
+docs-only follow-up, not a behavior change, and is left for explicit maintainer
+approval before touching production code.

@@ -360,18 +360,25 @@ Throughout these docs:
   persistence/save-game/schema/`schemaVersion`, provider/prompt/LLM, or
   chase/awareness/combat change (ADR-0083/ADR-0084 untouched)
   ([ADR-0085](./decisions/ADR-0085-relationship-journal-runtime-v0.md)).
-- 🔜 **Planned** — Hostile NPC Chase Demo Opt-In v0 — a controlled, default-off,
+- ✅ **Implemented** — Hostile NPC Chase Demo Opt-In v0 — a controlled, default-off,
   closed-allowlist, id-only demo/dev visibility path over the existing, unchanged
   `hostile-npc-chase-lite-v0` (ADR-0084) `chaseOptInNpcIds` seam. A pure selector in
-  `app/demoChaseOptIn.ts` (planned) intersects a frozen, hand-authored NPC-id
-  allowlist with the active room's present ids, gated by a default-off
-  `VITE_AIGM_DEMO_CHASE` env var mirroring the `llmConfig.ts` pattern
+  `app/demoChaseOptIn.ts` intersects a frozen, hand-authored NPC-id allowlist
+  (currently `{'herald-asha'}`) with the active room's present NPC ids (derived from
+  validated room NPC objects only), gated by a default-off `VITE_AIGM_DEMO_CHASE` env
+  var mirroring the `llmConfig.ts` pattern
   ([ADR-0023](./decisions/ADR-0023-real-room-generator-provider-v0.md)); with the
-  gate off, behavior is unchanged. No new chase behavior, no relationship/prompt/
-  dialogue/generated-content-derived eligibility, no contact consequences, and no
-  `WorldState`/`WorldEvent`/`WorldCommand`/memory/fact/persistence/schema/provider/
-  prompt change. Amends ADR-0084's "never wired through App/RoomViewer" statement
-  with this sole, narrow, documented exception
+  gate off, behavior is unchanged. `App` passes the non-empty selected id set to
+  `RoomViewer`, which passes it into `Engine.setRoom`'s existing
+  `chaseOptInNpcIds` option; `chaseStep`/`WanderMotor`/`Engine` themselves are
+  unmodified. No new chase behavior, no relationship/prompt/dialogue/generated-
+  content-derived eligibility, no contact consequences (no combat/damage/HP/death/
+  capture/injury/encounters/items/quests), and no `WorldState`/`WorldEvent`/
+  `WorldCommand`/memory/fact/`fact_visibility`/persistence/schema/save-game/provider/
+  prompt change; movement-only. An optional visual/debug indicator was scoped as
+  Slice 3 and intentionally skipped — manual smoke testing showed the chase/wander
+  transition was directly observable without one. Amends ADR-0084's "never wired
+  through App/RoomViewer" statement with this sole, narrow, documented exception
   ([ADR-0086](./decisions/ADR-0086-hostile-npc-chase-demo-opt-in-v0.md)).
 - ❌ **Not built** — future shape only; documented so we don't paint into a corner.
 

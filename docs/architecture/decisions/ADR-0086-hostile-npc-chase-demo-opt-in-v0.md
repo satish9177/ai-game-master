@@ -1,6 +1,6 @@
 # ADR-0086: Hostile NPC chase demo opt-in is a default-off, closed-allowlist, id-only visibility path — no new chase behavior, no new gameplay authority
 
-- **Status:** Proposed
+- **Status:** Accepted - Implemented
 - **Date:** 2026-07-08
 - **Deciders:** Project owner
 - **Builds on:** the deterministic, home-leashed, same-room chase movement override
@@ -126,8 +126,13 @@ and in the general case**: no real room, no content signal, and no default
 configuration ever auto-enables chase. ADR-0086 introduces the **sole, narrow,
 documented exception** — a default-off, closed-allowlist, id-only demo/dev path,
 introduced and bounded by this ADR. `SetRoomOptions.chaseOptInNpcIds`'s doc comment in
-`Engine.ts` is updated (Slice 5 of the companion plan) to name this ADR as the one
-authorized caller shape, rather than silently contradicting the original comment.
+`Engine.ts` was scoped (Slice 5 of the companion plan) to be updated to name this ADR
+as the one authorized caller shape, rather than silently contradicting the original
+comment. **That specific comment edit was deferred** — the Slice 5 closeout pass was
+restricted to docs files and did not touch `Engine.ts` (production code). This ADR and
+the companion plan are the authoritative record in the meantime; the stale wording in
+`Engine.ts` is a known, tracked follow-up (see the companion plan's §18), not a silent
+contradiction.
 
 ---
 
@@ -196,21 +201,38 @@ authorized caller shape, rather than silently contradicting the original comment
 
 ## Verification
 
-Planned files (Slice 1–2 of the companion plan):
+Implemented files:
 
-- `apps/web/src/app/demoChaseOptIn.ts` — pure allowlist constant, env gate reader,
-  and id-intersection selector.
+- `apps/web/src/app/demoChaseOptIn.ts` — pure allowlist constant (`DEMO_CHASE_NPC_IDS
+  = {'herald-asha'}`), env gate reader (`readDemoChaseEnabled`), and id-intersection
+  selector (`selectDemoChaseOptInNpcIds`).
 - `apps/web/src/app/demoChaseOptIn.test.ts` — selector/gate unit coverage.
 - `apps/web/src/renderer/RoomViewer.tsx` — optional `chaseOptInNpcIds` prop threaded
-  into the existing `SetRoomOptions` merge.
-- `apps/web/src/App.tsx` — computes and conditionally passes the demo set.
+  into the existing `SetRoomOptions` merge, added to the room-load effect's
+  dependency array.
+- `apps/web/src/App.tsx` — computes the demo set from present, validated room NPC ids
+  and passes it to `RoomViewer` only when non-empty.
+- `apps/web/src/redteam/demoChase.redteam.test.ts` — dedicated safety/eval regression
+  (gate-off parity, allowlist-cannot-exceed, log-safety boundaries).
 - Targeted extensions to the existing `RoomViewer`/`App` test files.
 
-Verification results: **pending** — this ADR is filed at Slice 0 (docs only); no code
-has been written yet. This section will be completed at Slice 5 (docs closeout) with
-actual test run output, matching the ADR-0084 verification-section convention.
+Slice 3 (optional debug indicator) was evaluated and **skipped**: manual smoke
+testing showed the wander-vs-chase transition was directly observable without one, so
+no new presentation/UI surface was added.
 
-Boundaries to re-confirm at closeout (must all still hold):
+Verification results (run from `apps/web`):
+
+- `npx vitest run src/app/demoChaseOptIn.test.ts` — 14 tests passed.
+- `npx vitest run src/App.test.tsx` — 177 tests passed.
+- `npx vitest run src/renderer/RoomViewer.test.ts` — 33 tests passed.
+- `npx vitest run src/renderer/engine/npc/chaseStep.test.ts src/renderer/engine/npc/WanderMotor.test.ts src/renderer/engine/Engine.test.ts src/renderer/engine/npc/awarenessTracker.test.ts` —
+  90 tests passed, unmodified.
+- `npx vitest run src/redteam/demoChase.redteam.test.ts` — 8 tests passed.
+- `npm run lint` — clean.
+- `npm run build` — succeeded.
+- `npm run test` (full suite) — 210 files, 3607 tests passed.
+
+Boundaries re-confirmed at closeout (all still hold):
 
 - Default off; closed allowlist; id-only selection.
 - Movement/intent only; no chase-behavior change; contact remains inert.
