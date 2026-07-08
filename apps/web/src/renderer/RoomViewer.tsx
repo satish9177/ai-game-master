@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Engine } from './engine/Engine'
+import type { SetRoomOptions } from './engine/Engine'
 import type { Interactable } from '../domain/ports/interaction'
 import type { RoomSource } from '../domain/ports/RoomSource'
 import { Hud } from './ui/Hud'
@@ -85,6 +86,13 @@ type RoomViewerProps = {
   getRelationshipContextForNpc?: (npcId: string) => NpcRelationshipState | undefined
   timeContext?: PromptTimeContext | null
   resolvedObjectIds?: ReadonlySet<string>
+  /**
+   * Demo/dev-only chase opt-in (ADR-0086), threaded verbatim into the existing,
+   * unchanged `Engine.SetRoomOptions.chaseOptInNpcIds` seam. Populated only by
+   * `App`'s default-off, closed-allowlist, id-only selector; absent/empty here
+   * behaves identically to omitting it.
+   */
+  chaseOptInNpcIds?: ReadonlySet<string>
 }
 
 export function RoomViewer({
@@ -103,6 +111,7 @@ export function RoomViewer({
   getRelationshipContextForNpc,
   timeContext,
   resolvedObjectIds,
+  chaseOptInNpcIds,
 }: RoomViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const engineRef = useRef<Engine | null>(null)
@@ -320,8 +329,15 @@ export function RoomViewer({
       effectLookupRef.current = buildInteractionEffectLookup(result.room)
       currentRoomNameRef.current = result.room.name
       try {
+        const setRoomOptions: SetRoomOptions = {}
         if (resolvedObjectIds !== undefined) {
-          engine.setRoom(result.room, { resolvedObjectIds })
+          setRoomOptions.resolvedObjectIds = resolvedObjectIds
+        }
+        if (chaseOptInNpcIds !== undefined && chaseOptInNpcIds.size > 0) {
+          setRoomOptions.chaseOptInNpcIds = chaseOptInNpcIds
+        }
+        if (Object.keys(setRoomOptions).length > 0) {
+          engine.setRoom(result.room, setRoomOptions)
         } else {
           engine.setRoom(result.room)
         }
@@ -369,6 +385,7 @@ export function RoomViewer({
     onWorldStateChange,
     onCommittedInteractionEvents,
     resolvedObjectIds,
+    chaseOptInNpcIds,
     roomSource,
     sessionId,
     webgl2Available,

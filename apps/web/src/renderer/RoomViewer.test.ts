@@ -1016,6 +1016,101 @@ describe('RoomViewer NPC dialogue room context wiring', () => {
     expect(engine?.setRoom).toHaveBeenCalledWith(room, { resolvedObjectIds })
   })
 
+  it('omits chaseOptInNpcIds from engine.setRoom when the prop is absent', async () => {
+    const room = loadedRoom()
+
+    const props = {
+      roomSource: { getRoom: async () => ({ ok: true, room }) },
+      sessionId: 'session-1',
+      interactionService: { resolve: async () => ({ status: 'rejected', reason: 'missing-effect' }) },
+      encounterService: { resolve: async () => ({ status: 'failed', reason: 'not-found' }) },
+      npcDialogueService: {
+        reply: async () => ({ status: 'replied', turn: { speaker: 'npc', text: 'A line.' } }),
+      },
+      onNavigate: async () => ({ status: 'failed', reason: 'not-found' }),
+    } as unknown as Parameters<typeof RoomViewer>[0]
+    RoomViewer(props)
+
+    await Promise.resolve()
+    await Promise.resolve()
+
+    const engine = mockState.engineInstances[0]
+    expect(engine?.setRoom).toHaveBeenCalledWith(room)
+  })
+
+  it('omits chaseOptInNpcIds from engine.setRoom when the prop is an empty set', async () => {
+    const room = loadedRoom()
+
+    const props = {
+      roomSource: { getRoom: async () => ({ ok: true, room }) },
+      sessionId: 'session-1',
+      interactionService: { resolve: async () => ({ status: 'rejected', reason: 'missing-effect' }) },
+      encounterService: { resolve: async () => ({ status: 'failed', reason: 'not-found' }) },
+      npcDialogueService: {
+        reply: async () => ({ status: 'replied', turn: { speaker: 'npc', text: 'A line.' } }),
+      },
+      onNavigate: async () => ({ status: 'failed', reason: 'not-found' }),
+      chaseOptInNpcIds: new Set<string>(),
+    } as unknown as Parameters<typeof RoomViewer>[0]
+    RoomViewer(props)
+
+    await Promise.resolve()
+    await Promise.resolve()
+
+    const engine = mockState.engineInstances[0]
+    expect(engine?.setRoom).toHaveBeenCalledWith(room)
+  })
+
+  it('passes a non-empty chaseOptInNpcIds through to engine.setRoom', async () => {
+    const room = loadedRoom()
+    const chaseOptInNpcIds = new Set(['room-npc'])
+
+    const props = {
+      roomSource: { getRoom: async () => ({ ok: true, room }) },
+      sessionId: 'session-1',
+      interactionService: { resolve: async () => ({ status: 'rejected', reason: 'missing-effect' }) },
+      encounterService: { resolve: async () => ({ status: 'failed', reason: 'not-found' }) },
+      npcDialogueService: {
+        reply: async () => ({ status: 'replied', turn: { speaker: 'npc', text: 'A line.' } }),
+      },
+      onNavigate: async () => ({ status: 'failed', reason: 'not-found' }),
+      chaseOptInNpcIds,
+    } as unknown as Parameters<typeof RoomViewer>[0]
+    RoomViewer(props)
+
+    await Promise.resolve()
+    await Promise.resolve()
+
+    const engine = mockState.engineInstances[0]
+    expect(engine?.setRoom).toHaveBeenCalledWith(room, { chaseOptInNpcIds })
+  })
+
+  it('passes both resolvedObjectIds and a non-empty chaseOptInNpcIds together in the same SetRoomOptions', async () => {
+    const room = loadedRoom()
+    const resolvedObjectIds = new Set(['room-npc'])
+    const chaseOptInNpcIds = new Set(['room-npc'])
+
+    const props = {
+      roomSource: { getRoom: async () => ({ ok: true, room }) },
+      sessionId: 'session-1',
+      interactionService: { resolve: async () => ({ status: 'rejected', reason: 'missing-effect' }) },
+      encounterService: { resolve: async () => ({ status: 'failed', reason: 'not-found' }) },
+      npcDialogueService: {
+        reply: async () => ({ status: 'replied', turn: { speaker: 'npc', text: 'A line.' } }),
+      },
+      onNavigate: async () => ({ status: 'failed', reason: 'not-found' }),
+      resolvedObjectIds,
+      chaseOptInNpcIds,
+    } as unknown as Parameters<typeof RoomViewer>[0]
+    RoomViewer(props)
+
+    await Promise.resolve()
+    await Promise.resolve()
+
+    const engine = mockState.engineInstances[0]
+    expect(engine?.setRoom).toHaveBeenCalledWith(room, { resolvedObjectIds, chaseOptInNpcIds })
+  })
+
   it('passes the current quest stage into NPCDialogueService.reply on the first Continue click after opening NPC dialogue', async () => {
     const replies: unknown[] = []
     const room = loadedRoom()

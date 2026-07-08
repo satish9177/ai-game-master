@@ -39,6 +39,7 @@ import {
   loadGeneratedRoomCacheSaveState,
 } from './domain/quests/generatedRoomCacheSaveState'
 import { loadGeneratedQuestSaveState } from './domain/quests/generatedQuestSaveState'
+import { selectDemoChaseOptInNpcIds } from './app/demoChaseOptIn'
 import { restoreGeneratedQuestPlay } from './app/restoreGeneratedQuestPlay'
 import { restoreGeneratedRoomCache } from './app/restoreGeneratedRoomCache'
 import { AdjacentRoomPregenerator } from './app/AdjacentRoomPregenerator'
@@ -702,6 +703,69 @@ describe('App resolved object projection wiring', () => {
       room,
     })).toBeUndefined()
     expect(resolvedObjectIdsForGeneratedPlay({ state, room })).toBeUndefined()
+  })
+
+  it('App wires the demo chase opt-in (ADR-0086) as a default-off, id-only, non-empty-only prop', () => {
+    expect(appSource).toContain(
+      "import { readDemoChaseEnabled, selectDemoChaseOptInNpcIds } from './app/demoChaseOptIn'",
+    )
+    expect(appSource).toContain('const demoChaseEnabled = readDemoChaseEnabled()')
+
+    const computed = appSource.slice(
+      appSource.indexOf('const presentNpcIds = new Set<string>()'),
+      appSource.indexOf('return (', appSource.indexOf('const presentNpcIds = new Set<string>()')),
+    )
+    expect(computed).toContain("object.type === 'npc' && object.id !== undefined")
+    expect(computed).toContain('presentNpcIds.add(object.id)')
+    expect(computed).toContain('enabled: demoChaseEnabled')
+    expect(computed).toContain('presentNpcIds,')
+    // Id-only: the computed block never reads name, dialogue, or room/prompt text.
+    expect(computed).not.toMatch(/\.name\b/)
+    expect(computed).not.toContain('dialogue')
+    expect(computed).not.toContain('roomContext')
+
+    const render = appSource.slice(
+      appSource.indexOf('<RoomViewer'),
+      appSource.indexOf('/>', appSource.indexOf('<RoomViewer')),
+    )
+    expect(render).toContain(
+      '{...(demoChaseOptInNpcIds.size > 0 ? { chaseOptInNpcIds: demoChaseOptInNpcIds } : {})}',
+    )
+
+    // Only the module-level gate read and the derived boolean/set are used —
+    // no direct import.meta.env access and no raw env var name in the render.
+    expect(render).not.toContain('import.meta.env')
+    expect(render).not.toContain('VITE_AIGM_DEMO_CHASE')
+  })
+
+  it('demo chase opt-in selection matches App wiring: off by default, id-only, allowlist-gated', () => {
+    const npcRoom = makeRoom([
+      {
+        type: 'npc',
+        id: 'herald-asha',
+        name: 'Asha',
+        position: [0, 0, -2],
+        interaction: { key: 'F', prompt: 'Talk', dialogue: { persona: 'herald' } },
+      },
+    ], 'throne-room')
+    const npcPresentIds = (room: LoadedRoom) => {
+      const ids = new Set<string>()
+      for (const object of room.objects) {
+        if (object.type === 'npc' && object.id !== undefined) ids.add(object.id)
+      }
+      return ids
+    }
+
+    // Gate off: no opt-in even though herald-asha is present (App's default state).
+    expect(selectDemoChaseOptInNpcIds({ enabled: false, presentNpcIds: npcPresentIds(npcRoom) }).size).toBe(0)
+
+    // Gate on + herald-asha present: opt-in contains herald-asha.
+    expect([...selectDemoChaseOptInNpcIds({ enabled: true, presentNpcIds: npcPresentIds(npcRoom) })])
+      .toEqual(['herald-asha'])
+
+    // Gate on + herald-asha absent (no allowlisted npc in the room): no opt-in.
+    const noNpcRoom = resolvedRoom()
+    expect(selectDemoChaseOptInNpcIds({ enabled: true, presentNpcIds: npcPresentIds(noNpcRoom) }).size).toBe(0)
   })
 
   it('projects a B-room object after A to B interaction, C travel, and return to B state shape', () => {

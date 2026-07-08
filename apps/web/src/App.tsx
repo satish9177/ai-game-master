@@ -32,6 +32,7 @@ import { FakeRoomGenerator } from './generation/FakeRoomGenerator'
 import { FakeWorldBibleSeeder } from './generation/FakeWorldBibleSeeder'
 import { readLlmConfig } from './app/llmConfig'
 import { readDebugConfig } from './app/debugConfig'
+import { readDemoChaseEnabled, selectDemoChaseOptInNpcIds } from './app/demoChaseOptIn'
 import { selectRoomGenerator } from './app/selectRoomGenerator'
 import { selectObjectiveGenerator } from './app/selectObjectiveGenerator'
 import { selectGateGenerator } from './app/selectGateGenerator'
@@ -147,6 +148,11 @@ const roomMemoryDebugViewerEnabled = debugConfig.roomMemoryDebugViewerEnabled
 // here in the composition layer. When OFF the existing authored/generated
 // journal behavior is byte-identical; the event seam is never invoked.
 const eventConsequenceJournalFromEventsEnabled = readEventConsequenceJournalEnabled()
+// Hostile NPC chase demo opt-in (ADR-0086): default-off, closed-allowlist,
+// id-only visibility path onto the existing, unchanged
+// `SetRoomOptions.chaseOptInNpcIds` seam. Off by default; no behavior change
+// for any normal player, CI run, or default/deployed build.
+const demoChaseEnabled = readDemoChaseEnabled()
 // The PromptBar-generated room path uses the configured generator: the
 // FakeRoomGenerator by default, or a real OpenAI-compatible provider when the
 // env config is complete (real-room-generator-provider v0; ADR-0023). The
@@ -1364,6 +1370,20 @@ function App() {
     return result
   }, [activePlay, applyEventJournalFromSession, applyWorldClockFromSession, guardConfig, refreshDerivedViews, setQuestHintsForView, setQuestSpecForView])
 
+  // Demo chase opt-in (ADR-0086): ids only, derived from the active room's
+  // present NPC objects. Never reads NPC name, prompt/generated text, dialogue,
+  // or relationship state.
+  const presentNpcIds = new Set<string>()
+  for (const object of activePlay?.room.objects ?? []) {
+    if (object.type === 'npc' && object.id !== undefined) {
+      presentNpcIds.add(object.id)
+    }
+  }
+  const demoChaseOptInNpcIds = selectDemoChaseOptInNpcIds({
+    enabled: demoChaseEnabled,
+    presentNpcIds,
+  })
+
   return (
     <ErrorBoundary logger={logger}>
       {activePlay ? (
@@ -1385,6 +1405,7 @@ function App() {
           {...(activePlay.objectivesPerRoom === true
             ? { resolvedObjectIds: activePlay.entryResolvedObjectIds }
             : {})}
+          {...(demoChaseOptInNpcIds.size > 0 ? { chaseOptInNpcIds: demoChaseOptInNpcIds } : {})}
         />
       ) : (
         <div className="room-viewer-root">
