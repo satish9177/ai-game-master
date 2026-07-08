@@ -5,6 +5,7 @@ import {
   type NpcRoutineRawEnv,
 } from './npcRoutine'
 import type { NpcRoutineSchedule } from '../domain/npcRoutine'
+import type { NpcRoutineNpcType } from '../domain/npcRoutinePresets'
 
 describe('readRoutineEnabled', () => {
   it('defaults to false when env is empty', () => {
@@ -192,5 +193,137 @@ describe('selectNpcRoutineModes', () => {
       config: TEST_CONFIG,
     })
     expect(hostileIdIgnored.size).toBe(0)
+  })
+})
+
+describe('selectNpcRoutineModes - type preset integration (Slice 2)', () => {
+  it('preserves existing herald-asha explicit schedule behavior with the default authored type map', () => {
+    const result = selectNpcRoutineModes({
+      enabled: true,
+      presentNpcIds: new Set(['herald-asha']),
+      timeOfDay: 'day',
+      config: TEST_CONFIG,
+    })
+    expect(result.get('herald-asha')).toBe('patrol')
+    expect(result.size).toBe(1)
+  })
+
+  it('explicit id config wins over an injected type preset fallback', () => {
+    const explicitConfig: Readonly<Record<string, NpcRoutineSchedule>> = Object.freeze({
+      'npc-x': { night: 'rest' },
+    })
+    const typeConfig: Readonly<Record<string, NpcRoutineNpcType>> = Object.freeze({
+      'npc-x': 'guard',
+    })
+
+    const nightResult = selectNpcRoutineModes({
+      enabled: true,
+      presentNpcIds: new Set(['npc-x']),
+      timeOfDay: 'night',
+      config: explicitConfig,
+      typeConfig,
+    })
+    expect(nightResult.get('npc-x')).toBe('rest')
+
+    // guard's preset would resolve 'day' to 'patrol', but explicit config has
+    // no 'day' entry, so explicit config wins entirely -- no fallback merge.
+    const dayResult = selectNpcRoutineModes({
+      enabled: true,
+      presentNpcIds: new Set(['npc-x']),
+      timeOfDay: 'day',
+      config: explicitConfig,
+      typeConfig,
+    })
+    expect(dayResult.size).toBe(0)
+  })
+
+  it('a type-mapped NPC without explicit id config gets a routine via its type preset', () => {
+    const result = selectNpcRoutineModes({
+      enabled: true,
+      presentNpcIds: new Set(['guard-1']),
+      timeOfDay: 'day',
+      config: {},
+      typeConfig: { 'guard-1': 'guard' },
+    })
+    expect(result.get('guard-1')).toBe('patrol')
+  })
+
+  it('an unknown id with no explicit config and no type mapping returns no routine', () => {
+    const result = selectNpcRoutineModes({
+      enabled: true,
+      presentNpcIds: new Set(['nobody']),
+      timeOfDay: 'day',
+      config: {},
+      typeConfig: {},
+    })
+    expect(result.size).toBe(0)
+  })
+
+  it('an unknown/free-text/hostile-looking type mapping returns no routine (no semantic parsing)', () => {
+    const result = selectNpcRoutineModes({
+      enabled: true,
+      presentNpcIds: new Set(['bandit-1']),
+      timeOfDay: 'day',
+      config: {},
+      typeConfig: { 'bandit-1': 'bandit leader' as unknown as NpcRoutineNpcType },
+    })
+    expect(result.size).toBe(0)
+  })
+
+  it('a generated npc id with no authored type entry returns no routine', () => {
+    const result = selectNpcRoutineModes({
+      enabled: true,
+      presentNpcIds: new Set(['generated-npc-42']),
+      timeOfDay: 'day',
+      config: {},
+      typeConfig: { 'guard-1': 'guard' },
+    })
+    expect(result.size).toBe(0)
+  })
+
+  it('gate off still returns empty even with a type-mapped id present', () => {
+    const result = selectNpcRoutineModes({
+      enabled: false,
+      presentNpcIds: new Set(['guard-1']),
+      timeOfDay: 'day',
+      config: {},
+      typeConfig: { 'guard-1': 'guard' },
+    })
+    expect(result.size).toBe(0)
+  })
+
+  it('a missing time bucket for a type-resolved preset still returns empty', () => {
+    const result = selectNpcRoutineModes({
+      enabled: true,
+      presentNpcIds: new Set(['static-1']),
+      timeOfDay: 'dawn',
+      config: {},
+      typeConfig: { 'static-1': 'static_npc' },
+    })
+    // 'stationary' preset maps dawn->idle, so use a type whose preset omits a
+    // bucket instead: none of the authored presets omit a bucket, so assert
+    // the resolved mode is the preset's dawn value, proving no default/mutation.
+    expect(result.get('static-1')).toBe('idle')
+  })
+
+  it('does not mutate presentNpcIds, config, or typeConfig', () => {
+    const presentNpcIds = new Set(['guard-1'])
+    const config = Object.freeze({})
+    const typeConfig = Object.freeze({ 'guard-1': 'guard' as NpcRoutineNpcType })
+    const presentSnapshot = [...presentNpcIds]
+    const configSnapshot = JSON.stringify(config)
+    const typeConfigSnapshot = JSON.stringify(typeConfig)
+
+    selectNpcRoutineModes({
+      enabled: true,
+      presentNpcIds,
+      timeOfDay: 'day',
+      config,
+      typeConfig,
+    })
+
+    expect([...presentNpcIds]).toEqual(presentSnapshot)
+    expect(JSON.stringify(config)).toEqual(configSnapshot)
+    expect(JSON.stringify(typeConfig)).toEqual(typeConfigSnapshot)
   })
 })

@@ -50,7 +50,9 @@ describe('redteam npc routine - modules have no reachable side-effect import sur
     const specifiers = importSpecifiers(appNpcRoutineSource)
     expect(specifiers.length).toBeGreaterThan(0) // guard against a vacuous pass
     for (const specifier of specifiers) {
-      expect(specifier).toMatch(/^\.\.\/domain\/(world\/worldClock|npcRoutine|npcRoutineConfig)$/)
+      expect(specifier).toMatch(
+        /^\.\.\/domain\/(world\/worldClock|npcRoutine|npcRoutineConfig|npcRoutinePresets|npcRoutineTypeConfig)$/,
+      )
     }
   })
 
