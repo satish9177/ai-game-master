@@ -7,7 +7,16 @@ import { createInitialPatrolState, updatePatrolStep } from './patrolStep'
 import type { NpcPatrolStepState } from './patrolStep'
 import { chaseStep } from './chaseStep'
 
-export type WanderMotorPolicy = 'wander' | 'patrol'
+export type WanderMotorPolicy = 'wander' | 'patrol' | 'idle'
+
+type NpcIdleStepState = {
+  mode: 'pausing'
+  position: { x: number; z: number }
+}
+
+function createInitialIdleState(home: WanderXZ): NpcIdleStepState {
+  return { mode: 'pausing', position: { x: home.x, z: home.z } }
+}
 
 export type WanderPositionNode = {
   position: {
@@ -36,6 +45,7 @@ type WanderMotorRegistrationBase = {
 export type WanderMotorRegistration =
   | (WanderMotorRegistrationBase & { policy?: 'wander'; home: WanderXZ })
   | (WanderMotorRegistrationBase & { policy: 'patrol'; route: PatrolRoute })
+  | (WanderMotorRegistrationBase & { policy: 'idle'; home: WanderXZ })
 
 export type WanderMotorPauseContext = {
   interactionLocked: boolean
@@ -57,6 +67,7 @@ type WanderMotorEntryBase = {
 type WanderMotorEntry =
   | (WanderMotorEntryBase & { policy: 'wander'; state: NpcWanderStepState })
   | (WanderMotorEntryBase & { policy: 'patrol'; route: PatrolRoute; state: NpcPatrolStepState })
+  | (WanderMotorEntryBase & { policy: 'idle'; state: NpcIdleStepState })
 
 export class WanderMotor {
   private readonly entries = new Map<string, WanderMotorEntry>()
@@ -74,6 +85,8 @@ export class WanderMotor {
 
     const entry: WanderMotorEntry = registration.policy === 'patrol'
       ? { ...base, policy: 'patrol', route: registration.route, state: createInitialPatrolState(registration.route) }
+      : registration.policy === 'idle'
+      ? { ...base, policy: 'idle', state: createInitialIdleState(registration.home) }
       : { ...base, policy: 'wander', state: createInitialWanderState(registration.home) }
 
     this.entries.set(registration.npcId, entry)
@@ -119,7 +132,7 @@ export class WanderMotor {
           dtS,
           seed: entry.seed,
         })
-      } else {
+      } else if (entry.policy === 'wander') {
         entry.state = updateWanderStep({
           state: entry.state,
           field: entry.field,
@@ -149,6 +162,11 @@ function resetEntryPosition(entry: WanderMotorEntry, position: WanderXZ): void {
       position: { x: position.x, z: position.z },
       pauseRemainingS: 0,
     }
+    return
+  }
+
+  if (entry.policy === 'idle') {
+    entry.state = { mode: 'pausing', position: { x: position.x, z: position.z } }
     return
   }
 

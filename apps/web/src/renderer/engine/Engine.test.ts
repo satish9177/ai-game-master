@@ -13,6 +13,7 @@ import { IDLE_BOB_AMPLITUDE, IdleAnimator, idleOffsets, idlePhase } from './anim
 import { NpcBehaviorTracker } from './npc/behaviorTracker'
 import { WanderMotor } from './npc/WanderMotor'
 import { NpcAwarenessTracker } from './npc/awarenessTracker'
+import type { NpcRoutineMode } from '../../domain/npcRoutine'
 
 const fallback = loadRoomSpec(fallbackRoom)
 const INSPECT_BODY = 'You inspect it carefully, but do not take anything.'
@@ -927,6 +928,218 @@ describe('Engine patrol opt-in seam (ADR-0080)', () => {
         fakeEngine as never,
         room,
         { patrolOptInNpcIds: new Set(['guard']) },
+      )
+
+      const before = structuredClone(room.objects)
+
+      for (let tick = 0; tick < 50; tick += 1) {
+        updateNpcWander(fakeEngine, 0.1)
+      }
+
+      expect(room.objects).toEqual(before)
+    } finally {
+      if (originalWindow === undefined) vi.unstubAllGlobals()
+      else vi.stubGlobal('window', originalWindow)
+    }
+  })
+})
+
+describe('Engine npcRoutineModes seam (Slice 2)', () => {
+  it('registers idle motor policy for a routine mode of "idle"', () => {
+    const originalWindow = globalThis.window
+    vi.stubGlobal('window', { addEventListener: vi.fn(), removeEventListener: vi.fn() })
+
+    try {
+      const fakeEngine = makeFakeEngine(new IdleAnimator())
+      const registerSpy = vi.spyOn(fakeEngine.wanderMotor, 'register')
+      const room = patrolWiringRoom('routine-idle-room')
+
+      Engine.prototype.setRoom.call(
+        fakeEngine as never,
+        room,
+        { npcRoutineModes: new Map<string, NpcRoutineMode>([['guard', 'idle']]) },
+      )
+
+      const field = buildNpcWanderField(room, 'guard')!
+      const guardCall = registerSpy.mock.calls.find((call) => call[0].npcId === 'guard')!
+      expect(guardCall[0]).toMatchObject({ npcId: 'guard', policy: 'idle', home: field.home })
+    } finally {
+      if (originalWindow === undefined) vi.unstubAllGlobals()
+      else vi.stubGlobal('window', originalWindow)
+    }
+  })
+
+  it('registers idle motor policy for a routine mode of "rest"', () => {
+    const originalWindow = globalThis.window
+    vi.stubGlobal('window', { addEventListener: vi.fn(), removeEventListener: vi.fn() })
+
+    try {
+      const fakeEngine = makeFakeEngine(new IdleAnimator())
+      const registerSpy = vi.spyOn(fakeEngine.wanderMotor, 'register')
+      const room = patrolWiringRoom('routine-rest-room')
+
+      Engine.prototype.setRoom.call(
+        fakeEngine as never,
+        room,
+        { npcRoutineModes: new Map<string, NpcRoutineMode>([['guard', 'rest']]) },
+      )
+
+      const field = buildNpcWanderField(room, 'guard')!
+      const guardCall = registerSpy.mock.calls.find((call) => call[0].npcId === 'guard')!
+      expect(guardCall[0]).toMatchObject({ npcId: 'guard', policy: 'idle', home: field.home })
+    } finally {
+      if (originalWindow === undefined) vi.unstubAllGlobals()
+      else vi.stubGlobal('window', originalWindow)
+    }
+  })
+
+  it('registers wander motor policy for a routine mode of "passive"', () => {
+    const originalWindow = globalThis.window
+    vi.stubGlobal('window', { addEventListener: vi.fn(), removeEventListener: vi.fn() })
+
+    try {
+      const fakeEngine = makeFakeEngine(new IdleAnimator())
+      const registerSpy = vi.spyOn(fakeEngine.wanderMotor, 'register')
+      const room = patrolWiringRoom('routine-passive-room')
+
+      Engine.prototype.setRoom.call(
+        fakeEngine as never,
+        room,
+        { npcRoutineModes: new Map<string, NpcRoutineMode>([['guard', 'passive']]) },
+      )
+
+      const field = buildNpcWanderField(room, 'guard')!
+      const guardCall = registerSpy.mock.calls.find((call) => call[0].npcId === 'guard')!
+      expect(guardCall[0]).not.toHaveProperty('policy', 'idle')
+      expect(guardCall[0]).not.toHaveProperty('policy', 'patrol')
+      expect(guardCall[0]).toMatchObject({ npcId: 'guard', home: field.home })
+    } finally {
+      if (originalWindow === undefined) vi.unstubAllGlobals()
+      else vi.stubGlobal('window', originalWindow)
+    }
+  })
+
+  it('registers patrol motor policy for a routine mode of "patrol" using the existing route logic', () => {
+    const originalWindow = globalThis.window
+    vi.stubGlobal('window', { addEventListener: vi.fn(), removeEventListener: vi.fn() })
+
+    try {
+      const fakeEngine = makeFakeEngine(new IdleAnimator())
+      const registerSpy = vi.spyOn(fakeEngine.wanderMotor, 'register')
+      const room = patrolWiringRoom('routine-patrol-room')
+
+      Engine.prototype.setRoom.call(
+        fakeEngine as never,
+        room,
+        { npcRoutineModes: new Map<string, NpcRoutineMode>([['guard', 'patrol']]) },
+      )
+
+      const field = buildNpcWanderField(room, 'guard')!
+      const expectedRoute = buildNpcPatrolRoute(field, stableHash32(`${room.id}:guard`))
+      expect(expectedRoute).not.toBeNull()
+
+      const guardCall = registerSpy.mock.calls.find((call) => call[0].npcId === 'guard')!
+      expect(guardCall[0]).toMatchObject({ npcId: 'guard', policy: 'patrol', route: expectedRoute })
+    } finally {
+      if (originalWindow === undefined) vi.unstubAllGlobals()
+      else vi.stubGlobal('window', originalWindow)
+    }
+  })
+
+  it('leaves an NPC absent from npcRoutineModes on the existing wander/idle path', () => {
+    const originalWindow = globalThis.window
+    vi.stubGlobal('window', { addEventListener: vi.fn(), removeEventListener: vi.fn() })
+
+    try {
+      const fakeEngine = makeFakeEngine(new IdleAnimator())
+      const registerSpy = vi.spyOn(fakeEngine.wanderMotor, 'register')
+      const room = patrolWiringRoom('routine-unconfigured-room')
+
+      Engine.prototype.setRoom.call(
+        fakeEngine as never,
+        room,
+        { npcRoutineModes: new Map<string, NpcRoutineMode>([['guard', 'idle']]) },
+      )
+
+      const villagerCall = registerSpy.mock.calls.find((call) => call[0].npcId === 'villager')!
+      expect(villagerCall[0]).not.toHaveProperty('policy', 'idle')
+      expect(villagerCall[0]).not.toHaveProperty('policy', 'patrol')
+    } finally {
+      if (originalWindow === undefined) vi.unstubAllGlobals()
+      else vi.stubGlobal('window', originalWindow)
+    }
+  })
+
+  it('still honors patrolOptInNpcIds for an NPC absent from npcRoutineModes', () => {
+    const originalWindow = globalThis.window
+    vi.stubGlobal('window', { addEventListener: vi.fn(), removeEventListener: vi.fn() })
+
+    try {
+      const fakeEngine = makeFakeEngine(new IdleAnimator())
+      const registerSpy = vi.spyOn(fakeEngine.wanderMotor, 'register')
+      const room = patrolWiringRoom('routine-patrol-optin-room')
+
+      Engine.prototype.setRoom.call(
+        fakeEngine as never,
+        room,
+        {
+          patrolOptInNpcIds: new Set(['guard']),
+          npcRoutineModes: new Map<string, NpcRoutineMode>([['villager', 'idle']]),
+        },
+      )
+
+      const field = buildNpcWanderField(room, 'guard')!
+      const expectedRoute = buildNpcPatrolRoute(field, stableHash32(`${room.id}:guard`))
+      const guardCall = registerSpy.mock.calls.find((call) => call[0].npcId === 'guard')!
+      const villagerCall = registerSpy.mock.calls.find((call) => call[0].npcId === 'villager')!
+      expect(guardCall[0]).toMatchObject({ npcId: 'guard', policy: 'patrol', route: expectedRoute })
+      expect(villagerCall[0]).toMatchObject({ npcId: 'villager', policy: 'idle' })
+    } finally {
+      if (originalWindow === undefined) vi.unstubAllGlobals()
+      else vi.stubGlobal('window', originalWindow)
+    }
+  })
+
+  it('keeps chaseOptInNpcIds independent of npcRoutineModes', () => {
+    const originalWindow = globalThis.window
+    vi.stubGlobal('window', { addEventListener: vi.fn(), removeEventListener: vi.fn() })
+
+    try {
+      const fakeEngine = makeFakeEngine(new IdleAnimator())
+      const registerSpy = vi.spyOn(fakeEngine.wanderMotor, 'register')
+      const room = patrolWiringRoom('routine-chase-room')
+
+      Engine.prototype.setRoom.call(
+        fakeEngine as never,
+        room,
+        {
+          chaseOptInNpcIds: new Set(['guard']),
+          npcRoutineModes: new Map<string, NpcRoutineMode>([['guard', 'idle']]),
+        },
+      )
+
+      const guardCall = registerSpy.mock.calls.find((call) => call[0].npcId === 'guard')!
+      expect(guardCall[0]).toMatchObject({ npcId: 'guard', policy: 'idle', chaseEligible: true })
+    } finally {
+      if (originalWindow === undefined) vi.unstubAllGlobals()
+      else vi.stubGlobal('window', originalWindow)
+    }
+  })
+
+  it('never mutates room.objects across N ticks with npcRoutineModes set (no authoritative mutation)', () => {
+    const originalWindow = globalThis.window
+    vi.stubGlobal('window', { addEventListener: vi.fn(), removeEventListener: vi.fn() })
+
+    try {
+      const fakeEngine = makeFakeEngine(new IdleAnimator())
+      const room = patrolWiringRoom('routine-no-mutation-room')
+
+      Engine.prototype.setRoom.call(
+        fakeEngine as never,
+        room,
+        {
+          npcRoutineModes: new Map<string, NpcRoutineMode>([['guard', 'idle'], ['villager', 'patrol']]),
+        },
       )
 
       const before = structuredClone(room.objects)

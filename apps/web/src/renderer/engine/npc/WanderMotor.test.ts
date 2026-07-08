@@ -540,6 +540,120 @@ describe('WanderMotor', () => {
     expect(motor.isWalking('npc')).toBe(false)
   })
 
+  it('holds an idle NPC at its home position across updates without drift', () => {
+    const field = openField()
+    const motor = new WanderMotor()
+    const node = makeNode()
+    motor.register({ npcId: 'npc', node, field, seed: 'idle-hold', policy: 'idle', home: field.home })
+
+    expect(node.position.x).toBe(field.home.x)
+    expect(node.position.z).toBe(field.home.z)
+
+    for (let index = 0; index < 10; index += 1) {
+      motor.update(0.25, { interactionLocked: false, isNpcTalking: () => false })
+      expect(node.position.x).toBe(field.home.x)
+      expect(node.position.z).toBe(field.home.z)
+    }
+  })
+
+  it('never reports walking for a plain idle NPC', () => {
+    const field = openField()
+    const motor = new WanderMotor()
+    const node = makeNode()
+    motor.register({ npcId: 'npc', node, field, seed: 'idle-not-walking', policy: 'idle', home: field.home })
+
+    expect(motor.isWalking('npc')).toBe(false)
+    motor.update(0.25, { interactionLocked: false, isNpcTalking: () => false })
+    expect(motor.isWalking('npc')).toBe(false)
+  })
+
+  it('freezes idle position when paused by interaction lock or npcTalking', () => {
+    const field = openField()
+    const lockedMotor = new WanderMotor()
+    const talkingMotor = new WanderMotor()
+    const lockedNode = makeNode()
+    const talkingNode = makeNode()
+    lockedMotor.register({ npcId: 'npc', node: lockedNode, field, seed: 'idle-lock', policy: 'idle', home: field.home })
+    talkingMotor.register({ npcId: 'npc', node: talkingNode, field, seed: 'idle-talking', policy: 'idle', home: field.home })
+
+    lockedMotor.update(3, { interactionLocked: true, isNpcTalking: () => false })
+    talkingMotor.update(3, { interactionLocked: false, isNpcTalking: (npcId) => npcId === 'npc' })
+
+    expect({ x: lockedNode.position.x, z: lockedNode.position.z }).toEqual(field.home)
+    expect({ x: talkingNode.position.x, z: talkingNode.position.z }).toEqual(field.home)
+    expect(lockedMotor.isWalking('npc')).toBe(false)
+    expect(talkingMotor.isWalking('npc')).toBe(false)
+  })
+
+  it('lets the existing chase override move an idle NPC when chaseEligible && isChaseActive', () => {
+    const field = openField()
+    const motor = new WanderMotor()
+    const node = makeNode()
+    motor.register({ npcId: 'npc', node, field, seed: 'idle-chase-active', policy: 'idle', home: field.home, chaseEligible: true })
+
+    motor.update(0.25, {
+      interactionLocked: false,
+      isNpcTalking: () => false,
+      playerPosition: { x: 2, z: 0 },
+      isChaseActive: () => true,
+    })
+
+    expect(node.position.x).toBeGreaterThan(field.home.x)
+    expect(node.position.z).toBe(0)
+    expect(distance(field.home, node.position)).toBeLessThanOrEqual((NPC_WANDER.MAX_SPEED * 0.25) + 1e-12)
+    expect(motor.isWalking('npc')).toBe(true)
+  })
+
+  it('does not wander an idle NPC when chase is inactive or unavailable', () => {
+    const field = openField()
+    const inactiveMotor = new WanderMotor()
+    const noContextMotor = new WanderMotor()
+    const inactiveNode = makeNode()
+    const noContextNode = makeNode()
+    inactiveMotor.register({ npcId: 'npc', node: inactiveNode, field, seed: 'idle-chase-inactive', policy: 'idle', home: field.home, chaseEligible: true })
+    noContextMotor.register({ npcId: 'npc', node: noContextNode, field, seed: 'idle-chase-none', policy: 'idle', home: field.home, chaseEligible: true })
+
+    inactiveMotor.update(0.25, {
+      interactionLocked: false,
+      isNpcTalking: () => false,
+      playerPosition: { x: 2, z: 0 },
+      isChaseActive: () => false,
+    })
+    noContextMotor.update(0.25, { interactionLocked: false, isNpcTalking: () => false })
+
+    expect({ x: inactiveNode.position.x, z: inactiveNode.position.z }).toEqual(field.home)
+    expect({ x: noContextNode.position.x, z: noContextNode.position.z }).toEqual(field.home)
+    expect(inactiveMotor.isWalking('npc')).toBe(false)
+    expect(noContextMotor.isWalking('npc')).toBe(false)
+  })
+
+  it('holds an idle NPC at the chase-stop position once chase becomes inactive, without further drift', () => {
+    const field = openField()
+    const motor = new WanderMotor()
+    const node = makeNode()
+    motor.register({ npcId: 'npc', node, field, seed: 'idle-chase-stop', policy: 'idle', home: field.home, chaseEligible: true })
+    motor.update(0.25, {
+      interactionLocked: false,
+      isNpcTalking: () => false,
+      playerPosition: { x: 2, z: 0 },
+      isChaseActive: () => true,
+    })
+    const chased = { x: node.position.x, z: node.position.z }
+    expect(distance(field.home, chased)).toBeGreaterThan(0)
+
+    for (let index = 0; index < 5; index += 1) {
+      motor.update(0.25, {
+        interactionLocked: false,
+        isNpcTalking: () => false,
+        playerPosition: { x: 2, z: 0 },
+        isChaseActive: () => false,
+      })
+      expect(node.position.x).toBe(chased.x)
+      expect(node.position.z).toBe(chased.z)
+    }
+    expect(motor.isWalking('npc')).toBe(false)
+  })
+
   it('preserves chase max-step behavior at the motor level', () => {
     const field = openField()
     const motor = new WanderMotor()

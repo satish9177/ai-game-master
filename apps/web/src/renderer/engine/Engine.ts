@@ -24,6 +24,8 @@ import { detectNpcPlayerAwareness } from '../../domain/npcPlayerAwareness'
 import { buildNpcWanderField } from '../../domain/npcMovementContract'
 import { buildNpcPatrolRoute } from '../../domain/npcPatrolContract'
 import { stableHash32 } from '../../domain/stableHash'
+import { routineModeToMotorPolicy } from '../../domain/npcRoutine'
+import type { NpcRoutineMode } from '../../domain/npcRoutine'
 
 export type SetRoomOptions = {
   resolvedObjectIds?: ReadonlySet<string>
@@ -43,6 +45,13 @@ export type SetRoomOptions = {
    * while the existing same-room awareness tier is aware/alerted.
    */
   chaseOptInNpcIds?: ReadonlySet<string>
+  /**
+   * Internal seam only (Slice 2 of the day/night routine foundation). Maps
+   * npcId to the routine mode selected for the current time of day. Not
+   * wired through RoomViewer/App yet; when an npcId is absent, existing
+   * wander/patrol-opt-in behavior is unchanged.
+   */
+  npcRoutineModes?: ReadonlyMap<string, NpcRoutineMode>
 }
 
 /**
@@ -163,6 +172,7 @@ export class Engine {
       this.interactables,
       options.patrolOptInNpcIds,
       options.chaseOptInNpcIds,
+      options.npcRoutineModes,
     ))
     window.addEventListener('keydown', this.onInteractKey)
 
@@ -418,6 +428,7 @@ function registerWanderNpcs(
   interactables: readonly Interactable[],
   patrolOptInNpcIds?: ReadonlySet<string>,
   chaseOptInNpcIds?: ReadonlySet<string>,
+  npcRoutineModes?: ReadonlyMap<string, NpcRoutineMode>,
 ): string[] {
   const npcIds: string[] = []
 
@@ -442,13 +453,20 @@ function registerWanderNpcs(
       ...(interactable !== undefined ? { interactable } : {}),
     }
 
-    const route = patrolOptInNpcIds?.has(objectId) === true
+    const routineMode = npcRoutineModes?.get(objectId)
+    const motorPolicy = routineMode !== undefined
+      ? routineModeToMotorPolicy(routineMode)
+      : (patrolOptInNpcIds?.has(objectId) === true ? 'patrol' : 'wander')
+
+    const route = motorPolicy === 'patrol'
       ? buildNpcPatrolRoute(field, stableHash32(seed))
       : null
 
     wanderMotor.register(
       route !== null
         ? { ...base, policy: 'patrol', route }
+        : motorPolicy === 'idle'
+        ? { ...base, policy: 'idle', home: field.home }
         : { ...base, home: field.home },
     )
     npcIds.push(objectId)
