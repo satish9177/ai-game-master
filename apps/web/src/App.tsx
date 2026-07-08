@@ -1372,17 +1372,23 @@ function App() {
 
   // Demo chase opt-in (ADR-0086): ids only, derived from the active room's
   // present NPC objects. Never reads NPC name, prompt/generated text, dialogue,
-  // or relationship state.
-  const presentNpcIds = new Set<string>()
-  for (const object of activePlay?.room.objects ?? []) {
-    if (object.type === 'npc' && object.id !== undefined) {
-      presentNpcIds.add(object.id)
+  // or relationship state. Memoized on the active room (not on every render):
+  // RoomViewer keys its engine-building effect on this set's identity, so a
+  // fresh `Set` on unrelated re-renders (e.g. dialogue-turn feedback state)
+  // would otherwise remount the engine mid-conversation, closing the NPC
+  // dialogue panel and snapping the NPC back to its registered position.
+  const demoChaseOptInNpcIds = useMemo(() => {
+    const presentNpcIds = new Set<string>()
+    for (const object of activePlay?.room.objects ?? []) {
+      if (object.type === 'npc' && object.id !== undefined) {
+        presentNpcIds.add(object.id)
+      }
     }
-  }
-  const demoChaseOptInNpcIds = selectDemoChaseOptInNpcIds({
-    enabled: demoChaseEnabled,
-    presentNpcIds,
-  })
+    return selectDemoChaseOptInNpcIds({
+      enabled: demoChaseEnabled,
+      presentNpcIds,
+    })
+  }, [activePlay?.room])
 
   return (
     <ErrorBoundary logger={logger}>

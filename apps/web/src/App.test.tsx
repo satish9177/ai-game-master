@@ -711,10 +711,18 @@ describe('App resolved object projection wiring', () => {
     )
     expect(appSource).toContain('const demoChaseEnabled = readDemoChaseEnabled()')
 
-    const computed = appSource.slice(
-      appSource.indexOf('const presentNpcIds = new Set<string>()'),
-      appSource.indexOf('return (', appSource.indexOf('const presentNpcIds = new Set<string>()')),
-    )
+    // Memoized on the active room only (dialogue-remount-fix): a fresh Set on
+    // every render would change RoomViewer's chaseOptInNpcIds identity, and
+    // RoomViewer's engine-building effect is keyed on that identity, so any
+    // unrelated re-render (e.g. dialogue-turn/relationship feedback state)
+    // would otherwise remount the engine mid-conversation.
+    const memoStart = appSource.indexOf('const demoChaseOptInNpcIds = useMemo(() => {')
+    expect(memoStart).toBeGreaterThan(-1)
+    const memoEnd = appSource.indexOf('}, [activePlay?.room])', memoStart)
+    expect(memoEnd).toBeGreaterThan(memoStart)
+
+    const computed = appSource.slice(memoStart, memoEnd)
+    expect(computed).toContain('const presentNpcIds = new Set<string>()')
     expect(computed).toContain("object.type === 'npc' && object.id !== undefined")
     expect(computed).toContain('presentNpcIds.add(object.id)')
     expect(computed).toContain('enabled: demoChaseEnabled')
@@ -723,6 +731,12 @@ describe('App resolved object projection wiring', () => {
     expect(computed).not.toMatch(/\.name\b/)
     expect(computed).not.toContain('dialogue')
     expect(computed).not.toContain('roomContext')
+
+    // The dependency array is exactly [activePlay?.room] — not any dialogue,
+    // feedback, quest, or journal state that changes while a conversation is
+    // in progress — so React only recomputes (and RoomViewer only remounts
+    // its engine) when the active room itself changes.
+    expect(appSource).toContain('}, [activePlay?.room])')
 
     const render = appSource.slice(
       appSource.indexOf('<RoomViewer'),
@@ -736,6 +750,22 @@ describe('App resolved object projection wiring', () => {
     // no direct import.meta.env access and no raw env var name in the render.
     expect(render).not.toContain('import.meta.env')
     expect(render).not.toContain('VITE_AIGM_DEMO_CHASE')
+  })
+
+  it('demo chase opt-in Set identity is stable across calls given the same present ids (regression guard for the dialogue-remount fix)', () => {
+    // Documents the causal chain the useMemo fix relies on: RoomViewer.tsx's
+    // engine-building effect lists chaseOptInNpcIds in its dependency array, so
+    // a new Set reference on every App render (the pre-fix behavior) would
+    // remount the engine on every unrelated re-render. Wrapping the derivation
+    // in useMemo([activePlay?.room]) means React reuses the same Set reference
+    // across renders that don't change the active room — this asserts the
+    // selector itself is a plain, side-effect-free function of its inputs (no
+    // hidden per-call state), which is what makes memoizing it correct.
+    const presentNpcIds = new Set(['herald-asha'])
+    const first = selectDemoChaseOptInNpcIds({ enabled: true, presentNpcIds })
+    const second = selectDemoChaseOptInNpcIds({ enabled: true, presentNpcIds })
+    expect(Array.from(first)).toEqual(Array.from(second))
+    expect(first).not.toBe(second) // selector alone doesn't memoize; useMemo must
   })
 
   it('demo chase opt-in selection matches App wiring: off by default, id-only, allowlist-gated', () => {
