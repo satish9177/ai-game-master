@@ -2,7 +2,8 @@ import { z } from 'zod'
 import type { Affordance } from '../interactions/affordance'
 import type { RoomObject } from '../roomSpec'
 import type { RelationshipDialogueContext } from '../npcRelationship/dialogueContext'
-import type { PromptTimeContext } from '../world/worldClock'
+import type { PromptTimeContext, TimeOfDay } from '../world/worldClock'
+import type { NpcRoutineMode } from '../npcRoutine'
 
 export const NPCDialoguePromptSchema = z
   .object({
@@ -59,6 +60,24 @@ export type RoomMemoryDialogueContext = {
   entries: RoomMemoryContextEntry[]
 }
 
+/**
+ * Closed activity label, one per {@link NpcRoutineMode} value (fixed 1:1 mapping,
+ * npc-routine-dialogue-context-v0 / ADR-0089).
+ */
+export type NPCRoutineActivity = 'standing by' | 'patrolling' | 'resting' | 'keeping a quiet watch'
+
+/**
+ * Bounded, read-only, advisory current-activity hint (npc-routine-dialogue-context-v0,
+ * Slice 1 / ADR-0089). Sourced from the movement layer's already-resolved
+ * `NpcRoutineMode` -- never a second resolution. No schedule details, no npc id/name/
+ * persona/dialogue/room/prompt/provider/generated text.
+ */
+export type RoutineDialogueContext = {
+  mode: NpcRoutineMode
+  activity: NPCRoutineActivity
+  timeOfDay: TimeOfDay
+}
+
 export type NPCDialogueContext = {
   roomId: string
   npcId: string
@@ -85,6 +104,10 @@ export type NPCDialogueContext = {
    * or hour; see `PromptTimeContext`.
    */
   time?: PromptTimeContext
+  /**
+   * Bounded, read-only, advisory current-activity hint. See `RoutineDialogueContext`.
+   */
+  routine?: RoutineDialogueContext
 }
 
 export type NPCDialogueRequest = {
