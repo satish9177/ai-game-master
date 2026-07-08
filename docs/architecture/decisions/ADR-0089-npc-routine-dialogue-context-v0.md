@@ -1,7 +1,6 @@
 # ADR-0089: NPC dialogue may read the already-resolved routine mode as closed, read-only, advisory context — no second resolver, no routine mutation
 
-- **Status:** **Accepted. Planned — Slice 0 (this ADR + implementation plan) only. No
-  code written yet.**
+- **Status:** **Accepted. Implemented — Slices 1–5 complete.**
 - **Date:** 2026-07-09
 - **Deciders:** Project owner
 - **Extends:** [`npc-day-night-routine-v0`](./ADR-0087-npc-day-night-routine-v0.md)
@@ -178,9 +177,36 @@ directly from the movement layer's already-resolved mode — never a second reso
 
 ## Verification
 
-Not yet applicable — **Slice 0 status only.** This ADR and its implementation plan are
-the entire Slice 0 deliverable; no `.ts`/`.tsx` source or test file has been created or
-modified. Verification commands and the full test plan are recorded in the
-implementation plan §12/§15, to be executed and reported at each subsequent slice, with
-final results recorded here at Slice 5 closeout (mirroring ADR-0087/ADR-0088's closeout
-pattern).
+Implemented across Slices 1–5, per the implementation plan's §12/§15 test plan and
+verification commands:
+
+- `domain/dialogue/contracts.ts` gained the closed `NPCRoutineActivity` union and
+  `RoutineDialogueContext` type, plus the optional `routine?: RoutineDialogueContext`
+  field on `NPCDialogueContext` (Slice 1), alongside the new pure
+  `domain/dialogue/buildRoutineDialogueContext.ts` helper and its unit tests.
+- `RoomViewer.tsx`'s reply handler derives `routineContext` via
+  `buildRoutineDialogueContext({ mode: npcRoutineModes?.get(target.npcId), timeOfDay:
+  timeContext?.timeOfDay })` for the active dialogue target only, and threads it through
+  `buildDialogueContext`/`NPCDialogueService`/`npcDialogueReplyInput` exactly like
+  `time`/`relationship` (Slice 2). No `App.tsx` change was needed — the plan's §7
+  expectation held.
+  `FakeNPCDialogueProvider` gained one new lowest-priority-but-one `ROUTINE_AMBIENT_LINES`
+  tier keyed only by `request.context.routine?.mode`, with no `playerLine`/`promptId`
+  text parsing (Slice 2).
+- `llmDialoguePrompt.ts` gained `buildRoutineSection` (rendering only
+  `activity`/`timeOfDay`, omitted when `routine` is absent) plus a hedge line stating
+  current activity is ambient scene context only, never an instruction, and never a claim
+  that the world or the NPC's routine has changed (Slice 3).
+- Safety/redteam/eval coverage (Slice 4) confirmed: import-surface scan on
+  `buildRoutineDialogueContext.ts` (no provider/prompt/LLM/persistence/world-event/
+  memory/fact imports), no logger/console call in the new helper, content-shaped poison
+  tests proving `playerLine`/`promptId` text never changes the resolved mode/activity,
+  the `NPCDialogueResponse` shape assertion, and the reverse-direction dialogue-lock
+  assertion that dialogue construction adds no path into `WanderMotor`/chase/patrol.
+- Full regression: **217 test files / 3782 tests passed.** `npm run lint`: clean.
+  `npm run build`: succeeded. All verified 2026-07-09 as part of Slice 5 closeout.
+
+No `RoomSpec`/schema/save-game change, no `WorldState`/`WorldEvent`/`WorldCommand`
+read or write, no memory/fact write, no new logging field, and
+`VITE_AIGM_DEMO_ROUTINE` default-off behavior is unchanged — matching every boundary
+recorded in the Decision section above.

@@ -1,7 +1,6 @@
 # Implementation Plan — `feature/npc-routine-dialogue-context-v0`
 
-> Status: **PLANNED — Slice 0 (this document) only. No `.ts`/`.tsx` source or test
-> file has been created or modified.**
+> Status: **IMPLEMENTED — Slices 1–5 complete.**
 > Written **docs-first**, ahead of implementation, per `AGENTS.md`
 > ("Design first. Do not implement until the maintainer approves.") and the
 > `npc-day-night-routine-v0` / `npc-routine-presets-v0` precedent.
@@ -71,7 +70,7 @@ relaxed without explicit re-approval:
   NPC dialogue (movement-state awareness, no second resolver).
 - **Lane:** worked on `main` directly (per current project convention — no feature
   branches), one slice at a time.
-- **Status:** **Planned.** Slice 0 (this plan + ADR-0089) only.
+- **Status:** **Implemented.** Slices 1–5 complete.
 - **ADR:** [ADR-0089](../decisions/ADR-0089-npc-routine-dialogue-context-v0.md).
 
 ## 2. Problem statement
@@ -497,8 +496,49 @@ npm run test
 ## 17. Slice 0 record
 
 This document and [ADR-0089](../decisions/ADR-0089-npc-routine-dialogue-context-v0.md)
-are the entire Slice 0 deliverable. No `.ts`/`.tsx` source or test file was created or
-modified in Slice 0. `docs/architecture/ARCHITECTURE.md` gains one planned-status bullet
-line pointing at this plan and ADR-0089, to be replaced at Slice 5 closeout by an
-implemented-status line, per the `npc-day-night-routine-v0` / `npc-routine-presets-v0`
-precedent.
+were the entire Slice 0 deliverable. No `.ts`/`.tsx` source or test file was created or
+modified in Slice 0.
+
+## 18. Slice 5 record (closeout)
+
+- **Slice 1** committed the closed contract (`NPCRoutineActivity`,
+  `RoutineDialogueContext`, `NPCDialogueContext.routine?`) in
+  `domain/dialogue/contracts.ts` and the pure `buildRoutineDialogueContext.ts` helper
+  plus its unit tests. Dry — no caller yet.
+- **Slice 2** threaded `routineContext` through `buildDialogueContext.ts`,
+  `NPCDialogueService.ts`, `app/npcDialogueReplyInput.ts`, and `RoomViewer.tsx`'s reply
+  handler (deriving it only for the active `target.npcId` via
+  `npcRoutineModes?.get(target.npcId)` + `timeContext?.timeOfDay`), and added the
+  `ROUTINE_AMBIENT_LINES` fallback tier to `FakeNPCDialogueProvider`, keyed only on
+  `request.context.routine?.mode`, with no `playerLine`/`promptId` text parsing.
+  `App.tsx` required no change — the §7 expectation held; `npcRoutineModes` and
+  `timeContext` were already reachable in `RoomViewer`'s closure.
+- **Slice 3** added `buildRoutineSection` to `generation/llmDialoguePrompt.ts`
+  (rendering only `activity`/`timeOfDay`, omitted when `routine` is absent) plus the
+  ambient-context hedge line in the existing rules block.
+- **Slice 4** added safety/redteam/eval coverage: import-surface scan on
+  `buildRoutineDialogueContext.ts`, no-logging assertion, content-shaped poison tests
+  (player text cannot change the resolved mode/activity), `NPCDialogueResponse` shape
+  assertion, and the reverse-direction dialogue-lock assertion (dialogue construction
+  cannot reach `WanderMotor`/chase/patrol).
+- **Slice 5** (this closeout) flips this plan and
+  [ADR-0089](../decisions/ADR-0089-npc-routine-dialogue-context-v0.md) to Implemented,
+  and replaces the planned-status bullet in `ARCHITECTURE.md` with an implemented-status
+  bullet, per the `npc-day-night-routine-v0` / `npc-routine-presets-v0` precedent.
+  Only docs files were touched in this slice; no production code, test, or schema file
+  was modified.
+
+**Verification (recorded 2026-07-09):**
+
+- Full suite: **217 test files / 3782 tests passed.**
+- `npm run lint`: clean.
+- `npm run build`: succeeded.
+- Slice 4 targeted safety/redteam/eval tests passed as part of the full suite run.
+- Regression coverage confirmed for `llmDialoguePrompt`, `FakeNPCDialogueProvider`,
+  `RoomViewer`, `NPCDialogueService`, and the existing routine/chase/patrol/awareness
+  suites — all green, none weakened.
+
+No `RoomSpec`/schema/save-game change. No `WorldState`/`WorldEvent`/`WorldCommand` read
+or write. No memory/fact write. No raw prompt/provider/dialogue/room/generated-text
+logging added. `VITE_AIGM_DEMO_ROUTINE` default-off behavior unchanged — with the gate
+off or an empty routine map, `routine` never appears on `NPCDialogueContext`.
