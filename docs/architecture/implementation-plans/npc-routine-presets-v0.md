@@ -1,6 +1,6 @@
 # Implementation Plan — `feature/npc-routine-presets-v0`
 
-> Status: **Planned. Slice 0 (this document) only. No code written yet.**
+> Status: **IMPLEMENTED — Slices 0–3 shipped; Slice 4 (this closeout) complete.**
 > Written **docs-first**, ahead of implementation, per `AGENTS.md`
 > ("Design first. Do not implement until the maintainer approves.") and the
 > `npc-day-night-routine-v0` precedent.
@@ -53,7 +53,7 @@ explicit re-approval:
   (authored-id-only, V0).
 - **Lane:** worked on `main` directly (per current project convention — no feature
   branches), one slice at a time.
-- **Status:** **Planned.** Slice 0 (this plan + ADR-0088) only.
+- **Status:** **Implemented.** Slices 0–3 shipped; Slice 4 (docs/ADR closeout) complete.
 - **ADR:** [ADR-0088](../decisions/ADR-0088-npc-routine-presets-v0.md).
 
 ## 2. Problem statement
@@ -408,3 +408,86 @@ entire Slice 0 deliverable. No `.ts`/`.tsx` source or test file was created or m
 in Slice 0. `docs/architecture/ARCHITECTURE.md` gains one planned-status bullet line
 pointing at this plan and ADR-0088, to be replaced at Slice 4 closeout by an
 implemented-status line, per the `npc-day-night-routine-v0` precedent.
+
+## 19. Slice 4 closeout record (this update)
+
+**Implemented, option A only.** A reusable, closed authored id → closed NPC type →
+closed routine preset → closed time-bucket schedule layer now sits ahead of the existing
+per-id routine lookup, unchanged in priority or safety posture from ADR-0087.
+
+- **Resolution priority, exactly as designed (§6):** an explicit
+  `NPC_ROUTINE_CONFIG[npcId]` entry (ADR-0087, unchanged) still wins first — `herald-asha`
+  resolves exactly as it did before this feature. Only when no explicit entry exists does
+  `resolveRoutineScheduleForNpc` (`domain/npcRoutinePresets.ts`) consult a closed
+  `npcType` looked up from the authored `NPC_TYPE_BY_ID` map
+  (`domain/npcRoutineTypeConfig.ts`) and map it through a closed preset to a schedule.
+  Any unknown id, unknown/free-text type, or unmapped preset returns `null` — no routine,
+  never a thrown error, never an invented default.
+- **`NPC_TYPE_BY_ID` (`domain/npcRoutineTypeConfig.ts`) currently contains exactly one
+  entry in v0: `'herald-asha': 'guard'`.** It is a frozen, id-keyed allowlist in the same
+  closed-map shape as `NPC_ROUTINE_CONFIG` and `DEMO_CHASE_NPC_IDS` — never derived,
+  discovered, or expanded at runtime from any content source.
+- **Closed vocabularies shipped as planned (§5):** `NpcRoutineNpcType` (`guard | merchant
+  | villager | noble | servant | wanderer | static_npc`) and `NpcRoutinePreset`
+  (`stationary | day_patrol_night_rest | day_idle_night_rest | wander_day_rest_night |
+  patrol_morning_day_rest_night`) are both closed string-literal unions with runtime
+  type-guard checks (`isNpcRoutineNpcType`/`isNpcRoutinePreset`) in
+  `domain/npcRoutinePresets.ts` — no free text, no open enum.
+- **`ROUTINE_PRESETS` uses only the four existing closed modes** (`idle | patrol | rest |
+  passive`) from ADR-0087. No fifth mode and no new motor policy were added.
+- **Unknown id, unknown type, or unknown/invalid preset all resolve to `null`** (no
+  routine) — proven by the Slice 1/2 unit tests and the Slice 3 redteam coverage; the
+  resolver never throws.
+- **Generated NPCs are not solved by this feature**, exactly as scoped: a generated NPC
+  id (e.g. `generated-npc-2`) receives a routine only if a maintainer explicitly adds it
+  to `NPC_TYPE_BY_ID` or `NPC_ROUTINE_CONFIG` by hand. No automatic classification path
+  was added.
+- **Option B (optional closed `routineType`/`npcType` enum field on the RoomSpec `Npc`
+  schema) remains deferred**, exactly as recorded in §16/ADR-0088 — not started in this
+  feature. It would be populated only by trusted generated-assembly code, never trusted
+  directly from provider output, and requires its own separate schema approval and ADR
+  before any code is written.
+- **Option E (LLM/provider-generated routine text or schedules) remains permanently
+  rejected**, per §17/ADR-0088 — no code path in this feature lets an LLM or provider
+  propose routine text or a schedule.
+
+Safety/non-goals re-confirmed at closeout (all still hold):
+
+- No RoomSpec/schema/save-game/persistence change of any kind; no `schemaVersion` bump.
+- No generated-NPC classification, inference, or type assignment of any kind.
+- No provider/prompt/LLM change.
+- No content-derived behavior from NPC name, persona, dialogue, room text, prompt text,
+  provider output, generated text, relationship state, or journal state — the resolver's
+  only inputs are an id string, a closed-enum type value looked up from a frozen authored
+  map, and frozen authored preset/schedule tables.
+- No relationship-driven routine behavior.
+- No new routine modes or motor policies; `ROUTINE_PRESETS` is built only from
+  ADR-0087's existing four closed modes.
+- No combat/damage/HP/death/capture/injury/encounters/items/quests.
+- No cross-room movement.
+- No timers or background simulation of any kind.
+- No `WorldState`/`WorldEvent`/`WorldCommand` read or write.
+- No memory/fact/`fact_visibility` read or write.
+- No raw prompt/provider/dialogue/room-text/generated-text logging.
+- `VITE_AIGM_DEMO_ROUTINE` default-off behavior is unchanged and unaffected by this
+  feature — the gate, present-NPC intersection, and every ADR-0087 safety property are
+  reused verbatim.
+
+### Verification (run from `apps/web`)
+
+- Full suite (`npm run test`) — 216 files / 3726 tests passed.
+- `npm run lint` — clean.
+- `npm run build` — succeeded.
+- Targeted safety/redteam/import-surface coverage
+  (`src/redteam/npcRoutine.redteam.test.ts`, `src/domain/npcRoutinePresets.test.ts`,
+  `src/domain/npcRoutineTypeConfig.test.ts`, `src/app/npcRoutine.test.ts`) — passed
+  (part of the full-suite run above).
+- App/RoomViewer/routine/chase/patrol/awareness regressions
+  (`src/App.test.tsx`, `src/renderer/RoomViewer.test.ts`, `src/domain/npcRoutine.test.ts`,
+  `src/domain/npcRoutineConfig.test.ts`, `src/renderer/engine/npc/chaseStep.test.ts`,
+  `src/renderer/engine/npc/patrolStep.test.ts`, `src/renderer/engine/npc/WanderMotor.test.ts`,
+  `src/renderer/engine/Engine.test.ts`) — passed (part of the full-suite run above), no
+  weakening of ADR-0087/ADR-0084/ADR-0083/ADR-0080 behavior or tests.
+
+Boundaries re-confirmed at closeout (all still hold): see the safety/non-goals list
+above; every item was true before this feature and remains true after it.

@@ -1,6 +1,7 @@
 # ADR-0088: NPC routine presets are a closed authored-id → closed-type → closed-preset lookup layer — no schema change, no generated-NPC classification, in V0
 
-- **Status:** **Accepted. Planned — Slice 0 (this ADR + implementation plan) only.**
+- **Status:** **Accepted. Implemented — Slices 0–3 shipped; Slice 4 (docs closeout)
+  complete.**
 - **Date:** 2026-07-08
 - **Deciders:** Project owner
 - **Extends:** [`npc-day-night-routine-v0`](./ADR-0087-npc-day-night-routine-v0.md)
@@ -157,6 +158,24 @@ reconsider this without a full renegotiation of the generation-safety boundaries
 
 ## Verification
 
-Not yet run — Slice 0 (this ADR + implementation plan) introduces no `.ts`/`.tsx`
-source or test file. Verification commands and results will be recorded here at Slice
-4 closeout, per the implementation plan's §14 command list and the ADR-0087 precedent.
+Implemented per this ADR's decision, with no relaxation: `NPC_ROUTINE_CONFIG` (ADR-0087)
+still wins first; `NPC_TYPE_BY_ID` contains exactly `herald-asha -> guard` in v0; every
+preset resolves only to ADR-0087's four closed modes; unknown id/type/preset resolves to
+`null`; generated NPCs remain unsolved by this feature; option B stays deferred and
+option E stays permanently rejected. Full detail and the closed-vocabulary/mapping record
+live in the implementation plan's §19 Slice 4 closeout record.
+
+- Full suite (`npm run test`, run from `apps/web`) — 216 files / 3726 tests passed.
+- `npm run lint` — clean.
+- `npm run build` — succeeded.
+- Targeted safety/redteam/import-surface coverage
+  (`src/redteam/npcRoutine.redteam.test.ts`, `src/domain/npcRoutinePresets.test.ts`,
+  `src/domain/npcRoutineTypeConfig.test.ts`, `src/app/npcRoutine.test.ts`) passed, proving
+  no content-derived classification path and no import surface onto provider/prompt/
+  persistence/world-event/memory/fact modules.
+- App/RoomViewer/routine/chase/patrol/awareness regressions
+  (`src/App.test.tsx`, `src/renderer/RoomViewer.test.ts`, `src/domain/npcRoutine.test.ts`,
+  `src/domain/npcRoutineConfig.test.ts`, `src/renderer/engine/npc/chaseStep.test.ts`,
+  `src/renderer/engine/npc/patrolStep.test.ts`, `src/renderer/engine/npc/WanderMotor.test.ts`,
+  `src/renderer/engine/Engine.test.ts`) passed with no weakening of ADR-0087/ADR-0084/
+  ADR-0083/ADR-0080 behavior or tests.

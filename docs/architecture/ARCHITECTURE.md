@@ -410,21 +410,29 @@ Throughout these docs:
   added
   ([ADR-0087](./decisions/ADR-0087-npc-day-night-routine-v0.md),
   [implementation plan](./implementation-plans/npc-day-night-routine-v0.md)).
-- 🔜 **Planned** — NPC Routine Presets v0 — extends `npc-day-night-routine-v0`
+- ✅ **Implemented** — NPC Routine Presets v0 — extends `npc-day-night-routine-v0`
   (ADR-0087) with a reusable, closed authored id → closed NPC type
   (`guard | merchant | villager | noble | servant | wanderer | static_npc`) → closed
   routine preset (`stationary | day_patrol_night_rest | day_idle_night_rest |
   wander_day_rest_night | patrol_morning_day_rest_night`) → closed time-bucket schedule
-  lookup, so authored/demo NPCs can share a routine by type instead of each needing a
-  hand-written per-id schedule. Explicit `NPC_ROUTINE_CONFIG` id entries (e.g.
-  `herald-asha`) still win over any type-derived preset. No RoomSpec/schema/save-game
-  change; no generated-NPC classification (a generated NPC id gets a routine only if a
-  maintainer explicitly authors it into the id-keyed maps) — the option that would
-  scale to generated NPCs (an optional closed `npcType` enum field on the RoomSpec
-  `Npc` schema, set only by trusted generated assembly) is recorded as a deferred,
-  separately-approved future V1, not started here; LLM/provider-generated routine
-  schedules are permanently rejected. Slice 0 (docs/ADR) only — no `.ts`/`.tsx` change
-  yet
+  lookup (`domain/npcRoutinePresets.ts`), so authored/demo NPCs can share a routine by
+  type instead of each needing a hand-written per-id schedule.
+  `resolveRoutineScheduleForNpc` checks explicit `NPC_ROUTINE_CONFIG` (ADR-0087) id
+  entries first — `herald-asha` still resolves exactly as it did before this feature —
+  and only then falls through to a type-derived preset; every preset is built only from
+  ADR-0087's four closed modes; any unknown id, type, or preset resolves to `null`, never
+  a thrown error. The NPC type source in v0 is a single frozen, authored, id-keyed map,
+  `NPC_TYPE_BY_ID` (`domain/npcRoutineTypeConfig.ts`), containing exactly `herald-asha ->
+  guard`. No RoomSpec/schema/save-game change; no generated-NPC classification (a
+  generated NPC id gets a routine only if a maintainer explicitly authors it into the
+  id-keyed maps) — the option that would scale to generated NPCs (an optional closed
+  `npcType` enum field on the RoomSpec `Npc` schema, set only by trusted generated
+  assembly) is recorded as a deferred, separately-approved future V1, not started here;
+  LLM/provider-generated routine schedules are permanently rejected. No content-derived
+  classification from NPC name/persona/dialogue/room text/prompt/provider output/
+  relationship/journal state; no `WorldState`/`WorldEvent`/`WorldCommand`, memory/fact,
+  persistence, or provider/prompt change; `VITE_AIGM_DEMO_ROUTINE` default-off behavior
+  is unchanged
   ([ADR-0088](./decisions/ADR-0088-npc-routine-presets-v0.md),
   [implementation plan](./implementation-plans/npc-routine-presets-v0.md)).
 - ❌ **Not built** — future shape only; documented so we don't paint into a corner.
