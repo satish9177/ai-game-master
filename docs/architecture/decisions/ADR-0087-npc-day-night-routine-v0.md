@@ -1,6 +1,7 @@
 # ADR-0087: NPC day/night routine is a deterministic, same-room, movement-only policy layer over trusted authored config — opt-in only, no consumer of gameplay authority
 
-- **Status:** Accepted (design) — **Slice 0 only: docs written, no code yet.**
+- **Status:** **Accepted and Implemented.** Slices 0–3 and 5 shipped; Slice 4
+  (visual/debug presentation) intentionally skipped; Slice 6 (docs closeout) complete.
 - **Date:** 2026-07-08
 - **Deciders:** Project owner
 - **Builds on:** the deterministic event-log-derived world clock
@@ -186,13 +187,65 @@ existing wander/patrol/chase/pause stack.
 
 ## Verification
 
-**Not yet run — Slice 0 is docs-only.** This section will be completed at Slice 6
-closeout with the same shape as ADR-0080/ADR-0086: files changed per slice, verification
-commands actually executed, and results (test counts, `tsc`/`eslint` status), plus a
-re-confirmed safety boundary checklist. Until then:
+Implemented files:
 
-- No `.ts`/`.tsx` source or test file has been created or modified by this ADR or its
-  companion implementation plan.
-- `docs/architecture/ARCHITECTURE.md` gained one planned-status line pointing at this ADR
-  and the implementation plan; it will be replaced by an implemented-status line at
-  closeout.
+- `apps/web/src/domain/npcRoutine.ts` — closed `NpcRoutineMode`/`NpcRoutineSchedule`
+  types, pure `selectRoutineMode` (fail-closed to `null`), and the total
+  `routineModeToMotorPolicy` mapping (`patrol`→`patrol`, `passive`→`wander`,
+  `idle`/`rest`→`idle`).
+- `apps/web/src/domain/npcRoutine.test.ts`, `apps/web/src/domain/npcRoutineConfig.test.ts`
+  — unit coverage for the pure model and the frozen config.
+- `apps/web/src/domain/npcRoutineConfig.ts` — the frozen, id-keyed static authored config;
+  V0 contains exactly one entry, `herald-asha`.
+- `apps/web/src/renderer/engine/npc/WanderMotor.ts` — new `idle` policy branch (stationary
+  hold, reusing the existing pause/`syncXZ` shape); pause and chase branches unchanged.
+- `apps/web/src/renderer/engine/Engine.ts` — `SetRoomOptions.npcRoutineModes` seam;
+  `registerWanderNpcs` maps a routine-mapped NPC to its motor policy via
+  `routineModeToMotorPolicy`, fail-closed to wander for an unbuildable patrol route;
+  unmapped NPCs keep the unmodified existing branch.
+- `apps/web/src/app/npcRoutine.ts`, `apps/web/src/app/npcRoutine.test.ts` — the
+  `readRoutineEnabled` gate reader and `selectNpcRoutineModes` selector (configured ∩
+  present ids, resolved against `worldClock.timeOfDay`), mirroring `demoChaseOptIn.ts`.
+- `apps/web/src/App.tsx` — a `useMemo` keyed on `[activePlay?.room,
+  worldClock?.timeOfDay]` builds the resolved routine map from validated `room.objects`
+  ids and forwards it to `RoomViewer` only when non-empty.
+- `apps/web/src/renderer/RoomViewer.tsx` — optional `npcRoutineModes` prop threaded into
+  the existing `SetRoomOptions` merge and the room-load effect's dependency array.
+- `apps/web/src/redteam/npcRoutine.redteam.test.ts` — dedicated safety/eval regression
+  (no-side-effect scan, gate-off parity, dialogue-not-gated-by-routine-mode, log-safety
+  boundaries).
+- Targeted extensions to `WanderMotor.test.ts`, `Engine.test.ts`, `App.test.tsx`,
+  `RoomViewer.test.ts`.
+
+Slice 4 (optional debug indicator) was evaluated and **skipped**: no separate approval
+was given, mirroring the ADR-0086 Slice 3 precedent, so no new presentation/UI surface
+was added.
+
+Verification results (run from `apps/web`):
+
+- `npx vitest run src/domain/npcRoutine.test.ts src/domain/npcRoutineConfig.test.ts src/app/npcRoutine.test.ts src/renderer/engine/npc/WanderMotor.test.ts src/renderer/engine/Engine.test.ts src/redteam/npcRoutine.redteam.test.ts` —
+  6 files / 133 tests passed.
+- `npx vitest run src/App.test.tsx src/renderer/engine/npc/patrolStep.test.ts src/renderer/engine/npc/chaseStep.test.ts` —
+  3 files / 199 tests passed, unmodified.
+- `npx vitest run src/renderer/RoomViewer.test.ts` — 37 tests passed.
+- `npm run lint` — clean.
+- `npm run build` — succeeded.
+- `npm run test` (full suite) — 214 files, 3680 tests passed.
+
+Boundaries re-confirmed at closeout (all still hold):
+
+- Default off; closed, id-keyed authored allowlist; present-only selection.
+- Movement/presentation only; `rest`/`passive`/`idle` carry no gameplay consequence;
+  `passive` does not block dialogue.
+- Same-room only; no background simulation; no timer of any kind.
+- Dialogue/interaction lock still pauses movement first; chase remains independent and
+  unmodified, still pre-empting routine only through the existing `chaseEligible &&
+  isChaseActive` (awareness) path.
+- No `WorldState` / `WorldEvent` / `WorldCommand` / `applyEvent` change.
+- No persistence / schema / save-game / `RoomSpec` mutation; no `schemaVersion` bump.
+- No memory / fact / `fact_visibility` read or write.
+- No LLM / provider / prompt change.
+- No raw prompt/provider/dialogue/room-text/generated-text logging.
+- Existing `patrolStep` / `chaseStep` / `WanderMotor` / `Engine` / awareness safety tests
+  remain green and unmodified.
+- Full suite remains green.

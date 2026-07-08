@@ -1,7 +1,8 @@
 # Implementation Plan — `feature/npc-day-night-routine-v0`
 
-> Status: **DESIGN APPROVED — Slice 0 (this document + ADR) only. No code written yet.**
-> This plan is written **docs-first**, ahead of implementation, per `AGENTS.md`
+> Status: **IMPLEMENTED — Slices 0–3 and 5 shipped; Slice 4 (visual/debug presentation)
+> intentionally skipped; Slice 6 (this closeout) complete.**
+> This plan was written **docs-first**, ahead of implementation, per `AGENTS.md`
 > ("Design first. Do not implement until the maintainer approves.") and the
 > "land a dry/tested foundation before wiring behavior" pattern used by
 > [`npc-patrol-route-v0`](./npc-patrol-route-v0.md) ([ADR-0080](../decisions/ADR-0080-npc-patrol-route-v0.md)).
@@ -52,8 +53,9 @@ not be relaxed without explicit re-approval:
 
 - **Feature:** `npc-day-night-routine-v0` — Deterministic Same-Room NPC Day/Night Routine
   Foundation.
-- **Lane:** worked on `main` directly; no feature branch.
-- **Status:** Slice 0 (docs-only) in progress. Slices 1–6 not started.
+- **Lane:** worked on `feature/npc-day-night-routine-v0`.
+- **Status:** **Implemented.** Slices 0–3 and 5 shipped; Slice 4 (visual/debug
+  presentation) intentionally skipped; Slice 6 (docs/ADR closeout) complete.
 - **ADR:** [ADR-0087](../decisions/ADR-0087-npc-day-night-routine-v0.md).
 
 ## 2. Problem statement
@@ -306,23 +308,25 @@ Mirrors `demoChaseOptIn` end to end:
 
 ## 15. Implementation slices
 
-1. **Slice 1 — Pure routine model + config + tests.** `domain/npcRoutine.ts`,
+1. **Slice 1 — Pure routine model + config + tests. Shipped.** `domain/npcRoutine.ts`,
    `domain/npcRoutineConfig.ts`, and their tests. No renderer/engine/app changes.
-2. **Slice 2 — Motor `idle` policy + Engine routine integration + tests.** Extend
+2. **Slice 2 — Motor `idle` policy + Engine routine integration + tests. Shipped.** Extend
    `WanderMotor.ts` (new policy branch) and `Engine.ts` (`registerWanderNpcs` routine
    branch, `SetRoomOptions.npcRoutineModes`), plus extended `WanderMotor.test.ts` /
    `Engine.test.ts`.
-3. **Slice 3 — App/RoomViewer opt-in wiring + tests.** `app/npcRoutine.ts` selector,
-   `App.tsx` memo + conditional prop spread, `RoomViewer.tsx` prop/`SetRoomOptions`/effect
-   deps, plus their tests.
-4. **Slice 4 — Optional visual/debug presentation.** Only if separately approved after
-   Slice 3 lands; likely skipped, mirroring the ADR-0086 Slice 3 precedent where manual
-   smoke testing showed the transition was already observable without one.
-5. **Slice 5 — Safety/eval tests.** No-side-effect scan + regression run of existing
-   chase/patrol/awareness suites to prove no weakening.
-6. **Slice 6 — Docs/ADR closeout.** Flip this plan and ADR-0087 to Implemented, add the
-   `ARCHITECTURE.md` implemented-status line (replacing the planned line added in Slice
-   0), record verification results.
+3. **Slice 3 — App/RoomViewer opt-in wiring + tests. Shipped.** `app/npcRoutine.ts`
+   selector, `App.tsx` memo + conditional prop spread, `RoomViewer.tsx`
+   prop/`SetRoomOptions`/effect deps, plus their tests.
+4. **Slice 4 — Optional visual/debug presentation. Intentionally skipped.** Evaluated
+   after Slice 3 landed; not separately approved, mirroring the ADR-0086 Slice 3
+   precedent where manual smoke testing showed the transition was already observable
+   without one. No new presentation/UI surface was added.
+5. **Slice 5 — Safety/eval tests. Shipped.** No-side-effect scan
+   (`src/redteam/npcRoutine.redteam.test.ts`) + regression run of existing
+   chase/patrol/awareness suites, unmodified, proving no weakening.
+6. **Slice 6 — Docs/ADR closeout. This update.** Flipped this plan and ADR-0087 to
+   Implemented, added the `ARCHITECTURE.md` implemented-status line (replacing the
+   planned line added in Slice 0), recorded verification results below.
 
 Each slice is independently reviewable and keeps the full suite green.
 
@@ -340,18 +344,19 @@ Each slice is independently reviewable and keeps the full suite green.
 | Persistence/schema creep | No RoomSpec/save-game/WorldState field; nothing persisted; no `schemaVersion` bump. |
 | Logging leakage | Only safe enums/booleans/counts, if anything; no NPC/room names, prompts, or provider bodies. |
 
-## 17. Open questions
+## 17. Open questions — resolved at closeout
 
-1. Final `NPC_ROUTINE_CONFIG` entries (which NPC id(s), which mode per bucket) — confirm
-   the concrete authored schedule in Slice 1; the example in §6 is illustrative only.
-2. Whether Slice 3 needs an explicit "dialogue availability independent of routine mode"
-   test, or whether existing dialogue-lookup tests already cover it by construction
-   (dialogue lookup does not consult movement state at all) — resolve during Slice 3.
-3. Whether the internal seam name is `npcRoutineModes` (a resolved `Map`) vs. two separate
-   fields (`routineOptInNpcIds` + a schedule lookup) — the resolved-map shape is
-   recommended (§9–§11) because it keeps time-bucket resolution in the composition root
-   and the Engine mechanical, mirroring how `chaseOptInNpcIds` is already a resolved set
-   rather than a raw config reference.
+1. **Final `NPC_ROUTINE_CONFIG` entries.** Resolved in Slice 1 exactly as the §6 example:
+   `NPC_ROUTINE_CONFIG = { 'herald-asha': { dawn: 'idle', day: 'patrol', dusk: 'passive',
+   night: 'rest' } }` — the only entry in V0, `Object.freeze`d at both the outer map and
+   per-schedule level (`apps/web/src/domain/npcRoutineConfig.ts`).
+2. **Dialogue-availability-independent-of-routine-mode test.** Resolved: dialogue lookup
+   is built from `room.objects` independent of movement/routine state, so no dedicated
+   test was needed beyond the existing dialogue-lookup coverage; the Slice 5 redteam
+   suite additionally asserts routine mode never gates dialogue eligibility.
+3. **Internal seam name.** Resolved as recommended: `SetRoomOptions.npcRoutineModes` is a
+   resolved `ReadonlyMap<string, NpcRoutineMode>`, built once by `app/npcRoutine.ts` and
+   forwarded through `RoomViewer` into `Engine`, mirroring `chaseOptInNpcIds`.
 
 ## 18. Final recommendation
 
@@ -379,10 +384,77 @@ to regress.
   tests, the idle-hold/chase-override motor tests, and the Slice 5 no-side-effect scan
   plus unmodified regression run of chase/patrol/awareness suites.
 
-## 19. Slice 0 record (this update)
+## 19. Slice 0 record
 
-This document and [ADR-0087](../decisions/ADR-0087-npc-day-night-routine-v0.md) are the
-entire Slice 0 deliverable. No `.ts`/`.tsx` source or test file was created or modified.
-`docs/architecture/ARCHITECTURE.md` gained one planned-status bullet line (§ "Slice 0"
-convention below) pointing at this plan and ADR-0087; it will be replaced with an
-implemented-status line at Slice 6 closeout, per the `npc-patrol-route-v0` precedent.
+This document and [ADR-0087](../decisions/ADR-0087-npc-day-night-routine-v0.md) were the
+entire Slice 0 deliverable. No `.ts`/`.tsx` source or test file was created or modified in
+Slice 0. `docs/architecture/ARCHITECTURE.md` gained one planned-status bullet line
+pointing at this plan and ADR-0087, replaced at Slice 6 closeout (§20) by an
+implemented-status line, per the `npc-patrol-route-v0` precedent.
+
+## 20. Slice 6 closeout record (this update)
+
+**Implemented, presentation/runtime-only.** A deterministic same-room, movement-only NPC
+day/night routine foundation now exists, gated off by default.
+
+- **Gate:** `VITE_AIGM_DEMO_ROUTINE`, default off — behavior is byte-identical to today
+  when unset, mirroring `VITE_AIGM_DEMO_CHASE`.
+- **Routine metadata:** trusted static authored config only
+  (`apps/web/src/domain/npcRoutineConfig.ts`), containing exactly one entry in V0 —
+  `herald-asha` — with no generated/derived/name/prompt/room-text/provider/dialogue/
+  relationship-driven fallback of any kind.
+- **Closed modes:** `idle | patrol | rest | passive`, no fifth mode. `rest` maps to the
+  same stationary `idle` hold as `idle` (no distinct presentation in v0). `passive` maps
+  to the existing gentle wander policy and is movement/presentation-only — it does not
+  block dialogue, imply unavailability, trigger hostility, or change any gameplay
+  consequence.
+- **Eligibility:** `App.tsx` derives present NPC ids only from validated `room.objects`
+  NPC entries (never inferred/expanded), and reads the existing `worldClock.timeOfDay`
+  bucket only — no second time source. `RoomViewer` forwards a non-empty
+  `npcRoutineModes` map into `Engine.setRoom`'s `SetRoomOptions` only when the gate is on
+  and at least one configured id is present.
+- **Engine/motor:** `Engine` maps each routine mode to a `WanderMotor` policy via
+  `routineModeToMotorPolicy` (`patrol`→`patrol` fail-closed to `wander`, `passive`→
+  `wander`, `idle`/`rest`→`idle`). `WanderMotor` gained the new `idle` policy branch,
+  reusing the existing pause/`syncXZ` shape — no new pre-emption path.
+- **Priority unchanged:** the dialogue/interaction lock (`shouldPauseWander`) still pauses
+  movement first, ahead of every policy including `idle`. Chase remains fully independent
+  and reused unmodified — it still pre-empts a routine-selected base policy only through
+  the existing `chaseEligible && isChaseActive` (awareness `aware`/`alerted`) path; routine
+  adds no override mechanism of its own.
+- **Slice 4 (visual/debug presentation) intentionally skipped** — no new
+  presentation/UI/debug surface was added, mirroring the ADR-0086 precedent.
+- **No blanket/global activation.** No cross-room movement. No timers, `setInterval`,
+  `setTimeout`, or background simulation. No combat/damage/HP/death/capture/injury/
+  encounters/items/quests. No persistence/schema/save-game change, no `schemaVersion`
+  bump. No `WorldState`/`WorldEvent`/`WorldCommand` read or write. No memory/fact/
+  `fact_visibility` read or write. No provider/prompt/LLM change of any kind. No raw
+  prompt/provider/dialogue/room-text/generated-text logging.
+
+### Verification (run from `apps/web`)
+
+- `npx vitest run src/domain/npcRoutine.test.ts src/domain/npcRoutineConfig.test.ts` —
+  passed (part of the 133-test run below).
+- `npx vitest run src/domain/npcRoutine.test.ts src/domain/npcRoutineConfig.test.ts src/app/npcRoutine.test.ts src/renderer/engine/npc/WanderMotor.test.ts src/renderer/engine/Engine.test.ts src/redteam/npcRoutine.redteam.test.ts` —
+  6 files / 133 tests passed.
+- `npx vitest run src/App.test.tsx src/renderer/engine/npc/patrolStep.test.ts src/renderer/engine/npc/chaseStep.test.ts` —
+  3 files / 199 tests passed (unmodified patrol/chase regressions green).
+- `npx vitest run src/renderer/RoomViewer.test.ts` — 1 file / 37 tests passed.
+- `npm run lint` — clean.
+- `npm run build` — succeeded (`tsc -b && vite build`).
+- `npm run test` (full suite) — 214 files / 3680 tests passed.
+
+Boundaries re-confirmed at closeout (all still hold):
+
+- Default off; closed config allowlist; id-only, present-only selection.
+- Movement-only; `rest`/`passive`/`idle` carry no gameplay consequence.
+- Same-room only; no background simulation; no timer of any kind.
+- Dialogue/interaction lock and chase pre-emption reused unmodified and unweakened.
+- No `WorldState`/`WorldEvent`/`WorldCommand`/`applyEvent` change.
+- No persistence/schema/save-game/`RoomSpec` mutation; no `schemaVersion` bump.
+- No memory/fact/`fact_visibility` read or write.
+- No LLM/provider/prompt change.
+- No raw prompt/provider/dialogue/room-text/generated-text logging.
+- Existing `patrolStep`/`chaseStep`/`WanderMotor`/`Engine`/awareness safety suites remain
+  green and unmodified.
+- Full suite remains green.
