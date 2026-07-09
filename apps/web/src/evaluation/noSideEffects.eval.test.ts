@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { readDemoChaseEnabled, selectDemoChaseOptInNpcIds } from '../app/demoChaseOptIn'
 import { readRoutineEnabled, selectNpcRoutineModes } from '../app/npcRoutine'
+import type { NpcRoutineNpcType } from '../domain/npcRoutinePresets'
 import { recallRoomMemoryContext } from '../app/recallRoomMemoryContext'
 import { deriveAndReduceRelationship } from '../app/deriveAndReduceRelationship'
 import { deriveAndLogDialogueSemanticEvents } from '../app/deriveAndLogDialogueSemanticEvents'
@@ -660,6 +661,57 @@ describe('Gate F (npc day/night routine) - gate/selector at volume create no sid
     expect(Object.keys(poisonedEnv).length).toBe(1000) // guard against a vacuous pass
 
     expect(readRoutineEnabled(poisonedEnv)).toBe(false)
+    expect(await worldSession.store.listEvents(started.state.sessionId)).toEqual(beforeEvents)
+    expect(await worldSession.session.getWorldState(started.state.sessionId)).toEqual(beforeState)
+    expect(memoryHarness.store.snapshotAll()).toEqual(beforeMemoryRecords)
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+})
+
+/**
+ * Gate F extension — generated-npc-routine-type-v0 (ADR-0090, Slice 4).
+ * Proves behaviorally, against a real in-memory `WorldSession` and room-memory
+ * store, that the selector's new `roomNpcTypeById` type source appends zero
+ * `WorldEvent`s, mutates no `WorldState`, writes no memory record, and makes
+ * no provider/network call at volume -- including when the room-supplied
+ * npcType map mixes a valid closed value, poisoned/content-shaped ids, and a
+ * hostile-looking (invalid, cast) type value.
+ */
+describe('Gate F (generated npc routine type) - roomNpcTypeById at volume creates no side effects', () => {
+  it('selecting from 1000 present ids with a mixed valid/poisoned roomNpcTypeById map touches no world/memory/network state', async () => {
+    const worldSession = createWorldSessionHarness()
+    const started = await worldSession.session.startSession(evalCanon())
+    if (!started.ok) throw new Error('session start failed')
+    const beforeEvents = await worldSession.store.listEvents(started.state.sessionId)
+    const beforeState = await worldSession.session.getWorldState(started.state.sessionId)
+
+    const memoryHarness = createRoomMemoryHarness()
+    const beforeMemoryRecords = memoryHarness.store.snapshotAll()
+
+    const fetchSpy = vi.fn(() => Promise.reject(new Error('network is forbidden in evaluation')))
+    vi.stubGlobal('fetch', fetchSpy)
+
+    const presentNpcIds = new Set<string>(['herald-asha', 'generated-npc-typed'])
+    const roomNpcTypeById = new Map<string, NpcRoutineNpcType>([
+      ['generated-npc-typed', 'guard'],
+      ['herald-asha', 'wanderer'], // disagrees with the explicit config; must never win
+    ])
+    for (let index = 0; index < 998; index += 1) {
+      const poisonedId = `eval-roomnpctype-poison-${index}-${index % 2 === 0 ? 'relationship' : 'prompt'}`
+      presentNpcIds.add(poisonedId)
+      // Every third poisoned id also gets an invalid (cast, hostile-looking)
+      // roomNpcTypeById entry -- must never resolve a schedule.
+      if (index % 3 === 0) {
+        roomNpcTypeById.set(poisonedId, 'bandit leader' as unknown as NpcRoutineNpcType)
+      }
+    }
+    expect(presentNpcIds.size).toBe(1000) // guard against a vacuous pass
+
+    const result = selectNpcRoutineModes({ enabled: true, presentNpcIds, timeOfDay: 'day', roomNpcTypeById })
+
+    expect([...result.keys()].sort()).toEqual(['generated-npc-typed', 'herald-asha'])
+    expect(result.get('herald-asha')).toBe('patrol') // explicit config wins, never wanderer's preset
+    expect(result.get('generated-npc-typed')).toBe('patrol') // guard's real preset
     expect(await worldSession.store.listEvents(started.state.sessionId)).toEqual(beforeEvents)
     expect(await worldSession.session.getWorldState(started.state.sessionId)).toEqual(beforeState)
     expect(memoryHarness.store.snapshotAll()).toEqual(beforeMemoryRecords)

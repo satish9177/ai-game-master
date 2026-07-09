@@ -3,6 +3,8 @@ import npcRoutineConfigSource from '../domain/npcRoutineConfig.ts?raw'
 import npcRoutinePresetsSource from '../domain/npcRoutinePresets.ts?raw'
 import npcRoutineTypeConfigSource from '../domain/npcRoutineTypeConfig.ts?raw'
 import appNpcRoutineSource from '../app/npcRoutine.ts?raw'
+import roomSpecSource from '../domain/roomSpec.ts?raw'
+import appSource from '../App.tsx?raw'
 import npcMovementContractSource from '../domain/npcMovementContract.ts?raw'
 import wanderMotorSource from '../renderer/engine/npc/WanderMotor.ts?raw'
 import engineSource from '../renderer/engine/Engine.ts?raw'
@@ -15,11 +17,53 @@ import { describe, expect, it } from 'vitest'
 import { readRoutineEnabled, selectNpcRoutineModes } from '../app/npcRoutine'
 import { routineModeToMotorPolicy } from '../domain/npcRoutine'
 import { getRoutineSchedule, NPC_ROUTINE_CONFIG } from '../domain/npcRoutineConfig'
-import { resolveRoutineScheduleForNpc } from '../domain/npcRoutinePresets'
+import {
+  NPC_ROUTINE_NPC_TYPES,
+  isNpcRoutineNpcType,
+  resolveRoutineScheduleForNpc,
+  type NpcRoutineNpcType,
+} from '../domain/npcRoutinePresets'
 import { NPC_TYPE_BY_ID, getRoutineNpcType } from '../domain/npcRoutineTypeConfig'
+import { loadRoomSpec } from '../domain/loadRoomSpec'
+import type { LoadedRoom } from '../domain/loadRoomSpec'
+import { ROOM_SYSTEM_PROMPT } from '../generation/llmRoomPrompt'
 import { FakeNPCDialogueProvider, ROUTINE_AMBIENT_LINES } from '../dialogue/FakeNPCDialogueProvider'
 import type { NPCDialogueRequest } from '../domain/dialogue/contracts'
 import { hostilePlayerLines, markers } from './fixtures'
+
+/** Builds a minimal, validated room carrying a single npc object (redteam Slice 4, ADR-0090). */
+function minimalNpcRoom(npcObject: Record<string, unknown>, id = 'redteam-npctype-room'): LoadedRoom {
+  return loadRoomSpec({
+    schemaVersion: 1,
+    id,
+    name: 'redteam npctype room',
+    shell: { dimensions: { width: 18, depth: 18, height: 4 }, exits: [] },
+    spawn: { position: [0, 1.7, 4] },
+    objects: [npcObject],
+  })
+}
+
+/**
+ * The exact App-style npcType derivation (mirrors `App.tsx`'s `npcRoutineModes`
+ * useMemo body): reads only `object.type`, `object.id`, and the already-schema-
+ * validated `object.npcType`, guarded by `isNpcRoutineNpcType`.
+ */
+function deriveRoomNpcTypeById(objects: LoadedRoom['objects']): {
+  presentNpcIds: Set<string>
+  roomNpcTypeById: Map<string, NpcRoutineNpcType>
+} {
+  const presentNpcIds = new Set<string>()
+  const roomNpcTypeById = new Map<string, NpcRoutineNpcType>()
+  for (const object of objects) {
+    if (object.type === 'npc' && object.id !== undefined) {
+      presentNpcIds.add(object.id)
+      if (isNpcRoutineNpcType(object.npcType)) {
+        roomNpcTypeById.set(object.id, object.npcType)
+      }
+    }
+  }
+  return { presentNpcIds, roomNpcTypeById }
+}
 
 /**
  * Redteam coverage for npc-day-night-routine-v0 (ADR-0087, Slice 5) and its
@@ -537,6 +581,350 @@ describe('redteam npc routine dialogue context - reverse-direction: renderer/eng
     for (const source of [engineSource, wanderMotorSource]) {
       expect(source).not.toContain('NPCDialogueContext')
       expect(source).not.toContain('RoutineDialogueContext')
+    }
+  })
+})
+
+/**
+ * Redteam coverage for generated-npc-routine-type-v0 (ADR-0090, Slice 4).
+ *
+ * Extends the coverage above (which pins ADR-0087/ADR-0088/ADR-0089's
+ * behavior) to the new closed, optional `npcType` field on the RoomSpec `Npc`
+ * schema and its `roomNpcTypeById` wiring through `app/npcRoutine.ts` and
+ * `App.tsx`. Proves, against the real schema (`loadRoomSpec`/`RoomObjectSchema`),
+ * the real selector, and the real App-style derivation, that:
+ *   - `npcType` accepts only the seven closed values; every invalid/free-text/
+ *     wrong-case/null/object/array/number/boolean value is dropped to
+ *     `undefined` at the schema boundary, and a dropped value can never
+ *     produce a routine, even through the full real selector path;
+ *   - no NPC name/persona/dialogue/interaction-body/room-name text -- however
+ *     routine-shaped it reads -- ever produces a routine unless a valid
+ *     `npcType` field is also present; the real `App.tsx` npcType derivation
+ *     reads only `object.type`/`object.id`/`object.npcType`;
+ *   - extra schedule/routine/routineMode/patrolPath/timeBehavior/hostile/
+ *     combat/quest/item/health-shaped fields on a raw npc object are stripped
+ *     by the real schema and are never read by the selector or by
+ *     `app/npcRoutine.ts`'s source; no second resolver was introduced;
+ *   - the room prompt (`generation/llmRoomPrompt.ts`) asks only for a category
+ *     label, never a schedule/routine/mode/time-based instruction;
+ *   - resolution priority holds end to end against the real schema + real
+ *     selector + real authored config/type maps: explicit
+ *     `NPC_ROUTINE_CONFIG` wins first, authored `NPC_TYPE_BY_ID`/`typeConfig`
+ *     wins over a same-id room `npcType`, the room `npcType` is used only
+ *     when no authored type exists, the demo gate off yields an empty map,
+ *     and an id absent from the current room's present set yields no routine;
+ *   - `roomSpec.ts` reaches the closed `npcType` vocabulary only through
+ *     `npcRoutinePresets.ts`, and `app/npcRoutine.ts`'s import surface is
+ *     unchanged after adding `roomNpcTypeById`.
+ */
+describe('redteam generated npc routine type (ADR-0090) - closed enum only at the schema boundary', () => {
+  it.each(NPC_ROUTINE_NPC_TYPES)('accepts the closed npcType value %s through the real schema', (npcType) => {
+    const room = minimalNpcRoom({
+      type: 'npc',
+      id: 'valid-npctype-npc',
+      name: markers.npcName,
+      position: [0, 0, 0],
+      interaction: { key: 'F', prompt: 'Talk' },
+      npcType,
+    })
+    expect(room.skipped).toHaveLength(0)
+    const npc = room.objects[0]
+    expect(npc?.type === 'npc' && npc.npcType).toBe(npcType)
+  })
+
+  it.each([
+    'GUARD',
+    'Guard',
+    'guardian',
+    markers.npcName,
+    markers.playerText,
+    markers.providerBody,
+    'guard; DROP TABLE npcs',
+    '<script>alert(1)</script>',
+    '__proto__',
+    'constructor',
+    '',
+    null,
+    123,
+    true,
+    false,
+    ['guard'],
+    { npcType: 'guard' },
+  ])('drops the invalid/hostile npcType %j to undefined, and the room still validates', (npcType) => {
+    const room = minimalNpcRoom({
+      type: 'npc',
+      id: 'poisoned-npctype-npc',
+      name: markers.npcName,
+      position: [0, 0, 0],
+      interaction: { key: 'F', prompt: 'Talk' },
+      npcType,
+    })
+    expect(room.skipped).toHaveLength(0)
+    const npc = room.objects[0]
+    expect(npc?.type === 'npc' && npc.npcType).toBeUndefined()
+  })
+
+  it('a dropped invalid npcType can never produce a routine, even through the full real selector path', () => {
+    const room = minimalNpcRoom({
+      type: 'npc',
+      id: 'poisoned-npctype-npc',
+      name: markers.npcName,
+      position: [0, 0, 0],
+      interaction: { key: 'F', prompt: 'Talk' },
+      npcType: 'bandit leader',
+    })
+    const npc = room.objects[0]
+    expect(npc?.type === 'npc' && npc.npcType).toBeUndefined()
+
+    const { presentNpcIds, roomNpcTypeById } = deriveRoomNpcTypeById(room.objects)
+    expect(roomNpcTypeById.size).toBe(0)
+
+    const result = selectNpcRoutineModes({ enabled: true, presentNpcIds, timeOfDay: 'day', roomNpcTypeById })
+    expect(result.size).toBe(0)
+  })
+})
+
+describe('redteam generated npc routine type - no content-derived classification from name/persona/dialogue/room/prompt text', () => {
+  it('an NPC whose name/persona/interaction-body/dialogue text reads as routine-shaped, but has no npcType field, gets no routine', () => {
+    const room = loadRoomSpec({
+      schemaVersion: 1,
+      id: 'redteam-content-room',
+      name: 'the guard patrol rest static_npc chamber', // room name itself looks routine-shaped
+      shell: { dimensions: { width: 18, depth: 18, height: 4 }, exits: [] },
+      spawn: { position: [0, 1.7, 4] },
+      objects: [
+        {
+          type: 'npc',
+          id: 'content-poisoned-npc',
+          name: 'Guard Captain Patrol', // contains 'guard' and 'patrol'
+          position: [0, 0, 0],
+          interaction: {
+            key: 'F',
+            prompt: 'Talk to the guard',
+            body: 'This guard patrols by day and rests by night, on a strict schedule.',
+            dialogue: {
+              persona: 'day_patrol_night_rest guard who rests and patrols',
+              greeting: 'I am the guard; my routine is patrol then rest.',
+              prompts: [],
+            },
+          },
+          // deliberately no npcType field
+        },
+      ],
+    })
+
+    const npc = room.objects[0]
+    expect(npc?.type === 'npc' && npc.npcType).toBeUndefined()
+
+    const { presentNpcIds, roomNpcTypeById } = deriveRoomNpcTypeById(room.objects)
+    expect(roomNpcTypeById.size).toBe(0)
+
+    const result = selectNpcRoutineModes({ enabled: true, presentNpcIds, timeOfDay: 'day', roomNpcTypeById })
+    expect(result.size).toBe(0)
+  })
+
+  it('App.tsx npcType derivation reads only object.type, object.id, and object.npcType -- proven against the real source', () => {
+    const memoStart = appSource.indexOf('const npcRoutineModes = useMemo(() => {')
+    expect(memoStart).toBeGreaterThanOrEqual(0) // guard against a vacuous pass
+    const memoEnd = appSource.indexOf('}, [activePlay?.room, worldClock?.timeOfDay])', memoStart)
+    expect(memoEnd).toBeGreaterThan(memoStart)
+    const computed = appSource.slice(memoStart, memoEnd)
+
+    expect(computed).toContain('object.type')
+    expect(computed).toContain('object.id')
+    expect(computed).toContain('object.npcType')
+
+    for (const forbidden of [
+      '.name',
+      'persona',
+      'dialogue',
+      'interaction',
+      '.body',
+      'roomContext',
+      'prompt',
+      'provider',
+      'generatedText',
+      'relationship',
+      'journal',
+    ]) {
+      expect(computed).not.toContain(forbidden)
+    }
+  })
+})
+
+describe('redteam generated npc routine type - no schedule/behavior-command injection via room NPC fields', () => {
+  const injectedFields = {
+    schedule: ['dawn:idle', 'day:patrol', 'dusk:rest', 'night:passive'],
+    routine: 'day_patrol_night_rest',
+    routineMode: 'patrol',
+    patrolPath: [[0, 0, 0], [1, 0, 1]],
+    timeBehavior: 'always patrol',
+    hostile: true,
+    combat: 'melee',
+    quest: 'redteam-quest',
+    item: 'redteam-item',
+    health: 100,
+  }
+
+  it('extra schedule/behavior-command-shaped fields on a raw npc object are stripped by the real schema and never reach the parsed NPC', () => {
+    const room = minimalNpcRoom({
+      type: 'npc',
+      id: 'injected-npc',
+      name: markers.npcName,
+      position: [0, 0, 0],
+      interaction: { key: 'F', prompt: 'Talk' },
+      npcType: 'guard',
+      ...injectedFields,
+    })
+
+    const npc = room.objects[0]
+    expect(npc?.type === 'npc' && npc.npcType).toBe('guard') // the only legitimate signal survives
+
+    for (const key of Object.keys(injectedFields)) {
+      expect(npc !== undefined && key in npc).toBe(false)
+    }
+  })
+
+  it('a poisoned roomNpcTypeById entry only ever supplies npcType -- the selector has no parameter shape through which schedule/routineMode/patrolPath/etc could reach it', () => {
+    const poisonedRoomNpcTypeById = new Map<string, NpcRoutineNpcType>([['injected-npc', 'guard']])
+    const presentNpcIds = new Set(['injected-npc'])
+
+    const result = selectNpcRoutineModes({
+      enabled: true,
+      presentNpcIds,
+      timeOfDay: 'day',
+      roomNpcTypeById: poisonedRoomNpcTypeById,
+    })
+    // guard's real day_patrol_night_rest preset, never anything derived from
+    // the (nonexistent, unreachable) injected fields.
+    expect(result.get('injected-npc')).toBe('patrol')
+  })
+
+  it('app/npcRoutine.ts never reads a schedule/routineMode/patrolPath/timeBehavior/hostile/combat/quest/item/health property off any object', () => {
+    for (const forbiddenAccess of [
+      '.schedule',
+      '.routineMode',
+      '.patrolPath',
+      '.timeBehavior',
+      '.hostile',
+      '.combat',
+      '.quest',
+      '.item',
+      '.health',
+    ]) {
+      expect(appNpcRoutineSource).not.toContain(forbiddenAccess)
+    }
+  })
+
+  it('the selector still resolves through the single existing resolveRoutineScheduleForNpc call site -- no second resolver was introduced', () => {
+    const matches = [...appNpcRoutineSource.matchAll(/resolveRoutineScheduleForNpc\(/g)]
+    expect(matches).toHaveLength(1)
+    expect(appNpcRoutineSource).not.toMatch(/function resolve\w*Schedule/i)
+  })
+
+  it('the room prompt asks only for an npcType category label, never a schedule, routine mode, patrol path, or time-based behavior', () => {
+    const lower = ROOM_SYSTEM_PROMPT.toLowerCase()
+    expect(lower).toContain('npctype is only a category label')
+    expect(lower).not.toContain('include a schedule for npctype')
+    expect(lower).not.toContain('assign a routine')
+    expect(lower).not.toContain('define a patrol path')
+    expect(lower).not.toContain('specify time-based behavior')
+  })
+})
+
+describe('redteam generated npc routine type - priority and gate safety, end-to-end against real schema + selector + authored config', () => {
+  function npcTypeRoom(id: string, npcType: unknown): LoadedRoom {
+    return minimalNpcRoom({
+      type: 'npc',
+      id,
+      name: markers.npcName,
+      position: [0, 0, 0],
+      interaction: { key: 'F', prompt: 'Talk' },
+      npcType,
+    })
+  }
+
+  it('explicit NPC_ROUTINE_CONFIG (herald-asha) wins even when the real, schema-validated room npcType disagrees', () => {
+    const room = npcTypeRoom('herald-asha', 'wanderer')
+    const { presentNpcIds, roomNpcTypeById } = deriveRoomNpcTypeById(room.objects)
+    expect(roomNpcTypeById.get('herald-asha')).toBe('wanderer')
+
+    // Real default config/typeConfig (NPC_ROUTINE_CONFIG / NPC_TYPE_BY_ID).
+    const result = selectNpcRoutineModes({ enabled: true, presentNpcIds, timeOfDay: 'day', roomNpcTypeById })
+    expect(result.get('herald-asha')).toBe('patrol') // herald-asha's real explicit schedule, never wanderer's preset
+  })
+
+  it('authored typeConfig wins over a same-id room npcType when no explicit id config exists', () => {
+    const room = npcTypeRoom('dual-source-npc', 'wanderer')
+    const { presentNpcIds, roomNpcTypeById } = deriveRoomNpcTypeById(room.objects)
+
+    const result = selectNpcRoutineModes({
+      enabled: true,
+      presentNpcIds,
+      timeOfDay: 'day',
+      config: {},
+      typeConfig: { 'dual-source-npc': 'guard' },
+      roomNpcTypeById,
+    })
+    // authored 'guard' -> patrol; room 'wanderer' -> passive. Authored must win.
+    expect(result.get('dual-source-npc')).toBe('patrol')
+  })
+
+  it('a valid room npcType is used only when the id has no authored type and no explicit config', () => {
+    const room = npcTypeRoom('generated-npc-99', 'static_npc')
+    const { presentNpcIds, roomNpcTypeById } = deriveRoomNpcTypeById(room.objects)
+
+    const result = selectNpcRoutineModes({
+      enabled: true,
+      presentNpcIds,
+      timeOfDay: 'night',
+      config: {},
+      typeConfig: {},
+      roomNpcTypeById,
+    })
+    expect(result.get('generated-npc-99')).toBe('idle') // static_npc's stationary preset
+  })
+
+  it('VITE_AIGM_DEMO_ROUTINE disabled gives an empty routine map even with a valid room npcType present', () => {
+    const room = npcTypeRoom('generated-npc-99', 'guard')
+    const { presentNpcIds, roomNpcTypeById } = deriveRoomNpcTypeById(room.objects)
+
+    const result = selectNpcRoutineModes({ enabled: false, presentNpcIds, timeOfDay: 'day', roomNpcTypeById })
+    expect(result.size).toBe(0)
+  })
+
+  it('an NPC with a valid room npcType but absent from the current room (not present) gets no routine', () => {
+    const room = npcTypeRoom('generated-npc-99', 'guard')
+    const { roomNpcTypeById } = deriveRoomNpcTypeById(room.objects)
+
+    const result = selectNpcRoutineModes({
+      enabled: true,
+      presentNpcIds: new Set(['some-other-npc']), // the typed npc is not present
+      timeOfDay: 'day',
+      roomNpcTypeById,
+    })
+    expect(result.size).toBe(0)
+  })
+})
+
+describe('redteam generated npc routine type - import/source surface scans', () => {
+  it('domain/roomSpec.ts reaches the closed npcType vocabulary only through domain/npcRoutinePresets, never provider/prompt/LLM/persistence/world-event/memory/fact modules', () => {
+    const specifiers = importSpecifiers(roomSpecSource)
+    expect(specifiers).toContain('./npcRoutinePresets')
+    for (const specifier of specifiers) {
+      expect(specifier).not.toMatch(
+        /provider|llm|persistence|sqlite|world-session|worldevent|worldcommand|memory|fact|server/i,
+      )
+    }
+  })
+
+  it('app/npcRoutine.ts import surface is unchanged after adding roomNpcTypeById -- still only the pure domain routine modules', () => {
+    const specifiers = importSpecifiers(appNpcRoutineSource)
+    expect(specifiers.length).toBeGreaterThan(0) // guard against a vacuous pass
+    for (const specifier of specifiers) {
+      expect(specifier).toMatch(
+        /^\.\.\/domain\/(world\/worldClock|npcRoutine|npcRoutineConfig|npcRoutinePresets|npcRoutineTypeConfig)$/,
+      )
     }
   })
 })

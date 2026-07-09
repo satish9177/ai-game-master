@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { readDemoChaseEnabled, selectDemoChaseOptInNpcIds } from '../app/demoChaseOptIn'
 import { readRoutineEnabled, selectNpcRoutineModes } from '../app/npcRoutine'
+import type { NpcRoutineNpcType } from '../domain/npcRoutinePresets'
 import { recallRoomMemoryContext } from '../app/recallRoomMemoryContext'
 import { deriveAndReduceRelationship } from '../app/deriveAndReduceRelationship'
 import { deriveAndLogDialogueSemanticEvents } from '../app/deriveAndLogDialogueSemanticEvents'
@@ -598,6 +599,69 @@ describe('Gate E (npc day/night routine) - pure gate/selector adds no logs and l
       const selected = selectNpcRoutineModes({ enabled: true, presentNpcIds, timeOfDay: 'day' })
       expect([...selected.keys()]).toEqual(['herald-asha']) // guard against a vacuous pass
       expect(['idle', 'patrol', 'rest', 'passive']).toContain(selected.get('herald-asha'))
+
+      for (const spy of Object.values(consoleSpy)) expect(spy).not.toHaveBeenCalled()
+
+      const serialized = JSON.stringify([...selected])
+      for (const marker of Object.values(evalMarkers)) expect(serialized).not.toContain(marker)
+    } finally {
+      for (const spy of Object.values(consoleSpy)) spy.mockRestore()
+    }
+  })
+})
+
+/**
+ * Gate E extension — generated-npc-routine-type-v0 (ADR-0090, Slice 4).
+ * `selectNpcRoutineModes` takes no logger parameter at all, so this proves
+ * behaviorally: driving the selector with a `roomNpcTypeById` map keyed by
+ * marker-laden poisoned ids (and an invalid, hostile-looking cast type value)
+ * never calls `console.*` and never leaks a marker into the returned value.
+ * The resolved modes remain a closed enum, so no id, npcType string, or
+ * provider/prompt text can ride along even indirectly.
+ */
+describe('Gate E (generated npc routine type) - roomNpcTypeById adds no logs and leaks no markers', () => {
+  it('selecting modes with a marker-laden, partly-invalid roomNpcTypeById map calls no console method and leaks no eval marker', () => {
+    const consoleSpy = {
+      log: vi.spyOn(console, 'log').mockImplementation(() => {}),
+      warn: vi.spyOn(console, 'warn').mockImplementation(() => {}),
+      error: vi.spyOn(console, 'error').mockImplementation(() => {}),
+      info: vi.spyOn(console, 'info').mockImplementation(() => {}),
+      debug: vi.spyOn(console, 'debug').mockImplementation(() => {}),
+    }
+
+    try {
+      const presentNpcIds = new Set([
+        'herald-asha',
+        'generated-npc-typed',
+        evalMarkers.memoryText,
+        evalMarkers.playerLine,
+        evalMarkers.providerBody,
+        `${evalMarkers.plantedText}-npc`,
+      ])
+      // Only the two legitimate ids ever get a valid npcType; every marker-
+      // bearing id either has no entry at all or an invalid/hostile-looking
+      // cast type, so none of them can ever resolve into the returned map --
+      // proving the "no marker in output" assertion below is not vacuous.
+      const roomNpcTypeById = new Map<string, NpcRoutineNpcType>([
+        ['generated-npc-typed', 'guard'],
+        ['herald-asha', 'wanderer'], // disagrees with explicit config; must never win or leak
+        [evalMarkers.memoryText, 'bandit leader' as unknown as NpcRoutineNpcType], // invalid, hostile-looking
+        [evalMarkers.playerLine, 'GUARD' as unknown as NpcRoutineNpcType], // wrong case, invalid
+      ])
+
+      const selected = selectNpcRoutineModes({
+        enabled: true,
+        presentNpcIds,
+        timeOfDay: 'day',
+        roomNpcTypeById,
+      })
+      expect([...selected.keys()].sort()).toEqual(
+        ['generated-npc-typed', 'herald-asha'].sort(),
+      ) // guard against a vacuous pass
+      expect(selected.get('herald-asha')).toBe('patrol') // explicit config wins
+      for (const mode of selected.values()) {
+        expect(['idle', 'patrol', 'rest', 'passive']).toContain(mode)
+      }
 
       for (const spy of Object.values(consoleSpy)) expect(spy).not.toHaveBeenCalled()
 
