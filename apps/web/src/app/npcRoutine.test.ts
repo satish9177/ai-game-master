@@ -327,3 +327,204 @@ describe('selectNpcRoutineModes - type preset integration (Slice 2)', () => {
     expect(JSON.stringify(typeConfig)).toEqual(typeConfigSnapshot)
   })
 })
+
+/**
+ * Coverage for generated-npc-routine-type-v0 (ADR-0090, Slice 3):
+ * `roomNpcTypeById`, a third, lowest-priority `npcType` source sourced from
+ * validated generated-room NPC objects. Priority stays: explicit
+ * `NPC_ROUTINE_CONFIG` id schedule first, then authored `typeConfig`, then
+ * `roomNpcTypeById`, else no routine. No new resolver is introduced --
+ * `resolveRoutineScheduleForNpc` is reused unchanged.
+ */
+describe('selectNpcRoutineModes - roomNpcTypeById (Slice 3)', () => {
+  it('a generated npc with a valid roomNpcTypeById entry and no authored entry resolves the expected mode by timeOfDay', () => {
+    const roomNpcTypeById = new Map<string, NpcRoutineNpcType>([['generated-npc', 'guard']])
+
+    const dayResult = selectNpcRoutineModes({
+      enabled: true,
+      presentNpcIds: new Set(['generated-npc']),
+      timeOfDay: 'day',
+      config: {},
+      typeConfig: {},
+      roomNpcTypeById,
+    })
+    expect(dayResult.get('generated-npc')).toBe('patrol') // guard's day_patrol_night_rest preset
+
+    const nightResult = selectNpcRoutineModes({
+      enabled: true,
+      presentNpcIds: new Set(['generated-npc']),
+      timeOfDay: 'night',
+      config: {},
+      typeConfig: {},
+      roomNpcTypeById,
+    })
+    expect(nightResult.get('generated-npc')).toBe('rest')
+  })
+
+  it('a present generated npc with no roomNpcTypeById entry gets no routine (missing roomNpcTypeById arg entirely)', () => {
+    const result = selectNpcRoutineModes({
+      enabled: true,
+      presentNpcIds: new Set(['generated-npc']),
+      timeOfDay: 'day',
+      config: {},
+      typeConfig: {},
+      // roomNpcTypeById omitted entirely -- defaults to empty
+    })
+    expect(result.size).toBe(0)
+  })
+
+  it('a roomNpcTypeById entry for an npc that is not present in the room gets no routine', () => {
+    const result = selectNpcRoutineModes({
+      enabled: true,
+      presentNpcIds: new Set(['some-other-npc']),
+      timeOfDay: 'day',
+      config: {},
+      typeConfig: {},
+      roomNpcTypeById: new Map([['generated-npc', 'guard']]),
+    })
+    expect(result.size).toBe(0)
+  })
+
+  it('explicit NPC_ROUTINE_CONFIG id schedule wins even when roomNpcTypeById disagrees', () => {
+    const explicitConfig: Readonly<Record<string, NpcRoutineSchedule>> = Object.freeze({
+      'herald-asha': HERALD_SCHEDULE,
+    })
+    const roomNpcTypeById = new Map<string, NpcRoutineNpcType>([['herald-asha', 'wanderer']])
+
+    const result = selectNpcRoutineModes({
+      enabled: true,
+      presentNpcIds: new Set(['herald-asha']),
+      timeOfDay: 'day',
+      config: explicitConfig,
+      typeConfig: {},
+      roomNpcTypeById,
+    })
+    // herald-asha's explicit schedule resolves day -> patrol; wanderer's
+    // preset would resolve day -> passive if it were consulted at all.
+    expect(result.get('herald-asha')).toBe('patrol')
+  })
+
+  it('authored typeConfig wins over roomNpcTypeById for the same id', () => {
+    const roomNpcTypeById = new Map<string, NpcRoutineNpcType>([['dual-source-npc', 'wanderer']])
+
+    const result = selectNpcRoutineModes({
+      enabled: true,
+      presentNpcIds: new Set(['dual-source-npc']),
+      timeOfDay: 'day',
+      config: {},
+      typeConfig: { 'dual-source-npc': 'guard' },
+      roomNpcTypeById,
+    })
+    // authored 'guard' -> day_patrol_night_rest -> day:'patrol'.
+    // room 'wanderer' -> wander_day_rest_night -> day:'passive'.
+    // authored must win, so the result must be 'patrol', not 'passive'.
+    expect(result.get('dual-source-npc')).toBe('patrol')
+  })
+
+  it('an invalid/unknown roomNpcTypeById value (already dropped upstream to undefined) never reaches this selector as a bad type, so absence yields no routine', () => {
+    // By the time roomNpcTypeById is built (Slice 1's schema `.catch(undefined)`
+    // boundary), an invalid npcType is already undefined and therefore absent
+    // from the map -- there is no way to construct a `ReadonlyMap<string,
+    // NpcRoutineNpcType>` entry with an invalid value through the closed type.
+    // This test proves the absence path (no entry at all) still yields no
+    // routine, matching "invalid npcType -> no routine" end to end.
+    const result = selectNpcRoutineModes({
+      enabled: true,
+      presentNpcIds: new Set(['poisoned-npc']),
+      timeOfDay: 'day',
+      config: {},
+      typeConfig: {},
+      roomNpcTypeById: new Map(),
+    })
+    expect(result.size).toBe(0)
+  })
+
+  it('VITE_AIGM_DEMO_ROUTINE disabled returns empty even with a valid roomNpcTypeById entry present', () => {
+    const result = selectNpcRoutineModes({
+      enabled: false,
+      presentNpcIds: new Set(['generated-npc']),
+      timeOfDay: 'day',
+      config: {},
+      typeConfig: {},
+      roomNpcTypeById: new Map([['generated-npc', 'guard']]),
+    })
+    expect(result.size).toBe(0)
+  })
+
+  it('a missing timeOfDay returns empty even with a valid roomNpcTypeById entry present', () => {
+    const result = selectNpcRoutineModes({
+      enabled: true,
+      presentNpcIds: new Set(['generated-npc']),
+      timeOfDay: undefined,
+      config: {},
+      typeConfig: {},
+      roomNpcTypeById: new Map([['generated-npc', 'guard']]),
+    })
+    expect(result.size).toBe(0)
+  })
+
+  it('keeps deterministic id order: config keys, then typeConfig keys, then roomNpcTypeById keys, deduped', () => {
+    const result = selectNpcRoutineModes({
+      enabled: true,
+      presentNpcIds: new Set(['from-room-b', 'from-config', 'from-type', 'from-room-a']),
+      timeOfDay: 'day',
+      config: { 'from-config': { day: 'idle' } },
+      typeConfig: { 'from-type': 'guard' },
+      roomNpcTypeById: new Map<string, NpcRoutineNpcType>([
+        ['from-room-b', 'villager'],
+        ['from-room-a', 'wanderer'],
+      ]),
+    })
+    expect([...result.keys()]).toEqual(['from-config', 'from-type', 'from-room-b', 'from-room-a'])
+  })
+
+  it('an id present in both config and roomNpcTypeById is not duplicated in iteration order', () => {
+    const roomNpcTypeById = new Map<string, NpcRoutineNpcType>([['herald-asha', 'wanderer']])
+    const result = selectNpcRoutineModes({
+      enabled: true,
+      presentNpcIds: new Set(['herald-asha']),
+      timeOfDay: 'day',
+      config: { 'herald-asha': HERALD_SCHEDULE },
+      typeConfig: {},
+      roomNpcTypeById,
+    })
+    expect(result.size).toBe(1)
+    expect([...result.keys()]).toEqual(['herald-asha'])
+  })
+
+  it('does not mutate presentNpcIds, config, typeConfig, or roomNpcTypeById', () => {
+    const presentNpcIds = new Set(['generated-npc'])
+    const config = Object.freeze({})
+    const typeConfig = Object.freeze({})
+    const roomNpcTypeById = new Map<string, NpcRoutineNpcType>([['generated-npc', 'guard']])
+    const presentSnapshot = [...presentNpcIds]
+    const roomTypeSnapshot = [...roomNpcTypeById.entries()]
+
+    selectNpcRoutineModes({
+      enabled: true,
+      presentNpcIds,
+      timeOfDay: 'day',
+      config,
+      typeConfig,
+      roomNpcTypeById,
+    })
+
+    expect([...presentNpcIds]).toEqual(presentSnapshot)
+    expect([...roomNpcTypeById.entries()]).toEqual(roomTypeSnapshot)
+  })
+
+  it('an unknown/hostile-looking string cast into roomNpcTypeById never resolves a preset (no semantic parsing)', () => {
+    const poisonedRoomNpcTypeById = new Map<string, NpcRoutineNpcType>([
+      ['npc-1', 'bandit leader' as unknown as NpcRoutineNpcType],
+    ])
+    const result = selectNpcRoutineModes({
+      enabled: true,
+      presentNpcIds: new Set(['npc-1']),
+      timeOfDay: 'day',
+      config: {},
+      typeConfig: {},
+      roomNpcTypeById: poisonedRoomNpcTypeById,
+    })
+    expect(result.size).toBe(0)
+  })
+})

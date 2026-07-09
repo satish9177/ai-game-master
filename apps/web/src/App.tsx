@@ -34,6 +34,7 @@ import { readLlmConfig } from './app/llmConfig'
 import { readDebugConfig } from './app/debugConfig'
 import { readDemoChaseEnabled, selectDemoChaseOptInNpcIds } from './app/demoChaseOptIn'
 import { readRoutineEnabled, selectNpcRoutineModes } from './app/npcRoutine'
+import { isNpcRoutineNpcType, type NpcRoutineNpcType } from './domain/npcRoutinePresets'
 import { selectRoomGenerator } from './app/selectRoomGenerator'
 import { selectObjectiveGenerator } from './app/selectObjectiveGenerator'
 import { selectGateGenerator } from './app/selectGateGenerator'
@@ -1402,17 +1403,31 @@ function App() {
   // dialogue, or relationship state. Memoized on the active room and the
   // resolved time bucket (not on every render) for the same engine-remount-
   // stability reason as `demoChaseOptInNpcIds`.
+  //
+  // `roomNpcTypeById` (generated-npc-routine-type-v0; ADR-0090) extends this
+  // with a third, lowest-priority npcType source read only from the same
+  // validated present NPC objects: a present NPC's already-schema-validated
+  // `npcType` (dropped to `undefined` upstream by `roomSpec.ts` if it was
+  // ever invalid) is included only when `isNpcRoutineNpcType` accepts it.
+  // Still id + closed-enum only -- never NPC name, persona, dialogue,
+  // interaction text, room text, prompt text, provider output, or
+  // relationship/journal state.
   const npcRoutineModes = useMemo(() => {
     const presentNpcIds = new Set<string>()
+    const roomNpcTypeById = new Map<string, NpcRoutineNpcType>()
     for (const object of activePlay?.room.objects ?? []) {
       if (object.type === 'npc' && object.id !== undefined) {
         presentNpcIds.add(object.id)
+        if (isNpcRoutineNpcType(object.npcType)) {
+          roomNpcTypeById.set(object.id, object.npcType)
+        }
       }
     }
     return selectNpcRoutineModes({
       enabled: routineEnabled,
       presentNpcIds,
       timeOfDay: worldClock?.timeOfDay,
+      roomNpcTypeById,
     })
   }, [activePlay?.room, worldClock?.timeOfDay])
 

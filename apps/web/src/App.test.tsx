@@ -41,6 +41,7 @@ import {
 import { loadGeneratedQuestSaveState } from './domain/quests/generatedQuestSaveState'
 import { selectDemoChaseOptInNpcIds } from './app/demoChaseOptIn'
 import { selectNpcRoutineModes } from './app/npcRoutine'
+import { isNpcRoutineNpcType, type NpcRoutineNpcType } from './domain/npcRoutinePresets'
 import { restoreGeneratedQuestPlay } from './app/restoreGeneratedQuestPlay'
 import { restoreGeneratedRoomCache } from './app/restoreGeneratedRoomCache'
 import { AdjacentRoomPregenerator } from './app/AdjacentRoomPregenerator'
@@ -910,6 +911,190 @@ describe('App resolved object projection wiring', () => {
         timeOfDay: null,
       }).size,
     ).toBe(0)
+  })
+
+  // Coverage for generated-npc-routine-type-v0 (ADR-0090, Slice 3): App's
+  // roomNpcTypeById derivation, a third, lowest-priority npcType source read
+  // only from validated present NPC objects (never name/persona/dialogue/
+  // interaction/room/prompt text). Mirrors the `npcRoom`/`npcPresentIds`
+  // pattern of the routine test above, plus the equivalent derivation logic
+  // App itself runs, to prove end-to-end behavior through the real schema
+  // (`loadRoomSpec`) and the real selector.
+  it('App wires roomNpcTypeById (ADR-0090) as an id + closed-enum-only source, derived only from validated present NPC objects', () => {
+    expect(appSource).toContain(
+      "import { isNpcRoutineNpcType, type NpcRoutineNpcType } from './domain/npcRoutinePresets'",
+    )
+
+    const memoStart = appSource.indexOf('const npcRoutineModes = useMemo(() => {')
+    expect(memoStart).toBeGreaterThan(-1)
+    const memoEnd = appSource.indexOf(
+      '}, [activePlay?.room, worldClock?.timeOfDay])',
+      memoStart,
+    )
+    expect(memoEnd).toBeGreaterThan(memoStart)
+    const computed = appSource.slice(memoStart, memoEnd)
+
+    expect(computed).toContain('const roomNpcTypeById = new Map<string, NpcRoutineNpcType>()')
+    expect(computed).toContain("object.type === 'npc' && object.id !== undefined")
+    expect(computed).toContain('isNpcRoutineNpcType(object.npcType)')
+    expect(computed).toContain('roomNpcTypeById.set(object.id, object.npcType)')
+    expect(computed).toContain('roomNpcTypeById,')
+
+    // Still id + closed-enum only: never reads name, persona, dialogue,
+    // interaction text, or room/prompt text for npcType derivation.
+    expect(computed).not.toMatch(/\.name\b/)
+    expect(computed).not.toContain('persona')
+    expect(computed).not.toContain('dialogue')
+    expect(computed).not.toContain('interaction')
+    expect(computed).not.toContain('roomContext')
+
+    // The dependency array is unchanged by this feature.
+    expect(appSource).toContain('}, [activePlay?.room, worldClock?.timeOfDay])')
+  })
+
+  function deriveRoomNpcTypeById(room: LoadedRoom): {
+    presentNpcIds: Set<string>
+    roomNpcTypeById: Map<string, NpcRoutineNpcType>
+  } {
+    // The exact derivation App.tsx runs inside its npcRoutineModes useMemo.
+    const presentNpcIds = new Set<string>()
+    const roomNpcTypeById = new Map<string, NpcRoutineNpcType>()
+    for (const object of room.objects) {
+      if (object.type === 'npc' && object.id !== undefined) {
+        presentNpcIds.add(object.id)
+        if (isNpcRoutineNpcType(object.npcType)) {
+          roomNpcTypeById.set(object.id, object.npcType)
+        }
+      }
+    }
+    return { presentNpcIds, roomNpcTypeById }
+  }
+
+  it('a generated npc with a valid npcType and no authored config/type mapping resolves a routine mode by timeOfDay', () => {
+    const npcRoom = makeRoom([
+      {
+        type: 'npc',
+        id: 'generated-npc',
+        name: 'Nara',
+        npcType: 'guard',
+        position: [0, 0, -2],
+        interaction: { key: 'F', prompt: 'Talk' },
+      },
+    ], 'generated-room')
+
+    const { presentNpcIds, roomNpcTypeById } = deriveRoomNpcTypeById(npcRoom)
+    expect(roomNpcTypeById.get('generated-npc')).toBe('guard')
+
+    const dayResult = selectNpcRoutineModes({
+      enabled: true,
+      presentNpcIds,
+      timeOfDay: 'day',
+      roomNpcTypeById,
+    })
+    expect(dayResult.get('generated-npc')).toBe('patrol') // guard's day_patrol_night_rest preset
+
+    const nightResult = selectNpcRoutineModes({
+      enabled: true,
+      presentNpcIds,
+      timeOfDay: 'night',
+      roomNpcTypeById,
+    })
+    expect(nightResult.get('generated-npc')).toBe('rest')
+  })
+
+  it('a generated npc without npcType gets no routine, even when the gate is on and time is known', () => {
+    const npcRoom = makeRoom([
+      {
+        type: 'npc',
+        id: 'generated-npc',
+        name: 'Nara',
+        position: [0, 0, -2],
+        interaction: { key: 'F', prompt: 'Talk' },
+      },
+    ], 'generated-room')
+
+    const { presentNpcIds, roomNpcTypeById } = deriveRoomNpcTypeById(npcRoom)
+    expect(roomNpcTypeById.size).toBe(0)
+
+    const result = selectNpcRoutineModes({
+      enabled: true,
+      presentNpcIds,
+      timeOfDay: 'day',
+      roomNpcTypeById,
+    })
+    expect(result.size).toBe(0)
+  })
+
+  it('a generated npc with an invalid npcType is already dropped to undefined by the schema, so it gets no routine', () => {
+    const npcRoom = makeRoom([
+      {
+        type: 'npc',
+        id: 'generated-npc',
+        name: 'Nara',
+        npcType: 'bandit leader', // not in the closed enum -> dropped at parse time
+        position: [0, 0, -2],
+        interaction: { key: 'F', prompt: 'Talk' },
+      },
+    ], 'generated-room')
+
+    const npc = npcRoom.objects[0]
+    expect(npc?.type === 'npc' && npc.npcType).toBeUndefined()
+
+    const { presentNpcIds, roomNpcTypeById } = deriveRoomNpcTypeById(npcRoom)
+    expect(roomNpcTypeById.size).toBe(0)
+
+    const result = selectNpcRoutineModes({
+      enabled: true,
+      presentNpcIds,
+      timeOfDay: 'day',
+      roomNpcTypeById,
+    })
+    expect(result.size).toBe(0)
+  })
+
+  it('roomNpcTypeById ignores npc objects without an id, even when npcType is valid', () => {
+    const npcRoom = makeRoom([
+      {
+        type: 'npc',
+        name: 'Nameless',
+        npcType: 'guard', // no id -- must be ignored
+        position: [0, 0, -2],
+        interaction: { key: 'F', prompt: 'Talk' },
+      },
+    ], 'generated-room')
+
+    const { presentNpcIds, roomNpcTypeById } = deriveRoomNpcTypeById(npcRoom)
+    expect(presentNpcIds.size).toBe(0)
+    expect(roomNpcTypeById.size).toBe(0)
+  })
+
+  it('herald-asha keeps its unchanged explicit-config behavior even when a same-id room npcType disagrees, and authored NPC_TYPE_BY_ID wins over the room field for the same id', () => {
+    const npcRoom = makeRoom([
+      {
+        type: 'npc',
+        id: 'herald-asha',
+        name: 'Asha',
+        npcType: 'wanderer', // disagrees with both the explicit schedule and the authored type
+        position: [0, 0, -2],
+        interaction: { key: 'F', prompt: 'Talk' },
+      },
+    ], 'throne-room')
+
+    const { presentNpcIds, roomNpcTypeById } = deriveRoomNpcTypeById(npcRoom)
+    expect(roomNpcTypeById.get('herald-asha')).toBe('wanderer')
+
+    // App always calls selectNpcRoutineModes with its default `config`/
+    // `typeConfig` (NPC_ROUTINE_CONFIG / NPC_TYPE_BY_ID) -- omitted here to
+    // exercise those real defaults, exactly as App does.
+    const result = selectNpcRoutineModes({
+      enabled: true,
+      presentNpcIds,
+      timeOfDay: 'day',
+      roomNpcTypeById,
+    })
+    // herald-asha's explicit NPC_ROUTINE_CONFIG schedule resolves day ->
+    // patrol -- never wanderer's wander_day_rest_night preset (day -> passive).
+    expect(result.get('herald-asha')).toBe('patrol')
   })
 
   it('projects a B-room object after A to B interaction, C travel, and return to B state shape', () => {
