@@ -90,7 +90,7 @@ existing four modes). Ship **option A only** in this feature.
   schedule gets resolved for an id, not the gate, the eligibility rule, the motor
   integration, or the movement-priority order.
 
-### Deferred: Option B (recorded future V1)
+### Option B — delivered by ADR-0090 (`generated-npc-routine-type-v0`)
 
 An optional, closed, validated enum field on the RoomSpec `Npc` schema (e.g.
 `npcType?: NpcRoutineNpcType`), populated only by trusted generated-assembly code
@@ -101,6 +101,14 @@ RoomSpec change and therefore requires its own explicit maintainer approval, its
 ADR, and its own schema/save-load/redteam test coverage before any code is written. Not
 started in this feature. See implementation plan §16 for the full requirements list
 agreed for that future work.
+
+**Delivered.** This path shipped as the `npcType` field in
+[`generated-npc-routine-type-v0`](./ADR-0090-generated-npc-routine-type-v0.md)
+(ADR-0090), exactly as scoped above: an optional, closed `npcType` enum on the RoomSpec
+`Npc` schema, validated with invalid/unknown values dropped to `undefined`, feeding the
+unchanged resolver from this ADR as a third, lowest-priority type source — below the
+explicit `NPC_ROUTINE_CONFIG` schedule and below this ADR's authored `NPC_TYPE_BY_ID`
+map, which both continue to win over the room field.
 
 ### Rejected: Option E (permanent)
 

@@ -1,7 +1,7 @@
 # ADR-0090: An optional closed `npcType` enum field on the RoomSpec `Npc` schema — data-only NPC metadata, not a schedule or behavior command — lets generated NPCs opt into existing routine presets
 
-- **Status:** **Accepted. Slice 0 only (docs-only implementation plan + this ADR).
-  Not yet implemented — no source, test, schema, or prompt code changed.**
+- **Status:** **Accepted. Implemented — Slices 0–4 shipped; Slice 5 (docs closeout)
+  complete.**
 - **Date:** 2026-07-09
 - **Deciders:** Project owner
 - **Delivers:** the deferred **Option B** recorded in
@@ -194,14 +194,33 @@ authored `NPC_TYPE_BY_ID` map.
 
 ## Verification
 
-To be recorded at Slice 5 closeout, after implementation. Planned targeted coverage:
-`roomSpec` schema tests (valid accepted; invalid/free-text/wrong-type/`null` dropped to
-`undefined`; absent OK), `llmRoomPrompt` tests (category-only hint; no
-schedule/routine/mode/time text), `npcRoutine` domain/app tests (generated `npcType`
-resolves a mode; explicit `NPC_ROUTINE_CONFIG` wins; authored `NPC_TYPE_BY_ID` wins over
-the room field; missing/invalid → no routine), `App` tests (room-derived type map from
-validated present NPCs), redteam/safety tests (no text parsing, invalid dropped, no
-schedule injection, no provider control of mode, no memory/world/event/command write, no
-raw logging, gate-off preserved), plus `npm run lint`, `npm run build`, and the full
-suite. Until then this ADR is **Slice 0 only**; ADR-0088's deferred Option B note stays
-as-is and is flipped to "delivered" only at this feature's Slice 5 closeout.
+Implemented per this ADR's decision, with no relaxation: explicit `NPC_ROUTINE_CONFIG`
+still wins first; authored `NPC_TYPE_BY_ID` still wins over the room field; `npcType`
+resolves only through the unchanged ADR-0088 resolver (no new resolver); every
+invalid/missing/unknown/free-text/wrong-type/`null` value is dropped to `undefined`
+inside the schema; the room prompt asks for a category label only; the
+`VITE_AIGM_DEMO_ROUTINE` default-off gate is unaffected; and no memory/fact/
+`fact_visibility`, `WorldState`/`WorldEvent`/`WorldCommand`, timer/background-simulation,
+`schemaVersion`, or save-game/DB migration was added. Full detail and the closed-vocabulary/
+priority-order record live in the implementation plan's §17 Slice 5 closeout record.
+
+- Full suite (`npm run test`, run from `apps/web`) — 217 files / 3879 tests passed.
+- `npm run lint` — clean.
+- `npm run build` — succeeded.
+- Targeted safety/redteam/eval coverage:
+  - `src/redteam/npcRoutine.redteam.test.ts` — 72 passed, proving the closed-enum-only
+    schema boundary, no content-derived classification, no schedule/behavior-command
+    injection, end-to-end priority/gate safety against the real schema + selector +
+    authored config, and unchanged import/source surfaces.
+  - `src/evaluation/noSideEffects.eval.test.ts` — 17 passed, including a Gate F
+    extension proving `roomNpcTypeById` at volume (N=1000) causes zero
+    `WorldEvent`/`WorldState`/memory/provider side effects.
+  - `src/evaluation/logSafety.eval.test.ts` — 11 passed, including a Gate E extension
+    proving the selector with a marker-laden, partly-invalid `roomNpcTypeById` map calls
+    no `console.*` method and leaks no marker.
+- Regression checks passed (unchanged behavior, re-run only): `src/domain/roomSpec.test.ts`,
+  `src/app/npcRoutine.test.ts`, `src/generation/llmRoomPrompt.test.ts`, `src/App.test.tsx`.
+- **No production code change was needed in Slice 4** — the safety properties held on
+  first implementation.
+
+ADR-0088's deferred Option B note has been updated to record delivery by this ADR.

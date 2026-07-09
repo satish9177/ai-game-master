@@ -1,8 +1,7 @@
 # Implementation Plan — `feature/generated-npc-routine-type-v0`
 
-> Status: **Slice 0 (this document + ADR-0090) — docs-only. Not yet implemented.**
-> No `.ts`/`.tsx` source or test file, no schema, and no prompt code has been created
-> or modified. Written **docs-first**, ahead of implementation, per `AGENTS.md`
+> Status: **IMPLEMENTED — Slices 0–4 shipped; Slice 5 (this closeout) complete.**
+> Written **docs-first**, ahead of implementation, per `AGENTS.md`
 > ("Design first. Do not implement until the maintainer approves.") and the
 > `npc-routine-presets-v0` precedent.
 >
@@ -66,7 +65,7 @@ explicit re-approval:
   RoomSpec `Npc` schema so generated NPCs can use existing routine presets.
 - **Lane:** worked on `main` directly (per current project convention — no feature
   branches), one slice at a time.
-- **Status:** **Slice 0 (docs-only) complete in this document. Slices 1–5 not started.**
+- **Status:** **Implemented.** Slices 0–4 shipped; Slice 5 (docs/ADR closeout) complete.
 - **ADR:** [ADR-0090](../decisions/ADR-0090-generated-npc-routine-type-v0.md).
 
 ## 2. Problem statement
@@ -365,3 +364,100 @@ Slice 5 closeout by an implemented-status line, per the `npc-routine-presets-v0`
 precedent. ADR-0088's deferred Option B note is **not** flipped in Slice 0 — it is
 cross-linked here as a planned follow-up and will be updated to "delivered by ADR-0090"
 only at this feature's Slice 5 closeout, once the feature is complete.
+
+## 17. Slice 5 closeout record (this update)
+
+**Implemented, exactly as designed.** This feature delivers the deferred **Option B**
+recorded in [ADR-0088](../decisions/ADR-0088-npc-routine-presets-v0.md) (§"Deferred:
+Option B") and this plan's §16: the RoomSpec `Npc` object now supports an optional,
+closed, data-only `npcType` field, so generated NPCs can opt into the existing routine
+preset system.
+
+- **Field name is `npcType`, not `routineType`** (§0.2, decided and unchanged) —
+  data-only NPC metadata, never a schedule or behavior command.
+- **Valid values (reused from ADR-0088, no new values):**
+  `guard | merchant | villager | noble | servant | wanderer | static_npc`.
+- **Invalid/missing/unknown/free-text/wrong-type/`null` values are dropped to
+  `undefined`** entirely inside the schema
+  (`z.enum(NPC_ROUTINE_NPC_TYPES).optional().catch(undefined)`, `domain/roomSpec.ts`) —
+  no new `assembleRoom` normalizer stage, no repair-pipeline change. `NPC_ROUTINE_NPC_TYPES`
+  and `isNpcRoutineNpcType` were exported from `domain/npcRoutinePresets.ts` (previously
+  module-private) as the single source of truth shared by the schema and `App.tsx`.
+- **The generated-room prompt (`generation/llmRoomPrompt.ts`) includes a minimal
+  category-only hint**: an npc object may optionally include `npcType` set to one of the
+  seven closed values, framed as a category label only. The prompt does **not** ask for
+  schedules, routine modes, patrol paths, time-based behavior, or any custom routine text.
+- **Runtime maps a validated `npcType` through the existing, unmodified routine preset
+  system — no new resolver was added.** `resolveRoutineScheduleForNpc`
+  (`domain/npcRoutinePresets.ts`, ADR-0088) is called exactly as before; the only change
+  is an additional, lowest-priority type source feeding it.
+- **Resolution priority, exactly as designed (§7), reconfirmed against real modules in
+  Slice 4:**
+  1. Explicit `NPC_ROUTINE_CONFIG[npcId]` (ADR-0087) still wins first — herald-asha
+     resolves exactly as it did before this feature, even when a same-id room NPC
+     carries a disagreeing `npcType`.
+  2. Otherwise, authored `NPC_TYPE_BY_ID[npcId]` (ADR-0088) wins over the room field.
+  3. Otherwise, the room object's validated `npcType` is used only when present and no
+     authored type exists.
+  4. Otherwise, no routine.
+- **A generated NPC with a valid `npcType` can now receive a routine mode, behind the
+  unchanged, default-off `VITE_AIGM_DEMO_ROUTINE` gate.** A generated NPC without a
+  valid `npcType` (missing, invalid, or dropped) gets no routine, matching pre-feature
+  behavior exactly.
+- **`App.tsx` derives `roomNpcTypeById` only from the current, validated room's NPC
+  objects**, reading only `object.type === 'npc'`, `object.id !== undefined`, and a
+  `isNpcRoutineNpcType`-guarded `object.npcType` — never `name`, `persona`, `dialogue`,
+  `interaction` text, room text, prompt text, provider output, or relationship/journal
+  state, proven by source scans in both `App.test.tsx` and the redteam suite.
+- **The dialogue routine context path (ADR-0089) is unchanged** — `RoomViewer` still
+  reads the resolved `npcRoutineModes` map; a newly-resolved generated-NPC mode surfaces
+  automatically with no dialogue-layer code change.
+
+Safety/non-goals re-confirmed at closeout (all still hold):
+
+- **This is not player memory.** No memory/fact/`fact_visibility` write or read of
+  `npcType`.
+- No content-derived classification from NPC name, persona, dialogue, interaction, room,
+  prompt, provider, or generated text — the App derivation and the resolver read only an
+  id string and a closed-enum type value.
+- No relationship-driven routines.
+- No LLM/provider control of schedules; no LLM-generated schedules; no free-text routine
+  names; no custom schedules.
+- No combat/damage/HP/death/capture/injury/encounters/items/quests.
+- No `WorldEvent`, no `WorldCommand`, no `WorldState` mutation.
+- No timers or background simulation of any kind.
+- No raw prompt/provider/dialogue/room-text/generated-text logging.
+- No save-game/database migration; no `schemaVersion` bump — the field is additive and
+  optional throughout.
+- `VITE_AIGM_DEMO_ROUTINE` remains default-off; the gate, present-NPC intersection, and
+  every ADR-0087/ADR-0088/ADR-0089 safety property are reused verbatim.
+
+### Verification (run from `apps/web`)
+
+- Full suite (`npm run test`) — **217 files / 3879 tests passed.**
+- `npm run lint` — clean.
+- `npm run build` — succeeded.
+- Slice 4 safety/redteam/eval coverage:
+  - `src/redteam/npcRoutine.redteam.test.ts` — **72 passed** (closed-enum-only schema
+    boundary; no content-derived classification; no schedule/behavior-command injection;
+    priority/gate safety end to end against the real schema + selector + authored config;
+    import/source surface scans).
+  - `src/evaluation/noSideEffects.eval.test.ts` — **17 passed**, including the new Gate F
+    extension proving `roomNpcTypeById` at volume (N=1000, mixed valid/poisoned/invalid
+    entries) appends zero `WorldEvent`s, mutates no `WorldState`, writes no memory record,
+    and makes no provider/network call.
+  - `src/evaluation/logSafety.eval.test.ts` — **11 passed**, including the new Gate E
+    extension proving the selector with a marker-laden, partly-invalid `roomNpcTypeById`
+    map calls no `console.*` method and leaks no marker into its output.
+- Regression checks (unchanged behavior, re-run only) passed:
+  `src/domain/roomSpec.test.ts`, `src/app/npcRoutine.test.ts`,
+  `src/generation/llmRoomPrompt.test.ts`, `src/App.test.tsx`.
+- **No production code change was needed in Slice 4** — every safety property held on
+  first implementation; the redteam/eval suites confirmed rather than uncovered a defect.
+
+Boundaries re-confirmed at closeout: see the safety/non-goals list above; every item was
+true before this feature and remains true after it. `docs/architecture/ARCHITECTURE.md`'s
+planned-status bullet was replaced by an implemented-status line pointing at this plan and
+[ADR-0090](../decisions/ADR-0090-generated-npc-routine-type-v0.md). ADR-0088's deferred
+Option B note was updated to record delivery by this feature, without rewriting its
+original historical record.
