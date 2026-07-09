@@ -1,6 +1,12 @@
+import roomSpecSource from './roomSpec.ts?raw'
 import { describe, expect, it } from 'vitest'
 import { RoomObjectSchema } from './roomSpec'
 import { loadRoomSpec } from './loadRoomSpec'
+import { NPC_ROUTINE_NPC_TYPES } from './npcRoutinePresets'
+
+function importSpecifiers(source: string): string[] {
+  return [...source.matchAll(/from\s+['"]([^'"]+)['"]/g)].map((match) => match[1]!)
+}
 
 /**
  * Schema-level coverage for the post-apocalyptic asset pack v0. Confirms each
@@ -362,5 +368,100 @@ describe('strange/device/light object schema', () => {
     ]))
     expect(loaded.objects).toEqual([])
     expect(loaded.skipped.map((item) => item.type)).toEqual(['machine', 'artifact', 'candle'])
+  })
+})
+
+/**
+ * Schema-level coverage for generated-npc-routine-type-v0 (ADR-0090, Slice 1).
+ *
+ * `npcType` is a closed, optional, data-only category label -- never a
+ * schedule or behavior command. It reuses the closed vocabulary already
+ * proven safe by npc-routine-presets-v0 (ADR-0088):
+ * `NPC_ROUTINE_NPC_TYPES`. Any value outside that closed set is dropped to
+ * `undefined` at the schema boundary (`.optional().catch(undefined)`) so the
+ * NPC and the room still validate; nothing downstream needs to repair or
+ * fall back for an invalid `npcType`.
+ */
+describe('npc schema npcType field', () => {
+  const npcBase = {
+    type: 'npc' as const,
+    name: 'Asha',
+    position: [0, 0, 0] as [number, number, number],
+    interaction: { key: 'F' as const, prompt: 'Press F to talk' },
+  }
+
+  it.each(NPC_ROUTINE_NPC_TYPES)('accepts and preserves the closed npcType value %s', (npcType) => {
+    const parsed = RoomObjectSchema.parse({ ...npcBase, npcType })
+    expect(parsed.type === 'npc' && parsed.npcType).toBe(npcType)
+  })
+
+  it('leaves npcType absent/undefined when not supplied', () => {
+    const parsed = RoomObjectSchema.parse(npcBase)
+    expect(parsed.type === 'npc' && parsed.npcType).toBeUndefined()
+    expect('npcType' in parsed).toBe(false)
+  })
+
+  it.each([
+    'GUARD',
+    'Guard',
+    'guardian',
+    'night guard patrol schedule',
+    '<script>alert(1)</script>',
+    'guard; DROP TABLE npcs',
+    '',
+    ' guard',
+    'static-npc', // hyphen instead of underscore
+  ])('drops the invalid free-text/wrong-case npcType %j to undefined while the NPC still validates', (npcType) => {
+    const parsed = RoomObjectSchema.parse({ ...npcBase, npcType })
+    expect(parsed.type === 'npc' && parsed.npcType).toBeUndefined()
+  })
+
+  it.each([null, 123, true, false, ['guard'], { npcType: 'guard' }])(
+    'drops a non-string npcType %j to undefined while the NPC still validates',
+    (npcType) => {
+      const parsed = RoomObjectSchema.parse({ ...npcBase, npcType })
+      expect(parsed.type === 'npc' && parsed.npcType).toBeUndefined()
+    },
+  )
+
+  it('keeps the whole room valid when an NPC carries an invalid npcType', () => {
+    const loaded = loadRoomSpec(minimalRoom([
+      { ...npcBase, id: 'poisoned-npc', npcType: 'not-a-real-type' },
+    ]))
+    expect(loaded.skipped).toHaveLength(0)
+    const npc = loaded.objects[0]
+    expect(npc?.type === 'npc' && npc.npcType).toBeUndefined()
+  })
+
+  it('keeps an existing NPC fixture with no npcType field parsing exactly as before', () => {
+    const loaded = loadRoomSpec(minimalRoom([
+      {
+        type: 'npc',
+        id: 'friendly-aide',
+        name: 'Asha',
+        position: [0, 0, 0],
+        interaction: { key: 'F', prompt: 'Press F to talk' },
+      },
+    ]))
+    expect(loaded.skipped).toHaveLength(0)
+    const npc = loaded.objects[0]
+    expect(npc?.type).toBe('npc')
+    expect(npc && 'npcType' in npc).toBe(false)
+  })
+
+  it('NPC_ROUTINE_NPC_TYPES contains exactly the seven closed values used by the schema', () => {
+    expect([...NPC_ROUTINE_NPC_TYPES].sort()).toEqual(
+      ['guard', 'merchant', 'noble', 'servant', 'static_npc', 'villager', 'wanderer'],
+    )
+  })
+
+  it('domain/roomSpec.ts imports the closed npcType vocabulary only from the pure npcRoutinePresets module, never provider/prompt/LLM/persistence/world-event/memory/fact modules', () => {
+    const specifiers = importSpecifiers(roomSpecSource)
+    expect(specifiers).toContain('./npcRoutinePresets')
+    for (const specifier of specifiers) {
+      expect(specifier).not.toMatch(
+        /provider|llm|persistence|sqlite|world-session|worldevent|worldcommand|memory|fact|server/i,
+      )
+    }
   })
 })

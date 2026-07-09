@@ -2,6 +2,7 @@ import { z } from 'zod'
 import { InteractionEffectSchema } from './interactions/effects'
 import { EncounterSpecSchema } from './encounters/encounterSpec'
 import { NPCDialogueSpecSchema } from './dialogue/contracts'
+import { NPC_ROUTINE_NPC_TYPES } from './npcRoutinePresets'
 
 /**
  * RoomSpec is DATA ONLY. It describes a room declaratively; the trusted
@@ -230,6 +231,11 @@ const Npc = z.object({
   name: z.string().min(1),
   interaction: Interaction, // key: 'F'
   color: Hex.default('#3a6ea5'),
+  // Closed, optional, data-only category label — never a schedule or behavior
+  // command. Any value outside NPC_ROUTINE_NPC_TYPES (wrong type, wrong case,
+  // free text, null, etc.) is dropped to undefined so the NPC/room still
+  // validates. See ADR-0090.
+  npcType: z.enum(NPC_ROUTINE_NPC_TYPES).optional().catch(undefined),
   ...transform,
 })
 

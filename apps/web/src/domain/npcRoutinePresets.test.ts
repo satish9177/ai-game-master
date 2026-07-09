@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import {
+  NPC_ROUTINE_NPC_TYPES,
   NPC_TYPE_TO_ROUTINE_PRESET,
   ROUTINE_PRESETS,
+  isNpcRoutineNpcType,
   resolveRoutineScheduleForNpc,
   type NpcRoutineNpcType,
   type NpcRoutinePreset,
@@ -31,6 +33,36 @@ const CLOSED_PRESETS: readonly NpcRoutinePreset[] = [
 describe('NpcRoutineNpcType', () => {
   it('NPC_TYPE_TO_ROUTINE_PRESET keys are exactly the closed npc type values', () => {
     expect(Object.keys(NPC_TYPE_TO_ROUTINE_PRESET).sort()).toEqual([...CLOSED_NPC_TYPES].sort())
+  })
+})
+
+describe('NPC_ROUTINE_NPC_TYPES', () => {
+  it('contains exactly the seven closed npc type values', () => {
+    expect([...NPC_ROUTINE_NPC_TYPES].sort()).toEqual([...CLOSED_NPC_TYPES].sort())
+    expect(NPC_ROUTINE_NPC_TYPES).toHaveLength(7)
+  })
+})
+
+describe('isNpcRoutineNpcType', () => {
+  it('accepts each of the seven closed npc type values', () => {
+    for (const npcType of CLOSED_NPC_TYPES) {
+      expect(isNpcRoutineNpcType(npcType)).toBe(true)
+    }
+  })
+
+  it('rejects wrong-case, free-text, hostile-looking, and non-string values', () => {
+    expect(isNpcRoutineNpcType('Guard')).toBe(false)
+    expect(isNpcRoutineNpcType('GUARD')).toBe(false)
+    expect(isNpcRoutineNpcType('guardian')).toBe(false)
+    expect(isNpcRoutineNpcType('night guard patrol schedule')).toBe(false)
+    expect(isNpcRoutineNpcType('<script>alert(1)</script>')).toBe(false)
+    expect(isNpcRoutineNpcType('')).toBe(false)
+    expect(isNpcRoutineNpcType(null)).toBe(false)
+    expect(isNpcRoutineNpcType(undefined)).toBe(false)
+    expect(isNpcRoutineNpcType(123)).toBe(false)
+    expect(isNpcRoutineNpcType(true)).toBe(false)
+    expect(isNpcRoutineNpcType(['guard'])).toBe(false)
+    expect(isNpcRoutineNpcType({ npcType: 'guard' })).toBe(false)
   })
 })
 

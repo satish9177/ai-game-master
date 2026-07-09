@@ -16,7 +16,7 @@ export type NpcRoutinePreset =
   | 'wander_day_rest_night'
   | 'patrol_morning_day_rest_night'
 
-const NPC_ROUTINE_NPC_TYPES: readonly NpcRoutineNpcType[] = [
+export const NPC_ROUTINE_NPC_TYPES = [
   'guard',
   'merchant',
   'villager',
@@ -24,7 +24,7 @@ const NPC_ROUTINE_NPC_TYPES: readonly NpcRoutineNpcType[] = [
   'servant',
   'wanderer',
   'static_npc',
-]
+] as const satisfies readonly NpcRoutineNpcType[]
 
 const NPC_ROUTINE_PRESETS: readonly NpcRoutinePreset[] = [
   'stationary',
@@ -34,7 +34,7 @@ const NPC_ROUTINE_PRESETS: readonly NpcRoutinePreset[] = [
   'patrol_morning_day_rest_night',
 ]
 
-function isNpcRoutineNpcType(value: unknown): value is NpcRoutineNpcType {
+export function isNpcRoutineNpcType(value: unknown): value is NpcRoutineNpcType {
   return (
     typeof value === 'string' &&
     (NPC_ROUTINE_NPC_TYPES as readonly string[]).includes(value)
