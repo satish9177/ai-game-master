@@ -12,7 +12,16 @@
  * model's reply is still treated as raw, untrusted text downstream: it flows
  * through `assembleRoom` (`JSON.parse → loadRoomSpec → validateRoom → repair →
  * fallback`), which is the only trust boundary. Nothing here weakens that.
+ *
+ * The `npcType` hint (generated-npc-routine-type-v0; ADR-0090) reuses the same
+ * closed vocabulary already validated by the RoomSpec `Npc.npcType` field
+ * (`domain/npcRoutinePresets.ts`) so the prompt and the schema can never drift.
+ * It asks for a category label only — never a schedule, routine, mode, patrol
+ * path, or time-based behavior; the field is dropped to `undefined` by the
+ * schema if the model ever ignores this and emits anything else, so this hint
+ * is a population aid, not a trust boundary.
  */
+import { NPC_ROUTINE_NPC_TYPES } from '../domain/npcRoutinePresets'
 
 /** One OpenAI-compatible chat message. Only the two roles we send. */
 export type ChatMessage = { role: 'system' | 'user'; content: string }
@@ -58,6 +67,9 @@ export const ROOM_SYSTEM_PROMPT = [
   'For story anchors use throne, altar, or statue. For devices/strange objects use machine or artifact.',
   'For lights use torch for wall lighting and candle for small visual candles; candle is visual-only.',
   'For generic clutter use debris, barricade, prop, crate, or barrel.',
+  '',
+  `An npc object may optionally include "npcType" set to exactly one of: ${NPC_ROUTINE_NPC_TYPES.join(', ')}.`,
+  'npcType is only a category label (data only) — never include a schedule, routine, routine mode, patrol path, or time-based behavior for npcType.',
   '',
   'Story anchor guidance:',
   'When appropriate, build the room around exactly one dominant story anchor: the single object the player should notice first to understand what happened here.',

@@ -4,6 +4,7 @@ import {
   MAX_SEED_CHARS,
   buildRoomPromptMessages,
 } from './llmRoomPrompt'
+import { NPC_ROUTINE_NPC_TYPES } from '../domain/npcRoutinePresets'
 
 const ALLOWED_ROOM_OBJECT_TYPES = [
   'throne',
@@ -260,5 +261,93 @@ describe('ROOM_SYSTEM_PROMPT', () => {
 
   it('is bounded (static, prompt-free instruction)', () => {
     expect(ROOM_SYSTEM_PROMPT.length).toBeLessThan(4500)
+  })
+})
+
+/**
+ * Coverage for generated-npc-routine-type-v0 (ADR-0090, Slice 2). The prompt
+ * may hint the closed `npcType` category so generated NPCs can populate it,
+ * but it must ask for a category label only -- never a schedule, routine,
+ * mode, patrol path, time-based behavior, or any statement that the provider
+ * controls routine state. The schema (Slice 1) already drops anything else
+ * to `undefined`, so this hint is a population aid, not a trust boundary.
+ */
+describe('ROOM_SYSTEM_PROMPT npcType hint', () => {
+  it('reuses the same closed npcType vocabulary as the RoomSpec schema and has exactly seven values', () => {
+    expect(NPC_ROUTINE_NPC_TYPES).toEqual([
+      'guard',
+      'merchant',
+      'villager',
+      'noble',
+      'servant',
+      'wanderer',
+      'static_npc',
+    ])
+  })
+
+  it('mentions the npcType field name and every one of its closed allowed values', () => {
+    expect(ROOM_SYSTEM_PROMPT).toContain('npcType')
+    for (const npcType of NPC_ROUTINE_NPC_TYPES) {
+      expect(ROOM_SYSTEM_PROMPT).toContain(npcType)
+    }
+  })
+
+  it('describes npcType as optional and as a category/data label, not a requirement', () => {
+    const lower = ROOM_SYSTEM_PROMPT.toLowerCase()
+    expect(lower).toContain('may optionally include "npctype"')
+    expect(lower).toContain('npctype is only a category label')
+    expect(lower).toContain('(data only)')
+  })
+
+  it('does not ask the model to produce a schedule, routine, routine mode, patrol path, or time-based behavior for npcType', () => {
+    const lower = ROOM_SYSTEM_PROMPT.toLowerCase()
+    // The prompt is allowed to name these terms only inside the negative
+    // instruction that forbids them -- assert that exact forbidding sentence
+    // exists, and that no other, non-negated instruction asks for any of
+    // them in connection with npcType.
+    expect(lower).toContain(
+      'npctype is only a category label (data only) — never include a schedule, routine, routine mode, patrol path, or time-based behavior for npctype.',
+    )
+    expect(lower).not.toContain('include a schedule for npctype')
+    expect(lower).not.toContain('assign a routine')
+    expect(lower).not.toContain('define a patrol path')
+    expect(lower).not.toContain('specify time-based behavior')
+    expect(lower).not.toContain('npctype schedule')
+    expect(lower).not.toContain('npctype routine')
+  })
+
+  it('does not ask for custom/free-text routine descriptions or behavior commands', () => {
+    const lower = ROOM_SYSTEM_PROMPT.toLowerCase()
+    expect(lower).not.toContain('custom routine')
+    expect(lower).not.toContain('routine text')
+    expect(lower).not.toContain('behavior command')
+    expect(lower).not.toContain('describe the npc\'s behavior')
+  })
+
+  it('never states or implies that the provider/model controls routine or schedule state', () => {
+    const lower = ROOM_SYSTEM_PROMPT.toLowerCase()
+    expect(lower).not.toContain('you control')
+    expect(lower).not.toContain('you decide the routine')
+    expect(lower).not.toContain('you set the schedule')
+    expect(lower).not.toContain('determines the npc\'s routine')
+    expect(lower).not.toContain('controls the routine')
+  })
+
+  it('keeps the npcType hint small -- two short sentences, not a growing spec', () => {
+    const start = ROOM_SYSTEM_PROMPT.indexOf('An npc object may optionally include "npcType"')
+    expect(start).toBeGreaterThanOrEqual(0) // guard against a vacuous pass
+    const end = ROOM_SYSTEM_PROMPT.indexOf('\n\n', start)
+    const hintBlock = end === -1 ? ROOM_SYSTEM_PROMPT.slice(start) : ROOM_SYSTEM_PROMPT.slice(start, end)
+    expect(hintBlock.length).toBeLessThan(400)
+  })
+
+  it('keeps overall existing generated-room prompt behavior stable alongside the new hint', () => {
+    expect(ROOM_SYSTEM_PROMPT.length).toBeLessThan(4500)
+    const messages = buildRoomPromptMessages('a quiet chapel')
+    expect(messages).toHaveLength(2)
+    expect(messages[0]!.role).toBe('system')
+    expect(messages[0]!.content).toBe(ROOM_SYSTEM_PROMPT)
+    expect(messages[1]!.role).toBe('user')
+    expect(messages[1]!.content).toBe('a quiet chapel')
   })
 })
