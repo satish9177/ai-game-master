@@ -455,6 +455,32 @@ Throughout these docs:
   or logging change
   ([ADR-0089](./decisions/ADR-0089-npc-routine-dialogue-context-v0.md),
   [implementation plan](./implementation-plans/npc-routine-dialogue-context-v0.md)).
+- 🔜 **Planned (Slice 0 — docs-only plan + ADR; not yet implemented)** — Generated NPC
+  Routine Type v0 — delivers the deferred **Option B** from
+  [ADR-0088](./decisions/ADR-0088-npc-routine-presets-v0.md) (§"Deferred: Option B"): an
+  optional, closed, validated `npcType` enum field
+  (`guard | merchant | villager | noble | servant | wanderer | static_npc`) on the
+  RoomSpec `Npc` object, so **generated** NPCs can opt into the existing routine presets
+  without a hardcoded per-id map and without content-derived classification. `npcType` is
+  data-only NPC metadata — not a schedule and not a behavior command; invalid/missing/
+  unknown/free-text/wrong-type/`null` values are dropped to `undefined` **inside the
+  schema** (field-level `z.enum(...).optional().catch(undefined)`), so generated-room
+  validation accepts the valid closed enum only with no new `assembleRoom` stage. The
+  generated-room prompt may add a minimal closed-enum **category-only** hint (never
+  schedules/routines/modes/time behavior/custom text). Runtime maps `npcType` through the
+  unchanged ADR-0088 resolver — `npcType` → existing `NpcRoutineNpcType` → existing preset
+  → existing schedule → current mode from `worldClock.timeOfDay` (no new resolver, no
+  custom schedule, no provider-controlled schedule) — with priority: explicit
+  `NPC_ROUTINE_CONFIG` id schedule wins first (ADR-0087, `herald-asha` unchanged), then
+  authored `NPC_TYPE_BY_ID` wins over the room field (ADR-0088 fallback/fixture path),
+  then the validated room `npcType`, else no routine. Generated NPC routines stay behind
+  the default-off `VITE_AIGM_DEMO_ROUTINE` gate; the ADR-0089 dialogue routine context is
+  reused unchanged (reads the existing `npcRoutineModes` map). Not player memory; no
+  memory/fact/`fact_visibility`, `WorldState`/`WorldEvent`/`WorldCommand`, timer/
+  background-simulation, `schemaVersion`/save-game/DB migration, or raw-text logging
+  change is planned
+  ([ADR-0090](./decisions/ADR-0090-generated-npc-routine-type-v0.md),
+  [implementation plan](./implementation-plans/generated-npc-routine-type-v0.md)).
 - ❌ **Not built** — future shape only; documented so we don't paint into a corner.
 
 ## Status today (Renderer Foundation v0)
