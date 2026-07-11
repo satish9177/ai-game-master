@@ -5,6 +5,7 @@ import { LIVING_WORLD_PROOF_SCHEMA_VERSION } from './contracts'
 import type { QueryBounds, WorldInstant } from './conflictContracts'
 import type { ConflictStore } from './conflictStore'
 import type { ReadableRecord } from './evidenceRecords'
+import type { PlanLeafRef } from './planBodyContracts'
 import type {
   ActionConsequence,
   AttemptVerdict,
@@ -537,6 +538,8 @@ export interface AttemptRequest {
   target: string
   intentionId: string | null
   planTemplateId: string | null
+  /** ADR-0010 D3: present only for attempts a plan-body Action leaf emits. */
+  planLeafRef?: PlanLeafRef
 }
 
 export type DispatchOutcome = { verdict: 'dispatched'; attempt: ProofActionAttempt } | { verdict: 'refused'; fault: DispatchFault }
@@ -569,6 +572,7 @@ export function dispatchAttempt(store: IntentionStore, request: AttemptRequest):
     intentionId: request.intentionId,
     planTemplateId: request.planTemplateId,
     dispatchedAtSeq: commitSeq,
+    ...(request.planLeafRef !== undefined ? { planLeafRef: request.planLeafRef } : {}),
   }
 
   const nextStore: IntentionStore = {
@@ -590,6 +594,8 @@ export interface OutcomeRequest {
   engineReason?: string
   consequence?: ActionConsequence
   observation?: Observation
+  /** ADR-0010 D9/D21: the effective world time this outcome took effect (a Wait-anchor trigger candidate). */
+  effectiveValidTime?: WorldInstant
 }
 
 export type OutcomeCommitResult = { verdict: 'committed'; outcome: ProofActionOutcome } | { verdict: 'rejected'; fault: OutcomeFault }
@@ -621,6 +627,7 @@ export function commitOutcome(store: IntentionStore, request: OutcomeRequest): {
     ...(request.consequence !== undefined ? { consequenceId: request.consequence.id } : {}),
     ...(request.observation !== undefined ? { observationId: request.observation.id } : {}),
     ...(request.engineReason !== undefined ? { engineReason: request.engineReason } : {}),
+    ...(request.effectiveValidTime !== undefined ? { effectiveValidTime: request.effectiveValidTime } : {}),
   }
 
   const nextStore: IntentionStore = {

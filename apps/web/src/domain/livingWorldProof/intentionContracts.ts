@@ -2,6 +2,7 @@ import { z } from 'zod'
 import { ConfidenceSchema, LIVING_WORLD_PROOF_SCHEMA_VERSION } from './contracts'
 import type { Observation } from './contracts'
 import { CONFLICT_CANONICALIZER_VERSION, WorldInstantSchema } from './conflictContracts'
+import { PlanLeafRefSchema } from './planBodyContracts'
 
 /**
  * Intention Lifecycle Replay v0 schema (ADR-0009 D1-D16, spec intention-
@@ -174,6 +175,8 @@ export const ProofActionAttemptSchema = z
     intentionId: z.string().min(1).nullable(),
     planTemplateId: z.string().min(1).nullable(),
     dispatchedAtSeq: z.number().int().nonnegative(),
+    /** ADR-0010 D3: the one additive field. Present only for attempts emitted by a plan-body Action leaf; absent for Tier-1/routine attempts (D22). */
+    planLeafRef: PlanLeafRefSchema.optional(),
   })
   .strict()
 
@@ -200,6 +203,17 @@ export const ProofActionOutcomeSchema = z
     /** Engine-side audit only; never rendered to the holder or an explanation (D12). */
     engineReason: z.string().min(1).optional(),
     commitSeq: z.number().int().nonnegative(),
+    /**
+     * ADR-0010 D9/D21: the effective world time this outcome took effect,
+     * bitemporally distinct from `commitSeq` (recorded/commit time) exactly
+     * as ADR-0008's vocabulary already separates the two axes elsewhere.
+     * Optional and additive -- absent for outcomes outside the plan-body
+     * proof (existing intention-lifecycle tests never populate it); the
+     * plan-body pipeline always sets it, since a Wait's anchor is defined
+     * as the effective time of the trigger that first places it on the
+     * active path, and a committed ActionOutcome is one such trigger.
+     */
+    effectiveValidTime: WorldInstantSchema.optional(),
   })
   .strict()
 
@@ -251,7 +265,14 @@ export const PlanTemplateSchema = z
     servesObjectiveType: z.string().min(1),
     /** Applicability context: a belief atom kind the holder's projection must entail (D9). */
     contextAtomKind: z.string().min(1),
-    steps: z.array(z.object({ action: z.string().min(1), target: z.string().min(1) }).strict()).min(1),
+    // Empty for a restricted-BT-bodied template (ADR-0010 D4): its authored
+    // body then lives in the separate PlanBodyTemplate registry
+    // (planBodyContracts.ts), keyed by the same id+version. `derivePlanState`/
+    // `nextAttemptRequestFor` below treat an empty step list as immediately
+    // finished, so the linear-cursor pipeline never dispatches from a
+    // BT-bodied template by construction -- the plan-body pipeline dispatches
+    // it instead (planBodyPipeline.ts), never touching `.steps`.
+    steps: z.array(z.object({ action: z.string().min(1), target: z.string().min(1) }).strict()),
   })
   .strict()
 

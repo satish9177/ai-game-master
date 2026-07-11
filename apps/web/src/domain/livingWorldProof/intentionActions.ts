@@ -38,7 +38,15 @@ export function worldFacts(partial?: Partial<WorldActionFacts>): WorldActionFact
 }
 
 /** Actions that, when they succeed, mint a world consequence; movement and routine patrols do not. */
-const CONSEQUENTIAL_ACTIONS: ReadonlySet<string> = new Set(['speak-accusation', 'speak-warning', 'speak-correction'])
+export const CONSEQUENTIAL_ACTIONS: ReadonlySet<string> = new Set([
+  'speak-accusation',
+  'speak-warning',
+  'speak-correction',
+  // ADR-0010 plan-body fixture (planBodyScenario.ts): SpeakReport is the
+  // consequential leaf `PT_report_bt`/`PT_report_watch_bt` guard with
+  // SequenceWithMemory (never a reactively re-ticked position, D8).
+  'speak-report',
+])
 
 export interface AttemptDecision {
   verdict: AttemptVerdict
@@ -81,8 +89,8 @@ export function validateAttempt(attempt: ProofActionAttempt, facts: WorldActionF
   }
 }
 
-/** The scope-computed observation the actor perceives -- result only, never the engine reason (D12). */
-function observationFor(attempt: ProofActionAttempt, decision: AttemptDecision, time: string): Observation {
+/** The scope-computed observation the actor perceives -- result only, never the engine reason (D12). Exported for reuse by the plan-body pipeline's own outcome commit (planBodyPipeline.ts), which needs the identical construction plus an additive bitemporal `effectiveValidTime` `executeAttempt` does not carry. */
+export function observationFor(attempt: ProofActionAttempt, decision: AttemptDecision, time: string): Observation {
   return {
     schemaVersion: LIVING_WORLD_PROOF_SCHEMA_VERSION,
     id: `O_${attempt.actor}_${attempt.id}`,

@@ -393,7 +393,8 @@ export interface PlanFailureState {
   boundTemplateIds: readonly string[]
 }
 
-function nextApplicableBinding(
+/** Exported for reuse by the plan-body pipeline's root-failure -> rebind/fail handoff (ADR-0010 D17): the same deterministic "next applicable authored template" search, one layer down. */
+export function nextApplicableBinding(
   candidate: CanonicalObjective,
   state: PlanFailureState,
   templates: readonly PlanTemplate[],
