@@ -138,7 +138,24 @@ export type ConflictEdge = z.infer<typeof ConflictEdgeSchema>
 
 // ---- BeliefTransition (per-holder, directed, cause-typed, D3) -------------
 
-export const TransitionCauseSchema = z.enum(['corrected-by-evidence', 'superseded-by-update', 'decayed', 'resolved-by-precedence'])
+// Attributed-Belief Staleness Replay v0 (research vault ADR-0011 D18) adds
+// eight cause values for ascription-caused transitions, additively -- no
+// existing value is removed or reinterpreted, and no already-committed
+// BeliefTransition's cause byte changes meaning.
+export const TransitionCauseSchema = z.enum([
+  'corrected-by-evidence',
+  'superseded-by-update',
+  'decayed',
+  'resolved-by-precedence',
+  'ascribed-from-assertion',
+  'delivery-without-acceptance',
+  'ascribed-from-acknowledgment',
+  'ascribed-apology-noted',
+  'ascribed-from-withdrawal',
+  'ascribed-from-denial',
+  'ascribed-unaware-from-ignorance-expression',
+  'ascription-decayed',
+])
 
 export type TransitionCause = z.infer<typeof TransitionCauseSchema>
 

@@ -39,10 +39,21 @@ interface PredicateSpec {
   exclusive: boolean
 }
 
+// Attributed-Belief Staleness Replay v0 (research vault ADR-0011 D5/D2) adds
+// one row, additively: an attribution's canonical key is
+// (predicate 'attributed-belief', fixedRoles {modeled_holder, inner_key}),
+// contesting `attributed_stance`. Because `exclusive` is true, any two
+// distinct stance values over the same key are incompatible under the same
+// polarity ('asserts', always -- attributionBuilder.ts) -- the existing
+// `incompatible()` below renders all six D4 stance pairs incompatible with
+// zero pair-specific code, exactly as D5 requires.
+export const ATTRIBUTED_BELIEF_PREDICATE = 'attributed-belief' as const
+
 const PREDICATE_GRAMMAR: Readonly<Record<string, PredicateSpec>> = {
   attacked: { contestedRole: 'actor', exclusive: true },
   involved_in: { contestedRole: 'actor', exclusive: true },
   [WORLD_STATE_PREDICATE]: { contestedRole: 'state', exclusive: true },
+  [ATTRIBUTED_BELIEF_PREDICATE]: { contestedRole: 'attributed_stance', exclusive: true },
 }
 
 /** The shared question a claim answers -- excludes the contested value/polarity/time (design plan I4). */
