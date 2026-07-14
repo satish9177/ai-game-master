@@ -367,11 +367,35 @@ const animationClips = {
   'zombie-walk': 'ZombieWalk',
 } as const
 
+// Slice 3 keeps the existing closed registry and budget planner intact. These
+// are authored, same-bundle low-poly roots — never neutral-family substitutions.
+const AUTHORED_LOD_ASSETS = [
+  ['architecture.crypt.floor-section', 'lod.architecture.crypt.floor-section.1', 'crypt', 'architecture.crypt.floor-section.lod1', 60],
+  ['architecture.crypt.wall-straight', 'lod.architecture.crypt.wall-straight.1', 'crypt', 'architecture.crypt.wall-straight.lod1', 120],
+  ['architecture.crypt.stairs', 'lod.architecture.crypt.stairs.1', 'crypt', 'architecture.crypt.stairs.lod1', 180],
+  ['architecture.crypt.doorway', 'lod.architecture.crypt.doorway.1', 'crypt', 'architecture.crypt.doorway.lod1', 220],
+  ['vegetation.tree', 'lod.vegetation.tree.1', 'vegetation', 'vegetation.tree.lod1', 140],
+  ['vegetation.dead-tree', 'lod.vegetation.dead-tree.1', 'vegetation', 'vegetation.dead-tree.lod1', 100],
+] as const
+
+for (const [sourceAssetId, lodAssetId, bundleId, nodeName, triangles] of AUTHORED_LOD_ASSETS) {
+  const source = assets[sourceAssetId]
+  if (source === undefined) throw new Error('missing authored LOD source asset')
+  register(lodAssetId, bundleId, source.family, source.licenseSourceId, {
+    nodeName,
+    instancing: source.instancing,
+    collision: source.collision,
+    cost: { ...source.cost, triangles },
+  })
+  assets[sourceAssetId] = { ...source, lodAssetIds: [lodAssetId] }
+}
+
 for (const [assetId, descriptor] of Object.entries(assets)) {
   const neutralId = neutralDefaults[descriptor.family]
   if (
     descriptor.family !== 'humanoid'
     && assetId !== neutralId
+    && !assetId.startsWith('lod.')
     && descriptor.lodAssetIds.length === 0
   ) {
     assets[assetId] = { ...descriptor, lodAssetIds: [neutralId] }

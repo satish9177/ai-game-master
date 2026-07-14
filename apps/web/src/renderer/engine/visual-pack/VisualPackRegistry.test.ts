@@ -107,7 +107,7 @@ describe('VisualPackRegistry', () => {
         expect(lod?.family).toBe(descriptor.family)
         expect(lod?.cost.triangles).toBeLessThanOrEqual(descriptor.cost.triangles)
       }
-      if (descriptor.family !== 'humanoid' && !neutralIds.has(assetId)) {
+      if (descriptor.family !== 'humanoid' && !neutralIds.has(assetId) && !assetId.startsWith('lod.')) {
         expect(descriptor.lodAssetIds.length).toBeGreaterThan(0)
       }
     }
@@ -126,6 +126,29 @@ describe('VisualPackRegistry', () => {
       collision: { kind: 'none' },
     })
   })
+
+  it('uses reviewed authored geometry roots for the Slice 3 LOD allowlist', () => {
+    const allowlist = [
+      ['architecture.crypt.floor-section', 'lod.architecture.crypt.floor-section.1', 'architecture.crypt.floor-section.lod1'],
+      ['architecture.crypt.wall-straight', 'lod.architecture.crypt.wall-straight.1', 'architecture.crypt.wall-straight.lod1'],
+      ['architecture.crypt.stairs', 'lod.architecture.crypt.stairs.1', 'architecture.crypt.stairs.lod1'],
+      ['architecture.crypt.doorway', 'lod.architecture.crypt.doorway.1', 'architecture.crypt.doorway.lod1'],
+      ['vegetation.tree', 'lod.vegetation.tree.1', 'vegetation.tree.lod1'],
+      ['vegetation.dead-tree', 'lod.vegetation.dead-tree.1', 'vegetation.dead-tree.lod1'],
+    ] as const
+
+    for (const [sourceId, lodId, nodeName] of allowlist) {
+      const source = ruinedKingdomPack.assets[sourceId]!
+      const lod = ruinedKingdomPack.assets[lodId]!
+      expect(source.lodAssetIds).toEqual([lodId])
+      expect(lod.nodeName).toBe(nodeName)
+      expect(lod.bundleId).toBe(source.bundleId)
+      expect(lod.family).toBe(source.family)
+      expect(lod.cost.triangles).toBeLessThan(source.cost.triangles)
+      expect(lodId).not.toBe(ruinedKingdomPack.neutralDefaults[source.family])
+    }
+  })
+
   it('keeps all bundle locations same-origin and every descriptor licensed', () => {
     for (const url of Object.values(ruinedKingdomPack.bundles)) {
       expect(url).toMatch(/^\/visual-packs\/ruined-kingdom-survival\/.+\.glb$/)

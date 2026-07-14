@@ -137,6 +137,8 @@ describe('VisualAssetCache', () => {
       'neutral.lighting',
       'object.crate.crate',
       'object.scroll.rolled',
+      'lod.architecture.crypt.doorway.1',
+      'lod.vegetation.tree.1',
     ] as const
 
     const leases = await Promise.all(assetIds.map((assetId) => cache.acquire(assetId)))

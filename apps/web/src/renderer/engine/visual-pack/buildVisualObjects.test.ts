@@ -159,6 +159,26 @@ describe('buildVisualObjects', () => {
     expect(built.group.getObjectByName('development-debug-visual')).toBeDefined()
   })
 
+  it('acquires an authored LOD root when the weighted budget requires it', async () => {
+    const raw = roomEnvelope([
+      { type: 'architecture', kind: 'wall-straight', position: [0, 0, 0] },
+    ]) as { environmentKind?: string }
+    raw.environmentKind = 'crypt'
+    const assets = new FakeAssets()
+    const built = await buildVisualObjects(loadRoomSpec(raw), {
+      assets,
+      renderBudget: { ...BALANCED_RENDER_BUDGET, visibleTriangles: 150 },
+    })
+
+    expect(built.renderPlan.items[0]).toMatchObject({
+      resolution: 'lod',
+      lodIndex: 0,
+    })
+    expect(assets.attempted).toContain('lod.architecture.crypt.wall-straight.1')
+    expect(assets.attempted).not.toContain('neutral.architecture')
+    built.dispose()
+  })
+
   it('keeps interactive/stateful objects unique instead of instancing them', async () => {
     const room = loadRoomSpec(roomEnvelope([
       {

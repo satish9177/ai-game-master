@@ -10992,9 +10992,9 @@
         "MD",
         "MV"
       ],
-      "sha256": "c87a3be2120da9bfd851485e4464f95be1a14fd99a253801fdea0c58a84f598f",
-      "byteLength": 1659540,
-      "builtAt": "2026-07-13",
+      "sha256": "28c94ec16a3ef42cfc0f387a2420dbcb47809b76731e1eaf32a38bce0afd305e",
+      "byteLength": 1673432,
+      "builtAt": "2026-07-14",
       "maximumTextureDimension": 512,
       "plannedModifications": [
         "curate crypt masonry stairs gates and niches",
@@ -11010,7 +11010,8 @@
         "replaced whole-mesh condition proxies with source-derived component geometry",
         "preserved every previously reviewed semantic node name",
         "embedded all buffers and textures in a self-contained GLB",
-        "applied conservative KHR_mesh_quantization to geometry only: 14-bit positions, 10-bit normals, 8-bit vertex colors, and 12-bit UVs"
+        "applied conservative KHR_mesh_quantization to geometry only: 14-bit positions, 10-bit normals, 8-bit vertex colors, and 12-bit UVs",
+        "added authored LOD1 roots with reduced geometry while retaining reviewed state components and embedded resources"
       ],
       "includedNodes": [
         {
@@ -12291,6 +12292,292 @@
             "created source-derived visible state or condition component",
             "normalized scale, axes, origin, and trusted ASCII name",
             "preserved reviewed source UV, vertex-color, and standard PBR material data"
+          ]
+        },
+        {
+          "name": "architecture.crypt.floor-section.lod1",
+          "sourceId": "MD",
+          "sourceName": "Floor_Modular",
+          "modifications": [
+            "mapped through explicit closed semantic-to-source curation map",
+            "normalized scale, axes, origin, and trusted ASCII name",
+            "preserved reviewed source UV, vertex-color, and standard PBR material data",
+            "derived as an authored LOD1 component with reduced base geometry and preserved reviewed resource references"
+          ]
+        },
+        {
+          "name": "architecture.crypt.floor-section.lod1:visual-base",
+          "sourceId": "MD",
+          "sourceName": "Floor_Modular",
+          "modifications": [
+            "created source-derived visible state or condition component",
+            "normalized scale, axes, origin, and trusted ASCII name",
+            "preserved reviewed source UV, vertex-color, and standard PBR material data",
+            "derived as an authored LOD1 component with reduced base geometry and preserved reviewed resource references"
+          ]
+        },
+        {
+          "name": "architecture.crypt.floor-section.lod1:condition-weathered",
+          "sourceId": "MD",
+          "sourceName": "Cobweb2",
+          "modifications": [
+            "created source-derived visible state or condition component",
+            "normalized scale, axes, origin, and trusted ASCII name",
+            "preserved reviewed source UV, vertex-color, and standard PBR material data",
+            "derived as an authored LOD1 component with reduced base geometry and preserved reviewed resource references"
+          ]
+        },
+        {
+          "name": "architecture.crypt.floor-section.lod1:condition-damaged",
+          "sourceId": "MD",
+          "sourceName": "Brick",
+          "modifications": [
+            "created source-derived visible state or condition component",
+            "normalized scale, axes, origin, and trusted ASCII name",
+            "preserved reviewed source UV, vertex-color, and standard PBR material data",
+            "derived as an authored LOD1 component with reduced base geometry and preserved reviewed resource references"
+          ]
+        },
+        {
+          "name": "architecture.crypt.floor-section.lod1:condition-burned",
+          "sourceId": "MD",
+          "sourceName": "Woodfire",
+          "modifications": [
+            "created source-derived visible state or condition component",
+            "normalized scale, axes, origin, and trusted ASCII name",
+            "preserved reviewed source UV, vertex-color, and standard PBR material data",
+            "derived as an authored LOD1 component with reduced base geometry and preserved reviewed resource references"
+          ]
+        },
+        {
+          "name": "architecture.crypt.floor-section.lod1:condition-overgrown",
+          "sourceId": "MV",
+          "sourceName": "Prop_Vine5",
+          "modifications": [
+            "created source-derived visible state or condition component",
+            "normalized scale, axes, origin, and trusted ASCII name",
+            "preserved reviewed source UV, vertex-color, and standard PBR material data",
+            "derived as an authored LOD1 component with reduced base geometry and preserved reviewed resource references"
+          ]
+        },
+        {
+          "name": "architecture.crypt.wall-straight.lod1",
+          "sourceId": "MD",
+          "sourceName": "Wall_Modular",
+          "modifications": [
+            "mapped through explicit closed semantic-to-source curation map",
+            "normalized scale, axes, origin, and trusted ASCII name",
+            "preserved reviewed source UV, vertex-color, and standard PBR material data",
+            "derived as an authored LOD1 component with reduced base geometry and preserved reviewed resource references"
+          ]
+        },
+        {
+          "name": "architecture.crypt.wall-straight.lod1:visual-base",
+          "sourceId": "MD",
+          "sourceName": "Wall_Modular",
+          "modifications": [
+            "created source-derived visible state or condition component",
+            "normalized scale, axes, origin, and trusted ASCII name",
+            "preserved reviewed source UV, vertex-color, and standard PBR material data",
+            "derived as an authored LOD1 component with reduced base geometry and preserved reviewed resource references"
+          ]
+        },
+        {
+          "name": "architecture.crypt.wall-straight.lod1:condition-weathered",
+          "sourceId": "MD",
+          "sourceName": "Cobweb2",
+          "modifications": [
+            "created source-derived visible state or condition component",
+            "normalized scale, axes, origin, and trusted ASCII name",
+            "preserved reviewed source UV, vertex-color, and standard PBR material data",
+            "derived as an authored LOD1 component with reduced base geometry and preserved reviewed resource references"
+          ]
+        },
+        {
+          "name": "architecture.crypt.wall-straight.lod1:condition-damaged",
+          "sourceId": "MD",
+          "sourceName": "Brick",
+          "modifications": [
+            "created source-derived visible state or condition component",
+            "normalized scale, axes, origin, and trusted ASCII name",
+            "preserved reviewed source UV, vertex-color, and standard PBR material data",
+            "derived as an authored LOD1 component with reduced base geometry and preserved reviewed resource references"
+          ]
+        },
+        {
+          "name": "architecture.crypt.wall-straight.lod1:condition-burned",
+          "sourceId": "MD",
+          "sourceName": "Woodfire",
+          "modifications": [
+            "created source-derived visible state or condition component",
+            "normalized scale, axes, origin, and trusted ASCII name",
+            "preserved reviewed source UV, vertex-color, and standard PBR material data",
+            "derived as an authored LOD1 component with reduced base geometry and preserved reviewed resource references"
+          ]
+        },
+        {
+          "name": "architecture.crypt.wall-straight.lod1:condition-overgrown",
+          "sourceId": "MV",
+          "sourceName": "Prop_Vine5",
+          "modifications": [
+            "created source-derived visible state or condition component",
+            "normalized scale, axes, origin, and trusted ASCII name",
+            "preserved reviewed source UV, vertex-color, and standard PBR material data",
+            "derived as an authored LOD1 component with reduced base geometry and preserved reviewed resource references"
+          ]
+        },
+        {
+          "name": "architecture.crypt.stairs.lod1",
+          "sourceId": "MD",
+          "sourceName": "Stairs_Modular",
+          "modifications": [
+            "mapped through explicit closed semantic-to-source curation map",
+            "normalized scale, axes, origin, and trusted ASCII name",
+            "preserved reviewed source UV, vertex-color, and standard PBR material data",
+            "derived as an authored LOD1 component with reduced base geometry and preserved reviewed resource references"
+          ]
+        },
+        {
+          "name": "architecture.crypt.stairs.lod1:visual-base",
+          "sourceId": "MD",
+          "sourceName": "Stairs_Modular",
+          "modifications": [
+            "created source-derived visible state or condition component",
+            "normalized scale, axes, origin, and trusted ASCII name",
+            "preserved reviewed source UV, vertex-color, and standard PBR material data",
+            "derived as an authored LOD1 component with reduced base geometry and preserved reviewed resource references"
+          ]
+        },
+        {
+          "name": "architecture.crypt.stairs.lod1:condition-weathered",
+          "sourceId": "MD",
+          "sourceName": "Cobweb2",
+          "modifications": [
+            "created source-derived visible state or condition component",
+            "normalized scale, axes, origin, and trusted ASCII name",
+            "preserved reviewed source UV, vertex-color, and standard PBR material data",
+            "derived as an authored LOD1 component with reduced base geometry and preserved reviewed resource references"
+          ]
+        },
+        {
+          "name": "architecture.crypt.stairs.lod1:condition-damaged",
+          "sourceId": "MD",
+          "sourceName": "Brick",
+          "modifications": [
+            "created source-derived visible state or condition component",
+            "normalized scale, axes, origin, and trusted ASCII name",
+            "preserved reviewed source UV, vertex-color, and standard PBR material data",
+            "derived as an authored LOD1 component with reduced base geometry and preserved reviewed resource references"
+          ]
+        },
+        {
+          "name": "architecture.crypt.stairs.lod1:condition-burned",
+          "sourceId": "MD",
+          "sourceName": "Woodfire",
+          "modifications": [
+            "created source-derived visible state or condition component",
+            "normalized scale, axes, origin, and trusted ASCII name",
+            "preserved reviewed source UV, vertex-color, and standard PBR material data",
+            "derived as an authored LOD1 component with reduced base geometry and preserved reviewed resource references"
+          ]
+        },
+        {
+          "name": "architecture.crypt.stairs.lod1:condition-overgrown",
+          "sourceId": "MV",
+          "sourceName": "Prop_Vine5",
+          "modifications": [
+            "created source-derived visible state or condition component",
+            "normalized scale, axes, origin, and trusted ASCII name",
+            "preserved reviewed source UV, vertex-color, and standard PBR material data",
+            "derived as an authored LOD1 component with reduced base geometry and preserved reviewed resource references"
+          ]
+        },
+        {
+          "name": "architecture.crypt.doorway.lod1",
+          "sourceId": "MD",
+          "sourceName": "Arch",
+          "modifications": [
+            "mapped through explicit closed semantic-to-source curation map",
+            "normalized scale, axes, origin, and trusted ASCII name",
+            "preserved reviewed source UV, vertex-color, and standard PBR material data",
+            "derived as an authored LOD1 component with reduced base geometry and preserved reviewed resource references"
+          ]
+        },
+        {
+          "name": "architecture.crypt.doorway.lod1:visual-base",
+          "sourceId": "MD",
+          "sourceName": "Arch",
+          "modifications": [
+            "created source-derived visible state or condition component",
+            "normalized scale, axes, origin, and trusted ASCII name",
+            "preserved reviewed source UV, vertex-color, and standard PBR material data",
+            "derived as an authored LOD1 component with reduced base geometry and preserved reviewed resource references"
+          ]
+        },
+        {
+          "name": "architecture.crypt.doorway.lod1:state-door",
+          "sourceId": "MD",
+          "sourceName": "Arch_Door_bottompivot",
+          "modifications": [
+            "created source-derived visible state or condition component",
+            "normalized scale, axes, origin, and trusted ASCII name",
+            "preserved reviewed source UV, vertex-color, and standard PBR material data",
+            "derived as an authored LOD1 component with reduced base geometry and preserved reviewed resource references"
+          ]
+        },
+        {
+          "name": "architecture.crypt.doorway.lod1:state-lock",
+          "sourceId": "MD",
+          "sourceName": "Spikes",
+          "modifications": [
+            "created source-derived visible state or condition component",
+            "normalized scale, axes, origin, and trusted ASCII name",
+            "preserved reviewed source UV, vertex-color, and standard PBR material data",
+            "derived as an authored LOD1 component with reduced base geometry and preserved reviewed resource references"
+          ]
+        },
+        {
+          "name": "architecture.crypt.doorway.lod1:condition-weathered",
+          "sourceId": "MD",
+          "sourceName": "Cobweb2",
+          "modifications": [
+            "created source-derived visible state or condition component",
+            "normalized scale, axes, origin, and trusted ASCII name",
+            "preserved reviewed source UV, vertex-color, and standard PBR material data",
+            "derived as an authored LOD1 component with reduced base geometry and preserved reviewed resource references"
+          ]
+        },
+        {
+          "name": "architecture.crypt.doorway.lod1:condition-damaged",
+          "sourceId": "MD",
+          "sourceName": "Brick",
+          "modifications": [
+            "created source-derived visible state or condition component",
+            "normalized scale, axes, origin, and trusted ASCII name",
+            "preserved reviewed source UV, vertex-color, and standard PBR material data",
+            "derived as an authored LOD1 component with reduced base geometry and preserved reviewed resource references"
+          ]
+        },
+        {
+          "name": "architecture.crypt.doorway.lod1:condition-burned",
+          "sourceId": "MD",
+          "sourceName": "Woodfire",
+          "modifications": [
+            "created source-derived visible state or condition component",
+            "normalized scale, axes, origin, and trusted ASCII name",
+            "preserved reviewed source UV, vertex-color, and standard PBR material data",
+            "derived as an authored LOD1 component with reduced base geometry and preserved reviewed resource references"
+          ]
+        },
+        {
+          "name": "architecture.crypt.doorway.lod1:condition-overgrown",
+          "sourceId": "MV",
+          "sourceName": "Prop_Vine5",
+          "modifications": [
+            "created source-derived visible state or condition component",
+            "normalized scale, axes, origin, and trusted ASCII name",
+            "preserved reviewed source UV, vertex-color, and standard PBR material data",
+            "derived as an authored LOD1 component with reduced base geometry and preserved reviewed resource references"
           ]
         }
       ],
@@ -25570,9 +25857,9 @@
         "USN",
         "MV"
       ],
-      "sha256": "7769b6fb8e2dcb0fb6b02e93abc7cb4e9cfbfd1c6dba58f1d793beeef18f666c",
-      "byteLength": 298332,
-      "builtAt": "2026-07-11",
+      "sha256": "5c514eb3086dddbcbd42b6ffa1e35f79e110390ffb268f0a8cd8541770cd7801",
+      "byteLength": 306944,
+      "builtAt": "2026-07-14",
       "maximumTextureDimension": 1024,
       "plannedModifications": [
         "curate reusable vegetation",
@@ -25588,7 +25875,8 @@
         "removed external textures and applied coherent standard PBR palette materials",
         "embedded all buffers in self-contained GLB",
         "Slice 2B2: explicitly remapped vegetation roots to reviewed USN growth meshes and added MV Prop_Vine1 geometry for vine/overgrowth without external textures or resources.",
-        "Slice 2B2: remapped weathered, damaged, burned, and overgrown components to non-base meshes for visible condition distinction without full-base overlap."
+        "Slice 2B2: remapped weathered, damaged, burned, and overgrown components to non-base meshes for visible condition distinction without full-base overlap.",
+        "added authored LOD1 roots with reduced geometry while retaining reviewed state components and embedded resources"
       ],
       "includedNodes": [
         {
@@ -26609,6 +26897,160 @@
             "created renderer-internal visible state or condition part",
             "normalized scale, axes, origin, and trusted ASCII name",
             "removed source texture dependency and applied grounded PBR palette material"
+          ]
+        },
+        {
+          "name": "vegetation.tree.lod1",
+          "sourceId": "USN",
+          "sourceName": "BirchTree_1",
+          "modifications": [
+            "mapped closed semantic registry node",
+            "normalized scale, axes, origin, and trusted ASCII name",
+            "removed source texture dependency and applied grounded PBR palette material",
+            "derived as an authored LOD1 component with reduced base geometry and preserved reviewed resource references"
+          ]
+        },
+        {
+          "name": "vegetation.tree.lod1:visual-base",
+          "sourceId": "USN",
+          "sourceName": "BirchTree_1",
+          "modifications": [
+            "created renderer-internal visible state or condition part",
+            "normalized scale, axes, origin, and trusted ASCII name",
+            "removed source texture dependency and applied grounded PBR palette material",
+            "derived as an authored LOD1 component with reduced base geometry and preserved reviewed resource references"
+          ]
+        },
+        {
+          "name": "vegetation.tree.lod1:visual-detail-01",
+          "sourceId": "USN",
+          "sourceName": "BirchTree_1",
+          "modifications": [
+            "created renderer-internal visible state or condition part",
+            "normalized scale, axes, origin, and trusted ASCII name",
+            "removed source texture dependency and applied grounded PBR palette material",
+            "derived as an authored LOD1 component with reduced base geometry and preserved reviewed resource references"
+          ]
+        },
+        {
+          "name": "vegetation.tree.lod1:condition-weathered",
+          "sourceId": "USN",
+          "sourceName": "DeadTree_1",
+          "modifications": [
+            "created renderer-internal visible state or condition part",
+            "normalized scale, axes, origin, and trusted ASCII name",
+            "removed source texture dependency and applied grounded PBR palette material",
+            "derived as an authored LOD1 component with reduced base geometry and preserved reviewed resource references"
+          ]
+        },
+        {
+          "name": "vegetation.tree.lod1:condition-damaged",
+          "sourceId": "USN",
+          "sourceName": "Grass_Small",
+          "modifications": [
+            "created renderer-internal visible state or condition part",
+            "normalized scale, axes, origin, and trusted ASCII name",
+            "removed source texture dependency and applied grounded PBR palette material",
+            "derived as an authored LOD1 component with reduced base geometry and preserved reviewed resource references"
+          ]
+        },
+        {
+          "name": "vegetation.tree.lod1:condition-burned",
+          "sourceId": "USN",
+          "sourceName": "DeadTree_1",
+          "modifications": [
+            "created renderer-internal visible state or condition part",
+            "normalized scale, axes, origin, and trusted ASCII name",
+            "removed source texture dependency and applied grounded PBR palette material",
+            "derived as an authored LOD1 component with reduced base geometry and preserved reviewed resource references"
+          ]
+        },
+        {
+          "name": "vegetation.tree.lod1:condition-overgrown",
+          "sourceId": "MV",
+          "sourceName": "Prop_Vine1",
+          "modifications": [
+            "created renderer-internal visible state or condition part",
+            "normalized scale, axes, origin, and trusted ASCII name",
+            "removed source texture dependency and applied grounded PBR palette material",
+            "derived as an authored LOD1 component with reduced base geometry and preserved reviewed resource references"
+          ]
+        },
+        {
+          "name": "vegetation.dead-tree.lod1",
+          "sourceId": "USN",
+          "sourceName": "DeadTree_1",
+          "modifications": [
+            "mapped closed semantic registry node",
+            "normalized scale, axes, origin, and trusted ASCII name",
+            "removed source texture dependency and applied grounded PBR palette material",
+            "derived as an authored LOD1 component with reduced base geometry and preserved reviewed resource references"
+          ]
+        },
+        {
+          "name": "vegetation.dead-tree.lod1:visual-base",
+          "sourceId": "USN",
+          "sourceName": "DeadTree_1",
+          "modifications": [
+            "created renderer-internal visible state or condition part",
+            "normalized scale, axes, origin, and trusted ASCII name",
+            "removed source texture dependency and applied grounded PBR palette material",
+            "derived as an authored LOD1 component with reduced base geometry and preserved reviewed resource references"
+          ]
+        },
+        {
+          "name": "vegetation.dead-tree.lod1:visual-detail-01",
+          "sourceId": "USN",
+          "sourceName": "DeadTree_1",
+          "modifications": [
+            "created renderer-internal visible state or condition part",
+            "normalized scale, axes, origin, and trusted ASCII name",
+            "removed source texture dependency and applied grounded PBR palette material",
+            "derived as an authored LOD1 component with reduced base geometry and preserved reviewed resource references"
+          ]
+        },
+        {
+          "name": "vegetation.dead-tree.lod1:condition-weathered",
+          "sourceId": "USN",
+          "sourceName": "Bush",
+          "modifications": [
+            "created renderer-internal visible state or condition part",
+            "normalized scale, axes, origin, and trusted ASCII name",
+            "removed source texture dependency and applied grounded PBR palette material",
+            "derived as an authored LOD1 component with reduced base geometry and preserved reviewed resource references"
+          ]
+        },
+        {
+          "name": "vegetation.dead-tree.lod1:condition-damaged",
+          "sourceId": "USN",
+          "sourceName": "Grass_Small",
+          "modifications": [
+            "created renderer-internal visible state or condition part",
+            "normalized scale, axes, origin, and trusted ASCII name",
+            "removed source texture dependency and applied grounded PBR palette material",
+            "derived as an authored LOD1 component with reduced base geometry and preserved reviewed resource references"
+          ]
+        },
+        {
+          "name": "vegetation.dead-tree.lod1:condition-burned",
+          "sourceId": "USN",
+          "sourceName": "Grass_Small",
+          "modifications": [
+            "created renderer-internal visible state or condition part",
+            "normalized scale, axes, origin, and trusted ASCII name",
+            "removed source texture dependency and applied grounded PBR palette material",
+            "derived as an authored LOD1 component with reduced base geometry and preserved reviewed resource references"
+          ]
+        },
+        {
+          "name": "vegetation.dead-tree.lod1:condition-overgrown",
+          "sourceId": "MV",
+          "sourceName": "Prop_Vine1",
+          "modifications": [
+            "created renderer-internal visible state or condition part",
+            "normalized scale, axes, origin, and trusted ASCII name",
+            "removed source texture dependency and applied grounded PBR palette material",
+            "derived as an authored LOD1 component with reduced base geometry and preserved reviewed resource references"
           ]
         }
       ],
