@@ -1,6 +1,7 @@
 import * as THREE from 'three'
 import { GLTFLoader, type GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js'
+import { KTX2Loader } from 'three/examples/jsm/loaders/KTX2Loader.js'
 import { clone as cloneSkeleton } from 'three/examples/jsm/utils/SkeletonUtils.js'
 import type { VisualAssetDescriptor, VisualPackRegistry } from './contracts'
 import type { Logger } from '../../../platform/logger/Logger'
@@ -45,8 +46,16 @@ export type VisualBundleLoader = Pick<GLTFLoader, 'loadAsync'>
  * Three ships this decoder as an embedded module, so this adds no runtime URL
  * or dependency beyond the pinned renderer package.
  */
-export function createVisualPackGltfLoader(): GLTFLoader {
-  return new GLTFLoader().setMeshoptDecoder(MeshoptDecoder)
+export const VISUAL_PACK_BASIS_TRANSCODER_PATH = '/visual-packs/ruined-kingdom-survival/transcoders/basis/'
+
+export function createVisualPackKtx2Loader(): KTX2Loader {
+  return new KTX2Loader().setTranscoderPath(VISUAL_PACK_BASIS_TRANSCODER_PATH)
+}
+
+export function createVisualPackGltfLoader(ktx2Loader?: KTX2Loader): GLTFLoader {
+  const loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder)
+  if (ktx2Loader) loader.setKTX2Loader(ktx2Loader)
+  return loader
 }
 
 type BundleRecord = {
@@ -67,16 +76,29 @@ export class VisualAssetCache {
   private generation = 0
 
   private readonly registry: VisualPackRegistry
-  private readonly loader: VisualBundleLoader
+  private loader: VisualBundleLoader
+  private readonly usesDefaultLoader: boolean
+  private ktx2Loader: KTX2Loader | undefined
   private readonly logger: Pick<Logger, 'warn'> | undefined
   constructor(
     registry: VisualPackRegistry,
-    loader: VisualBundleLoader = createVisualPackGltfLoader(),
+    loader?: VisualBundleLoader,
     logger?: Pick<Logger, 'warn'>,
   ) {
     this.registry = registry
-    this.loader = loader
+    this.usesDefaultLoader = loader === undefined
+    this.loader = loader ?? createVisualPackGltfLoader()
     this.logger = logger
+  }
+
+  /** Called by the trusted engine before the first production bundle is acquired. */
+  configureKtx2Support(renderer: THREE.WebGLRenderer): void {
+    if (!this.usesDefaultLoader || this.disposed) return
+    if (!this.ktx2Loader) {
+      this.ktx2Loader = createVisualPackKtx2Loader()
+      this.loader = createVisualPackGltfLoader(this.ktx2Loader)
+    }
+    this.ktx2Loader.detectSupport(renderer)
   }
 
   async acquire(assetId: string): Promise<VisualAssetLease> {
@@ -145,6 +167,8 @@ export class VisualAssetCache {
     }
     this.records.clear()
     this.reportedSkinningDiagnostics.clear()
+    this.ktx2Loader?.dispose()
+    this.ktx2Loader = undefined
   }
 
   private prepareRenderableSubtree(

@@ -37,9 +37,15 @@ const EXPECTED_ARTIFACT_PATHS = new Set([
   'props/vegetation.glb',
 ])
 
+const RUNTIME_SUPPORT_FILES = new Map([
+  ['transcoders/basis/basis_transcoder.js', { byteLength: 57529, sha256: '8478b5b6d6b74e7d3082b89f6417321d8d1dc0307f2b30d4484bb11b441696a1' }],
+  ['transcoders/basis/basis_transcoder.wasm', { byteLength: 527333, sha256: '6cf17dc889352c42e9acf8897107978d127005fe3386c36a0e3845e27967630a' }],
+])
+
 const APPROVED_EXTENSIONS = new Set([
   'EXT_meshopt_compression',
   'KHR_mesh_quantization',
+  'KHR_texture_basisu',
   'KHR_texture_transform',
 ])
 const GLB_MAGIC = 0x46546c67
@@ -460,6 +466,7 @@ function validateGlbDocument(parsed, artifact) {
   )
 
   validateImages(document, binChunk, artifact)
+  validateBasisTextures(document, artifact)
 }
 
 function compareReviewedNames(artifactPath, kind, actualNames, reviewedNames) {
@@ -523,6 +530,17 @@ function validateImages(document, binChunk, artifact) {
   }
 }
 
+function validateBasisTextures(document, artifact) {
+  for (const [index, texture] of (document.textures ?? []).entries()) {
+    const basis = texture?.extensions?.KHR_texture_basisu
+    if (basis === undefined) continue
+    const source = basis?.source
+    const image = Number.isSafeInteger(source) ? document.images?.[source] : undefined
+    if (!image || image.mimeType !== 'image/ktx2') {
+      addError('INVALID_KTX2_TEXTURE_REFERENCE', `${artifact.path}:texture-${index}`)
+    }
+  }
+}
 function getEmbeddedImageBytes(document, binChunk, image) {
   if (!isRecord(image)) {
     return null
@@ -547,6 +565,13 @@ function getEmbeddedImageBytes(document, binChunk, image) {
 }
 
 function readImageDimensions(bytes, mimeType) {
+  if (
+    mimeType === 'image/ktx2'
+    && bytes.length >= 36
+    && bytes.subarray(0, 12).equals(Buffer.from([171, 75, 84, 88, 32, 50, 48, 187, 13, 10, 26, 10]))
+  ) {
+    return { width: bytes.readUInt32LE(20), height: bytes.readUInt32LE(24) }
+  }
   if (
     mimeType === 'image/png'
     && bytes.length >= 24
@@ -598,12 +623,24 @@ async function validateFiles(artifacts, byteBudgets) {
   const files = await walkFiles(ASSET_ROOT)
   const artifactByPath = new Map(artifacts.map((artifact) => [artifact.path, artifact]))
   for (const file of files) {
-    if (!artifactByPath.has(file)) {
+    if (!artifactByPath.has(file) && !RUNTIME_SUPPORT_FILES.has(file)) {
       addError('UNDECLARED_PACK_FILE', file)
     }
   }
 
   let totalBytes = 0
+  for (const [path, expected] of RUNTIME_SUPPORT_FILES) {
+    if (!files.includes(path)) {
+      addError('MISSING_RUNTIME_SUPPORT_FILE', path)
+      continue
+    }
+    const buffer = await readFile(resolve(ASSET_ROOT, ...path.split('/')))
+    totalBytes += buffer.length
+    if (buffer.length !== expected.byteLength) addError('RUNTIME_SUPPORT_BYTE_LENGTH_MISMATCH', path)
+    if (createHash('sha256').update(buffer).digest('hex') !== expected.sha256) {
+      addError('RUNTIME_SUPPORT_CHECKSUM_MISMATCH', path)
+    }
+  }
   let coreBytes = 0
   const parsedByPath = new Map()
   for (const artifact of artifacts) {

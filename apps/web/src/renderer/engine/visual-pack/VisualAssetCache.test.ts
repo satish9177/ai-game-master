@@ -7,6 +7,8 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   isRenderValidSkinnedMesh,
   createVisualPackGltfLoader,
+  createVisualPackKtx2Loader,
+  VISUAL_PACK_BASIS_TRANSCODER_PATH,
   VisualAssetCache,
   VisualAssetLoadError,
   type VisualBundleLoader,
@@ -169,7 +171,7 @@ describe('VisualAssetCache', () => {
       'public/visual-packs/ruined-kingdom-survival/props/furniture.glb',
     ))
 
-    const gltf = await createVisualPackGltfLoader().parseAsync(
+    const gltf = await createNodeGltfLoader().parseAsync(
       bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
       '',
     )
@@ -181,6 +183,19 @@ describe('VisualAssetCache', () => {
     expect(reviewedRootFound).toBe(true)
   })
 
+  it('configures one GLTFLoader with both Meshopt and the locally bundled KTX2 transcoder', () => {
+    const ktx2Loader = createVisualPackKtx2Loader()
+    const loader = createVisualPackGltfLoader(ktx2Loader)
+    const configured = loader as unknown as {
+      ktx2Loader?: unknown
+      meshoptDecoder?: unknown
+    }
+    expect((ktx2Loader as unknown as { transcoderPath: string }).transcoderPath)
+      .toBe(VISUAL_PACK_BASIS_TRANSCODER_PATH)
+    expect(configured.ktx2Loader).toBe(ktx2Loader)
+    expect(configured.meshoptDecoder).toBeDefined()
+    ktx2Loader.dispose()
+  })
   it('loads distinct Slice 2A assets with component-only states and shared bundle prototypes', async () => {
     const loader = loaderFromCommittedBundles()
     const cache = new VisualAssetCache(ruinedKingdomPack, loader)
@@ -582,11 +597,20 @@ function hasEmissivePbrMaterial(root: THREE.Object3D): boolean {
   return found
 }
 
+function createNodeGltfLoader() {
+  const loader = createVisualPackGltfLoader()
+  loader.setKTX2Loader({
+    load(_url: string, onLoad: (texture: THREE.Texture) => void) {
+      onLoad(new THREE.Texture())
+    },
+  } as unknown as Parameters<typeof loader.setKTX2Loader>[0])
+  return loader
+}
 function loaderFromCommittedBundles(): VisualBundleLoader & {
   loadAsync: ReturnType<typeof vi.fn>
 } {
   installNodeImageBitmapLoaderShim()
-  const parser = createVisualPackGltfLoader()
+  const parser = createNodeGltfLoader()
   const loadAsync = vi.fn(async (bundleUrl: string): Promise<GLTF> => {
       const bytes = await readFile(resolve(process.cwd(), 'public' + bundleUrl))
       return parser.parseAsync(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength), '')
@@ -616,7 +640,7 @@ function installNodeImageBitmapLoaderShim(): void {
 }
 
 function loaderFromCommittedHumanoidStructure(): VisualBundleLoader {
-  const parser = createVisualPackGltfLoader()
+  const parser = createNodeGltfLoader()
   return {
     async loadAsync(bundleUrl: string): Promise<GLTF> {
       const bytes = await readFile(resolve(process.cwd(), 'public' + bundleUrl))

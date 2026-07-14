@@ -47,6 +47,7 @@ export type EngineVisualPackRuntime = Readonly<{
   assets: VisualAssetProvider
   characters: HumanoidCharacterFactory
   allowDebug: boolean
+  configureRenderer?: (renderer: THREE.WebGLRenderer) => void
 }>
 
 export type EngineOptions = Readonly<{ productionVisuals?: boolean }>
@@ -233,6 +234,7 @@ export class Engine {
     options: SetRoomOptions = {},
   ): Promise<void> {
     if (this.disposed) throw new Error('engine-disposed')
+    runtime.configureRenderer?.(this.renderer)
 
     this.npcBehavior.clear()
     this.wanderMotor.clear()

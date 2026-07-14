@@ -65,6 +65,7 @@ const visualPackRuntime: EngineVisualPackRuntime = {
   assets: visualAssetCache,
   characters: visualCharacterFactory,
   allowDebug: import.meta.env.DEV,
+  configureRenderer: (renderer) => visualAssetCache.configureKtx2Support(renderer),
 }
 
 const WEBGL2_UNAVAILABLE =
