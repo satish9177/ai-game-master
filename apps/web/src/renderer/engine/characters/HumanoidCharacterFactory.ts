@@ -85,7 +85,7 @@ export class HumanoidCharacterFactory {
       visualRoot.add(characterLease.instance)
 
       applyModularSelection(characterLease.instance, selection, definition)
-      applyPalette(characterLease.instance, selection.palette)
+      applyHumanoidReadabilityPalette(characterLease.instance, selection.palette, request.role)
 
       const animations = new CharacterAnimationController(
         characterLease.instance,
@@ -268,38 +268,99 @@ function bodyNodeName(bodyId: string): string {
   return bodyId
 }
 
-const PALETTE_COLORS: Readonly<Record<HumanoidPaletteId, string>> = {
-  earth: '#76543b',
-  village: '#7b6844',
-  guard: '#4d5964',
-  merchant: '#8a5e32',
-  royal: '#624a7e',
-  raider: '#4f3b34',
-  survivor: '#53645a',
-  undead: '#66705f',
-  monster: '#5b4b42',
+type HumanoidMaterialPart = 'cloth' | 'hair' | 'skin'
+
+type HumanoidReadabilityPalette = Readonly<{
+  cloth: string
+  hair: string
+}>
+
+// These are deliberately mid-value albedos. The source GLB has textured,
+// vertex-coloured PBR materials, so multiplying it by the former dark role
+// swatches made cloth, hair, and even skin collapse into near-black in the
+// tavern/crypt fill. Palette remains renderer-owned presentation only.
+const READABILITY_PALETTES: Readonly<Record<HumanoidPaletteId, HumanoidReadabilityPalette>> = {
+  earth: { cloth: '#a77852', hair: '#654632' },
+  village: { cloth: '#a58d5d', hair: '#72503a' },
+  guard: { cloth: '#6d8192', hair: '#4f4035' },
+  merchant: { cloth: '#b37b43', hair: '#654230' },
+  royal: { cloth: '#8669a1', hair: '#513b32' },
+  raider: { cloth: '#8c604c', hair: '#48362f' },
+  survivor: { cloth: '#71876a', hair: '#594536' },
+  undead: { cloth: '#82966f', hair: '#4c5542' },
+  monster: { cloth: '#8a6759', hair: '#4a3b36' },
 }
 
-function applyPalette(root: THREE.Object3D, palette: HumanoidPaletteId): void {
-  const tint = new THREE.Color(PALETTE_COLORS[palette])
+const PLAYER_SURVIVOR_ACCENT = new THREE.Color('#c69a57')
+const SKIN_READABILITY_FILL = new THREE.Color('#6b4a36')
+
+export function applyHumanoidReadabilityPalette(
+  root: THREE.Object3D,
+  palette: HumanoidPaletteId,
+  role: HumanoidCharacterRole,
+): void {
+  const colors = READABILITY_PALETTES[palette]
   root.traverse((node) => {
     const mesh = node as THREE.Mesh
     if (!mesh.isMesh) return
-    const tintable = node.userData.tintable === true
-      || (Array.isArray(mesh.material)
-        ? mesh.material.some((material) => material.name.startsWith('Tintable'))
-        : mesh.material?.name.startsWith('Tintable'))
-    if (!tintable) return
 
     const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material]
-    const owned = materials.map((material) => {
-      const clone = material.clone()
-      if ('color' in clone && clone.color instanceof THREE.Color) clone.color.multiply(tint)
-      return clone
-    })
+    const adjusted = materials.map((material) => applyReadabilityMaterial(material, node, colors, role))
+    if (adjusted.every((material, index) => material === materials[index])) return
+    // A multi-material mesh is disposed as a unit. Clone its untouched slots
+    // too, so an owned readability override never disposes a cache-owned
+    // shared material when the character leaves the room.
+    const owned = adjusted.map((material, index) => (
+      material === materials[index] ? material.clone() : material
+    ))
     mesh.material = Array.isArray(mesh.material) ? owned : owned[0]!
     mesh.userData.visualPackOwnedMaterial = true
   })
+}
+
+function applyReadabilityMaterial(
+  material: THREE.Material,
+  node: THREE.Object3D,
+  colors: HumanoidReadabilityPalette,
+  role: HumanoidCharacterRole,
+): THREE.Material {
+  const part = humanoidMaterialPart(material, node)
+  if (part === undefined) return material
+
+  const clone = material.clone()
+  if (!('color' in clone) || !(clone.color instanceof THREE.Color)) return clone
+
+  if (part === 'skin') {
+    applyMaterialFill(clone, SKIN_READABILITY_FILL, 0.035)
+    return clone
+  }
+
+  const color = new THREE.Color(part === 'hair' ? colors.hair : colors.cloth)
+  // A player-only warm lift makes the renderer-owned survivor preset easy to
+  // pick out without adding an object, state field, or special gameplay path.
+  if (role === 'player' && part === 'cloth') color.lerp(PLAYER_SURVIVOR_ACCENT, 0.28)
+  clone.color.lerp(color, part === 'cloth' ? 0.62 : 0.48)
+  applyMaterialFill(clone, color, part === 'cloth' ? 0.075 : 0.045)
+  return clone
+}
+
+function humanoidMaterialPart(
+  material: THREE.Material,
+  node: THREE.Object3D,
+): HumanoidMaterialPart | undefined {
+  const tintable = node.userData.tintable === true || material.name.startsWith('Tintable')
+  if (!tintable) return undefined
+
+  const name = material.name.toLowerCase()
+  if (name.includes('hair')) return 'hair'
+  if (name.includes('superhero') || name.includes('skin')) return 'skin'
+  return 'cloth'
+}
+
+function applyMaterialFill(material: THREE.Material, color: THREE.Color, intensity: number): void {
+  if (!('emissive' in material) || !(material.emissive instanceof THREE.Color)) return
+  material.emissive.copy(color)
+  if ('emissiveIntensity' in material) material.emissiveIntensity = intensity
 }
 
 function disposeOwnedMaterials(root: THREE.Object3D): void {

@@ -9,6 +9,7 @@ import {
 } from '../visual-pack/VisualAssetCache'
 import { ruinedKingdomPack } from '../visual-pack/ruinedKingdomPack'
 import {
+  applyHumanoidReadabilityPalette,
   HumanoidCharacterFactory,
   resolveHumanoidPreset,
   selectHumanoidParts,
@@ -190,7 +191,58 @@ describe('HumanoidCharacterFactory', () => {
       appearance: { preset: 'raider' },
     })).toBe('raider')
   })
+
+  it('keeps skin albedo intact while lifting cloth and hair from dark palette multiplication', () => {
+    const root = new THREE.Group()
+    const cloth = new THREE.MeshStandardMaterial({ color: '#ffffff' })
+    cloth.name = 'Tintable MI_Peasant'
+    const hair = new THREE.MeshStandardMaterial({ color: '#ffffff' })
+    hair.name = 'Tintable MI_Hair_1'
+    const skin = new THREE.MeshStandardMaterial({ color: '#ffffff' })
+    skin.name = 'Tintable MI_Superhero_Male'
+    const metal = new THREE.MeshStandardMaterial({ color: '#ffffff' })
+    metal.name = 'MI_Trim_Metal'
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(), [cloth, hair, skin, metal])
+    root.add(mesh)
+
+    applyHumanoidReadabilityPalette(root, 'guard', 'npc')
+
+    const materials = mesh.material as THREE.MeshStandardMaterial[]
+    expect(materials).not.toContain(cloth)
+    expect(cloth.color.getHexString()).toBe('ffffff')
+    expect(materials[0]!.color.getHexString()).not.toBe('ffffff')
+    expect(materials[0]!.emissiveIntensity).toBeCloseTo(0.075)
+    expect(materials[1]!.color.getHexString()).not.toBe('ffffff')
+    expect(materials[1]!.emissiveIntensity).toBeCloseTo(0.045)
+    expect(materials[2]!.color.getHexString()).toBe('ffffff')
+    expect(materials[2]!.emissiveIntensity).toBeCloseTo(0.035)
+    expect(materials).not.toContain(metal)
+    expect(metal.color.getHexString()).toBe('ffffff')
+  })
+
+  it('gives the renderer-owned player survivor treatment a stable warm cloth accent', () => {
+    const npcRoot = readabilityRoot()
+    const playerRoot = readabilityRoot()
+
+    applyHumanoidReadabilityPalette(npcRoot, 'survivor', 'npc')
+    applyHumanoidReadabilityPalette(playerRoot, 'survivor', 'player')
+
+    const npcCloth = npcRoot.children[0] as THREE.Mesh
+    const playerCloth = playerRoot.children[0] as THREE.Mesh
+    const npcMaterial = npcCloth.material as THREE.MeshStandardMaterial
+    const playerMaterial = playerCloth.material as THREE.MeshStandardMaterial
+    expect(playerMaterial.color.getHex()).not.toBe(npcMaterial.color.getHex())
+    expect(playerMaterial.emissiveIntensity).toBeGreaterThan(0)
+  })
 })
+
+function readabilityRoot(): THREE.Group {
+  const root = new THREE.Group()
+  const material = new THREE.MeshStandardMaterial({ color: '#ffffff' })
+  material.name = 'Tintable MI_Ranger'
+  root.add(new THREE.Mesh(new THREE.BoxGeometry(), material))
+  return root
+}
 
 function humanoidSource(): THREE.Group {
   const root = new THREE.Group()
