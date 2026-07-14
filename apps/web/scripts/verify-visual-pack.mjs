@@ -6,14 +6,18 @@ import { fileURLToPath } from 'node:url'
 const PACK_ID = 'ruined-kingdom-survival'
 const WEB_ROOT = dirname(dirname(fileURLToPath(import.meta.url)))
 const REPOSITORY_ROOT = resolve(WEB_ROOT, '..', '..')
-const MANIFEST_PATH = resolve(
-  REPOSITORY_ROOT,
-  'docs',
-  'assets',
-  PACK_ID,
-  'ASSET-SOURCES.json',
-)
-const ASSET_ROOT = resolve(WEB_ROOT, 'public', 'visual-packs', PACK_ID)
+const MANIFEST_PATH = process.env.RKS_VISUAL_PACK_MANIFEST
+  ? resolve(process.env.RKS_VISUAL_PACK_MANIFEST)
+  : resolve(
+      REPOSITORY_ROOT,
+      'docs',
+      'assets',
+      PACK_ID,
+      'ASSET-SOURCES.json',
+    )
+const ASSET_ROOT = process.env.RKS_VISUAL_PACK_ASSET_ROOT
+  ? resolve(process.env.RKS_VISUAL_PACK_ASSET_ROOT)
+  : resolve(WEB_ROOT, 'public', 'visual-packs', PACK_ID)
 
 const EXPECTED_ARTIFACT_PATHS = new Set([
   'core/neutral-fallbacks.glb',
@@ -33,7 +37,7 @@ const EXPECTED_ARTIFACT_PATHS = new Set([
   'props/vegetation.glb',
 ])
 
-const APPROVED_EXTENSIONS = new Set(['KHR_texture_transform'])
+const APPROVED_EXTENSIONS = new Set(['KHR_mesh_quantization', 'KHR_texture_transform'])
 const GLB_MAGIC = 0x46546c67
 const GLB_JSON_CHUNK = 0x4e4f534a
 const GLB_BIN_CHUNK = 0x004e4942
