@@ -288,9 +288,9 @@
         "ZA",
         "USN"
       ],
-      "sha256": "9c99463eac4e64a1cf959dc38962efea8fd25d2973d9cbc21cc81f2e6cf0d343",
-      "byteLength": 365488,
-      "builtAt": "2026-07-11",
+      "sha256": "5b17f8549cdfac204422494ccfdc8d0d75c0de9c1e187bd3f2fcfda073cf8c25",
+      "byteLength": 227400,
+      "builtAt": "2026-07-14",
       "maximumTextureDimension": 1024,
       "plannedModifications": [
         "curate neutral family fallbacks",
@@ -304,7 +304,8 @@
         "created closed semantic exact, family, environment, and neutral nodes",
         "created namespaced visible interaction and condition parts",
         "removed external textures and applied coherent standard PBR palette materials",
-        "embedded all buffers in self-contained GLB"
+        "embedded all buffers in self-contained GLB",
+        "Meshopt 1.1.1 EXT_meshopt_compression geometry-only optimization; preserved reviewed topology, nodes, materials, textures, animations, source provenance, and licenses"
       ],
       "includedNodes": [
         {
@@ -1429,9 +1430,9 @@
         "FO",
         "ZA"
       ],
-      "sha256": "3f70bd9fe285260d89c1af075dd8a6a27fb32d61582e307a5cdf5afc6a2f03ce",
-      "byteLength": 16481304,
-      "builtAt": "2026-07-11",
+      "sha256": "ca8d6462096b302c7cd035b8551d558723eefa05994f878d29cf5742bddf2fbf",
+      "byteLength": 14833512,
+      "builtAt": "2026-07-14",
       "maximumTextureDimension": 1024,
       "plannedModifications": [
         "normalize one shared humanoid rig",
@@ -1445,7 +1446,8 @@
         "combined modular body, hair, outfit, armour, accessory, and infection parts",
         "resized embedded textures to 512 square",
         "added unskinned static LOD and environment fallback nodes",
-        "removed animations from the geometry bundle"
+        "removed animations from the geometry bundle",
+        "Meshopt 1.1.1 EXT_meshopt_compression geometry-only optimization; preserved reviewed topology, nodes, materials, textures, animations, source provenance, and licenses"
       ],
       "includedNodes": [
         {
@@ -3399,9 +3401,9 @@
       "sourceIds": [
         "MV"
       ],
-      "sha256": "a5fbfa3a424876286c01814ee1e3e5a61362052988bca93ffbcb25cfa935b4e1",
-      "byteLength": 7155292,
-      "builtAt": "2026-07-13",
+      "sha256": "4a168cfba4aa18b3b8d4c80e8cd4fec56beab7f3b81cc9249957ccd8db0757bb",
+      "byteLength": 6968148,
+      "builtAt": "2026-07-14",
       "maximumTextureDimension": 512,
       "plannedModifications": [
         "curate modular village architecture",
@@ -3417,7 +3419,8 @@
         "replaced whole-mesh condition proxies with source-derived component geometry",
         "preserved every previously reviewed semantic node name",
         "embedded all buffers and textures in a self-contained GLB",
-        "applied conservative accessor-only KHR_mesh_quantization to position, normal, color, and in-range UV attributes while preserving every approved embedded image byte-for-byte"
+        "applied conservative accessor-only KHR_mesh_quantization to position, normal, color, and in-range UV attributes while preserving every approved embedded image byte-for-byte",
+        "Meshopt 1.1.1 EXT_meshopt_compression geometry-only optimization; preserved reviewed topology, nodes, materials, textures, animations, source provenance, and licenses"
       ],
       "includedNodes": [
         {
@@ -4791,9 +4794,9 @@
         "FP",
         "MV"
       ],
-      "sha256": "1991cd3d6306e4c4ad8ceff1191583215cb35b53aa717f3dc97f8ff8744923db",
-      "byteLength": 5691296,
-      "builtAt": "2026-07-13",
+      "sha256": "1f90f225ddb6e1584c5893ac9818b24cd585fe0518f6dfd8afe2f9f6c8cf409b",
+      "byteLength": 5462156,
+      "builtAt": "2026-07-14",
       "maximumTextureDimension": 512,
       "plannedModifications": [
         "curate tavern shell modules",
@@ -4809,7 +4812,8 @@
         "replaced whole-mesh condition proxies with source-derived component geometry",
         "preserved every previously reviewed semantic node name",
         "embedded all buffers and textures in a self-contained GLB",
-        "applied conservative accessor-only KHR_mesh_quantization to position, normal, color, and in-range UV attributes while preserving every approved embedded image byte-for-byte"
+        "applied conservative accessor-only KHR_mesh_quantization to position, normal, color, and in-range UV attributes while preserving every approved embedded image byte-for-byte",
+        "Meshopt 1.1.1 EXT_meshopt_compression geometry-only optimization; preserved reviewed topology, nodes, materials, textures, animations, source provenance, and licenses"
       ],
       "includedNodes": [
         {
@@ -6103,9 +6107,9 @@
         "MV",
         "FP"
       ],
-      "sha256": "bc892080a0bdd5deba907b0b2f0b92ac96479bb7c8837cb9a334cf551931345b",
-      "byteLength": 66044,
-      "builtAt": "2026-07-11",
+      "sha256": "c2fad1f76181d84116641fb0b0893600ef6a72217c01572138db077f7ca00f2f",
+      "byteLength": 54440,
+      "builtAt": "2026-07-14",
       "maximumTextureDimension": 1024,
       "plannedModifications": [
         "curate palace masonry and furnishings",
@@ -6119,7 +6123,8 @@
         "created closed semantic exact, family, environment, and neutral nodes",
         "created namespaced visible interaction and condition parts",
         "removed external textures and applied coherent standard PBR palette materials",
-        "embedded all buffers in self-contained GLB"
+        "embedded all buffers in self-contained GLB",
+        "Meshopt 1.1.1 EXT_meshopt_compression geometry-only optimization; preserved reviewed topology, nodes, materials, textures, animations, source provenance, and licenses"
       ],
       "includedNodes": [
         {
@@ -7363,9 +7368,9 @@
         "MV",
         "FP"
       ],
-      "sha256": "939d600263bf4d842371e2545ef018ebdfe0727120e903a27045dda37e823e74",
-      "byteLength": 94148,
-      "builtAt": "2026-07-11",
+      "sha256": "d63a3d3d525cab32b4bd3d3f316ecc14185233b62a36b839daac7aafb5a197bf",
+      "byteLength": 86628,
+      "builtAt": "2026-07-14",
       "maximumTextureDimension": 1024,
       "plannedModifications": [
         "curate broken and collapsed modules",
@@ -7379,7 +7384,8 @@
         "created closed semantic exact, family, environment, and neutral nodes",
         "created namespaced visible interaction and condition parts",
         "removed external textures and applied coherent standard PBR palette materials",
-        "embedded all buffers in self-contained GLB"
+        "embedded all buffers in self-contained GLB",
+        "Meshopt 1.1.1 EXT_meshopt_compression geometry-only optimization; preserved reviewed topology, nodes, materials, textures, animations, source provenance, and licenses"
       ],
       "includedNodes": [
         {
@@ -9732,9 +9738,9 @@
       "sourceIds": [
         "USN"
       ],
-      "sha256": "004673bc722b639069e569197eeebdda5fd1928518ad01c5ec392e8b616c5905",
-      "byteLength": 296656,
-      "builtAt": "2026-07-11",
+      "sha256": "17645d37d835f65edd4d9407a66bda26be688925c99830f648368db3c120468a",
+      "byteLength": 267808,
+      "builtAt": "2026-07-14",
       "maximumTextureDimension": 1024,
       "plannedModifications": [
         "curate forest-edge vegetation",
@@ -9748,7 +9754,8 @@
         "created closed semantic exact, family, environment, and neutral nodes",
         "created namespaced visible interaction and condition parts",
         "removed external textures and applied coherent standard PBR palette materials",
-        "embedded all buffers in self-contained GLB"
+        "embedded all buffers in self-contained GLB",
+        "Meshopt 1.1.1 EXT_meshopt_compression geometry-only optimization; preserved reviewed topology, nodes, materials, textures, animations, source provenance, and licenses"
       ],
       "includedNodes": [
         {
@@ -10992,8 +10999,8 @@
         "MD",
         "MV"
       ],
-      "sha256": "28c94ec16a3ef42cfc0f387a2420dbcb47809b76731e1eaf32a38bce0afd305e",
-      "byteLength": 1673432,
+      "sha256": "c0013c980cb2edd72c99e1c237b2b1aacd2c7b7c275643d079660d7fe6f0dda5",
+      "byteLength": 737348,
       "builtAt": "2026-07-14",
       "maximumTextureDimension": 512,
       "plannedModifications": [
@@ -11011,7 +11018,8 @@
         "preserved every previously reviewed semantic node name",
         "embedded all buffers and textures in a self-contained GLB",
         "applied conservative KHR_mesh_quantization to geometry only: 14-bit positions, 10-bit normals, 8-bit vertex colors, and 12-bit UVs",
-        "added authored LOD1 roots with reduced geometry while retaining reviewed state components and embedded resources"
+        "added authored LOD1 roots with reduced geometry while retaining reviewed state components and embedded resources",
+        "Meshopt 1.1.1 EXT_meshopt_compression geometry-only optimization; preserved reviewed topology, nodes, materials, textures, animations, source provenance, and licenses"
       ],
       "includedNodes": [
         {
@@ -12590,9 +12598,9 @@
       "sourceIds": [
         "MD"
       ],
-      "sha256": "67ea3ec794eee3154ac6e358831ef152a91fd38ac9aefb1000ad2150661f40af",
-      "byteLength": 302140,
-      "builtAt": "2026-07-11",
+      "sha256": "af42338c483fc89c2c2f6b6583e3a79b508a88db1b026ce33b732cede8968163",
+      "byteLength": 173976,
+      "builtAt": "2026-07-14",
       "maximumTextureDimension": 1024,
       "plannedModifications": [
         "curate dungeon walls cells bars doors and stairs",
@@ -12606,7 +12614,8 @@
         "created closed semantic exact, family, environment, and neutral nodes",
         "created namespaced visible interaction and condition parts",
         "removed external textures and applied coherent standard PBR palette materials",
-        "embedded all buffers in self-contained GLB"
+        "embedded all buffers in self-contained GLB",
+        "Meshopt 1.1.1 EXT_meshopt_compression geometry-only optimization; preserved reviewed topology, nodes, materials, textures, animations, source provenance, and licenses"
       ],
       "includedNodes": [
         {
@@ -13851,9 +13860,9 @@
         "MD",
         "MV"
       ],
-      "sha256": "a0837d84ffad39a90f494f09c0bec0daaf3e7b04de292c9054faab3a22a781aa",
-      "byteLength": 4247976,
-      "builtAt": "2026-07-13",
+      "sha256": "299af005a523e74be76899c86a5556a51be393020e2a07cae926248109996dfe",
+      "byteLength": 3670628,
+      "builtAt": "2026-07-14",
       "maximumTextureDimension": 512,
       "plannedModifications": [
         "curate furniture families",
@@ -13870,7 +13879,8 @@
         "preserved every previously reviewed semantic root and state-node name",
         "added standard glTF emissive material parts to applicable lighting fixtures",
         "embedded all buffers and textures in a self-contained GLB",
-        "applied conservative KHR_mesh_quantization to geometry only: 14-bit positions, 10-bit normals, 8-bit vertex colors, and 12-bit in-range UVs while retaining repeated source UVs as float32"
+        "applied conservative KHR_mesh_quantization to geometry only: 14-bit positions, 10-bit normals, 8-bit vertex colors, and 12-bit in-range UVs while retaining repeated source UVs as float32",
+        "Meshopt 1.1.1 EXT_meshopt_compression geometry-only optimization; preserved reviewed topology, nodes, materials, textures, animations, source provenance, and licenses"
       ],
       "includedNodes": [
         {
@@ -15785,9 +15795,9 @@
         "MD",
         "MV"
       ],
-      "sha256": "e1b761995ca8ae3722a5ad5af2f5e49aa098c0b49ed2a5a241c7d747143882ed",
-      "byteLength": 3335964,
-      "builtAt": "2026-07-13",
+      "sha256": "120bd90cd1197009c199b3fd7c84d24f5c3233540b9589ed49b60d5dc05b9388",
+      "byteLength": 3010728,
+      "builtAt": "2026-07-14",
       "maximumTextureDimension": 512,
       "plannedModifications": [
         "curate container families",
@@ -15804,7 +15814,8 @@
         "preserved every previously reviewed semantic root and state-node name",
         "added standard glTF emissive material parts to applicable lighting fixtures",
         "embedded all buffers and textures in a self-contained GLB",
-        "applied conservative KHR_mesh_quantization to geometry only: 14-bit positions, 10-bit normals, 8-bit vertex colors, and 12-bit in-range UVs while retaining repeated source UVs as float32"
+        "applied conservative KHR_mesh_quantization to geometry only: 14-bit positions, 10-bit normals, 8-bit vertex colors, and 12-bit in-range UVs while retaining repeated source UVs as float32",
+        "Meshopt 1.1.1 EXT_meshopt_compression geometry-only optimization; preserved reviewed topology, nodes, materials, textures, animations, source provenance, and licenses"
       ],
       "includedNodes": [
         {
@@ -17998,9 +18009,9 @@
         "FP",
         "ZA"
       ],
-      "sha256": "72ed350a752f08cf1bbebf0360bbd721b143c50eef4e8ca8e42758920391d01b",
-      "byteLength": 864288,
-      "builtAt": "2026-07-11",
+      "sha256": "027dddbe6b08f0d52a0e656d7e4fe29183e171d93288728369e6a6ea186d7e52",
+      "byteLength": 666664,
+      "builtAt": "2026-07-14",
       "maximumTextureDimension": 512,
       "plannedModifications": [
         "curate survival and kingdom clutter",
@@ -18019,7 +18030,8 @@
         "Slice 2B1: preserved existing materials, UVs, vertex colors, and zero embedded images without re-encoding",
         "Slice 2B1: remapped only component state/condition nodes and verified no component reuses its complete base mesh",
         "Slice 2B2: explicitly remapped machines, device fallbacks, and barricades to reviewed FP/ZA source meshes; added FP Anvil and Anvil_Log geometry without external textures or resources.",
-        "Slice 2B2: preserved state/condition components as non-base source meshes to prevent full-base overlap and z-fighting."
+        "Slice 2B2: preserved state/condition components as non-base source meshes to prevent full-base overlap and z-fighting.",
+        "Meshopt 1.1.1 EXT_meshopt_compression geometry-only optimization; preserved reviewed topology, nodes, materials, textures, animations, source provenance, and licenses"
       ],
       "includedNodes": [
         {
@@ -24454,9 +24466,9 @@
         "MD",
         "MV"
       ],
-      "sha256": "2abdf062dc34039ec00eff66e1d93359174cdba4d71374aa1de9334870605a8a",
-      "byteLength": 2286572,
-      "builtAt": "2026-07-13",
+      "sha256": "fd19d54009dba4d6197d104044f54fc3609b237a53939e3f0c275905130978bc",
+      "byteLength": 2055036,
+      "builtAt": "2026-07-14",
       "maximumTextureDimension": 512,
       "plannedModifications": [
         "curate emissive lighting fixtures",
@@ -24473,7 +24485,8 @@
         "preserved every previously reviewed semantic root and state-node name",
         "added standard glTF emissive material parts to applicable lighting fixtures",
         "embedded all buffers and textures in a self-contained GLB",
-        "applied conservative KHR_mesh_quantization to geometry only: 14-bit positions, 10-bit normals, 8-bit vertex colors, and 12-bit in-range UVs while retaining repeated source UVs as float32"
+        "applied conservative KHR_mesh_quantization to geometry only: 14-bit positions, 10-bit normals, 8-bit vertex colors, and 12-bit in-range UVs while retaining repeated source UVs as float32",
+        "Meshopt 1.1.1 EXT_meshopt_compression geometry-only optimization; preserved reviewed topology, nodes, materials, textures, animations, source provenance, and licenses"
       ],
       "includedNodes": [
         {
@@ -25857,8 +25870,8 @@
         "USN",
         "MV"
       ],
-      "sha256": "5c514eb3086dddbcbd42b6ffa1e35f79e110390ffb268f0a8cd8541770cd7801",
-      "byteLength": 306944,
+      "sha256": "107524940a6616d06c09a112706e0142db09e294c4420eafb862a1ebab9c4626",
+      "byteLength": 277884,
       "builtAt": "2026-07-14",
       "maximumTextureDimension": 1024,
       "plannedModifications": [
@@ -25876,7 +25889,8 @@
         "embedded all buffers in self-contained GLB",
         "Slice 2B2: explicitly remapped vegetation roots to reviewed USN growth meshes and added MV Prop_Vine1 geometry for vine/overgrowth without external textures or resources.",
         "Slice 2B2: remapped weathered, damaged, burned, and overgrown components to non-base meshes for visible condition distinction without full-base overlap.",
-        "added authored LOD1 roots with reduced geometry while retaining reviewed state components and embedded resources"
+        "added authored LOD1 roots with reduced geometry while retaining reviewed state components and embedded resources",
+        "Meshopt 1.1.1 EXT_meshopt_compression geometry-only optimization; preserved reviewed topology, nodes, materials, textures, animations, source provenance, and licenses"
       ],
       "includedNodes": [
         {

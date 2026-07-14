@@ -1,5 +1,6 @@
 import * as THREE from 'three'
 import { GLTFLoader, type GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js'
+import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js'
 import { clone as cloneSkeleton } from 'three/examples/jsm/utils/SkeletonUtils.js'
 import type { VisualAssetDescriptor, VisualPackRegistry } from './contracts'
 import type { Logger } from '../../../platform/logger/Logger'
@@ -39,6 +40,15 @@ export class VisualAssetLoadError extends Error {
 
 export type VisualBundleLoader = Pick<GLTFLoader, 'loadAsync'>
 
+/**
+ * The production pack requires Meshopt for its self-contained reviewed GLBs.
+ * Three ships this decoder as an embedded module, so this adds no runtime URL
+ * or dependency beyond the pinned renderer package.
+ */
+export function createVisualPackGltfLoader(): GLTFLoader {
+  return new GLTFLoader().setMeshoptDecoder(MeshoptDecoder)
+}
+
 type BundleRecord = {
   promise: Promise<GLTF>
   loaded?: GLTF
@@ -61,7 +71,7 @@ export class VisualAssetCache {
   private readonly logger: Pick<Logger, 'warn'> | undefined
   constructor(
     registry: VisualPackRegistry,
-    loader: VisualBundleLoader = new GLTFLoader(),
+    loader: VisualBundleLoader = createVisualPackGltfLoader(),
     logger?: Pick<Logger, 'warn'>,
   ) {
     this.registry = registry

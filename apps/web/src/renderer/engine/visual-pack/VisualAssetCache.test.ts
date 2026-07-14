@@ -2,10 +2,11 @@
 import * as THREE from 'three'
 import { readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
-import { GLTFLoader, type GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js'
+import { type GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { describe, expect, it, vi } from 'vitest'
 import {
   isRenderValidSkinnedMesh,
+  createVisualPackGltfLoader,
   VisualAssetCache,
   VisualAssetLoadError,
   type VisualBundleLoader,
@@ -159,6 +160,25 @@ describe('VisualAssetCache', () => {
       lease.release()
     }
     cache.teardown()
+  })
+
+  it('configures the bundled Meshopt decoder for required production geometry', async () => {
+    installNodeImageBitmapLoaderShim()
+    const bytes = await readFile(resolve(
+      process.cwd(),
+      'public/visual-packs/ruined-kingdom-survival/props/furniture.glb',
+    ))
+
+    const gltf = await createVisualPackGltfLoader().parseAsync(
+      bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
+      '',
+    )
+
+    let reviewedRootFound = false
+    gltf.scene.traverse((node) => {
+      if (node.userData.name === 'furniture.table') reviewedRootFound = true
+    })
+    expect(reviewedRootFound).toBe(true)
   })
 
   it('loads distinct Slice 2A assets with component-only states and shared bundle prototypes', async () => {
@@ -566,7 +586,7 @@ function loaderFromCommittedBundles(): VisualBundleLoader & {
   loadAsync: ReturnType<typeof vi.fn>
 } {
   installNodeImageBitmapLoaderShim()
-  const parser = new GLTFLoader()
+  const parser = createVisualPackGltfLoader()
   const loadAsync = vi.fn(async (bundleUrl: string): Promise<GLTF> => {
       const bytes = await readFile(resolve(process.cwd(), 'public' + bundleUrl))
       return parser.parseAsync(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength), '')
@@ -596,7 +616,7 @@ function installNodeImageBitmapLoaderShim(): void {
 }
 
 function loaderFromCommittedHumanoidStructure(): VisualBundleLoader {
-  const parser = new GLTFLoader()
+  const parser = createVisualPackGltfLoader()
   return {
     async loadAsync(bundleUrl: string): Promise<GLTF> {
       const bytes = await readFile(resolve(process.cwd(), 'public' + bundleUrl))

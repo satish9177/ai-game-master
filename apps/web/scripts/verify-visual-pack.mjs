@@ -37,7 +37,11 @@ const EXPECTED_ARTIFACT_PATHS = new Set([
   'props/vegetation.glb',
 ])
 
-const APPROVED_EXTENSIONS = new Set(['KHR_mesh_quantization', 'KHR_texture_transform'])
+const APPROVED_EXTENSIONS = new Set([
+  'EXT_meshopt_compression',
+  'KHR_mesh_quantization',
+  'KHR_texture_transform',
+])
 const GLB_MAGIC = 0x46546c67
 const GLB_JSON_CHUNK = 0x4e4f534a
 const GLB_BIN_CHUNK = 0x004e4942
