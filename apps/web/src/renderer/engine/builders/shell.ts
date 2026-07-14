@@ -23,6 +23,10 @@ const SHELL_MATERIAL: Pick<THREE.MeshStandardMaterialParameters, 'roughness' | '
 }
 
 /**
+ * Legacy/debug helper only.
+ * Production visual-pack rooms use registry-resolved modular architecture via
+ * buildVisualShellRoom; primitive geometry is never a production visual.
+ *
  * Builds the static room shell — floor + four walls — from the RoomSpec.
  * Low-poly: plain flat boxes, one material per mesh so the engine's scene-graph
  * disposal (disposeObject) frees every geometry and material exactly once.
@@ -96,22 +100,100 @@ export function buildShell(
     if (cutaway.has('north')) group.add(makeCurbTrim(width, t, 0, -halfD, nh, trimColor, visualTheme))
   }
 
-  // South wall (z = +halfD).
-  const sh = heightFor('south')
-  group.add(makeWall(width, sh, t, 0, sh / 2, halfD, wallColor, visualTheme))
-  if (cutaway.has('south')) group.add(makeCurbTrim(width, t, 0, halfD, sh, trimColor, visualTheme))
-
-  // East wall (x = +halfW) and west wall (x = -halfW), running along Z.
-  const eh = heightFor('east')
-  group.add(makeWall(t, eh, depth, halfW, eh / 2, 0, wallColor, visualTheme))
-  if (cutaway.has('east')) group.add(makeCurbTrim(t, depth, halfW, 0, eh, trimColor, visualTheme))
-
-  const wh = heightFor('west')
-  group.add(makeWall(t, wh, depth, -halfW, wh / 2, 0, wallColor, visualTheme))
-  if (cutaway.has('west')) group.add(makeCurbTrim(t, depth, -halfW, 0, wh, trimColor, visualTheme))
+  // Every declared exit side receives a centered visible opening.
+  addWallWithCenteredExit(group, {
+    runsAlongX: true,
+    fixedCoordinate: halfD,
+    length: width,
+    height: heightFor('south'),
+    thickness: t,
+    exitWidth: exits.find((exit) => exit.side === 'south')?.width,
+    cutaway: cutaway.has('south'),
+    wallColor,
+    trimColor,
+    visualTheme,
+  })
+  addWallWithCenteredExit(group, {
+    runsAlongX: false,
+    fixedCoordinate: halfW,
+    length: depth,
+    height: heightFor('east'),
+    thickness: t,
+    exitWidth: exits.find((exit) => exit.side === 'east')?.width,
+    cutaway: cutaway.has('east'),
+    wallColor,
+    trimColor,
+    visualTheme,
+  })
+  addWallWithCenteredExit(group, {
+    runsAlongX: false,
+    fixedCoordinate: -halfW,
+    length: depth,
+    height: heightFor('west'),
+    thickness: t,
+    exitWidth: exits.find((exit) => exit.side === 'west')?.width,
+    cutaway: cutaway.has('west'),
+    wallColor,
+    trimColor,
+    visualTheme,
+  })
 
   return group
 }
+function addWallWithCenteredExit(
+  group: THREE.Group,
+  options: Readonly<{
+    runsAlongX: boolean
+    fixedCoordinate: number
+    length: number
+    height: number
+    thickness: number
+    exitWidth?: number
+    cutaway: boolean
+    wallColor: string
+    trimColor: THREE.Color
+    visualTheme: GeneratedRoomVisualTheme | null
+  }>,
+): void {
+  const gap = options.exitWidth === undefined
+    ? 0
+    : Math.min(options.exitWidth, options.length)
+  const segmentLength = gap === 0 ? options.length : (options.length - gap) / 2
+  if (segmentLength <= 0) return
+  const offsets = gap === 0 ? [0] : [
+    -(gap / 2 + segmentLength / 2),
+    gap / 2 + segmentLength / 2,
+  ]
+
+  for (const offset of offsets) {
+    const sx = options.runsAlongX ? segmentLength : options.thickness
+    const sz = options.runsAlongX ? options.thickness : segmentLength
+    const x = options.runsAlongX ? offset : options.fixedCoordinate
+    const z = options.runsAlongX ? options.fixedCoordinate : offset
+    group.add(makeWall(
+      sx,
+      options.height,
+      sz,
+      x,
+      options.height / 2,
+      z,
+      options.wallColor,
+      options.visualTheme,
+    ))
+    if (options.cutaway) {
+      group.add(makeCurbTrim(
+        sx,
+        sz,
+        x,
+        z,
+        options.height,
+        options.trimColor,
+        options.visualTheme,
+      ))
+    }
+  }
+}
+
 
 function makeWall(
   sx: number,

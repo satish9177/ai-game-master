@@ -9,6 +9,7 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "test": "vitest run --passWithNoTests",
+    "verify:visual-pack": "node scripts/verify-visual-pack.mjs",
     "preview": "vite preview"
   },
   "dependencies": {

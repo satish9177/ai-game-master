@@ -5,6 +5,20 @@ import {
   buildRoomPromptMessages,
 } from './llmRoomPrompt'
 import { NPC_ROUTINE_NPC_TYPES } from '../domain/npcRoutinePresets'
+import {
+  ACCESSORY_PROFILES,
+  ARCHITECTURE_KINDS,
+  BODY_PRESENTATIONS,
+  CLUTTER_KINDS,
+  ENVIRONMENT_KINDS,
+  FURNITURE_KINDS,
+  HUMANOID_PALETTE_IDS,
+  HUMANOID_PRESET_IDS,
+  INFECTION_PROFILES,
+  LIGHT_FIXTURE_KINDS,
+  OBJECT_CONDITIONS,
+  VEGETATION_KINDS,
+} from '../domain/visuals/contracts'
 
 const ALLOWED_ROOM_OBJECT_TYPES = [
   'throne',
@@ -31,6 +45,11 @@ const ALLOWED_ROOM_OBJECT_TYPES = [
   'machine',
   'artifact',
   'candle',
+  'architecture',
+  'furniture',
+  'clutter',
+  'vegetation',
+  'light-fixture',
 ] as const
 
 const BAD_NATURAL_TYPE_NOUNS = [
@@ -48,17 +67,20 @@ const BAD_NATURAL_TYPE_NOUNS = [
 
 const SYNONYM_MAPPINGS = [
   'notes/letter/parchment -> paper or scroll',
-  'bookcase/journal -> book',
+  'bookcase -> furniture kind bookcase',
+  'journal -> book',
   'floor plan/route chart -> map',
-  'dead body/skeleton/bones -> corpse',
+  'dead body/skeleton -> corpse',
+  'loose bones -> clutter kind bone-pile',
   'desk/workbench -> table',
   'shrine/ritual platform -> altar',
   'monument/idol -> statue',
   'generator/console/lab equipment -> machine',
   'crystal/relic/strange orb -> artifact',
-  'candles/small flames -> candle',
-  'door/doorway/gate -> arch',
-  'trash/rubble/broken parts -> debris',
+  'door/doorway/gate -> architecture kind doorway or gate',
+  'lamp/lantern -> light-fixture kind lantern',
+  'bloodstain -> clutter kind bloodstain',
+  'trash/rubble/broken parts -> debris or clutter kind small-rubble',
 ] as const
 
 const SAFE_STORY_ANCHOR_TYPES = [
@@ -139,7 +161,34 @@ describe('ROOM_SYSTEM_PROMPT', () => {
     expect(lower).toContain('must be exactly one of these strings')
     expect(lower).toContain('never invent object types')
     expect(lower).toContain('never use natural-language nouns as type values')
-    expect(lower).toContain('choose the closest allowed type')
+    expect(lower).toContain('prefer the semantic families')
+  })
+
+  it('publishes the optional closed environmentKind vocabulary from the schema constants', () => {
+    expect(ROOM_SYSTEM_PROMPT).toContain('"environmentKind"?')
+    expect(ROOM_SYSTEM_PROMPT).toContain(
+      `environmentKind is optional and, when present, MUST be exactly one of: ${ENVIRONMENT_KINDS.join(', ')}.`,
+    )
+  })
+
+  it('publishes every closed semantic family kind from the schema constants', () => {
+    const families = [
+      ['architecture', ARCHITECTURE_KINDS],
+      ['furniture', FURNITURE_KINDS],
+      ['clutter', CLUTTER_KINDS],
+      ['vegetation', VEGETATION_KINDS],
+      ['light-fixture', LIGHT_FIXTURE_KINDS],
+    ] as const
+
+    for (const [family, kinds] of families) {
+      expect(ROOM_SYSTEM_PROMPT).toContain(`${family}.kind: ${kinds.join(', ')}.`)
+    }
+  })
+
+  it('publishes only the closed optional condition values', () => {
+    expect(ROOM_SYSTEM_PROMPT).toContain(
+      `Objects that support condition may optionally set it to exactly one of: ${OBJECT_CONDITIONS.join(', ')}.`,
+    )
   })
 
   it('gives explicit no-invent examples for common bad natural-language type nouns', () => {
@@ -156,23 +205,38 @@ describe('ROOM_SYSTEM_PROMPT', () => {
     }
   })
 
-  it('says to use prop if unsure rather than inventing a new type', () => {
+  it('keeps prop as legacy/emergency compatibility and prefers semantic families', () => {
     const lower = ROOM_SYSTEM_PROMPT.toLowerCase()
-    expect(lower).toContain('if unsure, use prop')
-    expect(lower).toContain('rather than inventing a new type')
+    expect(lower).not.toContain('if unsure, use prop')
+    expect(lower).toContain('prop is legacy/emergency compatibility only')
+    expect(lower).toContain('not a production choice for a supported concept')
+    expect(lower).toContain('before legacy prop')
   })
 
   it('keeps output data-only and outside renderer/code asset concerns', () => {
     const lower = ROOM_SYSTEM_PROMPT.toLowerCase()
     expect(lower).toContain('schemaVersion 1'.toLowerCase())
     expect(lower).toContain('data')
-    expect(lower).toContain('do not output renderer hints')
-    expect(lower).toContain('executable logic')
+    expect(lower).toContain('never output renderer instructions')
+    expect(lower).toContain('model/material paths or urls')
+    expect(lower).toContain('mesh/node/material/shader names')
+    expect(lower).toContain('animation clip names')
+    expect(lower).toContain('executable code')
     expect(lower).not.toContain('three.js')
     expect(lower).not.toContain('gltf')
     expect(lower).not.toContain('texture')
-    expect(lower).not.toContain('shader')
     expect(lower).not.toContain('builder')
+  })
+
+  it('publishes only closed humanoid appearance presets and selectors', () => {
+    expect(ROOM_SYSTEM_PROMPT).toContain(
+      `appearance.preset set to exactly one of: ${HUMANOID_PRESET_IDS.join(', ')}.`,
+    )
+    expect(ROOM_SYSTEM_PROMPT).toContain(`presentation=${BODY_PRESENTATIONS.join('|')}`)
+    expect(ROOM_SYSTEM_PROMPT).toContain(`palette=${HUMANOID_PALETTE_IDS.join('|')}`)
+    expect(ROOM_SYSTEM_PROMPT).toContain(`infection=${INFECTION_PROFILES.join('|')}`)
+    expect(ROOM_SYSTEM_PROMPT).toContain(`accessories=${ACCESSORY_PROFILES.join('|')}`)
+    expect(ROOM_SYSTEM_PROMPT.toLowerCase()).toContain('appearance is visual data only')
   })
 
   it('does not require clue/document objects to be interactive', () => {
@@ -252,7 +316,11 @@ describe('ROOM_SYSTEM_PROMPT', () => {
   it('keeps generated-room safety guidance compactly present', () => {
     const lower = ROOM_SYSTEM_PROMPT.toLowerCase()
     expect(lower).toContain('14-24m')
-    expect(lower).toContain('object count under 30')
+    expect(lower).not.toContain('object count under 30')
+    expect(lower).toContain('there is no small raw object-count cap')
+    expect(lower).toContain('many inexpensive static pieces')
+    expect(lower).toContain('expensive animated characters and light fixtures purposeful')
+    expect(lower).toContain('distribute rich static detail')
     expect(lower).toContain('spawn clear')
     expect(lower).toContain('exits on walls')
     expect(lower).toContain('central path readable')
@@ -260,7 +328,7 @@ describe('ROOM_SYSTEM_PROMPT', () => {
   })
 
   it('is bounded (static, prompt-free instruction)', () => {
-    expect(ROOM_SYSTEM_PROMPT.length).toBeLessThan(4500)
+    expect(ROOM_SYSTEM_PROMPT.length).toBeLessThan(8_000)
   })
 })
 
@@ -320,7 +388,10 @@ describe('ROOM_SYSTEM_PROMPT npcType hint', () => {
     const lower = ROOM_SYSTEM_PROMPT.toLowerCase()
     expect(lower).not.toContain('custom routine')
     expect(lower).not.toContain('routine text')
-    expect(lower).not.toContain('behavior command')
+    expect(lower).toContain(
+      'never include body-part names, rig or bone names, animation instructions, or behavior commands',
+    )
+    expect(lower).not.toContain('include behavior commands for appearance')
     expect(lower).not.toContain('describe the npc\'s behavior')
   })
 
@@ -342,7 +413,7 @@ describe('ROOM_SYSTEM_PROMPT npcType hint', () => {
   })
 
   it('keeps overall existing generated-room prompt behavior stable alongside the new hint', () => {
-    expect(ROOM_SYSTEM_PROMPT.length).toBeLessThan(4500)
+    expect(ROOM_SYSTEM_PROMPT.length).toBeLessThan(8_000)
     const messages = buildRoomPromptMessages('a quiet chapel')
     expect(messages).toHaveLength(2)
     expect(messages[0]!.role).toBe('system')

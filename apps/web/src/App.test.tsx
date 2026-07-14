@@ -1178,8 +1178,8 @@ describe('App generated-play adjacent room source wiring', () => {
     expect(target && 'interaction' in target ? target.interaction?.effect : undefined).toEqual({ kind: 'inspect' })
 
     const exampleBook = exampleResult.room.objects.find((object) => object.type === 'book')
-    expect(exampleBook?.id).toBeUndefined()
-    expect(exampleBook && 'interaction' in exampleBook ? exampleBook.interaction?.effect : undefined).toBeUndefined()
+    expect(exampleBook?.id).toBe('generated-inspect-book-0')
+    expect(exampleBook && 'interaction' in exampleBook ? exampleBook.interaction?.effect : undefined).toEqual({ kind: 'inspect' })
   })
 
   it('uses a story phrase in adjacent seeds only when a WorldBible pattern exists', () => {

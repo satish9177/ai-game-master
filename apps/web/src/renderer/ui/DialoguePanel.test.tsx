@@ -27,6 +27,7 @@ describe('DialoguePanel', () => {
     )
 
     expect(html).toContain('aria-label="Inspect"')
+    expect(html).toContain('data-panel-kind="interaction"')
     expect(html).toContain('<h2 class="panel-title">Inspect</h2>')
     expect(html).toContain(SAFE_BODY)
     expect(html).not.toContain('ProviderTrace')

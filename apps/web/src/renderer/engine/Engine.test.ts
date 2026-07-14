@@ -14,9 +14,12 @@ import { NpcBehaviorTracker } from './npc/behaviorTracker'
 import { WanderMotor } from './npc/WanderMotor'
 import { NpcAwarenessTracker } from './npc/awarenessTracker'
 import type { NpcRoutineMode } from '../../domain/npcRoutine'
+import { ruinedKingdomShowcases } from '../../domain/examples/ruinedKingdomShowcases'
+import { ruinedKingdomPack } from './visual-pack/ruinedKingdomPack'
+import type { VisualAssetLease } from './visual-pack/VisualAssetCache'
 
 const fallback = loadRoomSpec(fallbackRoom)
-const INSPECT_BODY = 'You inspect it carefully, but do not take anything.'
+const INSPECT_BODY = 'You open the chest and check its authored contents.'
 
 const encounter = {
   id: 'threat',
@@ -225,6 +228,13 @@ describe('buildInteractables', () => {
 })
 
 describe('Engine.setRoom options', () => {
+  it('refuses the primitive room builder when production visuals are enabled', () => {
+    expect(() => Engine.prototype.setRoom.call(
+      { productionVisuals: true } as never,
+      room,
+    )).toThrow('legacy-visuals-disabled')
+  })
+
   it('passes resolvedObjectIds through so matching interactables become resolved', () => {
     const originalWindow = globalThis.window
     vi.stubGlobal('window', {
@@ -279,6 +289,84 @@ describe('Engine.setRoom options', () => {
   })
 })
 
+describe('Engine production character insertion', () => {
+  it('keeps visible player and NPC character meshes in every showcase scene', async () => {
+    const originalWindow = globalThis.window
+    vi.stubGlobal('window', {
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    })
+
+    try {
+      for (const showcase of Object.values(ruinedKingdomShowcases)) {
+        const fakeEngine = makeVisualPackEngine()
+        const runtime = makeVisibleCharacterRuntime()
+
+        await Engine.prototype.setRoomWithVisualPack.call(
+          fakeEngine as never,
+          loadRoomSpec(showcase),
+          runtime as never,
+        )
+
+        expect(hasVisibleMesh(fakeEngine.player)).toBe(true)
+        const built = fakeEngine.builtVisualObjects
+        expect(built).not.toBeNull()
+        if (!built) throw new Error('expected-built-visual-objects')
+        expect(built.characters.size).toBeGreaterThan(0)
+        for (const character of built.characters.values()) {
+          expect(hasVisibleMesh(character.root)).toBe(true)
+        }
+
+        fakeEngine.movement?.dispose()
+        fakeEngine.playerCharacter?.dispose()
+        fakeEngine.builtVisualShell?.dispose()
+        fakeEngine.builtVisualObjects?.dispose()
+      }
+    } finally {
+      if (originalWindow === undefined) vi.unstubAllGlobals()
+      else vi.stubGlobal('window', originalWindow)
+    }
+  })
+})
+
+describe('Engine visual presentation updates', () => {
+  it('updates a built visual graph without rebuilding the room', () => {
+    const group = new THREE.Group()
+    const object = new THREE.Group()
+    object.userData.objectId = 'coffer'
+    const lid = new THREE.Object3D()
+    lid.name = 'state-lid'
+    object.add(lid)
+    group.add(object)
+    const activeInteractable = {
+      id: 'coffer',
+      type: 'crate',
+      label: 'Coffer',
+      affordance: 'take' as const,
+      key: 'E' as const,
+      prompt: 'Open',
+      position: { x: 0, y: 0, z: 0 },
+    }
+    const onActiveInteractionChange = vi.fn()
+    const fakeEngine = {
+      builtVisualObjects: { group },
+      interactables: [activeInteractable],
+      activeInteractable,
+      onActiveInteractionChange,
+    }
+
+    Engine.prototype.updateObjectPresentationStates.call(fakeEngine as never, new Map([[
+      'coffer',
+      { condition: 'intact', interactionState: 'looted', resolved: true },
+    ]]))
+
+    expect(lid.rotation.x).toBeCloseTo(-1.15)
+    expect(fakeEngine.interactables[0]).toMatchObject({ id: 'coffer', resolved: true })
+    expect(fakeEngine.activeInteractable).not.toBe(activeInteractable)
+    expect(onActiveInteractionChange).toHaveBeenCalledWith(fakeEngine.activeInteractable)
+  })
+})
+
 function makeFakeEngine(idleAnimator: IdleAnimator) {
   return {
     room: null,
@@ -307,6 +395,113 @@ function makeFakeEngine(idleAnimator: IdleAnimator) {
     player: new THREE.Object3D(),
     locked: false,
   }
+}
+
+function makeVisualPackEngine() {
+  const engine = {
+    disposed: false,
+    productionVisuals: true,
+    room: null,
+    scene: new THREE.Scene(),
+    logger: {
+      debug() {},
+      info() {},
+      warn() {},
+      error() {},
+      child() { return this },
+    },
+    cutawaySides: () => [],
+    player: new THREE.Object3D(),
+    playerCharacter: null as ReturnType<typeof makeVisibleCharacter> | null,
+    builtVisualShell: null as { dispose: () => void } | null,
+    builtVisualObjects: null as {
+      characters: ReadonlyMap<string, ReturnType<typeof makeVisibleCharacter>>
+      dispose: () => void
+    } | null,
+    collisionWorld: null,
+    bounds: null,
+    movement: null as { dispose: () => void } | null,
+    interactables: [] as ReturnType<typeof buildInteractables>,
+    onInteractKey: () => undefined,
+    npcBehavior: new NpcBehaviorTracker(),
+    wanderMotor: new WanderMotor(),
+    wanderNpcIds: [] as string[],
+    npcAwareness: new NpcAwarenessTracker(),
+    awarenessNodes: new Map<string, THREE.Object3D>(),
+    characterLastPositions: new Map<string, THREE.Vector3>(),
+    npcRoutineModes: new Map<string, NpcRoutineMode>(),
+    playerLastPosition: new THREE.Vector3(),
+    placePlayer: vi.fn(),
+  }
+  return engine
+}
+
+function makeVisibleCharacterRuntime() {
+  return {
+    registry: ruinedKingdomPack,
+    assets: {
+      async acquire(assetId: string): Promise<VisualAssetLease> {
+        const descriptor = ruinedKingdomPack.assets[assetId]!
+        const instance = new THREE.Group()
+        instance.name = descriptor.nodeName
+        instance.add(new THREE.Mesh(
+          new THREE.BoxGeometry(0.5, 0.8, 0.5),
+          new THREE.MeshStandardMaterial({ color: '#80664d' }),
+        ))
+        return {
+          assetId,
+          descriptor,
+          instance,
+          animations: [],
+          release: () => undefined,
+        }
+      },
+    },
+    characters: {
+      create: async (request: { role: 'player' | 'npc' | 'zombie' }) =>
+        makeVisibleCharacter(request.role),
+    },
+    allowDebug: false,
+  }
+}
+
+function makeVisibleCharacter(role: 'player' | 'npc' | 'zombie') {
+  const root = new THREE.Group()
+  root.userData.characterRole = role
+  root.userData.visualPackCharacter = true
+  const visualRoot = new THREE.Group()
+  visualRoot.add(new THREE.Mesh(
+    new THREE.BoxGeometry(0.5, 1.8, 0.3).translate(0, 0.9, 0),
+    new THREE.MeshStandardMaterial({ color: '#8a7055' }),
+  ))
+  root.add(visualRoot)
+  return {
+    root,
+    visualRoot,
+    selection: {} as never,
+    animations: {
+      setSuspended: vi.fn(),
+      update: vi.fn(),
+      playOneShot: vi.fn(),
+      dispose: vi.fn(),
+    } as never,
+    updateFacing: vi.fn(),
+    dispose: vi.fn(),
+  }
+}
+
+function hasVisibleMesh(root: THREE.Object3D): boolean {
+  let found = false
+  root.traverse((node) => {
+    if (found || !(node as THREE.Mesh).isMesh) return
+    let current: THREE.Object3D | null = node
+    while (current) {
+      if (!current.visible) return
+      current = current.parent
+    }
+    found = true
+  })
+  return found
 }
 
 /** Finds the objects group among a fake `scene.add` mock's recorded calls. */

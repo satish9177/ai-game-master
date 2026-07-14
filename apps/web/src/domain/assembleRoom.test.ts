@@ -31,10 +31,10 @@ function validSpec(overrides: Record<string, unknown> = {}): Record<string, unkn
 
 const raw = (spec: unknown): string => JSON.stringify(spec)
 
-const READ_BODY = 'You read over it carefully. Nothing changes yet.'
-const INSPECT_BODY = 'You inspect it carefully, but do not take anything.'
-const CORPSE_BODY = 'You inspect the remains without disturbing them.'
-const EXAMINE_BODY = 'You examine it for meaning or danger. Nothing changes yet.'
+const READ_BODY = 'You read it and mark it as reviewed.'
+const INSPECT_BODY = 'You open the chest and check its authored contents.'
+const CORPSE_BODY = 'You search the remains for clues and mark them as searched.'
+const EXAMINE_BODY = 'You examine the altar and leave its markings activated.'
 const DEFAULT_GENERATED_NPC_PERSONAS = [
   'generated-room-guide',
   'generated-calm-witness',
@@ -161,11 +161,11 @@ const RAW_OUT_OF_BOUNDS_OBJ = raw(
     objects: [{ type: 'pillar', position: [100, 0, 0] }],
   }),
 )
-// 35 crates at an in-bounds position → count capped to GENERATED_ROOM.MAX_OBJECTS (30).
-const RAW_TOO_MANY_OBJECTS = raw(
+// 100 inexpensive crates at an in-bounds position remain semantic room content.
+const RAW_RICH_LAYOUT = raw(
   validSpec({
     shell: { dimensions: { width: 18, depth: 18, height: 4 }, exits: [{ side: 'north', width: 3 }] },
-    objects: Array.from({ length: 35 }, () => ({ type: 'crate', position: [3, 0, 3] })),
+    objects: Array.from({ length: 100 }, () => ({ type: 'crate', position: [3, 0, 3] })),
   }),
 )
 // Exit arch placed in the room interior (z=3 → nearest wall = south at z=9) → snapped
@@ -209,8 +209,7 @@ const KNOWN_FATAL_CODES = [
   'room-too-small',
   'room-too-large',
   'spawn-out-of-bounds',
-  'object-budget-hard-exceeded',
-  'light-budget-hard-exceeded',
+  'object-envelope-exceeded',
 ]
 
 describe('assembleRoom', () => {
@@ -563,10 +562,10 @@ describe('assembleRoom', () => {
 
   // --- generated-room object bounds repair (Slice 3) ---
   //
-  // Object position clamping and count capping are benign normalizations: the
-  // room stays provenance 'generated' (no notice) and the repair is reported via
-  // the safe `objectsRepaired` flag only. Only a repairRoom pass or fallback
-  // changes provenance away from 'generated'.
+  // Object position clamping is a benign normalization: the room stays
+  // provenance 'generated' (no notice) and the repair is reported via the safe
+  // `objectsRepaired` flag only. Only a repairRoom pass or fallback changes
+  // provenance away from 'generated'.
 
   it('out-of-bounds object position is clamped into the playable area, stays "generated"', () => {
     const { room, diagnostics } = assembleRoom(RAW_OUT_OF_BOUNDS_OBJ, fallback)
@@ -581,18 +580,18 @@ describe('assembleRoom', () => {
     expect(validateRoom(room).ok).toBe(true)
   })
 
-  it('object count is capped to GENERATED_ROOM.MAX_OBJECTS (30), objectsRepaired true', () => {
-    const { room, diagnostics } = assembleRoom(RAW_TOO_MANY_OBJECTS, fallback)
+  it('preserves a rich in-bounds layout without count-based repair', () => {
+    const { room, diagnostics } = assembleRoom(RAW_RICH_LAYOUT, fallback)
     expect(diagnostics.provenance).toBe('generated')
-    expect(diagnostics.objectsRepaired).toBe(true)
+    expect(diagnostics.objectsRepaired).toBe(false)
     expect(diagnostics.repairAttempted).toBe(false)
     expect(diagnostics.failedStage).toBeUndefined()
-    expect(nonExitObjects(room)).toHaveLength(30) // capped from 35 to MAX_OBJECTS
+    expect(nonExitObjects(room)).toHaveLength(100)
     expect(buildExitLookup(room).size).toBe(1)
     expect(validateRoom(room).ok).toBe(true)
   })
 
-  it('generated room with all in-bounds objects and count ≤ MAX_OBJECTS: objectsRepaired false', () => {
+  it('generated room with all in-bounds objects has objectsRepaired false', () => {
     const { diagnostics } = assembleRoom(RAW_VALID, fallback)
     expect(diagnostics.objectsRepaired).toBe(false)
   })
@@ -608,7 +607,7 @@ describe('assembleRoom', () => {
   it('authored fallback room objects are not mutated by generated-room object repair', () => {
     const objectsBefore = JSON.parse(JSON.stringify(fallback.objects))
     assembleRoom(RAW_OUT_OF_BOUNDS_OBJ, fallback)
-    assembleRoom(RAW_TOO_MANY_OBJECTS, fallback)
+    assembleRoom(RAW_RICH_LAYOUT, fallback)
     expect(fallback.objects).toEqual(objectsBefore)
   })
 
@@ -616,8 +615,8 @@ describe('assembleRoom', () => {
     expect(assembleRoom(RAW_OUT_OF_BOUNDS_OBJ, fallback)).toEqual(
       assembleRoom(RAW_OUT_OF_BOUNDS_OBJ, fallback),
     )
-    expect(assembleRoom(RAW_TOO_MANY_OBJECTS, fallback)).toEqual(
-      assembleRoom(RAW_TOO_MANY_OBJECTS, fallback),
+    expect(assembleRoom(RAW_RICH_LAYOUT, fallback)).toEqual(
+      assembleRoom(RAW_RICH_LAYOUT, fallback),
     )
   })
 
@@ -1522,24 +1521,28 @@ describe('assembleRoom', () => {
       prompt: 'Read',
       title: 'Read',
       body: READ_BODY,
+      effect: { kind: 'inspect' },
     })
     expect(interactions.get('chest')).toEqual({
       key: 'E',
       prompt: 'Inspect',
       title: 'Inspect',
       body: INSPECT_BODY,
+      effect: { kind: 'inspect' },
     })
     expect(interactions.get('altar')).toEqual({
       key: 'E',
       prompt: 'Examine',
       title: 'Examine',
       body: EXAMINE_BODY,
+      effect: { kind: 'inspect' },
     })
     expect(interactions.get('corpse')).toEqual({
       key: 'E',
       prompt: 'Inspect',
       title: 'Inspect',
       body: CORPSE_BODY,
+      effect: { kind: 'inspect' },
     })
     expect(validateRoom(result.room).ok).toBe(true)
   })
@@ -1563,7 +1566,7 @@ describe('assembleRoom', () => {
     expect(result.diagnostics.provenance).toBe('generated')
     expect(result.diagnostics.failedStage).toBeUndefined()
     expect(result.diagnostics.repairAttempted).toBe(false)
-    expect(result.diagnostics.purposesAssigned).toBe(2)
+    expect(result.diagnostics.purposesAssigned).toBe(3)
   })
 
   it('preserves existing generated interactions and does not overwrite title, body, or effect', () => {
@@ -1630,7 +1633,7 @@ describe('assembleRoom', () => {
       ],
     })), fallback)
 
-    expect(result.diagnostics.purposesAssigned).toBe(0)
+    expect(result.diagnostics.purposesAssigned).toBe(1)
     for (const object of nonExitObjects(result.room)) {
       if (object.type === 'scroll' || object.type === 'npc') {
         expect('interaction' in object ? object.interaction : undefined).toBeDefined()
@@ -1736,7 +1739,7 @@ describe('assembleRoom', () => {
 
     expect(implicitDefault.diagnostics.objectiveTargetEnriched).toBe(false)
     expect(explicitFalse.diagnostics.objectiveTargetEnriched).toBe(false)
-    expect(interactionFor(implicitDefault.room.objects.find((object) => object.type === 'book')!)?.effect).toBeUndefined()
+    expect(interactionFor(implicitDefault.room.objects.find((object) => object.type === 'book')!)?.effect).toEqual({ kind: 'inspect' })
     expect(explicitFalse).toEqual(implicitDefault)
   })
 
@@ -1822,9 +1825,9 @@ describe('assembleRoom', () => {
     expect(book.id).toBe('generated-objective-target')
     expect(interaction).toMatchObject({
       key: 'E',
-      prompt: 'Read',
-      title: 'Read',
-      body: READ_BODY,
+      prompt: 'Inspect',
+      title: 'Inspect',
+      body: 'You inspect it and leave it visibly resolved.',
       effect: { kind: 'inspect' },
     })
     expect(interaction?.effect).not.toHaveProperty('flag')

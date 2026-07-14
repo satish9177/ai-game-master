@@ -1,6 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Engine } from './engine/Engine'
 import type { SetRoomOptions } from './engine/Engine'
+import type { LoadedRoom } from '../domain/loadRoomSpec'
+import { projectRoomObjectPresentationStates } from '../domain/visuals/objectPresentationState'
+import type { ExitGatePresentationResults } from '../domain/visuals/objectPresentationState'
+import { VisualAssetCache } from './engine/visual-pack/VisualAssetCache'
+import { ruinedKingdomPack } from './engine/visual-pack/ruinedKingdomPack'
+import { HumanoidCharacterFactory } from './engine/characters/HumanoidCharacterFactory'
+import type { EngineVisualPackRuntime } from './engine/Engine'
 import type { Interactable } from '../domain/ports/interaction'
 import type { RoomSource } from '../domain/ports/RoomSource'
 import { Hud } from './ui/Hud'
@@ -42,6 +49,24 @@ import { buildDialogueLookup, dialogueResultMessage, DIALOGUE_AT_CAP_MESSAGE } f
 import type { NPCDialogueLookup, NPCDialogueTarget } from '../app/dialogue'
 
 const ROOM_UNAVAILABLE = 'This room could not be loaded.'
+const visualPackLogger = createConsoleLogger()
+const visualAssetCache = new VisualAssetCache(
+  ruinedKingdomPack,
+  undefined,
+  visualPackLogger,
+)
+const visualCharacterFactory = new HumanoidCharacterFactory(
+  ruinedKingdomPack,
+  visualAssetCache,
+  visualPackLogger,
+)
+const visualPackRuntime: EngineVisualPackRuntime = {
+  registry: ruinedKingdomPack,
+  assets: visualAssetCache,
+  characters: visualCharacterFactory,
+  allowDebug: import.meta.env.DEV,
+}
+
 const WEBGL2_UNAVAILABLE =
   'This app needs WebGL2, which is not available in this browser or device.'
 
@@ -88,6 +113,7 @@ type RoomViewerProps = {
   getRelationshipContextForNpc?: (npcId: string) => NpcRelationshipState | undefined
   timeContext?: PromptTimeContext | null
   resolvedObjectIds?: ReadonlySet<string>
+  exitGateResults?: ExitGatePresentationResults
   /**
    * Demo/dev-only chase opt-in (ADR-0086), threaded verbatim into the existing,
    * unchanged `Engine.SetRoomOptions.chaseOptInNpcIds` seam. Populated only by
@@ -120,11 +146,27 @@ export function RoomViewer({
   getRelationshipContextForNpc,
   timeContext,
   resolvedObjectIds,
+  exitGateResults,
   chaseOptInNpcIds,
   npcRoutineModes,
 }: RoomViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const engineRef = useRef<Engine | null>(null)
+  const loadedRoomRef = useRef<LoadedRoom | null>(null)
+  const resolvedObjectIdsRef = useRef<ReadonlySet<string> | undefined>(resolvedObjectIds)
+  const exitGateResultsRef = useRef<ExitGatePresentationResults | undefined>(exitGateResults)
+  useEffect(() => {
+    resolvedObjectIdsRef.current = resolvedObjectIds
+    exitGateResultsRef.current = exitGateResults
+    const room = loadedRoomRef.current
+    const engine = engineRef.current
+    if (!room || !engine) return
+    engine.updateObjectPresentationStates(projectRoomObjectPresentationStates({
+      room,
+      resolvedObjectIds,
+      exitGateResults,
+    }))
+  }, [exitGateResults, resolvedObjectIds])
   const effectLookupRef = useRef<InteractionEffectLookup>(new Map())
   const encounterLookupRef = useRef<EncounterLookup>(new Map())
   const exitLookupRef = useRef<ExitLookup>(new Map())
@@ -193,7 +235,7 @@ export function RoomViewer({
 
     let engine: Engine
     try {
-      engine = new Engine(container, logger)
+      engine = new Engine(container, logger, { productionVisuals: true })
     } catch (err) {
       logger.error('engine construction failed', { error: describeError(err) })
       // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -203,6 +245,16 @@ export function RoomViewer({
 
     engineRef.current = engine
     let cancelled = false
+
+    const updateVisualStateFromWorldState = (state: WorldState) => {
+      const room = loadedRoomRef.current
+      if (!room) return
+      engine.updateObjectPresentationStates(projectRoomObjectPresentationStates({
+        room,
+        roomState: state.roomStates[room.id],
+        exitGateResults: exitGateResultsRef.current,
+      }))
+    }
 
     const resetNPCDialogue = () => {
       engine.setTalkingNpc(null)
@@ -296,6 +348,7 @@ export function RoomViewer({
       }).then((result) => {
         if (cancelled) return
         if (result.status === 'applied' || result.status === 'already-resolved') {
+          updateVisualStateFromWorldState(result.state)
           onWorldStateChange?.(result.state)
         }
         if (result.status === 'applied' && result.events.length > 0) {
@@ -320,7 +373,7 @@ export function RoomViewer({
       })
     }
 
-    void roomSource.getRoom().then((result) => {
+    void roomSource.getRoom().then(async (result) => {
       if (cancelled) return
       if (!result.ok) {
         logger.error('room load failed', { code: result.error.code })
@@ -338,24 +391,28 @@ export function RoomViewer({
       roomDialogueContextRef.current = buildRoomDialogueContext(result.room)
       effectLookupRef.current = buildInteractionEffectLookup(result.room)
       currentRoomNameRef.current = result.room.name
+      loadedRoomRef.current = result.room
       try {
         const setRoomOptions: SetRoomOptions = {}
-        if (resolvedObjectIds !== undefined) {
-          setRoomOptions.resolvedObjectIds = resolvedObjectIds
+        const currentResolvedObjectIds = resolvedObjectIdsRef.current
+        if (currentResolvedObjectIds !== undefined) {
+          setRoomOptions.resolvedObjectIds = currentResolvedObjectIds
         }
+        setRoomOptions.presentationStates = projectRoomObjectPresentationStates({
+          room: result.room,
+          resolvedObjectIds: currentResolvedObjectIds,
+          exitGateResults: exitGateResultsRef.current,
+        })
         if (chaseOptInNpcIds !== undefined && chaseOptInNpcIds.size > 0) {
           setRoomOptions.chaseOptInNpcIds = chaseOptInNpcIds
         }
         if (npcRoutineModes !== undefined && npcRoutineModes.size > 0) {
           setRoomOptions.npcRoutineModes = npcRoutineModes
         }
-        if (Object.keys(setRoomOptions).length > 0) {
-          engine.setRoom(result.room, setRoomOptions)
-        } else {
-          engine.setRoom(result.room)
-        }
-      } catch (err) {
-        logger.error('engine.setRoom failed', { error: describeError(err) })
+        await engine.setRoomWithVisualPack(result.room, visualPackRuntime, setRoomOptions)
+      } catch {
+        if (cancelled) return
+        logger.error('visual pack room build failed', { code: 'visual-pack-unavailable' })
         engine.dispose()
         engineRef.current = null
         setFatalMessage(ROOM_UNAVAILABLE)
@@ -376,6 +433,7 @@ export function RoomViewer({
       npcDialogueLookupRef.current = new Map()
       roomDialogueContextRef.current = undefined
       currentRoomNameRef.current = undefined
+      loadedRoomRef.current = null
       activeEncounterRef.current = null
       activeNPCDialogueRef.current = null
       npcDialogueRequestRef.current += 1
@@ -397,7 +455,6 @@ export function RoomViewer({
     onNavigate,
     onWorldStateChange,
     onCommittedInteractionEvents,
-    resolvedObjectIds,
     chaseOptInNpcIds,
     npcRoutineModes,
     roomSource,

@@ -434,8 +434,8 @@ describe('generated objective on a real prompt-generated room', () => {
     if (!result.ok) throw new Error('expected generated room')
 
     const book = result.room.objects.find((object) => object.type === 'book')
-    expect(book?.id).toBeUndefined()
-    expect(book && 'interaction' in book ? book.interaction?.effect : undefined).toBeUndefined()
+    expect(book?.id).toBe('generated-inspect-book-0')
+    expect(book && 'interaction' in book ? book.interaction?.effect : undefined).toEqual({ kind: 'inspect' })
     await expect(buildGeneratedObjectiveAttachment(result.room, new FakeObjectiveGenerator())).resolves.toBeNull()
   })
 

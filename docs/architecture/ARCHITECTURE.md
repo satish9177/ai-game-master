@@ -701,15 +701,12 @@ geometric mismatch
 - **Four benign layout normalizers** (`domain/generatedRoomLayout.ts`) run around
   composition in `assembleRoom`, before semantic validation at stage 3:
   - **Shell clamp** (`clampGeneratedShell`): width/depth → `[14..24]`.
-  - **Object bounds + count cap** (`repairGeneratedObjects`): each object
-    positioned so its full **footprint** (rotation-invariant radius per object
-    type, scaled and padded) stays inside the walkable floor; decorative objects
-    whose footprint cannot fit are dropped. Total capped at **30 objects** (drops
-    decorative first, then structural; never critical — NPC, scroll, interactive
-    arch, interactive crate/barrel/debris/barricade/zombie). Wall-light objects
-    such as torches generated in the floor interior are nudged toward a wall/side
-    position. Skipped/malformed mystery-marker anchors are also clamped inside the
-    room bounds.
+  - **Object bounds without performance truncation** (`repairGeneratedObjects`): each object
+    is positioned so its full footprint stays inside the walkable floor; decorative objects
+    whose footprint physically cannot fit may be dropped. Valid rich layouts are not capped
+    to 30 objects. Wall lights generated in the interior are nudged toward a wall/side.
+    A separate 4,096-entry schema ceiling protects parser/memory abuse and is not a render
+    budget; renderer cost is controlled later by weighted resource planning.
   - **Spawn safe-area repair** (`repairGeneratedSpawn`, stage 2.8): spawn X/Z clamped into
     the playable floor area, then nudged away from any spawn-blocking object via
     a small deterministic candidate set (origin, ±step in four cardinal
@@ -783,15 +780,14 @@ spaces
   `machine`, `artifact`, and `candle` in addition to the existing room object
   types. `schemaVersion` remains **1** because the change is additive to the
   generated object vocabulary.
-- **Trusted procedural builders only:** every current `RoomObject["type"]` has a
-  registered renderer builder. The new builders are hand-written Three.js
-  primitives/materials; there are no external assets, textures, GLTF imports,
-  shaders, fonts, labels, new dependencies, or LLM-generated renderer code.
-- **Mystery marker fallback:** skipped/unknown/malformed objects still remain in
-  `LoadedRoom.skipped`, are non-interactive, and render as a bounded mystery
-  marker instead of the old neon/magenta placeholder cube. The marker never
-  displays raw skipped type/name/id text and never promotes skipped data into a
-  valid object.
+- **Trusted production visual registry:** every accepted semantic type resolves to reviewed
+  GLB nodes through closed registry mappings. Legacy procedural builders and the mystery seal
+  remain development/emergency helpers only; supported production content never selects them.
+- **Fallback hierarchy:** exact variant/state → object-family default → environment-compatible
+  default → neutral production fallback. If neutral assets also fail, production shows a fixed
+  unavailable view instead of exposing primitive/debug geometry.
+- **No generated asset authority:** paths, materials, node/clip names, shaders, and renderer
+  instructions are absent from RoomSpec and remain trusted renderer implementation details.
 - **Generated-room-only pre-validation normalizers:** before `loadRoomSpec`,
   generated rooms get two benign normalizers: allowlisted type-only alias repair
   (for common natural nouns such as desk/skeleton/floor plan/generator) and
@@ -1572,9 +1568,10 @@ rationale in [ADR-0012](./decisions/ADR-0012-isometric-camera-foundation.md).
   strafe**; diagonals normalized, delta-time scaled, clamped to the room AABB.
 - **Proximity reads the player**, not the camera, so HUD prompts and E/F dialogue
   behave as before but anchor to where the player actually stands.
-- **A minimal player marker** (a renderer-internal `buildPlayerMarker()` capsule
-  with a facing nose) is **not RoomSpec data**; it lives in the scene graph and is
-  freed by the engine's normal disposal.
+- **A shared-rig production player character** is renderer-internal, never RoomSpec data.
+  The old blue `buildPlayerMarker()` capsule remains an explicit development/test
+  emergency helper only. Character cache leases and owned material overrides are
+  released by the engine/pack disposal path.
 - **Isometric cutaway shell.** `buildShell` lowers the camera-facing **south/east**
   near walls to a low **curb** so they can't hide the player; the **north/west far
   walls stay full height** to preserve room shape (a dollhouse, not a closed box).
@@ -2414,16 +2411,14 @@ slice can be safe. It is captured formally in
 
 Two rules make this safe:
 
-1. **A RoomSpec is data, never behavior.** It selects from a *fixed registry of
-   known `type` strings* (including the generated-room visual vocabulary such as
-   `scroll`, `book`, `paper`, `map`, `chest`, `corpse`, `table`, `altar`,
-   `statue`, `machine`, `artifact`, and `candle`). It can never introduce new
-   executable behavior. The mapping from `type` → 3D objects is hand-written,
-   reviewed, trusted code.
-2. **Validation happens at the boundary.** `loadRoomSpec` validates everything
-   crossing into the renderer. Unknown or malformed objects degrade to a visible,
-   non-interactive mystery marker; they never crash the renderer and never
-   execute.
+1. **A RoomSpec is data, never behavior.** It selects only fixed semantic types, variants,
+   family kinds, conditions, environments, interactions, and humanoid appearance presets.
+   It cannot select a pack, URL, path, GLTF node, material, shader, animation clip, or code.
+2. **Validation happens before rendering.** `loadRoomSpec` validates the envelope and
+   independently accepts/skips object entries. Supported content then resolves only through the
+   trusted registry: exact semantic variant/state → family default → environment-compatible
+   default → neutral production fallback. Debug geometry is development-only; production fails
+   closed to a fixed unavailable view after neutral fallback failure.
 
 Because of this, a *hostile or garbage* generation (later) is just data that
 either validates — and is rendered by trusted code — or fails validation and is
@@ -2432,42 +2427,22 @@ skipped. There is no code path from "model output" to "executed JavaScript".
 ## Current data flow (v0)
 
 ```
-App.tsx
-  ├─ playerHud: PlayerHudView | null    ✅ App-owned read-only render cache (seeded at session start)
-  ├─ <StatusHud view={playerHud} />     ✅ App-level overlay (sibling of RoomViewer)
-  ├─ quest: QuestView | null            ✅ App-owned read-only quest cache; null for prompt-generated sessions
-  ├─ <QuestTracker view={quest} />      ✅ App-level overlay; hidden when quest === null (pointer-events:none; aria-live)
-  ├─ journal: JournalView | null        ✅ App-owned read-only journal cache; null for prompt-generated sessions
-  ├─ <JournalPanel view={journal} />    ✅ App-level overlay; hidden when journal === null; collapsed by default (pointer-events:none for text; aria-live)
-  ├─ <SaveLoadBar .../>                 ✅ App-level save/load control (sibling of RoomViewer)
-  ├─ usageCount / usageStatus           ✅ App-owned guardrail state (real provider only; in-memory, never persisted)
-  ├─ <UsageMeter .../>                  ✅ App-level overlay; null for fake provider (role="status"; aria-live)
-  ├─ <AppRoomEntryOverlay room sessionId entrySeq notice onDismissNotice />  ✅ per-room-entry overlays
-  │    ├─ <RoomIntroPanel summary roomKey />  ✅ dismissible intro; null when no text or dismissed; resetKey resets on new room entry
-  │    └─ repaired/fallback notice (static, dismissible; shown for provenance repaired | fallback)
-  └─ RoomViewer.tsx                     (React host — owns the engine lifecycle)
-       ├─ loadRoomSpec(throneRoom)       ✅ validation boundary (today: static data)
-       ├─ new Engine(container)          ✅ pure Three.js
-       │    ├─ buildLighting(room)        ambient + optional hemisphere
-       │    ├─ buildShell(room)           floor + walls (north exit split; iso cutaway curbs)
-       │    ├─ buildObjects(room)         type→builder registry, mystery-marker fallback
-       │    ├─ buildPlayerMarker()        renderer-internal player object (not RoomSpec data)
-       │    ├─ IsometricCameraController  orthographic iso camera; follows the player
-       │    └─ MovementControls           screen-relative WASD/arrows → player (AABB clamp)
-       │       (LookControls retained but NOT instantiated — future free-camera mode)
-       ├─ engine.onActiveInteractionChange → React state → <Hud/>
-       └─ engine.onRequestOpenInteraction  → RoomViewer id lookup
-            ├─ exit? → NavigationService → existing moved-to-room
-            ├─ encounter? → present choices → EncounterService (on choose)
-            │    applied/already-resolved → onWorldStateChange(result.state)
-            │                               → App: refreshDerivedViews(state)
-            ├─ dialogue? → NPCDialogueService.getWorldState → fake provider
-            │    → component-only history → <NPCDialoguePanel/>
-            └─ else effect? → InteractionService
-                 → WorldSession.appendEvent (shared applyCommands)
-                 → typed result message → <DialoguePanel/>
-                 applied/already-resolved → onWorldStateChange(result.state)
-                                            → App: refreshDerivedViews(state)
+App.tsx (authoritative state + composition)
+  └─ RoomViewer.tsx (React lifecycle/intent seam)
+       ├─ projectRoomObjectPresentationStates(validated room, world flags, gate results)
+       ├─ pack-lifetime VisualAssetCache + HumanoidCharacterFactory
+       └─ Engine({ productionVisuals: true })
+            └─ setRoomWithVisualPack(validated LoadedRoom, trusted runtime, options)
+                 ├─ buildLighting + buildShell (four-sided exit gaps, isometric cutaway)
+                 ├─ buildVisualObjects
+                 │    semantic request → weighted plan → registry fallback chain
+                 │    → static instancing / authored LOD / resource degradation
+                 ├─ shared humanoid factory (player, NPCs, guards, villagers, zombies)
+                 ├─ CollisionWorld2D → swept/sliding player movement
+                 └─ callbacks emit neutral interaction intent to React
+                      → existing navigation / encounter / dialogue / interaction services
+                      → WorldSession append-only truth
+                      → live presentation-state projection back to Engine
 ```
 
 The React ↔ engine seam is **callbacks + imperative methods**, not shared
@@ -2502,29 +2477,33 @@ PromptBar.onSubmit(prompt)                    (app chrome — not renderer UI)
                  └─ RoomViewer/engine receive only the validated room
 ```
 
-`RoomViewer` and the engine are **unchanged**: they still consume a `RoomSource`
+The generation path still hands only a validated `LoadedRoom` to `RoomViewer`; prompt, provider, and fallback concerns remain outside renderer internals.
 and a validated `LoadedRoom`. Only composition knows the prompt, world bible,
 generator seed, fakes, or fallback exists. Logs contain safe enums/counts/codes/
 lengths only—never prompt/bible/seed/generated JSON/error text. Bad room content
 yields a repaired or fallback room (`ok:true`); world-bible failure degrades to
 the raw-prompt seed, and only a room-generator throw/reject is `unavailable`.
 
-## Renderer Foundation v0 — module summary
+## Renderer Foundation + Ruined Kingdom Survival visual pack — module summary
+
+ADR-0091 preserves the deterministic Three.js adapter and replaces production placeholder geometry with one closed, licensed, lazy-loaded pack. Static matches are instanced; characters share one rig contract but clone bones/mixers; dynamic visual state is projected from existing truth; weighted resource budgets degrade cost without deleting semantic objects.
 
 | Module | Role |
 | --- | --- |
-| `domain/roomSpec.ts` | `RoomSpecSchema` (envelope) + `RoomObjectSchema` (discriminated union on `type`); inferred `RoomSpec` / `RoomObject` types. Schema/types only, no behavior. |
+| `domain/roomSpec.ts` / `domain/visuals/contracts.ts` | Renderer-neutral schema and closed semantic visual enums. Optional schemaVersion-1 additions cover environment, conditions, family kinds, and humanoid appearance; never assets/paths/code. |
 | `domain/loadRoomSpec.ts` | `loadRoomSpec` (strict envelope, lenient objects) + the `LoadedRoom` result type. |
 | `domain/ports/interaction.ts` | The neutral interaction view-model shared by the engine and UI, including an optional passive object id for composition lookup and a derived `Affordance` used only for presentation. Also owns pure validated-object projection helpers for `Interactable[]` and affordance lookup. |
 | `domain/examples/throneRoom.ts` | The single hardcoded demo room — pure data literal. |
-| `renderer/engine/Engine.ts` | Owns renderer/scene, the **player object** + a `CameraController` (isometric), render loop, **player-position** proximity, interaction keys, and **total `dispose()`**. No React. |
+| `renderer/engine/Engine.ts` | Owns renderer/scene/camera/render loop, production visual-pack room build, shared-rig player, animation signals, collision, live presentation updates, callbacks, and total disposal. Legacy builders are rejected in production mode. |
 | `renderer/engine/camera/` | `CameraController` interface + `IsometricCameraController` (orthographic true-isometric, follows the player) over a pure, WebGL-free `isometric.ts` math module (offset / pose / screen-relative move / clamp / frustum). |
-| `renderer/engine/playerMarker.ts` | `buildPlayerMarker` — the minimal **renderer-internal** player marker (capsule + facing nose). Presentation, **not** RoomSpec data. |
-| `renderer/engine/builders/` | `buildShell` (floor + walls, with isometric **cutaway curbs** on the camera-facing walls), `buildLighting`, and the object `registry` + `buildObjects` with mystery-marker fallback and trusted procedural builders for every current `RoomObject["type"]` ([ADR-0033](./decisions/ADR-0033-generated-room-visual-vocabulary-v0.md)). Interactable objects keep one `interactable-indicator` floor ring; its material color comes from the fixed `AFFORDANCE_RING_COLOR` map ([ADR-0036](./decisions/ADR-0036-generated-room-interaction-affordances-v0.md)). |
-| `renderer/engine/controls/` | `MovementControls` (screen-relative WASD/arrows driving the **player**, room-clamped); `LookControls` (drag-look) **retained but not instantiated** in isometric mode. |
-| `renderer/engine/disposables.ts` | `Disposables` + `disposeObject` — explicit GPU teardown (Three.js does not GC geometries/materials/textures). |
+| `renderer/engine/playerMarker.ts` | Explicit development/test emergency marker only. The blue capsule is not a production player path. |
+| `renderer/engine/builders/` | Trusted shell/global lighting/indicator helpers plus the gated legacy procedural object path. Production objects resolve through `visual-pack/`; shell exits open on all four sides. |
+| `renderer/engine/controls/` | Screen-relative movement plus `CollisionWorld2D` static circle/rotated-box collision and deterministic sliding. `LookControls` remains unwired. |
+| `renderer/engine/disposables.ts` | Explicit GPU teardown that distinguishes room-owned resources from cache-owned shared visual-pack geometry/materials/textures. |
 | `renderer/ui/` | Presentational React overlays: `Hud` (interaction key + deterministic affordance verb chip + existing prompt); `DialoguePanel` (result messages); `StatusHud` (read-only player health/inventory/status HUD; `pointer-events:none`; `aria-live`); `playerHud.ts` (pure `projectPlayerHud(WorldState) → PlayerHudView` projection + `PlayerHudView`/`PlayerHudHealth`/`PlayerHudItem` types); `SaveLoadBar.tsx` (save/load bar; receives `{ canSave, hasSave, busy, error, onSave, onContinue }`; calm `role="alert"` errors; no save content shown); `QuestTracker.tsx` (read-only quest tracker; receives `{ view: QuestView }`; renders title + objective done markers; `pointer-events:none`; `role="status"` + `aria-live="polite"`; no service or engine import); `JournalPanel.tsx` (collapsible read-only journal; receives `{ view: JournalView }`; collapsed by default; empty state "Nothing of consequence yet."; `pointer-events:none` for text; interactive collapse toggle; `role="status"` + `aria-live="polite"`; no service or engine import); `UsageMeter.tsx` (local session-cap guardrail overlay; receives `{ count, cap, status, onGenerateAnyway, onReset }`; rendered only when `guardEnabled`; returns `null` when `status === 'inert'`; `role="status"` + `aria-live="polite"`; no `three`, engine internals, or services); `RoomIntroPanel.tsx` (dismissible room intro panel — see module summary row below); `roomIntroPanelState.ts` (pure dismiss-state helpers). |
-| `renderer/RoomViewer.tsx` | The composition seam: constructs/disposes the engine, bridges engine callbacks to React state. StrictMode-safe (mount → dispose → mount leaks nothing). |
+| `renderer/engine/visual-pack/` | Closed registry validation, exact/family/environment/neutral resolver, GLTF cache leases, weighted render planner, instanced production object construction, presentation states, and fixed fail-closed errors. |
+| `renderer/engine/characters/` | One modular humanoid factory and reusable animation controller for idle/walk/run/talk/gesture/inspect/pick-up/sit/carry/hurt/zombie movement. |
+| `renderer/RoomViewer.tsx` | Composition seam: owns engine lifecycle and pack-lifetime cache/factory, awaits production builds, projects authoritative object states, handles fixed fail-closed UI, and bridges intents without reaching into scene internals. |
 | `domain/quests/questSpec.ts` | `QuestSpec`/`QuestSpecSchema` — zod-validated authored data descriptor; closed condition vocabulary (`room-flag`, `room-visited`, `has-item`, `has-status`). Imports only `zod`; exports no command/event-producing function. |
 | `domain/quests/evaluateQuest.ts` | Pure `evaluateQuest(spec: QuestSpec, state: WorldState) → QuestView` and the exported pure `evaluateCondition(condition, state): boolean` (shared with the journal projector — previously private, now a one-line export with no behavior change). Total, deterministic, no I/O; reads defensively (optional chaining); missing rooms/flags/visited → `false`, never throws. Covered by co-located `evaluateQuest.test.ts` (pure Vitest, no DOM). |
 | `domain/examples/demoQuest.ts` | Hand-authored `demoQuestSpec` literal ("The Steward's Toll"): three objectives wired to the existing `throne-room` interaction/encounter flags and `ruined-safehouse` visited mark. |
@@ -2548,16 +2527,16 @@ the raw-prompt seed, and only a room-generator throw/reject is `unavailable`.
 | `domain/generatedRoomThemeVocabulary.ts` | Pure generated-room theme vocabulary resolver ([ADR-0044](./decisions/ADR-0044-generated-room-theme-vocabulary-v0.md)) for the existing `fantasy-keep` and `post-apoc` theme packs. Returns deterministic object pools, prop shapes, palette, NPC names, and `neverAppear` suppressions for fake/generated rooms. Missing theme falls back to default fantasy behavior; no sci-fi/spaceship support. |
 | `generation/FakeWorldBibleSeeder.ts` | Browser-local deterministic seeder over the shared PRNG and two theme packs; validates internally, has no real model/I/O/logger. |
 | `generation/prng.ts` | Deterministic seeded PRNG (`xmur3` + `mulberry32`) and a small `Rng` helper. Pure — no I/O, no `Math.random`/`Date.now`. |
-| `generation/FakeRoomGenerator.ts` | A deterministic `RoomGenerator`: prompt -> seeded PRNG -> RoomSpec **data**, serialized with `JSON.stringify`. Consumes optional `GeneratedRoomThemeVocabulary` by constructor DI; missing vocabulary uses default fantasy behavior. Emits only the published vocabulary; same prompt -> byte-identical output. No real model. |
+| `generation/FakeRoomGenerator.ts` | Deterministic data-only generator over closed semantic environments/families; emits no asset identity, path, renderer instruction, or primitive production fallback. Same seed remains byte-identical. |
 | `generation/OpenAICompatibleRoomGenerator.ts` | The opt-in **real** `RoomGenerator` ([ADR-0023](./decisions/ADR-0023-real-room-generator-provider-v0.md)): one generic adapter for any OpenAI-compatible endpoint (OpenAI/DeepSeek). One non-streaming `fetch` POST over an injected transport seam, hard `AbortController` timeout, no retry, no SDK; returns `choices[0].message.content` **verbatim**. Imports no logger; throws only fixed safe codes (`llm-request-failed`/`llm-timeout`/`llm-empty-response`). No parse/validate/repair here. |
-| `generation/llmRoomPrompt.ts` | Pure, side-effect-free prompt builder for the real provider: a static system message (published vocabulary, exact `object.type` allowlist, synonym guidance, story-anchor guidance, RoomSpec shape, conventions) + one user message carrying the seed clamped to a hard `MAX_SEED_CHARS`. Data-only; no renderer/builders/assets/code instructions. No I/O, no logger; bounds are unit-tested. |
+| `generation/llmRoomPrompt.ts` | Pure prompt publishing closed environment/family/kind/condition/appearance enums and rich-static guidance. Explicitly forbids paths, URLs, nodes, materials, shaders, clips, code, and a small raw object-count cap. |
 | `app/llmConfig.ts` | The **only** browser module that reads `import.meta.env`. Parses a typed `LlmConfig` (provider/model/key/`maxTokens`/`timeoutMs`), holds the provider → built-in base-URL map, and the `isRealProviderComplete` check. `generation/**` never reads env. |
 | `app/selectRoomGenerator.ts` | Composition factory: returns the real `OpenAICompatibleRoomGenerator` only when the config is complete, else `FakeRoomGenerator` with reason `config-disabled`. Pure (no I/O at selection time); also returns a log-safe selection summary (provider/model/numbers or the fixed reason). |
-| `domain/validateRoom.ts` | Pure semantic validator: `validateRoom(room) → RoomValidationResult` of severity-tagged issues. Checks *playability* (dimensions, spawn-in-bounds, object/light budgets, usable interactions) over a loaded room — a domain peer of `loadRoomSpec`. No I/O, no logger, no React/Three ([ADR-0011](./decisions/ADR-0011-semantic-room-validator-v0.md)). |
-| `domain/repairRoom.ts` | Pure deterministic repair: `repairRoom(room) → LoadedRoom`. Non-mutating; only clamps spawn into the walkable AABB and truncates over-hard-budget objects/torches — never resizes rooms or invents content. Code peer of `validateRoom` ([ADR-0020](./decisions/ADR-0020-room-generation-repair-fallback-v0.md)). |
-| `domain/generatedRoomLayout.ts` | Generated-room layout contract ([ADR-0031](./decisions/ADR-0031-generated-room-layout-contract-v0.md)): `GENERATED_ROOM` constants (default 18, min 14, max 24, max objects 30); four benign normalizers in `assembleRoom` — `clampGeneratedShell` (2.5; width/depth → `[14..24]`), `repairGeneratedObjects` (2.6; X/Z bounds + count cap ≤ 30, drops decorative first), `repairGeneratedSpawn` (2.8; clamp + deterministic nudge away from blocking objects), `repairGeneratedExits` (2.9; snap to nearest wall face). Pure, no I/O, no logger, no mutation. Never applied to authored/static/fallback rooms. |
+| `domain/validateRoom.ts` | Pure semantic validator. Rich layouts are not rejected by a performance object count; the separate 4,096-entry ceiling is parser/memory abuse protection. Runtime cost is handled by the weighted renderer planner. |
+| `domain/repairRoom.ts` | Pure deterministic repair of playability issues. It does not truncate rich valid rooms to a performance count; the high abuse ceiling remains fatal rather than silently deleting story content. |
+| `domain/generatedRoomLayout.ts` | Generated spatial normalizers clamp room size/positions, protect spawn, and snap exits without a small raw object-count cap. Objects that physically cannot fit may still be skipped by existing bounded spatial rules; inexpensive valid detail remains. |
 | `domain/generatedRoomComposition.ts` | Generated-room composition and story-anchor selection ([ADR-0032](./decisions/ADR-0032-generated-room-composition-v0.md), [ADR-0034](./decisions/ADR-0034-generated-room-story-anchors-v0.md), [ADR-0044](./decisions/ADR-0044-generated-room-theme-vocabulary-v0.md)): pure role classification, zone computation, `selectGeneratedStoryAnchorIndex`, and `composeGeneratedRoom` stage 2.7. Relocates existing objects only to clear the central corridor and foreground one derived anchor/NPC/interactable/clutter placement; preserves count and non-position fields; missing roles are diagnostic-only. Accepts optional structured `themePack`: `post-apoc` prefers `machine`/`corpse`; missing theme and `fantasy-keep` preserve default priority. Safe booleans: `composed`, `lacksAnchor`, `lacksInteractable`. Never applied to authored/static/fallback rooms. |
-| `domain/generatedRoomAliases.ts` / `domain/generatedRoomObjectTransforms.ts` | Generated-room visual vocabulary normalizers ([ADR-0033](./decisions/ADR-0033-generated-room-visual-vocabulary-v0.md)): allowlisted type-only alias repair and optional transform repair before `loadRoomSpec`. They never repair required fields, interactions, positions, or arbitrary/fuzzy nouns; direct `loadRoomSpec` behavior stays strict. |
+| `domain/generatedRoomAliases.ts` / `domain/generatedRoomObjectTransforms.ts` | Generated-only closed alias/semantic-variant repair and optional transform repair before `loadRoomSpec`; never paths/assets/free-form instructions. Alias coverage is cross-checked against the visual registry. |
 | `domain/assembleRoom.ts` | Pure assembly pipeline: `assembleRoom(rawText, fallbackRoom, options) -> { room, diagnostics }`. Composes `JSON.parse` -> `repairGeneratedAliases` -> `repairGeneratedObjectTransforms` -> `loadRoomSpec` -> `clampGeneratedShell` (2.5) -> `repairGeneratedObjects` (2.6) -> `composeGeneratedRoom` (2.7, optional structured `themePack`) -> `repairGeneratedSpawn` (2.8) -> `repairGeneratedExits` (2.9) -> `validateRoom` -> `repairRoom` -> re-validate -> fallback; **always** returns a zero-fatal room plus safe diagnostics (provenance/stage/codes/counts/booleans/normalization flags). Synchronous, no I/O, never logs ([ADR-0020](./decisions/ADR-0020-room-generation-repair-fallback-v0.md), [ADR-0031](./decisions/ADR-0031-generated-room-layout-contract-v0.md), [ADR-0032](./decisions/ADR-0032-generated-room-composition-v0.md), [ADR-0033](./decisions/ADR-0033-generated-room-visual-vocabulary-v0.md), [ADR-0034](./decisions/ADR-0034-generated-room-story-anchors-v0.md), [ADR-0044](./decisions/ADR-0044-generated-room-theme-vocabulary-v0.md)). |
 | `domain/examples/fallbackRoom.ts` | The trusted, data-only fallback room (the `throneRoom` authoring pattern): a small in-bounds stone antechamber, zero fatal/zero warning, no prompt or story text. Injected by the host as `assembleRoom`'s last resort. |
 | `room/GeneratedRoomSource.ts` | A `RoomSource` adapter (composition layer) that runs the generator, then `assembleRoom`. A generator throw/reject → `unavailable`; otherwise **always** `ok:true` with `provenance` (`generated`/`repaired`/`fallback`). Logs one safe line (provenance/stage/codes/counts/boolean diagnostics, including count-only vocabulary diagnostics) — never prompt/raw JSON/story text/object names. |
@@ -2575,7 +2554,7 @@ room generator, `WorldBibleSeed` schema/projection, `FakeWorldBibleSeeder`
 generated-room theme vocabulary resolver and FakeRoomGenerator vocabulary DI,
 non-blocking app helper and its leakage guard, `validateRoom`, repair/fallback,
 the generated-room layout normalizers (`generatedRoomLayout.ts`: shell clamp,
-object bounds + count cap, spawn repair, exit snapping — same-reference optimization,
+object bounds without performance truncation, spawn repair, exit snapping — same-reference optimization,
 no mutation), generated-room composition (classification/zones/relocation,
 same-reference optimization, no mutation), all `assembleRoom` pipeline paths
 including stages 2.5–2.9,
@@ -2592,10 +2571,10 @@ hides on dismiss, resets on key change, null for empty/absent summary) is covere
 
 ## Object & entity system (compositional builders)
 
-🔜 **Direction for future object/character work.** v0's per-type primitive
-builders are fine as-is; this section governs how the object system *grows*. Full
-rationale in
-[ADR-0006](./decisions/ADR-0006-compositional-entity-builders.md).
+✅ **Implemented for humanoids in ADR-0091.** One shared rig/factory now serves the player,
+human NPC roles, raiders, zombies, and compatible bipedal humanoid monsters. Modular body,
+head, hair, outfit, armour, palette, accessory, and infection selections are deterministic.
+Non-humanoid body plans require separate future rigs and are not forced through this skeleton.
 
 **Anti-pattern (avoid):** a separate one-off builder per entity type —
 `buildSoldier`, `buildWoman`, `buildMan`, `buildZombie`, `buildGiant`,
@@ -2631,8 +2610,8 @@ object safely — the data-only → trusted-renderer rule of
 [ADR-0001](./decisions/ADR-0001-data-only-room-spec-trusted-renderer.md) applied
 at part granularity. A new entity is usually a new *data combination*;
 occasionally a new *part* is added (and reviewed); almost never a new bespoke
-builder. Unknown parts/presets should degrade to an intentional safe marker,
-like unknown object types today (see [FAILURE-MODES](./FAILURE-MODES.md)).
+Unknown optional appearance selectors degrade to a closed safe preset. Supported production visuals use the registry fallback chain; debug markers remain development-only
+([ADR-0091](./decisions/ADR-0091-ruined-kingdom-survival-visual-pack.md)).
 
 ## Future plug-in points
 

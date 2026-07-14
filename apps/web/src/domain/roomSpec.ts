@@ -3,6 +3,17 @@ import { InteractionEffectSchema } from './interactions/effects'
 import { EncounterSpecSchema } from './encounters/encounterSpec'
 import { NPCDialogueSpecSchema } from './dialogue/contracts'
 import { NPC_ROUTINE_NPC_TYPES } from './npcRoutinePresets'
+import {
+  ArchitectureKindSchema,
+  ClutterKindSchema,
+  EnvironmentKindSchema,
+  FurnitureKindSchema,
+  HumanoidAppearanceSchema,
+  LightFixtureKindSchema,
+  ObjectConditionSchema,
+  SemanticVariantSchemas,
+  VegetationKindSchema,
+} from './visuals/contracts'
 
 /**
  * RoomSpec is DATA ONLY. It describes a room declaratively; the trusted
@@ -17,7 +28,15 @@ import { NPC_ROUTINE_NPC_TYPES } from './npcRoutinePresets'
 
 /* ---------- primitives ---------- */
 export const Vec3 = z.tuple([z.number(), z.number(), z.number()])
+const PositiveVec3 = z.tuple([
+  z.number().positive(),
+  z.number().positive(),
+  z.number().positive(),
+])
 export const Hex = z.string().regex(/^#[0-9a-fA-F]{6}$/, 'expected #rrggbb')
+
+/** High parser-abuse ceiling; rendering uses weighted resource budgets. */
+export const ROOM_OBJECT_ENTRY_LIMIT = 4_096
 
 // Shared transform fields mixed into every object.
 const transform = {
@@ -27,6 +46,10 @@ const transform = {
   scale: z.number().positive().default(1),
 }
 
+
+const visualCondition = {
+  condition: ObjectConditionSchema.optional().catch(undefined),
+}
 const Interaction = z.object({
   key: z.enum(['E', 'F']),
   prompt: z.string().min(1),
@@ -43,12 +66,16 @@ const Interaction = z.object({
 /* ---------- known object types ---------- */
 const Throne = z.object({
   type: z.literal('throne'),
+  variant: SemanticVariantSchemas.throne.optional().catch(undefined),
+  ...visualCondition,
   color: Hex.default('#b8860b'),
   ...transform,
 })
 
 const Pillar = z.object({
   type: z.literal('pillar'),
+  variant: SemanticVariantSchemas.pillar.optional().catch(undefined),
+  ...visualCondition,
   radius: z.number().positive().default(0.4),
   height: z.number().positive().default(4),
   color: Hex.default('#cfc8b8'),
@@ -57,6 +84,8 @@ const Pillar = z.object({
 
 const Rug = z.object({
   type: z.literal('rug'),
+  variant: SemanticVariantSchemas.rug.optional().catch(undefined),
+  ...visualCondition,
   size: z.tuple([z.number().positive(), z.number().positive()]).default([3, 5]),
   color: Hex.default('#7a2f2f'),
   ...transform,
@@ -64,6 +93,8 @@ const Rug = z.object({
 
 const Torch = z.object({
   type: z.literal('torch'),
+  variant: SemanticVariantSchemas.torch.optional().catch(undefined),
+  ...visualCondition,
   light: z
     .object({
       color: Hex.default('#ff8a3d'),
@@ -77,6 +108,8 @@ const Torch = z.object({
 
 const Arch = z.object({
   type: z.literal('arch'),
+  variant: SemanticVariantSchemas.arch.optional().catch(undefined),
+  ...visualCondition,
   width: z.number().positive().default(2.5),
   height: z.number().positive().default(3.5),
   color: Hex.default('#9a9488'),
@@ -86,6 +119,8 @@ const Arch = z.object({
 
 const Scroll = z.object({
   type: z.literal('scroll'),
+  variant: SemanticVariantSchemas.scroll.optional().catch(undefined),
+  ...visualCondition,
   interaction: Interaction, // key: 'E'
   color: Hex.default('#e8dcb5'),
   ...transform,
@@ -96,6 +131,8 @@ const Scroll = z.object({
 // renderer affordance apply unchanged.
 const Book = z.object({
   type: z.literal('book'),
+  variant: SemanticVariantSchemas.book.optional().catch(undefined),
+  ...visualCondition,
   size: z.tuple([
     z.number().positive(),
     z.number().positive(),
@@ -109,6 +146,8 @@ const Book = z.object({
 
 const Paper = z.object({
   type: z.literal('paper'),
+  variant: SemanticVariantSchemas.paper.optional().catch(undefined),
+  ...visualCondition,
   size: z.tuple([z.number().positive(), z.number().positive()]).default([0.8, 0.6]),
   color: Hex.default('#e8dcb5'),
   interaction: Interaction.optional(),
@@ -117,6 +156,8 @@ const Paper = z.object({
 
 const Map = z.object({
   type: z.literal('map'),
+  variant: SemanticVariantSchemas.map.optional().catch(undefined),
+  ...visualCondition,
   size: z.tuple([z.number().positive(), z.number().positive()]).default([1.4, 0.9]),
   color: Hex.default('#d6c28e'),
   markColor: Hex.default('#8a3f2f'),
@@ -129,6 +170,8 @@ const Map = z.object({
 // story behavior is implied by the type alone.
 const Chest = z.object({
   type: z.literal('chest'),
+  variant: SemanticVariantSchemas.chest.optional().catch(undefined),
+  ...visualCondition,
   size: z.tuple([
     z.number().positive(),
     z.number().positive(),
@@ -143,6 +186,8 @@ const Chest = z.object({
 
 const Corpse = z.object({
   type: z.literal('corpse'),
+  variant: SemanticVariantSchemas.corpse.optional().catch(undefined),
+  ...visualCondition,
   size: z.tuple([
     z.number().positive(),
     z.number().positive(),
@@ -156,6 +201,8 @@ const Corpse = z.object({
 
 const Table = z.object({
   type: z.literal('table'),
+  variant: SemanticVariantSchemas.table.optional().catch(undefined),
+  ...visualCondition,
   size: z.tuple([
     z.number().positive(),
     z.number().positive(),
@@ -170,6 +217,8 @@ const Table = z.object({
 // existing optional interaction is supplied; no quest, shrine, or puzzle logic.
 const Altar = z.object({
   type: z.literal('altar'),
+  variant: SemanticVariantSchemas.altar.optional().catch(undefined),
+  ...visualCondition,
   size: z.tuple([
     z.number().positive(),
     z.number().positive(),
@@ -183,6 +232,8 @@ const Altar = z.object({
 
 const Statue = z.object({
   type: z.literal('statue'),
+  variant: SemanticVariantSchemas.statue.optional().catch(undefined),
+  ...visualCondition,
   radius: z.number().positive().default(0.45),
   height: z.number().positive().default(2.2),
   color: Hex.default('#b8b0a2'),
@@ -195,6 +246,8 @@ const Statue = z.object({
 // machine/artifact may expose existing interactions, candle is presentation-only.
 const Machine = z.object({
   type: z.literal('machine'),
+  variant: SemanticVariantSchemas.machine.optional().catch(undefined),
+  ...visualCondition,
   size: z.tuple([
     z.number().positive(),
     z.number().positive(),
@@ -209,6 +262,8 @@ const Machine = z.object({
 
 const Artifact = z.object({
   type: z.literal('artifact'),
+  variant: SemanticVariantSchemas.artifact.optional().catch(undefined),
+  ...visualCondition,
   radius: z.number().positive().default(0.35),
   height: z.number().positive().default(0.9),
   baseColor: Hex.default('#4b4540'),
@@ -219,6 +274,8 @@ const Artifact = z.object({
 
 const Candle = z.object({
   type: z.literal('candle'),
+  variant: SemanticVariantSchemas.candle.optional().catch(undefined),
+  ...visualCondition,
   radius: z.number().positive().default(0.09),
   height: z.number().positive().default(0.22),
   waxColor: Hex.default('#f1e3c0'),
@@ -228,6 +285,7 @@ const Candle = z.object({
 
 const Npc = z.object({
   type: z.literal('npc'),
+  appearance: HumanoidAppearanceSchema.optional().catch(undefined),
   name: z.string().min(1),
   interaction: Interaction, // key: 'F'
   color: Hex.default('#3a6ea5'),
@@ -242,6 +300,7 @@ const Npc = z.object({
 // Generic low-poly filler so the data path is exercised without new builders.
 const Prop = z.object({
   type: z.literal('prop'),
+  ...visualCondition,
   shape: z.enum(['box', 'cylinder', 'cone', 'sphere']).default('box'),
   size: Vec3.default([1, 1, 1]),
   color: Hex.default('#888888'),
@@ -256,6 +315,8 @@ const Prop = z.object({
 // Wooden supply/loot crate (storage, stashes).
 const Crate = z.object({
   type: z.literal('crate'),
+  variant: SemanticVariantSchemas.crate.optional().catch(undefined),
+  ...visualCondition,
   size: Vec3.default([1, 1, 1]),
   color: Hex.default('#7a5a32'),
   interaction: Interaction.optional(),
@@ -265,6 +326,8 @@ const Crate = z.object({
 // Steel drum — fuel/water/toxic; the color carries the meaning.
 const Barrel = z.object({
   type: z.literal('barrel'),
+  variant: SemanticVariantSchemas.barrel.optional().catch(undefined),
+  ...visualCondition,
   radius: z.number().positive().default(0.35),
   height: z.number().positive().default(0.95),
   color: Hex.default('#46603a'),
@@ -276,6 +339,8 @@ const Barrel = z.object({
 // scaled to `size`; no randomness, so it round-trips and tests cleanly.
 const Debris = z.object({
   type: z.literal('debris'),
+  variant: SemanticVariantSchemas.debris.optional().catch(undefined),
+  ...visualCondition,
   size: Vec3.default([2, 0.8, 2]),
   color: Hex.default('#6b6358'),
   interaction: Interaction.optional(),
@@ -285,6 +350,7 @@ const Debris = z.object({
 // Improvised barrier — planks or stacked sandbags. Blocks streets/doorways.
 const Barricade = z.object({
   type: z.literal('barricade'),
+  ...visualCondition,
   length: z.number().positive().default(3),
   height: z.number().positive().default(1.2),
   style: z.enum(['planks', 'sandbags']).default('planks'),
@@ -293,13 +359,82 @@ const Barricade = z.object({
   ...transform,
 })
 
+
+/* ---------- reusable semantic visual families ---------- */
+// These families broaden generated room composition without exposing asset
+// identifiers. Exact models, materials, LODs, and collision remain trusted
+// visual-pack registry concerns.
+const Architecture = z.object({
+  type: z.literal('architecture'),
+  kind: ArchitectureKindSchema,
+  size: PositiveVec3.default([1, 1, 1]),
+  color: Hex.default('#8a8172'),
+  accentColor: Hex.default('#554a3d'),
+  interaction: Interaction.optional(),
+  ...visualCondition,
+  ...transform,
+})
+
+const Furniture = z.object({
+  type: z.literal('furniture'),
+  kind: FurnitureKindSchema,
+  size: PositiveVec3.default([1, 1, 1]),
+  color: Hex.default('#6b4a2e'),
+  accentColor: Hex.default('#35251b'),
+  interaction: Interaction.optional(),
+  ...visualCondition,
+  ...transform,
+})
+
+const Clutter = z.object({
+  type: z.literal('clutter'),
+  kind: ClutterKindSchema,
+  size: PositiveVec3.default([0.5, 0.5, 0.5]),
+  color: Hex.default('#746858'),
+  accentColor: Hex.default('#40382f'),
+  interaction: Interaction.optional(),
+  ...visualCondition,
+  ...transform,
+})
+
+const Vegetation = z.object({
+  type: z.literal('vegetation'),
+  kind: VegetationKindSchema,
+  size: PositiveVec3.default([1, 1, 1]),
+  color: Hex.default('#4f633f'),
+  accentColor: Hex.default('#343f2c'),
+  interaction: Interaction.optional(),
+  ...visualCondition,
+  ...transform,
+})
+
+const LightFixture = z.object({
+  type: z.literal('light-fixture'),
+  kind: LightFixtureKindSchema,
+  size: PositiveVec3.default([0.5, 0.8, 0.5]),
+  color: Hex.default('#4b4035'),
+  flameColor: Hex.default('#ffb347'),
+  light: z
+    .object({
+      color: Hex.default('#ff8a3d'),
+      intensity: z.number().nonnegative().default(5),
+      distance: z.number().nonnegative().default(6),
+    })
+    .prefault({}),
+  flicker: z.boolean().default(false),
+  interaction: Interaction.optional(),
+  ...visualCondition,
+  ...transform,
+})
 // Shambling figure. Static decoration (no combat/AI). May carry the shared
 // optional interaction (e.g. "examine"); the existing indicator handles it.
 const Zombie = z.object({
   type: z.literal('zombie'),
+  appearance: HumanoidAppearanceSchema.optional().catch(undefined),
   name: z.string().optional(),
   interaction: Interaction.optional(),
   color: Hex.default('#5c6b46'), // torn, sickly clothing
+  ...visualCondition,
   ...transform,
 })
 
@@ -327,6 +462,11 @@ export const RoomObjectSchema = z.discriminatedUnion('type', [
   Barrel,
   Debris,
   Barricade,
+  Architecture,
+  Furniture,
+  Clutter,
+  Vegetation,
+  LightFixture,
   Zombie,
 ])
 export type RoomObject = z.infer<typeof RoomObjectSchema>
@@ -336,6 +476,7 @@ export const RoomSpecSchema = z.object({
   schemaVersion: z.literal(1),
   id: z.string(),
   name: z.string(),
+  environmentKind: EnvironmentKindSchema.optional().catch(undefined),
   shell: z.object({
     dimensions: z.object({
       width: z.number().positive(), // x
@@ -377,6 +518,6 @@ export const RoomSpecSchema = z.object({
     .prefault({}),
   // Kept loose on purpose: a single bad object must not reject the whole room.
   // Per-object validation happens in loadRoomSpec().
-  objects: z.array(z.unknown()),
+  objects: z.array(z.unknown()).max(ROOM_OBJECT_ENTRY_LIMIT),
 })
 export type RoomSpec = z.infer<typeof RoomSpecSchema>

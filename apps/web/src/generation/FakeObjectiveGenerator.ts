@@ -11,7 +11,9 @@ type EligibleObject = RoomObject & { id: string }
 
 export class FakeObjectiveGenerator implements ObjectiveGenerator {
   async generate(room: LoadedRoom): Promise<string | null> {
-    const object = room.objects.find(isEligibleInteractObject)
+    const eligible = room.objects.filter(isEligibleInteractObject)
+    const object = eligible.find(isDedicatedObjectiveTarget)
+      ?? eligible.find((candidate) => !candidate.id.startsWith('generated-inspect-'))
     if (object == null) return null
 
     return JSON.stringify({
@@ -35,3 +37,9 @@ function isEligibleInteractObject(object: RoomObject): object is EligibleObject 
   )
 }
 
+
+function isDedicatedObjectiveTarget(object: EligibleObject): boolean {
+  return object.id === 'objective-document'
+    || object.id === 'generated-objective-target'
+    || object.id.startsWith('generated-objective-target-')
+}

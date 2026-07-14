@@ -29,15 +29,22 @@ export function buildLighting(
   group.name = 'lighting'
 
   const { color, intensity } = lighting.ambient
-  group.add(new THREE.AmbientLight(gradeLightingColor(color, theme, 'ambient'), intensity))
+  const ambient = new THREE.AmbientLight(
+    gradeLightingColor(color, theme, 'ambient'),
+    intensity,
+  )
+  ambient.name = 'room-ambient-fill'
+  group.add(ambient)
 
   if (lighting.hemisphere) {
     const { sky, ground, intensity: hemiIntensity } = lighting.hemisphere
-    group.add(new THREE.HemisphereLight(
+    const hemisphere = new THREE.HemisphereLight(
       gradeLightingColor(sky, theme, 'hemisphereSky'),
       gradeLightingColor(ground, theme, 'hemisphereGround'),
       hemiIntensity,
-    ))
+    )
+    hemisphere.name = 'room-hemisphere-fill'
+    group.add(hemisphere)
   }
 
   const sun = buildKeyLight(dimensions, theme)
@@ -124,6 +131,7 @@ function buildKeyLight(
     gradeLightingColor(KEY_LIGHT_COLOR, theme, 'key'),
     KEY_LIGHT_INTENSITY,
   )
+  sun.name = 'room-key-light'
 
   // Bounding-sphere radius (+margin) covers the whole room from the light's angle.
   const radius = 0.5 * Math.hypot(width, depth, height) + 1
@@ -133,7 +141,11 @@ function buildKeyLight(
 
   sun.castShadow = true
   sun.shadow.mapSize.set(SHADOW_MAP_SIZE, SHADOW_MAP_SIZE)
-  sun.shadow.normalBias = 0.02 // hide self-shadow acne on flat low-poly faces
+  // A small negative depth bias anchors contact shadows while normal bias keeps
+  // broad, flat low-poly faces free of acne. Radius softens the authored edge.
+  sun.shadow.bias = -0.0002
+  sun.shadow.normalBias = 0.035
+  sun.shadow.radius = 2
 
   const cam = sun.shadow.camera
   cam.left = -radius

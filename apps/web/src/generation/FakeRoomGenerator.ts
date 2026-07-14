@@ -4,6 +4,16 @@ import {
   themeVocabulary,
 } from '../domain/generatedRoomThemeVocabulary'
 import type { RoomObject } from '../domain/roomSpec'
+import {
+  ENVIRONMENT_KINDS,
+  type ArchitectureKind,
+  type ClutterKind,
+  type EnvironmentKind,
+  type FurnitureKind,
+  type LightFixtureKind,
+  type ObjectCondition,
+  type VegetationKind,
+} from '../domain/visuals/contracts'
 import { createRng, xmur3 } from './prng'
 
 /**
@@ -34,7 +44,74 @@ import { createRng, xmur3 } from './prng'
  */
 
 const DEFAULT_VOCABULARY = themeVocabulary('fantasy-keep')
-type PropShape = GeneratedRoomThemeVocabulary['propShapes'][number]
+
+type EnvironmentProfile = Readonly<{
+  architecture: readonly ArchitectureKind[]
+  furniture: readonly FurnitureKind[]
+  clutter: readonly ClutterKind[]
+  vegetation: readonly VegetationKind[]
+  lighting: readonly LightFixtureKind[]
+  conditions: readonly ObjectCondition[]
+}>
+
+const ENVIRONMENT_PROFILES: Readonly<Record<EnvironmentKind, EnvironmentProfile>> = Object.freeze({
+  village: Object.freeze({
+    architecture: Object.freeze(['wall-straight', 'roof', 'fence', 'well'] as const),
+    furniture: Object.freeze(['market-stall', 'bench', 'table', 'chair'] as const),
+    clutter: Object.freeze(['sack', 'hay-bale', 'pot', 'firewood'] as const),
+    vegetation: Object.freeze(['tree', 'bush', 'grass', 'fern'] as const),
+    lighting: Object.freeze(['lantern', 'wall-lantern'] as const),
+    conditions: Object.freeze(['intact', 'weathered'] as const),
+  }),
+  tavern: Object.freeze({
+    architecture: Object.freeze(['beam', 'window', 'trapdoor', 'stairs'] as const),
+    furniture: Object.freeze(['table', 'chair', 'bench', 'counter'] as const),
+    clutter: Object.freeze(['bottle', 'mug', 'plate', 'firewood'] as const),
+    vegetation: Object.freeze(['vine', 'mushroom', 'fern'] as const),
+    lighting: Object.freeze(['candle-cluster', 'chandelier', 'wall-lantern'] as const),
+    conditions: Object.freeze(['weathered', 'damaged', 'burned'] as const),
+  }),
+  palace: Object.freeze({
+    architecture: Object.freeze(['column', 'railing', 'fountain', 'stairs'] as const),
+    furniture: Object.freeze(['bench', 'cabinet', 'table', 'chair'] as const),
+    clutter: Object.freeze(['book-stack', 'coin-pile', 'plate', 'pot'] as const),
+    vegetation: Object.freeze(['bush', 'vine', 'fern'] as const),
+    lighting: Object.freeze(['chandelier', 'candle-cluster', 'wall-lantern'] as const),
+    conditions: Object.freeze(['intact', 'weathered'] as const),
+  }),
+  ruins: Object.freeze({
+    architecture: Object.freeze(['wall-ruined', 'column', 'beam', 'floor-section'] as const),
+    furniture: Object.freeze(['bench', 'shelf', 'table', 'cabinet'] as const),
+    clutter: Object.freeze(['small-rubble', 'firewood', 'bloodstain', 'rope'] as const),
+    vegetation: Object.freeze(['vine', 'dead-tree', 'grass', 'mushroom'] as const),
+    lighting: Object.freeze(['brazier', 'campfire', 'lantern'] as const),
+    conditions: Object.freeze(['weathered', 'damaged', 'burned', 'overgrown'] as const),
+  }),
+  'forest-edge': Object.freeze({
+    architecture: Object.freeze(['fence', 'wall-ruined', 'well', 'floor-section'] as const),
+    furniture: Object.freeze(['bench', 'stool', 'market-stall', 'table'] as const),
+    clutter: Object.freeze(['firewood', 'rope', 'sack', 'cauldron'] as const),
+    vegetation: Object.freeze(['tree', 'dead-tree', 'bush', 'fern', 'mushroom', 'rock'] as const),
+    lighting: Object.freeze(['campfire', 'lantern'] as const),
+    conditions: Object.freeze(['weathered', 'damaged', 'overgrown'] as const),
+  }),
+  crypt: Object.freeze({
+    architecture: Object.freeze(['stairs', 'gate', 'column', 'wall-ruined'] as const),
+    furniture: Object.freeze(['bench', 'cabinet', 'shelf'] as const),
+    clutter: Object.freeze(['bone-pile', 'markings', 'small-rubble', 'book-stack'] as const),
+    vegetation: Object.freeze(['vine', 'mushroom', 'rock'] as const),
+    lighting: Object.freeze(['brazier', 'candle-cluster', 'wall-lantern'] as const),
+    conditions: Object.freeze(['weathered', 'damaged', 'overgrown'] as const),
+  }),
+  dungeon: Object.freeze({
+    architecture: Object.freeze(['wall-straight', 'wall-corner', 'gate', 'stairs'] as const),
+    furniture: Object.freeze(['table', 'bench', 'shelf', 'stool'] as const),
+    clutter: Object.freeze(['rope', 'tool-rack', 'bone-pile', 'small-rubble'] as const),
+    vegetation: Object.freeze(['mushroom', 'vine', 'rock'] as const),
+    lighting: Object.freeze(['wall-lantern', 'brazier'] as const),
+    conditions: Object.freeze(['weathered', 'damaged'] as const),
+  }),
+})
 
 /** Snap to a 0.5 m grid so coordinates stay tidy and round-trip cleanly. */
 const snap = (v: number): number => Math.round(v * 2) / 2
@@ -61,14 +138,7 @@ function allowedTypes(
   if (allowed.length > 0) return allowed
 
   const fallbackAllowed = fallback.filter((type) => !neverAppear.has(type))
-  return fallbackAllowed.length > 0 ? fallbackAllowed : ['prop']
-}
-
-function allowedShapes(
-  pool: readonly PropShape[],
-  fallback: readonly PropShape[],
-): readonly PropShape[] {
-  return pool.length > 0 ? pool : fallback
+  return fallbackAllowed.length > 0 ? fallbackAllowed : ['paper']
 }
 
 function buildAnchor(type: RoomObject['type'], z: number): unknown {
@@ -167,6 +237,136 @@ function buildStrangeProp(type: RoomObject['type'], position: [number, number, n
   return { type, position, rotationY: type === 'candle' ? 0 : -12 }
 }
 
+/**
+ * Builds a rich environment layer from closed semantic families only. A
+ * prompt-salted RNG keeps these choices deterministic without perturbing the
+ * established room-shape/theme-vocabulary RNG stream.
+ */
+function buildSemanticEnvironment(
+  prompt: string,
+  environmentKind: EnvironmentKind,
+  halfW: number,
+  halfD: number,
+  vocabulary: GeneratedRoomThemeVocabulary,
+): unknown[] {
+  const rng = createRng(`semantic-environment:${prompt}`)
+  const profile = ENVIRONMENT_PROFILES[environmentKind]
+  const objects: unknown[] = []
+  const usableX = Math.max(2, halfW - 1.25)
+  const usableZ = Math.max(2, halfD - 1.5)
+
+  // Twenty cheap floor sections demonstrate that richness is independent of a
+  // small raw count cap and give the renderer a useful instancing workload.
+  const columns = 5
+  const rows = 4
+  const tileWidth = round1((usableX * 2 * 0.9) / columns)
+  const tileDepth = round1((usableZ * 2 * 0.9) / rows)
+  for (let index = 0; index < columns * rows; index += 1) {
+    const column = index % columns
+    const row = Math.floor(index / columns)
+    const x = snap(-usableX + ((usableX * 2) / (columns - 1)) * column)
+    const z = snap(-usableZ + ((usableZ * 2) / (rows - 1)) * row)
+    objects.push({
+      type: 'architecture',
+      kind: 'floor-section',
+      condition: profile.conditions[index % profile.conditions.length],
+      position: [x, 0.01, z],
+      size: [tileWidth, 0.08, tileDepth],
+      color: rng.pick(vocabulary.palette.floor),
+      accentColor: vocabulary.palette.accent,
+    })
+  }
+
+  const architecturePositions: [number, number, number][] = [
+    [-usableX, 0, -usableZ * 0.72],
+    [usableX, 0, -usableZ * 0.72],
+    [-usableX, 0, usableZ * 0.15],
+    [usableX, 0, usableZ * 0.15],
+  ]
+  for (let index = 0; index < architecturePositions.length; index += 1) {
+    objects.push({
+      type: 'architecture',
+      kind: profile.architecture[index % profile.architecture.length],
+      condition: profile.conditions[index % profile.conditions.length],
+      position: architecturePositions[index],
+      size: [1.4, 2.2, 0.55],
+      color: rng.pick(vocabulary.palette.wall),
+      accentColor: vocabulary.palette.accent,
+    })
+  }
+
+  const furniturePositions: [number, number, number][] = [
+    [-halfW * 0.55, 0, -halfD * 0.2],
+    [halfW * 0.55, 0, -halfD * 0.2],
+    [-halfW * 0.55, 0, halfD * 0.34],
+    [halfW * 0.55, 0, halfD * 0.34],
+  ]
+  for (let index = 0; index < furniturePositions.length; index += 1) {
+    objects.push({
+      type: 'furniture',
+      kind: profile.furniture[index % profile.furniture.length],
+      condition: profile.conditions[(index + 1) % profile.conditions.length],
+      position: furniturePositions[index],
+      size: [1.25, 1, 0.8],
+      color: rng.pick(vocabulary.palette.prop),
+      accentColor: vocabulary.palette.accent,
+    })
+  }
+
+  for (let index = 0; index < 8; index += 1) {
+    const side = index % 2 === 0 ? -1 : 1
+    objects.push({
+      type: 'clutter',
+      kind: profile.clutter[index % profile.clutter.length],
+      condition: profile.conditions[(index + 2) % profile.conditions.length],
+      position: [
+        snap(side * (halfW - 1.1)),
+        0,
+        snap(-halfD * 0.55 + Math.floor(index / 2) * (depthStep(halfD))),
+      ],
+      size: [0.45, 0.45, 0.45],
+      color: rng.pick(vocabulary.palette.prop),
+      accentColor: vocabulary.palette.accent,
+    })
+  }
+
+  for (let index = 0; index < 6; index += 1) {
+    const side = index % 2 === 0 ? -1 : 1
+    objects.push({
+      type: 'vegetation',
+      kind: profile.vegetation[index % profile.vegetation.length],
+      condition: profile.conditions[(index + 3) % profile.conditions.length],
+      position: [
+        snap(side * (halfW - 1.35)),
+        0,
+        snap(-halfD * 0.45 + Math.floor(index / 2) * (halfD * 0.4)),
+      ],
+      size: [0.7, 0.9, 0.7],
+      color: rng.pick(vocabulary.palette.prop),
+      accentColor: vocabulary.palette.accent,
+    })
+  }
+
+  for (let index = 0; index < 2; index += 1) {
+    objects.push({
+      type: 'light-fixture',
+      kind: profile.lighting[index % profile.lighting.length],
+      condition: profile.conditions[index % profile.conditions.length],
+      position: [index === 0 ? -halfW * 0.62 : halfW * 0.62, 2.2, -halfD * 0.55],
+      size: [0.45, 0.75, 0.45],
+      color: rng.pick(vocabulary.palette.prop),
+      flameColor: vocabulary.palette.emissive,
+      flicker: index === 0,
+    })
+  }
+
+  return objects
+}
+
+function depthStep(halfD: number): number {
+  return Math.max(1.5, halfD * 0.35)
+}
+
 /** Build the room as a plain JSON-shaped value (data only, never typed code). */
 function buildRoom(prompt: string, vocabulary: GeneratedRoomThemeVocabulary): unknown {
   const rng = createRng(prompt)
@@ -174,6 +374,7 @@ function buildRoom(prompt: string, vocabulary: GeneratedRoomThemeVocabulary): un
   // draws the body happens to make.
   const id = `gen-${xmur3(prompt)().toString(16).padStart(8, '0')}`
   const label = clampPrompt(prompt, 60)
+  const environmentKind = pickForPrompt(prompt, 'environment', ENVIRONMENT_KINDS)
 
   const width = rng.int(10, 20) // 10..19 m
   const depth = rng.int(12, 24) // 12..23 m
@@ -188,7 +389,6 @@ function buildRoom(prompt: string, vocabulary: GeneratedRoomThemeVocabulary): un
   const documentTypes = allowedTypes(vocabulary.documentPool, DEFAULT_VOCABULARY.documentPool, neverAppear)
   const practicalTypes = allowedTypes(vocabulary.practicalPool, DEFAULT_VOCABULARY.practicalPool, neverAppear)
   const strangeTypes = allowedTypes(vocabulary.strangePool, DEFAULT_VOCABULARY.strangePool, neverAppear)
-  const propShapes = allowedShapes(vocabulary.propShapes, DEFAULT_VOCABULARY.propShapes)
 
   // 1–2 exits on distinct walls.
   const sides = ['north', 'south', 'east', 'west'] as const
@@ -260,17 +460,9 @@ function buildRoom(prompt: string, vocabulary: GeneratedRoomThemeVocabulary): un
     })
   }
 
-  // A handful of filler props to exercise the generic data path.
-  const propCount = rng.int(1, 5) // 1..4
-  for (let i = 0; i < propCount; i++) {
-    objects.push({
-      type: 'prop',
-      shape: rng.pick(propShapes),
-      position: [snap(rng.range(-halfW + 1.5, halfW - 1.5)), 0, snap(rng.range(-halfD + 2, halfD - 2))],
-      size: [round1(rng.range(0.5, 1.5)), round1(rng.range(0.5, 1.5)), round1(rng.range(0.5, 1.5))],
-      color: rng.pick(vocabulary.palette.prop),
-    })
-  }
+  // Rich, environment-appropriate semantic families replace the old primitive
+  // prop filler. They remain ordinary generated RoomSpec data, not fixed rooms.
+  objects.push(...buildSemanticEnvironment(prompt, environmentKind, halfW, halfD, vocabulary))
 
   // An arch framing the north wall.
   objects.push({ type: 'arch', position: [0, 0, snap(-halfD)] })
@@ -279,6 +471,7 @@ function buildRoom(prompt: string, vocabulary: GeneratedRoomThemeVocabulary): un
     schemaVersion: 1,
     id,
     name: label ? `Generated room — ${label}` : 'Generated room',
+    environmentKind,
     shell: { dimensions: { width, depth, height }, floorColor, wallColor, exits },
     spawn: { position: [0, 1.7, snap(halfD - 2)], yaw: 180 }, // near south wall, facing north
     lighting: { ambient: { intensity: ambientIntensity }, hemisphere: { intensity: 0.5 } },

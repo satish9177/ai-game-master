@@ -3,10 +3,11 @@ import { FakeRoomGenerator } from './FakeRoomGenerator'
 import { loadRoomSpec } from '../domain/loadRoomSpec'
 import { validateRoom } from '../domain/validateRoom'
 import { assembleRoom } from '../domain/assembleRoom'
-import { GENERATED_ROOM } from '../domain/generatedRoomLayout'
+import { ROOM_OBJECT_ENTRY_LIMIT } from '../domain/roomSpec'
 import { fallbackRoom } from '../domain/examples/fallbackRoom'
 import { buildExitLookup } from '../app/exits'
 import { themeVocabulary } from '../domain/generatedRoomThemeVocabulary'
+import { ENVIRONMENT_KINDS } from '../domain/visuals/contracts'
 
 // The published vocabulary the renderer has builders for (ADR-0001, CONVENTIONS.md).
 const KNOWN_TYPES = [
@@ -34,6 +35,11 @@ const KNOWN_TYPES = [
   'debris',
   'barricade',
   'zombie',
+  'architecture',
+  'furniture',
+  'clutter',
+  'vegetation',
+  'light-fixture',
 ]
 
 const FANTASY_ANCHORS = ['throne', 'altar', 'statue'] as const
@@ -62,6 +68,7 @@ const POST_APOC_PROMPTS = [
 ] as const
 
 type GeneratedRoomJson = {
+  environmentKind?: string
   shell: {
     floorColor?: string
     wallColor?: string
@@ -114,6 +121,37 @@ describe('FakeRoomGenerator', () => {
     }
   })
 
+  it('emits every closed ruined-kingdom environment across bounded deterministic seeds', async () => {
+    const seen = new Set<string>()
+    for (let index = 0; index < 140; index += 1) {
+      const parsed = parseGenerated(await gen.generate('environment coverage ' + index))
+      if (parsed.environmentKind !== undefined) seen.add(parsed.environmentKind)
+    }
+    expect([...seen].sort()).toEqual([...ENVIRONMENT_KINDS].sort())
+  })
+
+  it('uses all five semantic families for rich layouts and never emits legacy prop filler', async () => {
+    for (const prompt of COVERAGE_PROMPTS) {
+      const parsed = parseGenerated(await gen.generate(prompt))
+      const types = new Set(parsed.objects.map((object) => object.type))
+      expect(types).not.toContain('prop')
+      for (const family of ['architecture', 'furniture', 'clutter', 'vegetation', 'light-fixture']) {
+        expect(types).toContain(family)
+      }
+      expect(parsed.objects.length).toBeGreaterThan(40)
+    }
+  })
+
+  it('keeps fake visual composition semantic and free of renderer asset authority', async () => {
+    const output = await gen.generate('a rich ruined kingdom crossing')
+    const lower = output.toLowerCase()
+    for (const forbidden of [
+      '.glb', 'http://', 'https://', 'modelpath', 'materialpath',
+      'nodename', 'clipname', 'shader', 'rendererinstruction', '<script',
+    ]) {
+      expect(lower).not.toContain(forbidden)
+    }
+  })
   it('round-trips as pure data — re-serializing the parsed value is identical', async () => {
     // If anything non-JSON (a function, undefined) had leaked in, this would differ.
     const out = await gen.generate('a quiet chapel')
@@ -127,15 +165,14 @@ describe('FakeRoomGenerator', () => {
       const room = loadRoomSpec(JSON.parse(out))
       expect(room.skipped).toEqual([])
       expect(validateRoom(room).ok).toBe(true)
-      expect(room.objects.length).toBeLessThanOrEqual(GENERATED_ROOM.MAX_OBJECTS)
       expect(await gen.generate(p)).toBe(out) // determinism holds for these too
     }
   })
 
-  it('stays under the generated-room object cap across the coverage matrix', async () => {
+  it('stays within the high parser-abuse envelope across the coverage matrix', async () => {
     for (const prompt of COVERAGE_PROMPTS) {
       const room = loadRoomSpec(JSON.parse(await gen.generate(prompt)))
-      expect(room.objects.length).toBeLessThanOrEqual(GENERATED_ROOM.MAX_OBJECTS)
+      expect(room.objects.length).toBeLessThanOrEqual(ROOM_OBJECT_ENTRY_LIMIT)
     }
   })
 

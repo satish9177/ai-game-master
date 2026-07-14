@@ -32,7 +32,9 @@ export function buildGroundRing(options: {
     toneMapped = true,
   } = options
 
-  const geometry = new THREE.RingGeometry(innerRadius, outerRadius, 48)
+  // Thirty-two segments stay smooth at the isometric camera distance while
+  // keeping every interaction cue deliberately inexpensive.
+  const geometry = new THREE.RingGeometry(innerRadius, outerRadius, 32)
   geometry.rotateX(-Math.PI / 2) // RingGeometry faces +Z by default; lay it flat facing +Y
 
   const ring = new THREE.Mesh(
@@ -47,11 +49,15 @@ export function buildGroundRing(options: {
       depthWrite: false, // a thin floor decal; don't occlude via the depth buffer
       roughness: 0.55,
       metalness: 0.02,
+      polygonOffset: true,
+      polygonOffsetFactor: -1,
       toneMapped,
     }),
   )
   ring.position.y = floorY
   ring.renderOrder = renderOrder
   ring.name = 'ground-ring'
+  ring.castShadow = false
+  ring.receiveShadow = false
   return ring
 }

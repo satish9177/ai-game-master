@@ -14,13 +14,11 @@ import type { LoadedRoom } from './loadRoomSpec'
  * Conventions: Y-up, meters, -Z = north.
  */
 
-/** Size envelope and object cap for generated rooms. Authored rooms ignore these. */
+/** Size envelope for generated rooms. Authored rooms ignore these dimensions. */
 export const GENERATED_ROOM = {
   DEFAULT_SIZE: 18,
   MIN_SIZE: 14,
   MAX_SIZE: 24,
-  /** Max objects per generated room (benign normalization; below the soft budget of 60). */
-  MAX_OBJECTS: 30,
 } as const
 
 /** Returns the default generated room floor dimensions (18 × 18 m). */
@@ -276,9 +274,11 @@ const PLACEHOLDER_FOOTPRINT = 0.4 + FOOTPRINT_SAFETY
 
 /**
  * Clamps each object so its full FOOTPRINT — not just its anchor — stays inside
- * the playable floor, caps the total object count at GENERATED_ROOM.MAX_OBJECTS,
- * nudges wall-light objects to a safe wall-side position, and clamps the skipped
- * mystery-marker anchors into bounds too. Generated rooms only.
+ * the playable floor, nudges wall-light objects to a safe wall-side position,
+ * and clamps skipped mystery-marker anchors into bounds too. Generated rooms
+ * only. It deliberately does not enforce a raw object-count performance cap:
+ * rich layouts may contain hundreds of inexpensive static pieces, while the
+ * renderer applies a separate weighted resource budget.
  *
  * Bounds are the playable floor (computePlayableBounds) shrunk by each object's
  * own footprint radius, so a document/crate/barrel/debris/prop/torch/placeholder
@@ -288,8 +288,8 @@ const PLACEHOLDER_FOOTPRINT = 0.4 + FOOTPRINT_SAFETY
  * Decorative clutter whose footprint cannot fit at all (footprint exceeds the
  * available half-extent) is dropped; critical/structural objects are never
  * dropped for fit — they are moved as far inside as possible (anchor toward the
- * center). The count cap then drops least-important first
- * (decorative → structural → critical); critical objects are never dropped.
+ * center). Objects are never dropped merely because the room contains many
+ * entries.
  *
  * Returns the SAME object reference when nothing needed repair (same-reference
  * optimization), so callers can use a reference check (`fixed !== room`) to
@@ -329,21 +329,14 @@ export function repairGeneratedObjects(room: LoadedRoom): LoadedRoom {
     }
   }
 
-  // Step 2: cap total object count; drop least-important objects first.
-  let final = placed
-  if (final.length > GENERATED_ROOM.MAX_OBJECTS) {
-    final = dropLeastImportant(final, GENERATED_ROOM.MAX_OBJECTS)
-    changed = true
-  }
-
-  // Step 3: clamp skipped placeholder anchors into bounds. The renderer draws
+  // Step 2: clamp skipped placeholder anchors into bounds. The renderer draws
   // these from room.skipped, so they otherwise bypass every generated-room
   // normalizer and can render outside the visible floor as magenta cubes.
   const skipped = clampSkippedPlaceholders(room.skipped, bounds)
   if (skipped !== room.skipped) changed = true
 
   if (!changed) return room
-  return { ...room, objects: final, skipped }
+  return { ...room, objects: placed, skipped }
 }
 
 /**
@@ -433,21 +426,6 @@ function readRawPosition(raw: unknown): [number, number, number] | null {
 function halfClamp(value: number, max: number): number {
   if (max <= 0) return 0
   return Math.min(Math.max(value, -max), max)
-}
-
-/**
- * Drop lowest-importance objects until `objects.length === target`. Preserves
- * the original index order of the kept objects (stable).
- */
-function dropLeastImportant(objects: RoomObject[], target: number): RoomObject[] {
-  const rank: Record<ObjectImportance, number> = { decorative: 0, structural: 1, critical: 2 }
-  const indexed = objects.map((obj, i) => ({ obj, rank: rank[classifyObjectImportance(obj)], i }))
-  // Sort ascending: lowest rank = dropped first. Secondary sort by index for stability.
-  indexed.sort((a, b) => a.rank - b.rank || a.i - b.i)
-  // Keep the last `target` entries (highest importance), then restore original order.
-  const kept = indexed.slice(objects.length - target)
-  kept.sort((a, b) => a.i - b.i)
-  return kept.map(({ obj }) => obj)
 }
 
 /**

@@ -26,9 +26,34 @@ import { buildNpcPatrolRoute } from '../../domain/npcPatrolContract'
 import { stableHash32 } from '../../domain/stableHash'
 import { routineModeToMotorPolicy } from '../../domain/npcRoutine'
 import type { NpcRoutineMode } from '../../domain/npcRoutine'
+import type { ObjectPresentationStateMap } from '../../domain/visuals/objectPresentationState'
+import {
+  buildVisualObjects,
+  updateBuiltObjectPresentationStates,
+  type BuiltVisualObjects,
+  type VisualAssetProvider,
+} from './visual-pack/buildVisualObjects'
+import type { VisualPackRegistry } from './visual-pack/contracts'
+import {
+  HumanoidCharacterFactory,
+  type HumanoidCharacterInstance,
+} from './characters/HumanoidCharacterFactory'
+import { findNearestFreePoint, type CollisionWorld2D } from './controls/CollisionWorld2D'
+import { buildVisualShellRoom } from './visual-pack/buildVisualShell'
+import { updateIsometricWallOcclusion } from './visual-pack/isometricWallOcclusion'
+
+export type EngineVisualPackRuntime = Readonly<{
+  registry: VisualPackRegistry
+  assets: VisualAssetProvider
+  characters: HumanoidCharacterFactory
+  allowDebug: boolean
+}>
+
+export type EngineOptions = Readonly<{ productionVisuals?: boolean }>
 
 export type SetRoomOptions = {
   resolvedObjectIds?: ReadonlySet<string>
+  presentationStates?: ObjectPresentationStateMap
   /**
    * Internal fixture/test seam only (see ADR-0080). NOT user-facing: it is not
    * RoomSpec/schema/save-game data and is never wired through RoomViewer/App
@@ -77,7 +102,7 @@ export class Engine {
   private readonly renderer: THREE.WebGLRenderer
   private readonly scene: THREE.Scene
   private readonly cameraController: CameraController
-  private readonly player: THREE.Object3D
+  private player: THREE.Object3D
   private readonly disposables = new Disposables()
   private readonly resizeObserver: ResizeObserver
   private readonly clock = new THREE.Clock()
@@ -95,6 +120,15 @@ export class Engine {
   private activeInteractable: Interactable | null = null
   private readonly interactRange = 2.5 // meters (XZ) to register as "in range"
   private locked = false // true while a dialogue panel owns input
+  private builtVisualObjects: BuiltVisualObjects | null = null
+  private builtVisualShell: BuiltVisualObjects | null = null
+  private playerCharacter: HumanoidCharacterInstance | null = null
+  private collisionWorld: CollisionWorld2D | null = null
+  private readonly characterLastPositions = new Map<string, THREE.Vector3>()
+  private readonly npcRoutineModes = new Map<string, NpcRoutineMode>()
+  private playerLastPosition = new THREE.Vector3()
+  private readonly productionVisuals: boolean
+  private disposed = false
 
   /** Fired when the nearest in-range interactable changes (drives the HUD). */
   onActiveInteractionChange: ((active: Interactable | null) => void) | null = null
@@ -107,13 +141,16 @@ export class Engine {
    */
   onNpcAwarenessChange: ((changes: readonly NpcAwarenessChange[]) => void) | null = null
 
-  constructor(container: HTMLElement, logger: Logger) {
+  constructor(container: HTMLElement, logger: Logger, options: EngineOptions = {}) {
     this.container = container
     this.logger = logger
+    this.productionVisuals = options.productionVisuals === true
 
     this.renderer = new THREE.WebGLRenderer({ antialias: true })
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
     this.renderer.outputColorSpace = THREE.SRGBColorSpace
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping
+    this.renderer.toneMappingExposure = 1.05
     this.renderer.setClearColor(0x14121a, 1)
     // Soft shadows from the renderer-internal key light give the isometric scene
     // depth/form. The shadow map dies with this engine's WebGL context on dispose.
@@ -127,7 +164,7 @@ export class Engine {
     // The camera follows the player from a fixed isometric angle; both exist
     // before any room loads so the first frame is already well-framed.
     this.cameraController = new IsometricCameraController()
-    this.player = buildPlayerMarker()
+    this.player = this.productionVisuals ? new THREE.Group() : buildPlayerMarker()
     this.scene.add(this.player)
 
     this.resizeObserver = new ResizeObserver(this.handleResize)
@@ -139,11 +176,18 @@ export class Engine {
 
   /** Receives the validated room, builds the shell, and places the player. */
   setRoom(room: LoadedRoom, options: SetRoomOptions = {}): void {
+    if (this.productionVisuals) {
+      throw new Error('legacy-visuals-disabled')
+    }
     this.npcBehavior.clear()
     this.wanderMotor.clear()
     this.wanderNpcIds.length = 0
     this.npcAwareness.clear()
     this.awarenessNodes.clear()
+    this.npcRoutineModes?.clear()
+    for (const [npcId, mode] of options.npcRoutineModes ?? []) {
+      this.npcRoutineModes?.set(npcId, mode)
+    }
     this.room = room
     const visualTheme = deriveRoomVisualTheme(room)
     this.scene.add(buildLighting(room.lighting, room.shell.dimensions, visualTheme))
@@ -182,6 +226,165 @@ export class Engine {
       warningCount: room.warnings.length,
     })
   }
+  /** Builds the same validated room through the closed production visual pack. */
+  async setRoomWithVisualPack(
+    room: LoadedRoom,
+    runtime: EngineVisualPackRuntime,
+    options: SetRoomOptions = {},
+  ): Promise<void> {
+    if (this.disposed) throw new Error('engine-disposed')
+
+    this.npcBehavior.clear()
+    this.wanderMotor.clear()
+    this.wanderNpcIds.length = 0
+    this.npcAwareness.clear()
+    this.awarenessNodes.clear()
+    this.characterLastPositions.clear()
+    this.npcRoutineModes?.clear()
+    for (const [npcId, mode] of options.npcRoutineModes ?? []) {
+      this.npcRoutineModes?.set(npcId, mode)
+    }
+    this.room = room
+
+    const visualTheme = deriveRoomVisualTheme(room)
+    this.scene.add(buildLighting(room.lighting, room.shell.dimensions, visualTheme))
+    const builtShell = await buildVisualObjects(
+      buildVisualShellRoom(room, this.cutawaySides()),
+      {
+        registry: runtime.registry,
+        assets: runtime.assets,
+        allowDebug: runtime.allowDebug,
+        logger: this.logger,
+      },
+    )
+    builtShell.group.name = 'visual-pack-shell'
+
+    let built: BuiltVisualObjects
+    try {
+      built = await buildVisualObjects(room, {
+        registry: runtime.registry,
+        assets: runtime.assets,
+        characterFactory: runtime.characters,
+        presentationStates: options.presentationStates,
+        allowDebug: runtime.allowDebug,
+        logger: this.logger,
+      })
+    } catch (error) {
+      builtShell.dispose()
+      throw error
+    }
+    if (this.disposed) {
+      builtShell.dispose()
+      built.dispose()
+      throw new Error('engine-disposed')
+    }
+
+    let playerCharacter: HumanoidCharacterInstance
+    try {
+      playerCharacter = await runtime.characters.create({
+        roomId: room.id,
+        stableId: 'player',
+        role: 'player',
+        appearance: {
+          preset: 'wanderer',
+          palette: 'survivor',
+          accessories: 'survivor',
+        },
+      })
+    } catch (error) {
+      builtShell.dispose()
+      built.dispose()
+      throw error
+    }
+    if (this.disposed) {
+      playerCharacter.dispose()
+      builtShell.dispose()
+      built.dispose()
+      throw new Error('engine-disposed')
+    }
+
+    this.playerCharacter?.dispose()
+    this.builtVisualShell?.dispose()
+    this.builtVisualObjects?.dispose()
+    this.scene.remove(this.player)
+    disposeObject(this.player)
+    this.playerCharacter = playerCharacter
+    this.player = playerCharacter.root
+    this.player.userData.visualPackCharacter = true
+    this.builtVisualObjects = built
+    this.builtVisualShell = builtShell
+    this.collisionWorld = built.collisionWorld
+    this.scene.add(this.player)
+    this.scene.add(builtShell.group)
+    this.scene.add(built.group)
+    registerAwarenessNodes(this.awarenessNodes, built.group)
+
+    const { width, depth } = room.shell.dimensions
+    const margin = room.shell.wallThickness / 2 + 0.32
+    this.bounds = {
+      minX: -(width / 2 - margin),
+      maxX: width / 2 - margin,
+      minZ: -(depth / 2 - margin),
+      maxZ: depth / 2 - margin,
+    }
+    this.movement?.dispose()
+    this.movement = new MovementControls()
+    this.placePlayer(room.spawn)
+
+    this.interactables.length = 0
+    this.interactables.push(...buildInteractables(room, options.resolvedObjectIds))
+    this.wanderNpcIds.push(...registerWanderNpcs(
+      this.wanderMotor,
+      room,
+      built.group,
+      this.interactables,
+      options.patrolOptInNpcIds,
+      options.chaseOptInNpcIds,
+      options.npcRoutineModes,
+    ))
+    window.addEventListener('keydown', this.onInteractKey)
+
+    this.playerLastPosition.copy(this.player.position)
+    for (const [id, character] of built.characters) {
+      this.characterLastPositions.set(id, character.root.position.clone())
+    }
+
+    this.logger.info('room received', {
+      code: 'visual-pack-room-ready',
+      objectCount: room.objects.length,
+      warningCount: room.warnings.length,
+      visualPack: true,
+      withinRenderBudget: built.renderPlan.withinBudget,
+      reachabilityTargets: built.reachability.targetCount,
+      reachableTargets: built.reachability.reachableTargetCount,
+      repairedColliders: built.reachability.repairedColliderCount,
+    })
+  }
+
+  /** Live presentation-only update; never mutates RoomSpec or gameplay state. */
+  updateObjectPresentationStates(states: ObjectPresentationStateMap): void {
+    if (this.builtVisualObjects) {
+      updateBuiltObjectPresentationStates(this.builtVisualObjects.group, states)
+      this.builtVisualObjects.updateCollisionPresentationStates?.(states)
+    }
+
+    for (let index = 0; index < (this.interactables?.length ?? 0); index += 1) {
+      const current = this.interactables[index]!
+      if (current.id === undefined) continue
+      const state = states.get(current.id)
+      if (state === undefined || current.resolved === (state.resolved ? true : undefined)) continue
+
+      const updated = { ...current }
+      if (state.resolved) updated.resolved = true
+      else delete updated.resolved
+      this.interactables[index] = updated
+      if (this.activeInteractable === current) {
+        this.activeInteractable = updated
+        this.onActiveInteractionChange?.(updated)
+      }
+    }
+  }
+
 
   /**
    * Places the player marker at the spawn point on the floor and snaps the
@@ -191,9 +394,16 @@ export class Engine {
    */
   private placePlayer(spawn: LoadedRoom['spawn']): void {
     const [x, , z] = spawn.position
-    this.player.position.set(x, 0, z)
+    const repaired = this.collisionWorld && this.bounds
+      ? findNearestFreePoint(this.collisionWorld, { x, z }, this.bounds, 0.32)
+      : null
+    // Room installation may repair an invalid generated spawn once. Ordinary
+    // movement remains continuous and never teleports the player.
+    this.player.position.set(repaired?.x ?? x, 0, repaired?.z ?? z)
+
     this.player.rotation.y = THREE.MathUtils.degToRad(spawn.yaw)
     this.cameraController.follow(this.player.position)
+    this.playerLastPosition.copy(this.player.position)
   }
 
   /**
@@ -228,12 +438,14 @@ export class Engine {
     this.rafId = requestAnimationFrame(this.renderLoop)
     const dt = Math.min(this.clock.getDelta(), 0.1) // cap to avoid post-idle jumps
     if (this.movement && this.bounds) {
-      this.movement.update(this.player, dt, this.bounds)
+      this.movement.update(this.player, dt, this.bounds, this.collisionWorld ?? undefined)
     }
     this.updateNpcWander(dt)
+    this.updateCharacterAnimations(dt)
     this.updateAwareness()
     this.idleAnimator.update(dt)
     this.cameraController.follow(this.player.position)
+    updateIsometricWallOcclusion(this.scene, this.player, this.cameraController.camera)
     this.updateProximity()
     this.renderer.render(this.scene, this.cameraController.camera)
   }
@@ -254,6 +466,35 @@ export class Engine {
       this.npcBehavior.setWandering(npcId, this.wanderMotor.isWalking(npcId))
     }
   }
+  private updateCharacterAnimations(dt: number): void {
+    if (dt <= 0) return
+
+    if (this.playerCharacter) {
+      const dx = this.player.position.x - this.playerLastPosition.x
+      const dz = this.player.position.z - this.playerLastPosition.z
+      const speed = Math.hypot(dx, dz) / dt
+      this.playerCharacter.updateFacing(dx, dz)
+      this.playerCharacter.animations.update(dt, { speed })
+      this.playerLastPosition.copy(this.player.position)
+    }
+
+    for (const [id, character] of this.builtVisualObjects?.characters ?? []) {
+      const previous = this.characterLastPositions.get(id) ?? character.root.position.clone()
+      const dx = character.root.position.x - previous.x
+      const dz = character.root.position.z - previous.z
+      const speed = Math.hypot(dx, dz) / dt
+      character.updateFacing(dx, dz)
+      character.animations.update(dt, {
+        speed,
+        talking: this.npcBehavior.stateOf(id) === 'talking',
+        seated: this.npcRoutineModes?.get(id) === 'rest',
+        zombie: character.root.userData.characterRole === 'zombie',
+      })
+      previous.copy(character.root.position)
+      this.characterLastPositions.set(id, previous)
+    }
+  }
+
 
   /**
    * Reads the current player/NPC XZ positions and feeds them through the pure
@@ -330,11 +571,21 @@ export class Engine {
     if (!active) return
     const key = e.code === 'KeyE' ? 'E' : 'F'
     if (active.key !== key) return // wrong key for this interactable
+    const oneShot = active.affordance === 'take'
+      ? 'pick-up'
+      : active.affordance === 'inspect' || active.affordance === 'use'
+      ? 'inspect'
+      : active.affordance === 'talk'
+      ? 'gesture'
+      : null
+    if (oneShot !== null) this.playerCharacter?.animations.playOneShot(oneShot)
     this.onRequestOpenInteraction?.(active)
   }
 
   dispose(): void {
     cancelAnimationFrame(this.rafId)
+    if (this.disposed) return
+    this.disposed = true
     this.rafId = 0
     this.resizeObserver.disconnect()
     window.removeEventListener('keydown', this.onInteractKey)
@@ -348,12 +599,24 @@ export class Engine {
     this.wanderNpcIds.length = 0
     this.npcAwareness.clear()
     this.awarenessNodes.clear()
+    this.npcRoutineModes?.clear()
     this.activeInteractable = null
     this.locked = false
     this.onActiveInteractionChange = null
     this.onRequestOpenInteraction = null
     this.onNpcAwarenessChange = null
 
+    if (this.playerCharacter) this.scene.remove(this.playerCharacter.root)
+    if (this.builtVisualObjects) this.scene.remove(this.builtVisualObjects.group)
+    if (this.builtVisualShell) this.scene.remove(this.builtVisualShell.group)
+    this.playerCharacter?.dispose()
+    this.playerCharacter = null
+    this.builtVisualObjects?.dispose()
+    this.builtVisualObjects = null
+    this.builtVisualShell?.dispose()
+    this.builtVisualShell = null
+    this.collisionWorld = null
+    this.characterLastPositions?.clear()
     disposeObject(this.scene) // frees the player marker's geometry/materials too
     this.scene.clear()
     this.disposables.dispose()

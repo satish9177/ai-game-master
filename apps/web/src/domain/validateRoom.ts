@@ -1,5 +1,6 @@
 import type { LoadedRoom } from './loadRoomSpec'
 import type { RoomObject } from './roomSpec'
+import { ROOM_OBJECT_ENTRY_LIMIT } from './roomSpec'
 
 export type RoomIssueSeverity = 'fatal' | 'warning'
 
@@ -13,10 +14,7 @@ export type RoomIssueCode =
   | 'object-above-ceiling'
   | 'object-crowds-spawn'
   | 'no-exit'
-  | 'object-budget-exceeded'
-  | 'object-budget-hard-exceeded'
-  | 'light-budget-exceeded'
-  | 'light-budget-hard-exceeded'
+  | 'object-envelope-exceeded'
   | 'interaction-empty-prompt'
   | 'interaction-missing-body'
   | 'npc-unnamed'
@@ -41,10 +39,7 @@ export const LIMITS = {
   MAX_ROOM_DIM: 300,
   BOUNDS_EPSILON: 0.5,
   SPAWN_CLEARANCE: 1,
-  MAX_OBJECTS_SOFT: 60,
-  MAX_OBJECTS_HARD: 300,
-  MAX_LIGHTS_SOFT: 8,
-  MAX_LIGHTS_HARD: 64,
+  MAX_ROOM_OBJECT_ENTRIES: ROOM_OBJECT_ENTRY_LIMIT,
   UNUSUAL_ASPECT_RATIO: 8,
   WALL_CLEARANCE: 0.3,
 } as const
@@ -148,43 +143,12 @@ function addRoomIssues(
     })
   }
 
-  addBudgetIssue(
-    room.objects.length,
-    LIMITS.MAX_OBJECTS_SOFT,
-    LIMITS.MAX_OBJECTS_HARD,
-    'object-budget-exceeded',
-    'object-budget-hard-exceeded',
-    'Room object count exceeds the recommended budget.',
-    'Room object count exceeds the hard budget.',
-    issues,
-  )
-  const lightCount = room.objects.filter((object) => object.type === 'torch').length
-  addBudgetIssue(
-    lightCount,
-    LIMITS.MAX_LIGHTS_SOFT,
-    LIMITS.MAX_LIGHTS_HARD,
-    'light-budget-exceeded',
-    'light-budget-hard-exceeded',
-    'Room light count exceeds the recommended budget.',
-    'Room light count exceeds the hard budget.',
-    issues,
-  )
-}
-
-function addBudgetIssue(
-  count: number,
-  softLimit: number,
-  hardLimit: number,
-  softCode: RoomIssueCode,
-  hardCode: RoomIssueCode,
-  softMessage: string,
-  hardMessage: string,
-  issues: RoomValidationIssue[],
-): void {
-  if (count > hardLimit) {
-    issues.push({ code: hardCode, severity: 'fatal', message: hardMessage })
-  } else if (count > softLimit) {
-    issues.push({ code: softCode, severity: 'warning', message: softMessage })
+  if (room.objects.length > LIMITS.MAX_ROOM_OBJECT_ENTRIES) {
+    issues.push({
+      code: 'object-envelope-exceeded',
+      severity: 'fatal',
+      message: 'Room object entries exceed the parser-abuse safety envelope.',
+    })
   }
 }
 

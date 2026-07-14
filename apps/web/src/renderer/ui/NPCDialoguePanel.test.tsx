@@ -128,6 +128,9 @@ describe('NPCDialoguePanel', () => {
 
     expect(html).toContain('<h2 class="panel-title">Mira</h2>')
     expect(html).toContain('aria-label="Conversation with Mira"')
+    expect(html).toContain('data-panel-kind="conversation"')
+    expect(html).toContain('data-speaker="player"')
+    expect(html).toContain('data-speaker="npc"')
   })
 
   it('renders known persona subtitle from a closed map', () => {

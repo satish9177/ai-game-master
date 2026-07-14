@@ -4,10 +4,18 @@ import { loadRoomSpec } from './loadRoomSpec'
 import type { LoadedRoom } from './loadRoomSpec'
 import type { RoomObject } from './roomSpec'
 
-const READ_BODY = 'You read over it carefully. Nothing changes yet.'
-const INSPECT_BODY = 'You inspect it carefully, but do not take anything.'
-const CORPSE_BODY = 'You inspect the remains without disturbing them.'
-const EXAMINE_BODY = 'You examine it for meaning or danger. Nothing changes yet.'
+const BOOK_BODY = 'You read it and mark it as reviewed.'
+const PAPER_BODY = 'You read the page and mark it as reviewed.'
+const MAP_BODY = 'You study the route and mark the map as reviewed.'
+const CHEST_BODY = 'You open the chest and check its authored contents.'
+const CRATE_BODY = 'You open the crate and check its authored contents.'
+const BARREL_BODY = 'You check the barrel and leave it visibly searched.'
+const CORPSE_BODY = 'You search the remains for clues and mark them as searched.'
+const TABLE_BODY = 'You inspect the work surface and mark it as searched.'
+const MACHINE_BODY = 'You inspect the mechanism and leave its indicator activated.'
+const ALTAR_BODY = 'You examine the altar and leave its markings activated.'
+const STATUE_BODY = 'You examine the monument and mark its details as reviewed.'
+const ARTIFACT_BODY = 'You examine the artifact and leave it visibly activated.'
 
 function makeRoom(objects: unknown[]): LoadedRoom {
   return loadRoomSpec({
@@ -53,18 +61,18 @@ describe('assignGeneratedObjectPurpose', () => {
 
     expect(result.purposesAssigned).toBe(12)
     expect(result.room.objects.map((_, index) => interactionAt(result.room, index))).toEqual([
-      { key: 'E', prompt: 'Read', title: 'Read', body: READ_BODY },
-      { key: 'E', prompt: 'Read', title: 'Read', body: READ_BODY },
-      { key: 'E', prompt: 'Read', title: 'Read', body: READ_BODY },
-      { key: 'E', prompt: 'Inspect', title: 'Inspect', body: INSPECT_BODY },
-      { key: 'E', prompt: 'Inspect', title: 'Inspect', body: INSPECT_BODY },
-      { key: 'E', prompt: 'Inspect', title: 'Inspect', body: INSPECT_BODY },
-      { key: 'E', prompt: 'Inspect', title: 'Inspect', body: CORPSE_BODY },
-      { key: 'E', prompt: 'Inspect', title: 'Inspect', body: INSPECT_BODY },
-      { key: 'E', prompt: 'Inspect', title: 'Inspect', body: INSPECT_BODY },
-      { key: 'E', prompt: 'Examine', title: 'Examine', body: EXAMINE_BODY },
-      { key: 'E', prompt: 'Examine', title: 'Examine', body: EXAMINE_BODY },
-      { key: 'E', prompt: 'Examine', title: 'Examine', body: EXAMINE_BODY },
+      { key: 'E', prompt: 'Read', title: 'Read', body: BOOK_BODY, effect: { kind: 'inspect' } },
+      { key: 'E', prompt: 'Read', title: 'Read', body: PAPER_BODY, effect: { kind: 'inspect' } },
+      { key: 'E', prompt: 'Read', title: 'Read', body: MAP_BODY, effect: { kind: 'inspect' } },
+      { key: 'E', prompt: 'Inspect', title: 'Inspect', body: CHEST_BODY, effect: { kind: 'inspect' } },
+      { key: 'E', prompt: 'Inspect', title: 'Inspect', body: CRATE_BODY, effect: { kind: 'inspect' } },
+      { key: 'E', prompt: 'Inspect', title: 'Inspect', body: BARREL_BODY, effect: { kind: 'inspect' } },
+      { key: 'E', prompt: 'Inspect', title: 'Inspect', body: CORPSE_BODY, effect: { kind: 'inspect' } },
+      { key: 'E', prompt: 'Inspect', title: 'Inspect', body: TABLE_BODY, effect: { kind: 'inspect' } },
+      { key: 'E', prompt: 'Inspect', title: 'Inspect', body: MACHINE_BODY, effect: { kind: 'inspect' } },
+      { key: 'E', prompt: 'Examine', title: 'Examine', body: ALTAR_BODY, effect: { kind: 'inspect' } },
+      { key: 'E', prompt: 'Examine', title: 'Examine', body: STATUE_BODY, effect: { kind: 'inspect' } },
+      { key: 'E', prompt: 'Examine', title: 'Examine', body: ARTIFACT_BODY, effect: { kind: 'inspect' } },
     ])
   })
 
@@ -101,17 +109,17 @@ describe('assignGeneratedObjectPurpose', () => {
     const result = assignGeneratedObjectPurpose(room)
 
     expect(result.room.objects.map((_, index) => interactionAt(result.room, index)?.body)).toEqual([
-      READ_BODY,
-      READ_BODY,
-      READ_BODY,
-      INSPECT_BODY,
-      INSPECT_BODY,
-      INSPECT_BODY,
-      INSPECT_BODY,
-      INSPECT_BODY,
-      EXAMINE_BODY,
-      EXAMINE_BODY,
-      EXAMINE_BODY,
+      BOOK_BODY,
+      PAPER_BODY,
+      MAP_BODY,
+      CHEST_BODY,
+      CRATE_BODY,
+      BARREL_BODY,
+      TABLE_BODY,
+      MACHINE_BODY,
+      ALTAR_BODY,
+      STATUE_BODY,
+      ARTIFACT_BODY,
     ])
   })
 
@@ -125,6 +133,7 @@ describe('assignGeneratedObjectPurpose', () => {
       prompt: 'Inspect',
       title: 'Inspect',
       body: CORPSE_BODY,
+      effect: { kind: 'inspect' },
     })
   })
 
@@ -138,9 +147,10 @@ describe('assignGeneratedObjectPurpose', () => {
       key: 'E',
       prompt: 'Inspect',
       title: 'Inspect',
-      body: INSPECT_BODY,
+      body: MACHINE_BODY,
+      effect: { kind: 'inspect' },
     })
-    expect(interaction).not.toHaveProperty('effect')
+    expect(interaction?.effect).toEqual({ kind: 'inspect' })
     expect(interaction).not.toHaveProperty('encounter')
     expect(interaction).not.toHaveProperty('dialogue')
     expect(interaction).not.toHaveProperty('exit')
@@ -207,7 +217,7 @@ describe('assignGeneratedObjectPurpose', () => {
     expect(result.room.objects).toEqual(room.objects)
   })
 
-  it('leaves scroll and npc unchanged', () => {
+  it('upgrades inspectable scrolls while preserving NPC interactions for dialogue normalization', () => {
     const room = makeRoom([
       {
         type: 'scroll',
@@ -226,10 +236,13 @@ describe('assignGeneratedObjectPurpose', () => {
 
     const result = assignGeneratedObjectPurpose(room)
 
-    expect(result.room).toBe(room)
-    expect(result.purposesAssigned).toBe(0)
-    expect(result.room.objects[0]).toBe(scroll)
+    expect(result.room).not.toBe(room)
+    expect(result.purposesAssigned).toBe(1)
+    expect(interactionAt(result.room, 0)?.effect).toEqual({ kind: 'inspect' })
+    expect(interactionAt(result.room, 1)).toBe(interactionAt(room, 1))
+    expect(result.room.objects[0]).not.toBe(scroll)
     expect(result.room.objects[1]).toBe(npc)
+    expect(result.room.objects[0]?.id).toBe('generated-inspect-scroll-0')
   })
 
   it('returns the same room reference when nothing is assigned', () => {
@@ -241,7 +254,7 @@ describe('assignGeneratedObjectPurpose', () => {
     expect(result.purposesAssigned).toBe(0)
   })
 
-  it('reports the number of purposes assigned unchanged', () => {
+  it('upgrades an allowlisted body-only interaction to a purposeful inspect effect', () => {
     const room = makeRoom([
       { type: 'book', position: [-3, 0.3, 0] },
       { type: 'chest', position: [-1, 0, 0] },
@@ -256,7 +269,8 @@ describe('assignGeneratedObjectPurpose', () => {
 
     const result = assignGeneratedObjectPurpose(room)
 
-    expect(result.purposesAssigned).toBe(3)
+    expect(result.purposesAssigned).toBe(4)
+    expect(interactionAt(result.room, 2)?.effect).toEqual({ kind: 'inspect' })
   })
 
   it('does not mutate the input room', () => {
@@ -308,7 +322,8 @@ describe('assignGeneratedObjectPurpose', () => {
       key: 'E',
       prompt: 'Inspect',
       title: 'Inspect',
-      body: INSPECT_BODY,
+      body: CHEST_BODY,
+      effect: { kind: 'inspect' },
     })
     expect(serializedInteraction).not.toContain('ProviderTrace')
     expect(serializedInteraction).not.toContain('raw-json')

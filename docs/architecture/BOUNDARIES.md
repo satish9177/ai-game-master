@@ -33,7 +33,7 @@ layers, never the reverse. The domain depends on nothing in this repo.
 | Layer | Folder (today) | What lives here |
 | --- | --- | --- |
 | **Domain / Contracts** | `apps/web/src/domain/` | RoomSpec, versioned world/event/save schemas, bounded initial-canon `WorldBibleSeed`, pure loaders/validators/projections, and ports including `WorldBibleSeeder`. Pure. |
-| **Renderer** | `apps/web/src/renderer/engine/` | Three.js engine, builders, controls, **camera controllers** (`camera/`: `CameraController` / `IsometricCameraController`), the **player object/marker**, disposal. |
+| **Renderer** | `apps/web/src/renderer/engine/` | Three.js engine, closed visual-pack registry/cache/resolver, shared humanoid factory and animations, weighted render planning, collision, camera controllers, and disposal. |
 | **UI** | `apps/web/src/renderer/ui/` | Presentational React components. |
 | **App / Composition root** | `apps/web/src/App.tsx`, `RoomViewer.tsx`, `app/`, `room/` | Wires concrete implementations, including prompt-only world-bible seeding/degradation, room sources, play-session/cache ownership, adjacent-room resolution, navigation, and UI hosts. |
 | **Platform** | `apps/web/src/platform/` | Cross-cutting adapters: logger (`logger/`) and real clock/UUID implementations (`system/`); 🔜 config/env. |
@@ -51,7 +51,7 @@ layers, never the reverse. The domain depends on nothing in this repo.
 | From ↓ → To → | Domain | Renderer | UI | Platform (Logger) | Generation | World session | Interactions | Encounters | Dialogue | Memory | Persistence |
 | --- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
 | **Domain** | — | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
-| **Renderer** | ✓ | — | ✗ | ✓ (port) | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
+| **Renderer** | `apps/web/src/renderer/engine/` | Three.js engine, closed visual-pack registry/cache/resolver, shared humanoid factory and animations, weighted render planning, collision, camera controllers, and disposal. |
 | **UI** | ✓ | ✗* | — | ✓ (port) | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
 | **App / Composition root** | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓‡ | ✗† |
 | **Generation** | ✓ | ✗ | ✗ | ✓ (port) | — | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
@@ -114,16 +114,25 @@ by tests over a temp DB ([ADR-0024](./decisions/ADR-0024-npc-memory-persistence-
 | **Generation must never emit executable code** — only WorldBibleSeed/RoomSpec-shaped data. | The trust boundary. Provider output remains data until its schema/assembly boundary validates it; it is never `eval`'d or turned into JS/Three/React/scene scripts. ([ADR-0001](./decisions/ADR-0001-data-only-room-spec-trusted-renderer.md), [ADR-0008](./decisions/ADR-0008-renderer-portability-strategy.md), [ADR-0022](./decisions/ADR-0022-world-bible-seed-v0.md)) |
 | **No raw `RoomSpec` may reach the renderer unvalidated.** | All dynamic/external data is validated by `loadRoomSpec` at the boundary first. |
 | **No engine objects in the domain or DB; keep `RoomSpec`/domain renderer-agnostic.** | The renderer is an *adapter* over the data contract — a Three.js adapter today, possibly Babylon/Unity/Godot later. Engine handles (`THREE.Mesh`, `Material`, `Vector3`, scene nodes) live only inside a renderer adapter; the domain and persisted rows hold neutral data only, so a second renderer is a new adapter, not a rewrite. ([ADR-0008](./decisions/ADR-0008-renderer-portability-strategy.md)) |
-| **The camera and the player marker are renderer-internal presentation — never `RoomSpec`/domain data.** | Camera mode (isometric today, free-camera later), the `CameraController`/`OrthographicCamera`, and the player marker live only inside the renderer engine. A `RoomSpec` describes *what is in the room*, not *how it is filmed*; no camera/player fields exist in the schema, and the model never directs the camera. ([ADR-0012](./decisions/ADR-0012-isometric-camera-foundation.md)) |
+| **The camera and player character are renderer-internal presentation — never `RoomSpec`/domain data.** | Camera mode, the shared player rig instance, and exact visual parts live only inside the renderer. A `RoomSpec` describes what is in the room, not how it is filmed or which mesh/node/material/clip implements it. ([ADR-0012](./decisions/ADR-0012-isometric-camera-foundation.md), [ADR-0091](./decisions/ADR-0091-ruined-kingdom-survival-visual-pack.md)) |
+
+## Closed visual-pack boundary
+
+[ADR-0091](./decisions/ADR-0091-ruined-kingdom-survival-visual-pack.md) applies the same inward dependency rule to production assets:
+
+- Generated or authored `RoomSpec` may select only closed semantic enums such as `environmentKind`, object family/kind/variant/condition, and humanoid appearance presets. It never contains pack ids, URLs, file paths, GLTF node names, material or shader names, animation clip names, or renderer instructions.
+- `VisualPackId`, bundle URLs, exact node names, material treatment, clips, LODs, collision profiles, render costs, and license-source ids exist only in trusted renderer registry code.
+- Resolution is deterministic: exact semantic variant/state → family default → environment-compatible default → neutral production fallback. Debug geometry is available only under trusted development configuration; production fails closed to a fixed asset-unavailable view after neutral fallback failure.
+- `RoomViewer` owns pack-lifetime cache/factory composition. Room engines borrow cloned scene graphs and independent skeletons/mixers; shared geometry, materials, textures, and clips remain cache-owned and are released/disposed exactly once.
+- Rendering uses weighted resource budgets for triangles, draw calls, decoded textures, skinned characters, mixers, lights, particles, transparency, shadows, and collision bodies. It does not impose a small content/object-count limit; the separate 4,096-entry schema ceiling is parser-abuse protection only.
+- Object presentation state is a read-only projection of validated RoomSpec plus authoritative world flags/gate results. The renderer may show open/locked/looted/read/activated state but may not create world truth or write events.
 
 ## The approved host interface (React ↔ engine seam)
 
 The UI and the engine are wired together **only** at the composition root
 (`RoomViewer.tsx` today) and communicate through a deliberately small surface:
 
-- **React → engine: imperative methods.** e.g. `engine.setRoom(room)`,
-  `engine.setInteractionLock(locked)`. React calls these; it does not reach into
-  scene graph, camera, or meshes.
+- **React → engine: imperative methods.** e.g. `engine.setRoomWithVisualPack(room, runtime, options)`, `engine.updateObjectPresentationStates(states)`, and `engine.setInteractionLock(locked)`. React calls these; it does not reach into the scene graph, cache, animation mixers, camera, or meshes.
 - **engine → React: callbacks.** e.g. `engine.onActiveInteractionChange`,
   `engine.onRequestOpenInteraction`. The engine pushes plain, serializable view
   data out (including an optional passive object id); React/composition turns it

@@ -96,7 +96,7 @@ function firstTargetExcept(room: LoadedRoom, ...excluded: string[]): string {
   return target
 }
 
-function objectBudgetEdgeRoom(id: string): LoadedRoom {
+function objectEnvelopeEdgeRoom(id: string): LoadedRoom {
   return loadRoomSpec({
     schemaVersion: 1,
     id,
@@ -104,7 +104,7 @@ function objectBudgetEdgeRoom(id: string): LoadedRoom {
     shell: { dimensions: { width: 18, depth: 18, height: 4 }, exits: [] },
     spawn: { position: [0, 1.7, 0], yaw: 180 },
     lighting: { ambient: { intensity: 1 } },
-    objects: Array.from({ length: LIMITS.MAX_OBJECTS_HARD }, (_, index) => ({
+    objects: Array.from({ length: LIMITS.MAX_ROOM_OBJECT_ENTRIES }, (_, index) => ({
       type: 'candle',
       id: `candle-${index}`,
       position: [0, 0, 0],
@@ -417,7 +417,7 @@ describe('AdjacentRoomPregenerator.resolveRoom', () => {
   it('keeps the original valid room when return-exit enrichment fails validation', async () => {
     const cache = new SessionRoomCache()
     const { logs, logger } = createLogger()
-    const sourceRoom = objectBudgetEdgeRoom('generated-child')
+    const sourceRoom = objectEnvelopeEdgeRoom('generated-child')
     const pregen = new AdjacentRoomPregenerator(
       cache,
       emptyRegistry,
@@ -433,7 +433,7 @@ describe('AdjacentRoomPregenerator.resolveRoom', () => {
     expect(result.ok).toBe(true)
     if (result.ok) {
       expect(validateRoom(result.room).ok).toBe(true)
-      expect(result.room.objects).toHaveLength(LIMITS.MAX_OBJECTS_HARD)
+      expect(result.room.objects).toHaveLength(LIMITS.MAX_ROOM_OBJECT_ENTRIES)
       expect(exitTargets(result.room)).not.toContain('R1')
       expect(cache.get('R1:exit:north')).toBe(result.room)
     }

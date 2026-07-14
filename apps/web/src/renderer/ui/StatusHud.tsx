@@ -22,17 +22,27 @@ export function StatusHud({
   clock?: WorldClock | null
 }) {
   return (
-    <div className="status-hud" role="status" aria-live="polite">
+    <div className="status-hud" role="status" aria-live="polite" aria-label="Player status">
       {clock && (
         <div className="status-hud-clock" data-time-of-day={clock.timeOfDay}>
           {formatWorldClock(clock)}
         </div>
       )}
-      <div className="status-hud-health">
-        <span className="status-hud-health-label">
-          {view.health.current} / {view.health.max}
-        </span>
-        <div className="status-hud-health-bar-track">
+      <div className="status-hud-health" aria-label="Vitality">
+        <div className="status-hud-health-line">
+          <span className="status-hud-section-label">Vitality</span>
+          <span className="status-hud-health-label">
+            {view.health.current} / {view.health.max}
+          </span>
+        </div>
+        <div
+          className="status-hud-health-bar-track"
+          role="progressbar"
+          aria-label="Health"
+          aria-valuemin={0}
+          aria-valuemax={view.health.max}
+          aria-valuenow={view.health.current}
+        >
           <div
             className="status-hud-health-bar-fill"
             style={{ width: `${view.health.fraction * 100}%` }}
@@ -40,6 +50,7 @@ export function StatusHud({
         </div>
       </div>
       <div className="status-hud-inventory">
+        <span className="status-hud-section-label">Pack</span>
         {view.items.length === 0 ? (
           <span className="status-hud-empty">No items</span>
         ) : (

@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { loadRoomSpec } from './loadRoomSpec'
+import { ROOM_OBJECT_ENTRY_LIMIT } from './roomSpec'
 import type { SkippedObjectReasonCounts } from './loadRoomSpec'
 
 /* ---------- shared base spec ---------- */
@@ -210,5 +211,15 @@ describe('loadRoomSpec – skip-reason classification (Slice 7E)', () => {
       { type: 'pillar', position: 'bad' },
     ])
     expect(loadRoomSpec(spec)).toEqual(loadRoomSpec(spec))
+  })
+})
+
+describe('loadRoomSpec parser-abuse envelope', () => {
+  it('rejects input above the high 4096-entry ceiling without truncating', () => {
+    const objects = Array.from(
+      { length: ROOM_OBJECT_ENTRY_LIMIT + 1 },
+      () => ({ type: 'rug', position: [0, 0, 0] }),
+    )
+    expect(() => loadRoomSpec(withObjects(objects))).toThrow()
   })
 })

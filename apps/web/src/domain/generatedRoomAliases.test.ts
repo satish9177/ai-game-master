@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest'
-import { repairGeneratedAliases } from './generatedRoomAliases'
+import {
+  GENERATED_ROOM_ALIAS_CATALOG,
+  repairGeneratedAliases,
+} from './generatedRoomAliases'
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -27,143 +30,28 @@ function entry(type: string, extras: Record<string, unknown> = {}): Record<strin
 // ---------------------------------------------------------------------------
 
 describe('repairGeneratedAliases — alias table coverage', () => {
-  const cases: [string, string][] = [
-    // paper
-    ['notes', 'paper'],
-    ['note', 'paper'],
-    ['letter', 'paper'],
-    ['letters', 'paper'],
-    ['parchment', 'paper'],
-    ['papers', 'paper'],
-    ['document', 'paper'],
-    ['documents', 'paper'],
-    ['page', 'paper'],
-    ['pages', 'paper'],
+  const cases = GENERATED_ROOM_ALIAS_CATALOG.map(({ alias, type, variant }) => [
+    alias,
+    type,
+    variant,
+  ] as const)
 
-    // book
-    ['journal', 'book'],
-    ['journals', 'book'],
-    ['diary', 'book'],
-    ['tome', 'book'],
-    ['ledger', 'book'],
-    ['books', 'book'],
-
-    // map
-    ['floor plan', 'map'],
-    ['floorplan', 'map'],
-    ['route chart', 'map'],
-    ['chart', 'map'],
-    ['blueprint', 'map'],
-    ['maps', 'map'],
-
-    // corpse
-    ['dead body', 'corpse'],
-    ['skeleton', 'corpse'],
-    ['skeletons', 'corpse'],
-    ['bones', 'corpse'],
-    ['remains', 'corpse'],
-    ['cadaver', 'corpse'],
-    ['corpses', 'corpse'],
-
-    // table
-    ['desk', 'table'],
-    ['desks', 'table'],
-    ['workbench', 'table'],
-    ['worktable', 'table'],
-    ['work table', 'table'],
-    ['counter', 'table'],
-    ['tables', 'table'],
-
-    // altar
-    ['shrine', 'altar'],
-    ['ritual platform', 'altar'],
-    ['ritual altar', 'altar'],
-    ['offering table', 'altar'],
-    ['altars', 'altar'],
-
-    // statue
-    ['monument', 'statue'],
-    ['idol', 'statue'],
-    ['effigy', 'statue'],
-    ['sculpture', 'statue'],
-    ['statues', 'statue'],
-
-    // machine
-    ['generator', 'machine'],
-    ['console', 'machine'],
-    ['machinery', 'machine'],
-    ['lab equipment', 'machine'],
-    ['terminal', 'machine'],
-    ['apparatus', 'machine'],
-    ['machines', 'machine'],
-
-    // artifact
-    ['crystal', 'artifact'],
-    ['crystals', 'artifact'],
-    ['relic', 'artifact'],
-    ['relics', 'artifact'],
-    ['orb', 'artifact'],
-    ['strange object', 'artifact'],
-    ['gem', 'artifact'],
-    ['shard', 'artifact'],
-    ['totem', 'artifact'],
-    ['artifacts', 'artifact'],
-
-    // candle
-    ['candles', 'candle'],
-    ['small flames', 'candle'],
-    ['votive', 'candle'],
-    ['tea light', 'candle'],
-    ['tealight', 'candle'],
-
-    // arch
-    ['door', 'arch'],
-    ['doors', 'arch'],
-    ['doorway', 'arch'],
-    ['gate', 'arch'],
-    ['gateway', 'arch'],
-    ['archway', 'arch'],
-    ['portal', 'arch'],
-    ['entrance', 'arch'],
-
-    // debris
-    ['rubble', 'debris'],
-    ['trash', 'debris'],
-    ['garbage', 'debris'],
-    ['junk', 'debris'],
-    ['wreckage', 'debris'],
-    ['scrap', 'debris'],
-    ['broken parts', 'debris'],
-    ['debris pile', 'debris'],
-
-    // crate
-    ['box', 'crate'],
-    ['boxes', 'crate'],
-    ['container', 'crate'],
-    ['containers', 'crate'],
-    ['case', 'crate'],
-    ['crates', 'crate'],
-    ['supply crate', 'crate'],
-
-    // chest
-    ['treasure chest', 'chest'],
-    ['lockbox', 'chest'],
-    ['coffer', 'chest'],
-    ['strongbox', 'chest'],
-    ['footlocker', 'chest'],
-
-    // barrel
-    ['drum', 'barrel'],
-    ['keg', 'barrel'],
-    ['cask', 'barrel'],
-    ['barrels', 'barrel'],
-  ]
+  it('contains exactly the approved 100 normalized aliases', () => {
+    expect(GENERATED_ROOM_ALIAS_CATALOG).toHaveLength(100)
+    expect(new Set(GENERATED_ROOM_ALIAS_CATALOG.map(({ alias }) => alias)).size).toBe(100)
+  })
 
   it.each(cases)('"%s" → "%s"', (alias, canonical) => {
     const { value, count } = repairGeneratedAliases(envelope([entry(alias)]))
     const objects = (value as Record<string, unknown>)['objects'] as Record<string, unknown>[]
     expect(objects[0]!['type']).toBe(canonical)
     expect(count).toBe(1)
+  })
+
+  it.each(cases)('preserves the exact semantic variant for %s', (alias, _canonical, variant) => {
+    const { value } = repairGeneratedAliases(envelope([entry(alias)]))
+    const objects = (value as Record<string, unknown>)['objects'] as Record<string, unknown>[]
+    expect(objects[0]!['variant']).toBe(variant)
   })
 })
 
@@ -211,6 +99,7 @@ describe('repairGeneratedAliases — canonical types pass through', () => {
     'book', 'paper', 'map', 'chest', 'corpse', 'table',
     'altar', 'statue', 'machine', 'artifact', 'candle',
     'npc', 'prop', 'crate', 'barrel', 'debris', 'barricade', 'zombie',
+    'architecture', 'furniture', 'clutter', 'vegetation', 'light-fixture',
   ]
 
   it.each(canonicalTypes)('canonical type "%s" is unchanged with count 0', (type) => {

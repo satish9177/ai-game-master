@@ -2,6 +2,11 @@
 
 **Status:** Implemented
 
+> **Partial supersession:** ADR-0091 removes this ADR's 30-object performance
+> cap. Generated layouts retain all physically valid semantic objects up to the
+> separate 4,096-entry parser-abuse ceiling; weighted renderer budgets govern
+> runtime cost.
+
 ## Context
 
 The opt-in `OpenAICompatibleRoomGenerator` ([ADR-0023](./ADR-0023-real-room-generator-provider-v0.md))

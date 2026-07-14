@@ -13,10 +13,13 @@ const mockState = vi.hoisted(() => ({
   stateIndex: 0,
   stateSetters: [] as Array<ReturnType<typeof vi.fn>>,
   callbacks: [] as unknown[],
+  visualPackFailure: false,
   engineInstances: [] as Array<{
     onRequestOpenInteraction: ((target: Interactable) => void) | null
     onActiveInteractionChange: ((target: Interactable | null) => void) | null
     setRoom: ReturnType<typeof vi.fn>
+    setRoomWithVisualPack: ReturnType<typeof vi.fn>
+    updateObjectPresentationStates: ReturnType<typeof vi.fn>
     setInteractionLock: ReturnType<typeof vi.fn>
     setTalkingNpc: ReturnType<typeof vi.fn>
     dispose: ReturnType<typeof vi.fn>
@@ -62,6 +65,18 @@ vi.mock('./engine/Engine', () => ({
     onRequestOpenInteraction: ((target: Interactable) => void) | null = null
     onActiveInteractionChange: ((target: Interactable | null) => void) | null = null
     setRoom = vi.fn()
+    setRoomWithVisualPack = vi.fn(async (
+      room: unknown,
+      _runtime: unknown,
+      options?: Record<string, unknown>,
+    ) => {
+      if (mockState.visualPackFailure) throw new Error('fixed-test-visual-pack-failure')
+      const legacyOptions = { ...(options ?? {}) }
+      delete legacyOptions.presentationStates
+      if (Object.keys(legacyOptions).length > 0) this.setRoom(room, legacyOptions)
+      else this.setRoom(room)
+    })
+    updateObjectPresentationStates = vi.fn()
     setInteractionLock = vi.fn()
     setTalkingNpc = vi.fn()
     dispose = vi.fn()
@@ -126,6 +141,7 @@ describe('RoomViewer NPC dialogue room context wiring', () => {
     mockState.stateSetters.length = 0
     mockState.callbacks.length = 0
     mockState.engineInstances.length = 0
+    mockState.visualPackFailure = false
   })
 
   afterEach(() => {
@@ -135,6 +151,7 @@ describe('RoomViewer NPC dialogue room context wiring', () => {
     mockState.stateSetters.length = 0
     mockState.callbacks.length = 0
     mockState.engineInstances.length = 0
+    mockState.visualPackFailure = false
   })
 
   it('passes roomContext built from the current LoadedRoom into dialogue reply input', () => {
@@ -1016,6 +1033,113 @@ describe('RoomViewer NPC dialogue room context wiring', () => {
     expect(engine?.setRoom).toHaveBeenCalledWith(room, { resolvedObjectIds })
   })
 
+  it('loads the room through the closed visual pack with projected initial states', async () => {
+    const room = loadedRoom()
+    const resolvedObjectIds = new Set(['room-npc'])
+
+    RoomViewer({
+      roomSource: { getRoom: async () => ({ ok: true, room }) },
+      sessionId: 'session-1',
+      interactionService: { resolve: async () => ({ status: 'rejected', reason: 'missing-effect' }) },
+      encounterService: { resolve: async () => ({ status: 'failed', reason: 'not-found' }) },
+      npcDialogueService: {
+        reply: async () => ({ status: 'replied', turn: { speaker: 'npc', text: 'A line.' } }),
+      },
+      onNavigate: async () => ({ status: 'failed', reason: 'not-found' }),
+      resolvedObjectIds,
+    } as unknown as Parameters<typeof RoomViewer>[0])
+
+    await Promise.resolve()
+    await Promise.resolve()
+
+    const engine = mockState.engineInstances[0]
+    expect(engine?.setRoomWithVisualPack).toHaveBeenCalledTimes(1)
+    const [loaded, runtime, options] = engine!.setRoomWithVisualPack.mock.calls[0]!
+    expect(loaded).toBe(room)
+    expect(runtime).toMatchObject({
+      registry: { id: 'ruined-kingdom-survival' },
+      allowDebug: expect.any(Boolean),
+    })
+    const states = (options as { presentationStates: ReadonlyMap<string, unknown> })
+      .presentationStates
+    expect(states.get('room-npc')).toEqual({
+      condition: 'intact',
+      interactionState: 'none',
+      resolved: true,
+    })
+    expect(engine?.dispose).not.toHaveBeenCalled()
+  })
+
+  it('projects an authoritative generated exit gate as locked on the initial visual build', async () => {
+    const room = loadRoomSpec({
+      schemaVersion: 1,
+      id: 'gated-room',
+      name: 'Gated Room',
+      shell: {
+        dimensions: { width: 18, depth: 18, height: 4 },
+        exits: [{ side: 'north', width: 3 }],
+      },
+      spawn: { position: [0, 1.7, 6] },
+      objects: [{
+        id: 'north-gate',
+        type: 'arch',
+        variant: 'iron-gate',
+        position: [0, 0, -9],
+        interaction: { key: 'E', prompt: 'Leave', exit: { toRoomId: 'next-room' } },
+      }],
+    })
+    const exitGateResults = new Map([['next-room', { gated: true }]])
+
+    RoomViewer({
+      roomSource: { getRoom: async () => ({ ok: true, room }) },
+      sessionId: 'session-1',
+      interactionService: { resolve: async () => ({ status: 'rejected', reason: 'missing-effect' }) },
+      encounterService: { resolve: async () => ({ status: 'failed', reason: 'not-found' }) },
+      npcDialogueService: {
+        reply: async () => ({ status: 'replied', turn: { speaker: 'npc', text: 'A line.' } }),
+      },
+      onNavigate: async () => ({ status: 'failed', reason: 'not-found' }),
+      exitGateResults,
+    } as unknown as Parameters<typeof RoomViewer>[0])
+
+    await Promise.resolve()
+    await Promise.resolve()
+
+    const engine = mockState.engineInstances[0]
+    const options = engine!.setRoomWithVisualPack.mock.calls[0]?.[2] as {
+      presentationStates: ReadonlyMap<string, unknown>
+    }
+    expect(options.presentationStates.get('north-gate')).toEqual({
+      condition: 'intact',
+      interactionState: 'locked',
+      resolved: false,
+    })
+    expect(mockState.engineInstances).toHaveLength(1)
+  })
+  it('fails closed when the production visual pack cannot build the room', async () => {
+    const room = loadedRoom()
+    mockState.visualPackFailure = true
+
+    RoomViewer({
+      roomSource: { getRoom: async () => ({ ok: true, room }) },
+      sessionId: 'session-1',
+      interactionService: { resolve: async () => ({ status: 'rejected', reason: 'missing-effect' }) },
+      encounterService: { resolve: async () => ({ status: 'failed', reason: 'not-found' }) },
+      npcDialogueService: {
+        reply: async () => ({ status: 'replied', turn: { speaker: 'npc', text: 'A line.' } }),
+      },
+      onNavigate: async () => ({ status: 'failed', reason: 'not-found' }),
+    } as unknown as Parameters<typeof RoomViewer>[0])
+
+    await Promise.resolve()
+    await Promise.resolve()
+    await Promise.resolve()
+
+    const engine = mockState.engineInstances[0]
+    expect(engine?.dispose).toHaveBeenCalledTimes(1)
+    expect(mockState.stateSetters.at(-1)).toHaveBeenCalledWith('This room could not be loaded.')
+  })
+
   it('omits chaseOptInNpcIds from engine.setRoom when the prop is absent', async () => {
     const room = loadedRoom()
 
@@ -1872,5 +1996,12 @@ describe('RoomViewer NPC dialogue room context wiring', () => {
       id: 'offering-coffer',
       body: 'The coffer lies open and empty - the coin is gone.',
     }))
+    const presentationStates = engine!.updateObjectPresentationStates.mock.calls.at(-1)?.[0] as
+      ReadonlyMap<string, unknown>
+    expect(presentationStates.get('offering-coffer')).toEqual({
+      condition: 'intact',
+      interactionState: 'looted',
+      resolved: true,
+    })
   })
 })

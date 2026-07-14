@@ -1,6 +1,6 @@
 import roomSpecSource from './roomSpec.ts?raw'
 import { describe, expect, it } from 'vitest'
-import { RoomObjectSchema } from './roomSpec'
+import { ROOM_OBJECT_ENTRY_LIMIT, RoomObjectSchema, RoomSpecSchema } from './roomSpec'
 import { loadRoomSpec } from './loadRoomSpec'
 import { NPC_ROUTINE_NPC_TYPES } from './npcRoutinePresets'
 
@@ -463,5 +463,156 @@ describe('npc schema npcType field', () => {
         /provider|llm|persistence|sqlite|world-session|worldevent|worldcommand|memory|fact|server/i,
       )
     }
+  })
+})
+
+describe('ruined kingdom semantic visual vocabulary', () => {
+  it.each([
+    ['architecture', 'wall-ruined'],
+    ['furniture', 'chair'],
+    ['clutter', 'bloodstain'],
+    ['vegetation', 'dead-tree'],
+    ['light-fixture', 'brazier'],
+  ] as const)('parses the closed %s family kind %s', (type, kind) => {
+    const parsed = RoomObjectSchema.parse({
+      type,
+      kind,
+      position: [1, 0, 2],
+      condition: 'weathered',
+    })
+    expect(parsed.type).toBe(type)
+    expect('kind' in parsed && parsed.kind).toBe(kind)
+    expect('condition' in parsed && parsed.condition).toBe('weathered')
+  })
+
+  it.each([
+    ['architecture', 'castle-script'],
+    ['furniture', '../chair.glb'],
+    ['clutter', 'arbitrary clue'],
+    ['vegetation', 'dragon'],
+    ['light-fixture', 'shadow-light-command'],
+  ] as const)('skips unknown %s family kind %s', (type, kind) => {
+    const loaded = loadRoomSpec(minimalRoom([{ type, kind, position: [0, 0, 0] }]))
+    expect(loaded.objects).toEqual([])
+    expect(loaded.skipped).toHaveLength(1)
+  })
+
+  it('accepts a closed room environment without changing schemaVersion', () => {
+    const parsed = RoomSpecSchema.parse({
+      ...(minimalRoom([]) as Record<string, unknown>),
+      environmentKind: 'crypt',
+    })
+    expect(parsed.schemaVersion).toBe(1)
+    expect(parsed.environmentKind).toBe('crypt')
+  })
+
+  it('drops an invalid optional environment while preserving the room', () => {
+    const parsed = RoomSpecSchema.parse({
+      ...(minimalRoom([]) as Record<string, unknown>),
+      environmentKind: '../../remote-pack',
+    })
+    expect(parsed.environmentKind).toBeUndefined()
+  })
+
+  it('preserves closed legacy variants and static conditions', () => {
+    const parsed = RoomObjectSchema.parse({
+      type: 'arch',
+      variant: 'iron-gate',
+      condition: 'damaged',
+      position: [0, 0, 0],
+    })
+    expect(parsed.type === 'arch' && parsed.variant).toBe('iron-gate')
+    expect(parsed.type === 'arch' && parsed.condition).toBe('damaged')
+  })
+
+  it.each([
+    '../models/gate.glb',
+    'javascript:alert(1)',
+    'custom-shader',
+    'free form renderer instructions',
+  ])('drops invalid optional legacy variant %j without dropping the object', (variant) => {
+    const loaded = loadRoomSpec(minimalRoom([{
+      type: 'arch',
+      variant,
+      position: [0, 0, 0],
+    }]))
+    expect(loaded.skipped).toHaveLength(0)
+    const arch = loaded.objects[0]
+    expect(arch?.type === 'arch' && arch.variant).toBeUndefined()
+  })
+
+  it('accepts closed humanoid appearance for NPCs and zombies', () => {
+    const npc = RoomObjectSchema.parse({
+      type: 'npc',
+      name: 'Guard',
+      position: [0, 0, 0],
+      interaction: { key: 'F', prompt: 'Talk' },
+      appearance: {
+        preset: 'guard',
+        presentation: 'masculine',
+        palette: 'guard',
+        infection: 'none',
+        accessories: 'guard',
+      },
+    })
+    const zombie = RoomObjectSchema.parse({
+      type: 'zombie',
+      position: [1, 0, 0],
+      appearance: {
+        preset: 'zombie',
+        palette: 'undead',
+        infection: 'advanced',
+      },
+    })
+    expect(npc.type === 'npc' && npc.appearance?.preset).toBe('guard')
+    expect(zombie.type === 'zombie' && zombie.appearance?.infection).toBe('advanced')
+  })
+
+  it.each([
+    { preset: '../guard.glb' },
+    { preset: 'guard', materialPath: '/materials/guard.json' },
+    { preset: 'guard', clip: 'eval(playerText)' },
+    'guard',
+  ])('drops invalid optional appearance %# without dropping the humanoid', (appearance) => {
+    const loaded = loadRoomSpec(minimalRoom([{
+      type: 'npc',
+      name: 'Guard',
+      position: [0, 0, 0],
+      interaction: { key: 'F', prompt: 'Talk' },
+      appearance,
+    }]))
+    expect(loaded.skipped).toHaveLength(0)
+    const npc = loaded.objects[0]
+    expect(npc?.type === 'npc' && npc.appearance).toBeUndefined()
+  })
+
+  it('strips arbitrary renderer fields from the validated room and objects', () => {
+    const loaded = loadRoomSpec({
+      ...(minimalRoom([{
+        type: 'chest',
+        position: [0, 0, 0],
+        modelPath: 'https://attacker.invalid/chest.glb',
+        materialPath: '../material.json',
+        rendererInstructions: 'execute this code',
+      }]) as Record<string, unknown>),
+      visualPackPath: 'https://attacker.invalid/pack.json',
+      rendererCode: 'eval(raw)',
+    })
+    expect(loaded.skipped).toHaveLength(0)
+    expect(loaded).not.toHaveProperty('visualPackPath')
+    expect(loaded).not.toHaveProperty('rendererCode')
+    expect(loaded.objects[0]).not.toHaveProperty('modelPath')
+    expect(loaded.objects[0]).not.toHaveProperty('materialPath')
+    expect(loaded.objects[0]).not.toHaveProperty('rendererInstructions')
+  })
+
+  it('accepts the abuse ceiling and rejects one entry beyond it', () => {
+    const object = { type: 'rug', position: [0, 0, 0] }
+    expect(RoomSpecSchema.safeParse(minimalRoom(
+      Array.from({ length: ROOM_OBJECT_ENTRY_LIMIT }, () => object),
+    )).success).toBe(true)
+    expect(RoomSpecSchema.safeParse(minimalRoom(
+      Array.from({ length: ROOM_OBJECT_ENTRY_LIMIT + 1 }, () => object),
+    )).success).toBe(false)
   })
 })

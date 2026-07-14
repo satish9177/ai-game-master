@@ -1,5 +1,4 @@
 import type { LoadedRoom } from './loadRoomSpec'
-import type { RoomObject } from './roomSpec'
 import { LIMITS } from './validateRoom'
 
 /**
@@ -12,19 +11,21 @@ import { LIMITS } from './validateRoom'
  *
  * It is the code peer of validateRoom (ADR-0011): pure, synchronous, no logger,
  * no React/Three.js, no DB/server. It NEVER mutates its input — it returns a new
- * room — and it only ever removes or clamps, never invents content.
+ * room — and it only clamps the spawn position, never inventing content.
  *
- * v0 fixes (each maps to a repairable validateRoom fatal):
+ * v0 fix:
  * - `spawn-out-of-bounds`        → clamp spawn X/Z into the walkable AABB, using
  *                                  the SAME margin validateRoom uses.
- * - `object-budget-hard-exceeded`→ truncate `objects` to the hard object budget.
- * - `light-budget-hard-exceeded` → drop `torch` objects beyond the hard light
- *                                  budget (non-torch objects preserved).
+ *
+ * Object and light counts are deliberately not repair inputs. Rendering cost is
+ * controlled by the renderer's weighted budget, not by deleting semantic room
+ * objects. The high object-entry envelope is abuse protection and remains fatal
+ * rather than being truncated into a seemingly valid room.
  *
  * Deliberately NOT repaired (route to the fallback room in a later commit):
- * room dimensions (resizing would dislocate spawn/objects), reachability,
- * collision, quest consistency. Repair is a single pass; the caller re-runs
- * validateRoom and falls back if a fatal issue remains.
+ * room dimensions, an exceeded parser-abuse envelope, reachability, collision,
+ * or quest consistency. Repair is a single pass; the caller re-runs validateRoom
+ * and falls back if a fatal issue remains.
  *
  * Conventions: Y-up, meters, -Z = north.
  */
@@ -38,10 +39,7 @@ export function repairRoom(room: LoadedRoom): LoadedRoom {
     clampAxis(spawnZ, depth / 2 - walkableMargin),
   ]
 
-  // Drop excess lights first, then enforce the overall object cap on the result.
-  const objects = truncateObjects(truncateLights(room.objects))
-
-  return { ...room, spawn: { ...room.spawn, position }, objects }
+  return { ...room, spawn: { ...room.spawn, position } }
 }
 
 /**
@@ -52,33 +50,4 @@ export function repairRoom(room: LoadedRoom): LoadedRoom {
 function clampAxis(value: number, max: number): number {
   if (max <= 0) return 0
   return Math.min(Math.max(value, -max), max)
-}
-
-/**
- * Drop `torch` objects beyond the hard light budget, preserving order and every
- * non-torch object. Returns the same array reference when already within budget.
- */
-function truncateLights(objects: RoomObject[]): RoomObject[] {
-  let torchCount = 0
-  for (const object of objects) {
-    if (object.type === 'torch') torchCount += 1
-  }
-  if (torchCount <= LIMITS.MAX_LIGHTS_HARD) return objects
-
-  let kept = 0
-  return objects.filter((object) => {
-    if (object.type !== 'torch') return true
-    kept += 1
-    return kept <= LIMITS.MAX_LIGHTS_HARD
-  })
-}
-
-/**
- * Truncate the object list to the hard object budget. Returns the same array
- * reference when already within budget.
- */
-function truncateObjects(objects: RoomObject[]): RoomObject[] {
-  return objects.length > LIMITS.MAX_OBJECTS_HARD
-    ? objects.slice(0, LIMITS.MAX_OBJECTS_HARD)
-    : objects
 }

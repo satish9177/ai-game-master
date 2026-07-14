@@ -56,6 +56,8 @@ import {
   readEventConsequenceJournalEnabled,
 } from './app/eventConsequenceJournalSeam'
 import { navigateWithExitGate } from './app/gatedNavigation'
+import { evaluateGeneratedExitGate } from './app/generatedExitGate'
+import type { ExitGatePresentationResults } from './domain/visuals/objectPresentationState'
 import { LocalStorageSaveSlotStore } from './app/saveSlotStore'
 import { createConsoleLogger } from './platform/logger/consoleLogger'
 import { SystemClock } from './platform/system/clock'
@@ -89,6 +91,7 @@ import {
 import type { RoomMemoryDialogueContext } from './domain/dialogue/contracts'
 import { loadRoomSpec, type LoadedRoom } from './domain/loadRoomSpec'
 import { fallbackRoom as fallbackRoomSpec } from './domain/examples/fallbackRoom'
+import { ruinedKingdomShowcases } from './domain/examples/ruinedKingdomShowcases'
 import { FALLBACK_NOTICE, shouldShowFallbackNotice } from './app/fallbackNotice'
 import { buildRoomIntroView } from './app/roomIntro'
 import type { WorldBibleSeed } from './domain/worldBible/worldBibleSeed'
@@ -244,6 +247,28 @@ type ActivePlay = {
   entryResolvedObjectIds?: ReadonlySet<string>
   providerGateStatus?: ProviderGateStatus
   providerGate?: GeneratedMechanicalGate
+}
+
+function projectExitGatePresentationResults(
+  play: ActivePlay,
+  state: WorldState,
+): ExitGatePresentationResults {
+  const results = new Map<string, { gated: boolean }>()
+  if (play.objectivesPerRoom !== true) return results
+
+  for (const object of play.room.objects) {
+    const interaction = 'interaction' in object ? object.interaction : undefined
+    const toRoomId = interaction?.exit?.toRoomId
+    if (toRoomId === undefined || results.has(toRoomId)) continue
+    results.set(toRoomId, evaluateGeneratedExitGate({
+      room: play.room,
+      toRoomId,
+      state,
+      providerGateStatus: play.providerGateStatus,
+      providerGate: play.providerGate,
+    }))
+  }
+  return results
 }
 
 type AppRoomIntroProps = {
@@ -427,7 +452,10 @@ let exampleBootstrap: Promise<ExampleBootstrapResult | null> | undefined
 
 function bootstrapExamplePlay(): Promise<ExampleBootstrapResult | null> {
   exampleBootstrap ??= (async () => {
-    const resolved = await adjacentPregenerator.resolveRoom(STARTING_ROOM_ID)
+    const showcaseId = debugConfig.ruinedKingdomShowcaseId
+    const resolved = showcaseId === undefined
+      ? await adjacentPregenerator.resolveRoom(STARTING_ROOM_ID)
+      : { ok: true as const, room: loadRoomSpec(ruinedKingdomShowcases[showcaseId]) }
     if (!resolved.ok) {
       logger.error('starting room resolution failed', { code: resolved.reason })
       return null
@@ -448,8 +476,9 @@ function bootstrapExamplePlay(): Promise<ExampleBootstrapResult | null> {
       navigation: exampleNavigation,
       adjacentPregenerator,
       initialPlayer: projectPlayerHud(started.state),
-      questSpec: demoQuestSpec,
-      journalSpec: demoJournalSpec,
+      ...(showcaseId === undefined
+        ? { questSpec: demoQuestSpec, journalSpec: demoJournalSpec }
+        : {}),
       initialState: started.state,
     }
   })()
@@ -468,6 +497,7 @@ function App() {
   // closed-over state value. Same pattern as `activePlayRef`/`questSpecRef`.
   const roomEntrySeqRef = useRef(0)
   const [playerHud, setPlayerHud] = useState<PlayerHudView | null>(null)
+  const [exitGateResults, setExitGateResults] = useState<ExitGatePresentationResults>(new Map())
   const [worldClock, setWorldClock] = useState<WorldClock | null>(null)
   const [quest, setQuest] = useState<QuestView | null>(null)
   const [questHints, setQuestHints] = useState<QuestHintState | null>(null)
@@ -654,6 +684,7 @@ function App() {
   const enterActivePlay = useCallback((play: ActivePlay) => {
     activePlayRef.current = play
     setActivePlay(play)
+    setExitGateResults(new Map())
     roomEntrySeqRef.current += 1
     setRoomEntrySeq(roomEntrySeqRef.current)
     setMemoryFeedbackState(memoryFeedbackOnRoomEntry)
@@ -692,6 +723,9 @@ function App() {
     setPlayerHud(views.playerHud)
     setQuest(views.quest)
     setJournal(views.journal)
+    setExitGateResults(play === null
+      ? new Map()
+      : projectExitGatePresentationResults(play, state))
     refreshRoomMemoryContext(state)
   }, [refreshRoomMemoryContext])
 
@@ -1442,6 +1476,7 @@ function App() {
           npcDialogueService={npcDialogueService}
           requestDialogueAttempt={requestDialogueAttempt}
           onNavigate={handleNavigate}
+          exitGateResults={exitGateResults}
           onWorldStateChange={refreshDerivedViews}
           onCommittedInteractionEvents={handleCommittedInteractionEvents}
           onNpcDialogueResolved={handleNpcDialogueResolved}

@@ -44,13 +44,12 @@ One entry in `objects[]` has an unknown `type` or fails its schema.
 - **Detection** ✅ — `loadRoomSpec` validates each object **independently**
   (`safeParse`). Failures are collected into `skipped[]` and `warnings[]` instead
   of throwing. A valid `type` that simply has no builder yet is also handled.
-- **Handling** ✅ — the skipped entry renders as a bounded, non-interactive
-  **mystery marker** so unsupported content is *visible*, never fatal. The rest
-  of the room loads normally. Skipped raw data is not recovered, promoted, or made
-  interactive.
-- **User-facing** ✅ — an intentional mystery marker appears at the skipped
-  object's safe anchor; it shows no raw skipped type/name/id text, and everything
-  else works.
+- **Handling** ✅ — invalid entries stay in bounded diagnostics and are skipped; they are
+  never promoted or made interactive. Valid supported semantics resolve through the trusted
+  visual registry and its exact/family/environment/neutral production fallback hierarchy.
+- **User-facing** ✅ — the rest of the room remains playable. Production never exposes
+  the blue capsule, mystery seal, or primitive geometry for supported content; explicit
+  development/test configuration may still show a fixed debug marker.
 - **Logging** ✅ — room-load diagnostics use safe counts/reason buckets only for
   skipped generated objects. Logs never include raw prompt/provider bodies,
   generated JSON, raw skipped objects, object text, keys, or PII. 🔜 surfacing
@@ -244,9 +243,9 @@ notice — they are silently corrective and keep `provenance: generated`.
 | --- | --- | --- | --- |
 | Floor too small or too large | `clampGeneratedShell` (stage 2.5): width/depth outside `[14..24]` m | clamp to `[14..24]`; height unchanged | `sizeRepaired: true` bool only |
 | Object outside floor bounds | `repairGeneratedObjects` (stage 2.6): object footprint outside playable area | position object so its full footprint (rotation-invariant per-type radius, scaled and padded) stays inside walkable floor; decorative objects whose footprint cannot fit are dropped | `objectsRepaired: true` bool only |
-| Too many objects (> 30) | `repairGeneratedObjects` (stage 2.6): list exceeds `MAX_OBJECTS` cap | drop decorative first, then structural; critical objects are never dropped | `objectsRepaired: true` bool only |
+| Pathological object envelope (> 4,096) | RoomSpec schema abuse ceiling | reject the envelope/fallback; this is not a render or authored-content budget | fixed schema/fallback diagnostics only |
 | Wall-light (e.g. torch) in floor interior | `repairGeneratedObjects` (stage 2.6): wall-light anchor farther than `WALL_LIGHT_BAND` from any wall edge | nudge toward nearest wall/side edge (deterministic); lights already near a wall are left in place | `objectsRepaired: true` bool only |
-| Skipped/malformed mystery-marker anchor outside floor | `repairGeneratedObjects` (stage 2.6): skipped object anchor beyond playable area (using the bounded marker footprint) | clamp anchor inside playable floor; skipped object still renders as a mystery marker, just inside bounds | `objectsRepaired: true` bool only |
+| Invalid/skipped object has an out-of-bounds anchor | per-object schema validation | invalid object remains skipped and never becomes a production scene node | skipped reason count only |
 | Unsafe or crowded spawn | `repairGeneratedSpawn` (stage 2.8): spawn X/Z outside floor or within `SPAWN_CLEARANCE` of a blocking object | clamp to floor, then search deterministic candidate set (origin, ±step cardinal); fall back to clamped position | `spawnRepaired: true` bool only |
 | Exit arch misplaced | `repairGeneratedExits` (stage 2.9): exit-carrying object not on a wall face | snap to nearest wall face (north/south/east/west; ties north > south > east > west) | `exitsRepaired: true` bool only |
 
@@ -324,10 +323,10 @@ builders, while keeping normal validation authoritative.
 
 | Visual-vocabulary condition | Detection | Handling | Logging |
 | --- | --- | --- | --- |
-| Common safe object concept | `RoomObjectSchema` accepts first-class types such as `book`, `paper`, `map`, `chest`, `corpse`, `table`, `altar`, `statue`, `machine`, `artifact`, `candle` | render through trusted procedural builders; no external assets or executable model output | ordinary safe room/object counts only |
+| Common safe object concept | closed legacy or semantic-family RoomObject schema | resolve reviewed GLB node through exact/family/environment/neutral registry chain; no generated path or renderer code | safe counts only |
 | Natural noun drift in generated output | generated-room alias repair before `loadRoomSpec`; allowlisted type-only aliases only | map known nouns such as desk/skeleton/floor plan/generator to safe canonical types; if unsure, leave untouched for validation/skip | `aliasesRepaired` count/boolean surface only |
 | Malformed optional transform | generated-room optional transform repair before `loadRoomSpec` | remove malformed optional `scale`/`rotationY` so schema defaults apply | `objectTransformsRepaired` count/boolean surface only |
-| Unknown or malformed object remains | per-object `loadRoomSpec` validation | keep in `LoadedRoom.skipped`; render bounded non-interactive mystery marker; do not promote or recover raw data | `skippedObjectReasonCounts` buckets only |
+| Unknown or malformed object remains | per-object `loadRoomSpec` validation | keep bounded diagnostic and skip; do not promote/recover raw data or create production debug geometry | `skippedObjectReasonCounts` only |
 | Malformed required field (`position`, `interaction`, envelope, etc.) | normal schema validation | required field failures still skip object or fail/fallback according to existing pipeline | reason bucket/code only; no raw content |
 
 - **Provenance.** Vocabulary, alias, and optional-transform normalization are
@@ -575,19 +574,15 @@ A handful of invariants keep it robust; all are ✅ today.
   calls `CameraController.resize(aspect)`, which recomputes the orthographic
   frustum (`orthographicFrustum`) and `updateProjectionMatrix()`, so world units
   never stretch on a non-square or resized window.
-- **Player and camera must initialize safely before *and* after room load.** ✅
-  Both are constructed up front — the player marker is added to the scene and the
-  camera frames it at the origin — so the first frame before any room is valid; on
-  `setRoom` the player is placed at spawn and the camera snaps to it. No frame
-  reads a null camera/player.
-- **Interaction proximity must use the player, not the camera.** ✅ `updateProximity`
-  and the E/F open-key read `player.position`. A regression here (reading the
-  camera, which now sits tens of meters away at the isometric offset) would
-  silently break every HUD prompt — so it is called out explicitly.
-- **The player marker must dispose with the scene/engine.** ✅ The marker is part
-  of the scene graph, so the engine's total `dispose()` (`disposeObject(scene)` +
-  `scene.clear()`) frees its geometry/material like any other mesh — no separate
-  teardown path and no leak under StrictMode's mount → dispose → mount.
+- **Player and camera initialize safely around async pack loading.** ✅ Production Engine
+  starts without a blue capsule, awaits `setRoomWithVisualPack`, then installs the shared-rig
+  player and frames its logical root. Cancellation/disposal after an async load releases clones
+  and leaves no scene node mounted.
+- **Interaction proximity uses the player, not the camera.** ✅ HUD and E/F keys read the
+  logical player root; the velocity-facing visual child does not change proximity truth.
+- **Shared resources dispose exactly once.** ✅ Pack geometry/materials/textures/clips stay
+  cache-owned; room-owned indicators/material overrides and independent mixers are disposed by
+  the room/character lifecycle. StrictMode mount → dispose → mount is covered by tests.
 - **Cutaway walls must prevent occlusion without destroying readability.** ✅ The
   camera-facing south/east walls drop to a 0.4 m curb (well below the ~1.4 m marker
   and ~1.76 m NPCs at the ~35° camera angle), while the far north/west walls stay
@@ -1247,6 +1242,19 @@ view, behind an explicit default-OFF flag
   `journal` slot; the event source only ever replaces it after the existing
   authored/generated projection already ran, and only on flag-ON success.
 
+## 36. Ruined Kingdom Survival visual pack ✅ (closed renderer assets)
+
+| Failure | Detection | Degrades to | Logging |
+| --- | --- | --- | --- |
+| Exact asset/node unavailable | fixed registry lookup or cache load fails | family → environment → neutral production candidate | fixed code/count only; never URL/path/exception text |
+| Neutral production bundle unavailable | all trusted production candidates fail | fixed room-unavailable view; no primitive or debug geometry in production | `visual-pack-unavailable` only |
+| Rich room exceeds a weighted resource budget | deterministic planner totals trusted descriptor costs | instance static matches, lower LOD, static/frozen distant humanoids, emissive-only lights, no particles/transparency/low-priority shadows, then lower-cost production fallback; semantic objects retained | counts/booleans only |
+| Shared asset clone/load completes after room disposal | cache generation/disposed checks | stale clone discarded/released; room remains disposed | fixed cache error code only |
+| Interaction or gate state changes | pure projection from existing resolved ids/flags/gate result | live open/locked/looted/read/activated mesh state; no engine remount or truth mutation | none |
+| Invalid asset/path/material/clip/code field in generated JSON | RoomSpec exposes no such field; strict closed enums and red-team tests | field stripped or invalid object skipped before renderer | bounded reason counts only |
+
+The blue capsule, mystery seal, and primitive builders are development/emergency helpers only. A supported production room never selects them. Asset provenance, checksums, reviewed node/animation sets, byte limits, and CC0 attribution are enforced by `verify:visual-pack`.
+
 ---
 
 ## Summary
@@ -1254,22 +1262,22 @@ view, behind an explicit default-OFF flag
 | # | Failure | Detection | Degrades to | Status |
 | --- | --- | --- | --- | --- |
 | 1 | Bad envelope | `parse` throws | safe "couldn't load" screen | 🔜 |
-| 2 | Bad/unknown object | per-object `safeParse`; skipped generated-object reason buckets | bounded non-interactive mystery marker; no raw skipped text | ✅ |
+| 2 | Bad/unknown object | per-object `safeParse`; skipped generated-object reason buckets | invalid entry skipped; supported semantic content uses production fallback hierarchy; no raw skipped text or production debug geometry | ✅ |
 | 3 | WebGL unavailable/lost | capability check + event | fallback message | 🔜 |
 | 4 | Invalid generated JSON | `assembleRoom`: parse/schema/semantic stages → typed result | repaired or trusted fallback room + static notice; generator-unavailable → retry | ✅ v0 |
 | 4b | Valid spec, bad room | `validateRoom` (semantic) + deterministic `repairRoom` / fallback; 🔜 LLM reviewer | fatal → repair → render, else trusted fallback room | ✅ v0 |
 | 4c | World Bible seeding | schema validation + composition catch | raw-prompt generator seed; no stored bible; normal room pipeline | ✅ non-blocking v0 |
 | 4d | Real room provider | completeness check; fixed-code throw on network/timeout/empty/non-JSON | incomplete → fake (`config-disabled`); request failure → `unavailable` retry; malformed text → repaired/fallback | ✅ opt-in v0 (dev-only) |
-| 4e | Generated room layout normalization | shell clamp (2.5); footprint-aware object bounds + count cap + wall-light nudge + mystery-marker anchor clamp (2.6); spawn safe-area repair (2.8); exit wall-snap (2.9) — all pre-semantic | benign normalization keeps `provenance: generated` and shows no notice; authored/fallback rooms untouched | ✅ v0 |
+| 4e | Generated room layout normalization | shell clamp; footprint-aware bounds; wall-light nudge; spawn/exit repair; separate 4,096-entry abuse ceiling | rich valid layouts are never truncated to a small count; static pieces remain and weighted renderer budgets degrade expensive resources | ✅ |
 | 4f | Generated room composition and story-anchor normalization | role classification + deterministic zones (2.7), plus one derived story-anchor selector over validated `RoomObject.type`; after object legality and before spawn/exit finalizers | existing objects repositioned only; missing anchor/interactable accepted; no gameplay semantics; `provenance: generated`, no notice; authored/static/fallback untouched | ✅ v0 |
-| 4g | Generated room visual vocabulary normalization | trusted vocabulary/builders; generated alias repair; optional transform repair; skipped reason buckets | valid safe concepts render as readable objects; unknown/malformed entries remain mystery markers; benign normalization keeps `provenance: generated` | ✅ v0 |
+| 4g | Generated room visual vocabulary/pack | closed semantic vocabulary + alias repair + registry resolver | exact → family → environment → neutral production fallback; debug only in trusted development mode | ✅ |
 | 4h | Generated room theme vocabulary degradation | structured `WorldBibleSeed.themePack` only; missing theme/default path; no prompt or seed parsing | missing/unknown context falls back to default fantasy vocabulary and anchor priority; post-apoc suppresses fantasy-biased fake pools while keeping arch/npc; sci-fi/spaceship deferred to later theme packs | ✅ v0 |
 | 4i | Generated story threading degradation | closed `openingArc.pattern` + structural adjacent `roomId` depth only; escape has no anchor override | missing context/anchor falls back to previous adjacent seed/composition behavior; guidance never becomes quest/world state | ✅ v0 |
 | 4j | Generated room consequence journal degradation | generated journal input over authoritative state + closed status/context only | missing context/quest/counts omit entries or show empty journal; authored and generated journal sources never combine; no state mutation | ✅ v0 |
 | 5 | Backend/network | validated API requests + typed results | safe API envelope; browser retry state 🔜 | ✅ API edge v0 |
 | 6 | DB / persistence failure | typed results (rooms, conflicts) + fail-fast throws (open/migration/corrupt session) | safe API error; no browser surface yet | ✅ API-backed v0 |
 | 7 | Pre-gen not ready / return exit absent | one `resolveRoom` seam: cache hit / in-flight join / on-demand resolve (capped, depth-1 warming); generated return exit parse + re-validation | instant cached room, or safe on-demand resolve/generate; return-exit parse/validation miss → original valid room with no return exit; never a freeze | ✅ v0 (browser); status lifecycle 🔜 |
-| 8 | Iso camera/player presentation | resize→frustum; player-position proximity; scene-graph disposal; cutaway curbs | stable framing, no occlusion or leak | ✅ |
+| 8 | Iso camera/shared-player presentation | resize→frustum; shared rig logical root; swept/sliding collision; cache-aware disposal | stable framing/facing/collision with no primitive production player or shared-resource leak | ✅ |
 | 9 | Concurrent world append | optimistic revision check | typed conflict; neither event nor snapshot committed | ✅ headless |
 | 10 | Save integrity mismatch | validate log + seed + projected snapshot | reject whole save | ✅ headless |
 | 11 | Unsupported save version | envelope version check | typed rejection; no silent migration | ✅ headless |
@@ -1287,15 +1295,16 @@ view, behind an explicit default-OFF flag
 | 22 | Usage guardrail | `guardEnabled` (provider !== `'fake'`); `evaluate(state, config)` derives status per render; `inFlightRef` lock; `confirmGrantedRef` + `pendingPromptRef` for at-cap gate | fake → fully inert; real → count/cap/status drive `UsageMeter`; `at-cap` gates prompt until confirm; in-flight lock prevents double-click; never persisted; reset in-memory only | ✅ browser |
 | 23 | Room intro summary display | `buildRoomSummary` focal selection (anchor → interactable → NPC fallback; returns `null` when none qualify); `text.length === 0` guard in `RoomIntroPanel`; `resetKey` change resets dismiss state | no focal object → no panel; dismissed → panel hidden until next room entry; null summary never blocks play, triggers repair/fallback, or logs; summary text never contains object names, interaction bodies, or raw generated JSON | ✅ browser |
 | 24 | Generated interaction affordances | `affordanceFor` over validated `interaction.exit` / `encounter` / `dialogue` / `effect.kind` and NPC object type; HUD/ring consume derived `Interactable.affordance` | weak prompts mitigated by verb chip; ambiguous defaults to Inspect; ring tint is presentation-only; never repair/fallback/gameplay | ✅ browser |
-| 25 | Generated room object purpose and explore loop | `assignGeneratedObjectPurpose` runs only in generated `assembleRoom` after composition/spawn/exit repair and before final validation; reads validated object type + interaction presence only | allowlisted bare objects get presentation-only `{ key, prompt, title, body }`; pressing E opens the existing panel with safe fixed text; unsupported/existing/fallback paths unchanged; no gameplay/schema/backend/state change | ✅ generated assembly + browser UI |
+| 25 | Generated room object purpose and explore loop | `assignGeneratedObjectPurpose` runs after NPC/objective enrichment and before final validation | supported bare objects receive a stable inspect effect plus safe text and visible resolved state; purposeless unsupported affordances are removed; authored/fallback paths unchanged | ✅ |
 | 26 | NPC dialogue room context | `buildRoomDialogueContext` over validated `LoadedRoom`; optional service/provider packet; fake provider room-focus table after prompt/persona precedence | missing/no-focus/unsupported focus → existing generic fallback; prompt/persona lines unchanged; no repair/fallback/load failure or state mutation | ✅ browser/domain/dialogue |
-| 27 | Generated room NPC presence | raw prompt -> boolean `requestsNpc`; `ensureGeneratedNpcPresence` runs in generated `assembleRoom` after object-purpose enrichment and before final validation | requested+absent+safe tile -> one fixed generic TALK NPC; existing NPC preserved; no safe tile/false negative -> no-op; false positive -> harmless generic NPC | ✅ generated assembly/domain |
+| 27 | Generated room NPC presence | raw prompt → boolean `requestsNpc`; presence/dialogue normalization precedes objective/purpose enrichment | requested+absent+safe tile → one fixed TALK NPC; existing NPC preserved; no safe tile/false negative → no-op | ✅ |
 | 30 | Generated quest save/load | `loadGeneratedQuestSaveState` re-validates parked blob; `restoreGeneratedQuestPlay` calls `loadRoomSpec` only (no generator); `SlotWrapper.generatedQuestJson` parked alongside `saveGameJson`; authored saves never write the field | valid blob → generated play restored (room, questSpec, storyKind, hints, resolvedObjectIds); missing/invalid blob → authored-world fallback + `degraded` notice; no LLM call, no cost increment, no `SaveGame` schema change | ✅ v0 browser |
 | 31 | Generated room cache save/load | optional `generatedRoomCacheJson` re-validates after valid `generatedQuestJson`; `restoreGeneratedRoomCache` calls `loadRoomSpec` only; generated cache/navigation rebuilt over visited rooms | valid blob → current + visited generated rooms cached for stable backtracking; missing/corrupt blob → ADR-0059 current-room-only restore; beyond cap/unvisited rooms may regenerate; no provider/cost call | ✅ v0 browser |
 | 32 | Generated mechanical gate fake (derivation) | `buildGeneratedMechanicalGate` over the final room reuses ADR-0061 `validateGeneratedMechanicalGate` + `isGeneratedGateSatisfiable`; runs only when `AssembleRoomOptions.deriveMechanicalGateDiagnostic === true` (generated first-room only); room returned unchanged | flag-writer + exit present → contract-valid satisfiable `locked-exit` gate derivable, `mechanicalGateAvailable: true`; missing ingredient/unsatisfiable/option-off/fallback → `null`, `mechanicalGateAvailable: false`; gate never stored, persisted, or enforced; no mutation/schema/navigation change; diagnostic/log limited to the `mechanicalGateAvailable` boolean only | ✅ implemented (ADR-0062 Slice 2) |
 | 33 | Generated mechanical gate runtime enforcement | `evaluateGeneratedExitGate` re-derives gate from `activePlay.room` via `buildGeneratedMechanicalGate`; runs only in generated play (`generatedGateEnabled = objectivesPerRoom === true`); evaluates against freshly fetched `WorldState`; save/load stores no gate data and re-derives from the restored `LoadedRoom` + restored flags | `getWorldState` fails → pass `null` state → fail-open, navigate normally; gate `null` (no flag-writer, no exit, unsatisfiable) → fail-open; gate governs a different exit → fail-open; gate locked (flag absent/false) → `reason:'gate-locked'`, static UI message, `navigate` not called; gate unlocked (flag set by interaction) → navigate normally; missing/corrupt generated room cache does not break current-room gate behavior; authored/demo gate path (`reason:'blocked'`, Malik message) byte-identical; no schema/persistence/renderer/provider change | ✅ implemented (ADR-0063) |
 | 34 | Generated mechanical gate provider proposal | Real provider proposes untrusted structural gate data only; app derives the full `GeneratedMechanicalGate` and accepts it only after schema parse, frozen contract validation, and satisfiability checks; `providerGateStatus` / `providerGate` live only on transient `ActivePlay` | proposal fails, is rejected, times out, or is unsafe → `providerGateStatus:'rejected'` only in transient `ActivePlay`, navigation fails open for the provider path, deterministic fallback is not used after provider rejection; provider disabled or usage cap exhausted → no provider attempt and ADR-0063 deterministic behavior unchanged; no persistence/schema change; no raw gate/provider/prompt/flag/object IDs leak | ✅ implemented (ADR-0064) |
 | 35 | Consequence journal from events | flag read once in the app layer; `loadEventConsequenceJournal` try/catch over `getEventLog`; monotonic request id guards stale async results | OFF or any failure → existing authored/generated journal unchanged; ON + success → event-derived view fills the existing slot; no event-log mutation, no polling/subscriptions, no raw event text leakage | ✅ v1 |
+| 36 | Ruined Kingdom Survival visual pack | registry/cache/manifest validation + weighted planner + presentation projection | exact/family/environment/neutral production fallback; fail-closed production UI after neutral failure; no semantic object deletion | ✅ |
 
 The through-line: **validate at the boundary, degrade visibly and safely, log
 the detail, show the user calm.**

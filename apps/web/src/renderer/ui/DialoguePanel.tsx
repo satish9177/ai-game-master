@@ -40,6 +40,7 @@ export function DialoguePanel({
     <div className="panel-backdrop" onPointerDown={onClose}>
       <div
         className="panel"
+        data-panel-kind="interaction"
         role="dialog"
         aria-modal="true"
         aria-label={title}

@@ -110,6 +110,11 @@ const registry = {
   barrel: buildBarrel,
   debris: buildDebris,
   barricade: buildBarricade,
+  architecture: buildArchitecture,
+  furniture: buildFurniture,
+  clutter: buildClutter,
+  vegetation: buildVegetation,
+  'light-fixture': buildLightFixture,
   zombie: buildZombie,
 } satisfies ObjectBuilderRegistry
 
@@ -485,4 +490,245 @@ function archBox(
   )
   m.position.set(px, py, pz)
   return m
+}
+function buildArchitecture(
+  obj: ObjectOf<'architecture'>,
+  visualTheme: GeneratedRoomVisualTheme | null,
+): THREE.Object3D {
+  const group = new THREE.Group()
+  const material = makeThemedStandardMaterial(obj.color, visualTheme, 'focalAnchor')
+  const accent = makeThemedStandardMaterial(obj.accentColor, visualTheme, 'special')
+  const [width, height, depth] = obj.size
+
+  if (obj.kind === 'doorway' || obj.kind === 'gate' || obj.kind === 'window') {
+    const post = Math.max(0.14, width * 0.14)
+    group.add(semanticBox(post, height, depth, -width / 2, height / 2, 0, material))
+    group.add(semanticBox(post, height, depth, width / 2, height / 2, 0, material))
+    group.add(semanticBox(width + post, post, depth, 0, height - post / 2, 0, accent))
+    if (obj.kind === 'gate') {
+      for (const x of [-0.3, 0, 0.3]) {
+        group.add(semanticBox(post * 0.35, height * 0.72, depth * 0.45, x * width, height * 0.36, 0, accent))
+      }
+    }
+    return group
+  }
+
+  if (obj.kind === 'stairs') {
+    const steps = 5
+    for (let index = 0; index < steps; index += 1) {
+      const stepHeight = height * ((index + 1) / steps)
+      group.add(semanticBox(
+        width,
+        stepHeight,
+        depth / steps,
+        0,
+        stepHeight / 2,
+        depth / 2 - (index + 0.5) * (depth / steps),
+        index % 2 === 0 ? material : accent,
+      ))
+    }
+    return group
+  }
+
+  if (obj.kind === 'column') {
+    const shaft = new THREE.Mesh(
+      new THREE.CylinderGeometry(width * 0.25, width * 0.3, height * 0.82, 10),
+      material,
+    )
+    shaft.position.y = height * 0.51
+    group.add(shaft)
+    group.add(semanticBox(width * 0.8, height * 0.09, depth * 0.8, 0, height * 0.045, 0, accent))
+    group.add(semanticBox(width * 0.72, height * 0.09, depth * 0.72, 0, height * 0.955, 0, accent))
+    return group
+  }
+
+  if (obj.kind === 'well' || obj.kind === 'fountain' || obj.kind === 'pool') {
+    const rim = new THREE.Mesh(
+      new THREE.TorusGeometry(Math.max(width, depth) * 0.34, Math.min(width, depth) * 0.1, 8, 20),
+      material,
+    )
+    rim.rotation.x = Math.PI / 2
+    rim.position.y = height * 0.42
+    group.add(rim)
+    const basin = new THREE.Mesh(
+      new THREE.CylinderGeometry(width * 0.34, width * 0.42, height * 0.4, 16, 1, true),
+      accent,
+    )
+    basin.position.y = height * 0.2
+    group.add(basin)
+    return group
+  }
+
+  group.add(semanticBox(width, height, depth, 0, height / 2, 0, material))
+  if (obj.kind === 'wall-ruined') {
+    group.add(semanticBox(width * 0.35, height * 0.35, depth * 1.25, width * 0.3, height * 0.9, 0, accent))
+  } else {
+    group.add(semanticBox(width * 0.9, height * 0.08, depth * 1.08, 0, height * 0.78, 0, accent))
+  }
+  return group
+}
+
+function buildFurniture(
+  obj: ObjectOf<'furniture'>,
+  visualTheme: GeneratedRoomVisualTheme | null,
+): THREE.Object3D {
+  const group = new THREE.Group()
+  const wood = makeThemedStandardMaterial(obj.color, visualTheme, 'focalAnchor')
+  const accent = makeThemedStandardMaterial(obj.accentColor, visualTheme, 'special')
+  const [width, height, depth] = obj.size
+  const seatHeight = height * 0.48
+
+  if (obj.kind === 'bed') {
+    group.add(semanticBox(width, height * 0.22, depth, 0, height * 0.28, 0, accent))
+    group.add(semanticBox(width * 0.92, height * 0.18, depth * 0.82, 0, height * 0.5, 0, wood))
+    group.add(semanticBox(width, height, depth * 0.12, 0, height / 2, -depth * 0.44, accent))
+    return group
+  }
+
+  if (obj.kind === 'shelf' || obj.kind === 'bookcase' || obj.kind === 'cabinet' || obj.kind === 'wardrobe') {
+    group.add(semanticBox(width, height, depth * 0.18, 0, height / 2, depth * 0.4, accent))
+    group.add(semanticBox(width * 0.1, height, depth, -width * 0.45, height / 2, 0, wood))
+    group.add(semanticBox(width * 0.1, height, depth, width * 0.45, height / 2, 0, wood))
+    for (const y of [0.08, 0.38, 0.68, 0.96]) {
+      group.add(semanticBox(width, height * 0.07, depth, 0, height * y, 0, wood))
+    }
+    return group
+  }
+
+  const topDepth = obj.kind === 'chair' || obj.kind === 'stool' || obj.kind === 'bench'
+    ? depth * 0.85
+    : depth
+  group.add(semanticBox(width, height * 0.16, topDepth, 0, seatHeight, 0, wood))
+  const legX = width * 0.4
+  const legZ = topDepth * 0.36
+  for (const x of [-legX, legX]) {
+    for (const z of [-legZ, legZ]) {
+      group.add(semanticBox(width * 0.1, seatHeight, depth * 0.1, x, seatHeight / 2, z, accent))
+    }
+  }
+  if (obj.kind === 'chair' || obj.kind === 'bench') {
+    group.add(semanticBox(width, height * 0.55, depth * 0.1, 0, height * 0.72, -depth * 0.4, wood))
+  }
+  return group
+}
+
+function buildClutter(
+  obj: ObjectOf<'clutter'>,
+  visualTheme: GeneratedRoomVisualTheme | null,
+): THREE.Object3D {
+  const group = new THREE.Group()
+  const material = makeThemedStandardMaterial(obj.color, visualTheme, 'industrial')
+  const accent = makeThemedStandardMaterial(obj.accentColor, visualTheme, 'special')
+  const [width, height, depth] = obj.size
+
+  if (obj.kind === 'bloodstain' || obj.kind === 'markings') {
+    const stain = new THREE.Mesh(
+      new THREE.CircleGeometry(Math.max(width, depth) * 0.5, 12),
+      material,
+    )
+    stain.rotation.x = -Math.PI / 2
+    stain.position.y = 0.012
+    group.add(stain)
+    return group
+  }
+
+  if (obj.kind === 'bottle' || obj.kind === 'mug' || obj.kind === 'pot' || obj.kind === 'potion') {
+    const vessel = new THREE.Mesh(
+      new THREE.CylinderGeometry(width * 0.28, width * 0.42, height * 0.72, 10),
+      material,
+    )
+    vessel.position.y = height * 0.36
+    group.add(vessel)
+    group.add(semanticBox(width * 0.2, height * 0.28, depth * 0.2, 0, height * 0.86, 0, accent))
+    return group
+  }
+
+  for (const [x, y, z, scale] of [
+    [-0.24, 0.18, -0.12, 0.55],
+    [0.18, 0.13, 0.16, 0.42],
+    [0.05, 0.25, -0.2, 0.36],
+  ] as const) {
+    const piece = new THREE.Mesh(new THREE.DodecahedronGeometry(scale, 0), material)
+    piece.position.set(x * width, y * height, z * depth)
+    piece.scale.set(width, height, depth)
+    group.add(piece)
+  }
+  return group
+}
+
+function buildVegetation(
+  obj: ObjectOf<'vegetation'>,
+  visualTheme: GeneratedRoomVisualTheme | null,
+): THREE.Object3D {
+  const group = new THREE.Group()
+  const foliage = makeThemedStandardMaterial(obj.color, visualTheme, 'focalAnchor')
+  const bark = makeThemedStandardMaterial(obj.accentColor, visualTheme, 'industrial')
+  const [width, height, depth] = obj.size
+
+  if (obj.kind === 'rock' || obj.kind === 'stump') {
+    const rock = new THREE.Mesh(new THREE.DodecahedronGeometry(0.5, 0), obj.kind === 'rock' ? bark : foliage)
+    rock.scale.set(width, height, depth)
+    rock.position.y = height * 0.45
+    group.add(rock)
+    return group
+  }
+
+  const trunk = new THREE.Mesh(
+    new THREE.CylinderGeometry(width * 0.12, width * 0.18, height * 0.64, 8),
+    bark,
+  )
+  trunk.position.y = height * 0.32
+  group.add(trunk)
+  for (const [x, y, z, scale] of [
+    [0, 0.72, 0, 0.48],
+    [-0.2, 0.58, 0.08, 0.36],
+    [0.22, 0.6, -0.1, 0.34],
+  ] as const) {
+    const crown = new THREE.Mesh(new THREE.DodecahedronGeometry(0.5, 0), foliage)
+    crown.position.set(x * width, y * height, z * depth)
+    crown.scale.setScalar(scale * Math.max(width, depth))
+    group.add(crown)
+  }
+  return group
+}
+
+function buildLightFixture(
+  obj: ObjectOf<'light-fixture'>,
+  visualTheme: GeneratedRoomVisualTheme | null,
+): THREE.Object3D {
+  const group = new THREE.Group()
+  const metal = makeThemedStandardMaterial(obj.color, visualTheme, 'industrial')
+  const flame = makeThemedStandardMaterial(obj.flameColor, visualTheme, 'special', {
+    emissive: obj.flameColor,
+    emissiveIntensity: 2,
+  })
+  const [width, height, depth] = obj.size
+  group.add(semanticBox(width * 0.7, height * 0.08, depth * 0.7, 0, height * 0.08, 0, metal))
+  const cage = new THREE.Mesh(
+    new THREE.CylinderGeometry(width * 0.26, width * 0.34, height * 0.62, 8, 1, true),
+    metal,
+  )
+  cage.position.y = height * 0.38
+  group.add(cage)
+  const glow = new THREE.Mesh(new THREE.OctahedronGeometry(width * 0.18, 0), flame)
+  glow.position.y = height * 0.4
+  group.add(glow)
+  const light = new THREE.PointLight(obj.light.color, obj.light.intensity, obj.light.distance)
+  light.position.y = height * 0.48
+  group.add(light)
+  return group
+}
+
+function semanticBox(
+  sx: number,
+  sy: number,
+  sz: number,
+  x: number,
+  y: number,
+  z: number,
+  material: THREE.Material,
+): THREE.Mesh {
+  const mesh = new THREE.Mesh(new THREE.BoxGeometry(sx, sy, sz), material)
+  mesh.position.set(x, y, z)
+  return mesh
 }

@@ -9,8 +9,13 @@ import { AFFORDANCE_LABEL } from '../../domain/interactions/affordance'
 export function Hud({ active }: { active: Interactable | null }) {
   if (!active) return null
   const resolved = active.resolved === true
+  const className = `hud hud--affordance-${active.affordance}${resolved ? ' hud--resolved' : ''}`
   return (
-    <div className={resolved ? 'hud hud--resolved' : 'hud'} aria-live="polite">
+    <div
+      className={className}
+      aria-live="polite"
+      aria-atomic="true"
+    >
       <span className="hud-key">{active.key}</span>
       <span className="hud-affordance">{AFFORDANCE_LABEL[active.affordance]}</span>
       {resolved && (

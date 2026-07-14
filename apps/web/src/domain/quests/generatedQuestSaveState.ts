@@ -97,6 +97,7 @@ function projectLoadedRoomToSpec(room: LoadedRoom): RoomSpec {
     schemaVersion: room.schemaVersion,
     id: room.id,
     name: room.name,
+    ...(room.environmentKind === undefined ? {} : { environmentKind: room.environmentKind }),
     shell: room.shell,
     spawn: room.spawn,
     lighting: room.lighting,

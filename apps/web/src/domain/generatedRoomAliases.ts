@@ -3,10 +3,10 @@ import type { RoomObject } from './roomSpec'
 /**
  * Deterministic alias repair for generated rooms only (Slice 7D.1).
  *
- * Converts common natural-language noun type strings that real LLM providers
- * emit into existing canonical RoomSpec object types before loadRoomSpec runs.
- * Only the `type` field is rewritten; every other field is preserved as-is and
- * passed to the normal Zod validation boundary unchanged.
+ * Converts common natural-language nouns into a canonical RoomSpec type plus
+ * a closed semantic variant before loadRoomSpec runs. Other fields are copied
+ * unchanged and still pass through the normal Zod validation boundary.
+ * Alias meaning never becomes an asset path or renderer instruction.
  *
  * Rules:
  * - Pure and synchronous: no I/O, no logger, no mutation of input.
@@ -160,6 +160,174 @@ const ALIAS_TABLE: ReadonlyMap<string, CanonicalType> = new Map<string, Canonica
   ['barrels', 'barrel'],
 ])
 
+type VariantOf<T> = T extends { variant?: infer Variant }
+  ? Exclude<Variant, undefined>
+  : never
+type SemanticVariant = VariantOf<RoomObject>
+
+/** Alias-specific semantic detail retained after canonical type repair. */
+const ALIAS_VARIANT_TABLE: ReadonlyMap<string, SemanticVariant> = new Map<string, SemanticVariant>([
+  // paper
+  ['notes', 'notes'],
+  ['note', 'notes'],
+  ['letter', 'letter'],
+  ['letters', 'letter'],
+  ['parchment', 'parchment'],
+  ['papers', 'sheet'],
+  ['document', 'sheet'],
+  ['documents', 'sheet'],
+  ['page', 'sheet'],
+  ['pages', 'sheet'],
+
+  // book
+  ['journal', 'journal'],
+  ['journals', 'journal'],
+  ['diary', 'journal'],
+  ['tome', 'tome'],
+  ['ledger', 'ledger'],
+  ['books', 'closed-book'],
+
+  // map
+  ['floor plan', 'floor-plan'],
+  ['floorplan', 'floor-plan'],
+  ['route chart', 'route-map'],
+  ['chart', 'world-map'],
+  ['blueprint', 'floor-plan'],
+  ['maps', 'world-map'],
+
+  // corpse
+  ['dead body', 'body'],
+  ['skeleton', 'skeleton'],
+  ['skeletons', 'skeleton'],
+  ['bones', 'bone-pile'],
+  ['remains', 'decayed-remains'],
+  ['cadaver', 'body'],
+  ['corpses', 'body'],
+
+  // table
+  ['desk', 'desk'],
+  ['desks', 'desk'],
+  ['workbench', 'workbench'],
+  ['worktable', 'workbench'],
+  ['work table', 'workbench'],
+  ['counter', 'counter'],
+  ['tables', 'table'],
+
+  // altar
+  ['shrine', 'shrine'],
+  ['ritual platform', 'ritual-platform'],
+  ['ritual altar', 'ritual-platform'],
+  ['offering table', 'offering-table'],
+  ['altars', 'altar'],
+
+  // statue
+  ['monument', 'monument'],
+  ['idol', 'idol'],
+  ['effigy', 'effigy'],
+  ['sculpture', 'sculpture'],
+  ['statues', 'statue'],
+
+  // machine
+  ['generator', 'generator'],
+  ['console', 'console'],
+  ['machinery', 'machinery'],
+  ['lab equipment', 'lab-equipment'],
+  ['terminal', 'terminal'],
+  ['apparatus', 'apparatus'],
+  ['machines', 'machine'],
+
+  // artifact
+  ['crystal', 'crystal'],
+  ['crystals', 'crystal'],
+  ['relic', 'relic'],
+  ['relics', 'relic'],
+  ['orb', 'orb'],
+  ['strange object', 'strange-object'],
+  ['gem', 'gem'],
+  ['shard', 'shard'],
+  ['totem', 'totem'],
+  ['artifacts', 'artifact'],
+
+  // candle
+  ['candles', 'cluster'],
+  ['small flames', 'cluster'],
+  ['votive', 'votive'],
+  ['tea light', 'tea-light'],
+  ['tealight', 'tea-light'],
+
+  // arch
+  ['door', 'wood-door'],
+  ['doors', 'wood-door'],
+  ['doorway', 'wood-door'],
+  ['gate', 'iron-gate'],
+
+  ['gateway', 'iron-gate'],
+  ['archway', 'stone-arch'],
+  ['portal', 'stone-portal'],
+  ['entrance', 'entrance'],
+
+  // debris
+  ['rubble', 'rubble'],
+  ['trash', 'trash'],
+  ['garbage', 'trash'],
+  ['junk', 'junk'],
+  ['wreckage', 'wreckage'],
+  ['scrap', 'scrap'],
+  ['broken parts', 'broken-parts'],
+  ['debris pile', 'debris-pile'],
+
+  // crate
+  ['box', 'box'],
+  ['boxes', 'box'],
+  ['container', 'crate'],
+  ['containers', 'crate'],
+  ['case', 'case'],
+  ['crates', 'crate'],
+  ['supply crate', 'supply-crate'],
+
+  // chest
+  ['treasure chest', 'treasure-chest'],
+  ['lockbox', 'lockbox'],
+  ['coffer', 'coffer'],
+  ['strongbox', 'strongbox'],
+  ['footlocker', 'footlocker'],
+
+  // barrel
+  ['drum', 'drum'],
+  ['keg', 'keg'],
+  ['cask', 'cask'],
+  ['barrels', 'barrel'],
+])
+/**
+ * Closed, renderer-agnostic catalog of every generated noun repair.
+ *
+ * Exporting the catalog lets focused boundary tests prove that every accepted
+ * alias reaches a trusted visual-pack mapping without teaching the domain
+ * layer anything about renderer families, assets, paths, or licenses.
+ */
+export type GeneratedRoomAliasCatalogEntry = Readonly<{
+  alias: string
+  type: RoomObject['type']
+  variant: SemanticVariant
+}>
+
+export const GENERATED_ROOM_ALIAS_CATALOG: readonly GeneratedRoomAliasCatalogEntry[] =
+  Object.freeze(Array.from(ALIAS_TABLE, ([alias, type]) => {
+    const variant = ALIAS_VARIANT_TABLE.get(alias)
+    if (variant === undefined) {
+      throw new Error('generated alias catalog invariant failed')
+    }
+    return Object.freeze({ alias, type, variant })
+  }))
+
+const ALIAS_RESOLUTION_TABLE: ReadonlyMap<
+  string,
+  Readonly<{ type: CanonicalType; variant: SemanticVariant }>
+> = new Map(GENERATED_ROOM_ALIAS_CATALOG.map(({ alias, type, variant }) => [
+  alias,
+  { type, variant },
+]))
+
 /** Normalizes a raw type string for alias lookup: lowercase, trim, collapse whitespace. */
 function normalizeType(raw: string): string {
   return raw.toLowerCase().trim().replace(/\s+/g, ' ')
@@ -170,8 +338,11 @@ function normalizeType(raw: string): string {
  * the canonical type string when found, or `null` when the input is not in the
  * table (including when it already IS a canonical type — those are not aliased).
  */
-function resolveAlias(raw: string): CanonicalType | null {
-  return ALIAS_TABLE.get(normalizeType(raw)) ?? null
+function resolveAlias(
+  raw: string,
+): { type: CanonicalType; variant: SemanticVariant } | null {
+  const normalized = normalizeType(raw)
+  return ALIAS_RESOLUTION_TABLE.get(normalized) ?? null
 }
 
 /**
@@ -185,10 +356,13 @@ function repairEntry(entry: unknown): { entry: unknown; changed: boolean } {
   const obj = entry as Record<string, unknown>
   if (typeof obj['type'] !== 'string') return { entry, changed: false }
 
-  const canonical = resolveAlias(obj['type'])
-  if (canonical === null) return { entry, changed: false }
+  const resolution = resolveAlias(obj['type'])
+  if (resolution === null) return { entry, changed: false }
 
-  return { entry: { ...obj, type: canonical }, changed: true }
+  return {
+    entry: { ...obj, type: resolution.type, variant: resolution.variant },
+    changed: true,
+  }
 }
 
 /**

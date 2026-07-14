@@ -104,6 +104,17 @@ describe('buildGeneratedQuestSaveState', () => {
     expect(loaded).toEqual({ ok: true, state })
   })
 
+  it('round-trips the optional room environment kind', () => {
+    const room = makeRoom({ environmentKind: 'crypt' })
+    const state = buildGeneratedQuestSaveState(makeInput({ room }))
+    expect(state?.room.environmentKind).toBe('crypt')
+
+    const loaded = loadGeneratedQuestSaveState(JSON.stringify(state))
+
+    expect(loaded.ok).toBe(true)
+    expect(loaded.ok ? loaded.state.room.environmentKind : undefined).toBe('crypt')
+  })
+
   it('round-trips minimal input with optional fields absent', () => {
     const state = buildGeneratedQuestSaveState(
       makeInput({ questSpec: undefined, storyKind: undefined, hints: undefined }),
@@ -116,6 +127,7 @@ describe('buildGeneratedQuestSaveState', () => {
     if (!loaded.ok) return
     expect('questSpec' in loaded.state).toBe(false)
     expect('storyKind' in loaded.state).toBe(false)
+    expect('environmentKind' in loaded.state.room).toBe(false)
     expect('hints' in loaded.state).toBe(false)
   })
 

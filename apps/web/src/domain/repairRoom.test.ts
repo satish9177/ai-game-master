@@ -48,24 +48,18 @@ describe('repairRoom', () => {
     expect(repairRoom(room).spawn.position).toEqual([1, 1.7, -2])
   })
 
-  it('truncates objects beyond the hard object budget', () => {
-    const objects = Array.from({ length: LIMITS.MAX_OBJECTS_HARD + 5 }, pillar)
+  it('preserves rich object lists and never drops lights for rendering cost', () => {
+    const objects = [
+      ...Array.from({ length: 500 }, pillar),
+      ...Array.from({ length: 100 }, torch),
+    ]
     const room = makeRoom({ objects })
-    expect(room.objects).toHaveLength(LIMITS.MAX_OBJECTS_HARD + 5)
-
-    expect(repairRoom(room).objects).toHaveLength(LIMITS.MAX_OBJECTS_HARD)
-  })
-
-  it('drops torches beyond the hard light budget, keeping non-torch objects', () => {
-    const torches = Array.from({ length: LIMITS.MAX_LIGHTS_HARD + 3 }, torch)
-    const room = makeRoom({ objects: [pillar(), ...torches] })
 
     const repaired = repairRoom(room)
-    const torchCount = repaired.objects.filter((o) => o.type === 'torch').length
-    const pillarCount = repaired.objects.filter((o) => o.type === 'pillar').length
 
-    expect(torchCount).toBe(LIMITS.MAX_LIGHTS_HARD)
-    expect(pillarCount).toBe(1)
+    expect(repaired.objects).toBe(room.objects)
+    expect(repaired.objects).toHaveLength(600)
+    expect(repaired.objects.filter((object) => object.type === 'torch')).toHaveLength(100)
   })
 
   it('is deterministic', () => {
@@ -77,7 +71,7 @@ describe('repairRoom', () => {
   })
 
   it('does not mutate the input room', () => {
-    const objects = Array.from({ length: LIMITS.MAX_OBJECTS_HARD + 2 }, pillar)
+    const objects = Array.from({ length: 500 }, pillar)
     const room = makeRoom({ spawn: [100, 1.7, -100], objects })
     const spawnBefore = [...room.spawn.position]
     const lengthBefore = room.objects.length

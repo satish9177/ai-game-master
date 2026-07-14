@@ -50,16 +50,20 @@ export function ensureGeneratedObjectiveTarget(
   if (targetIndex === -1) return { room, objectiveTargetEnriched: false }
 
   const target = room.objects[targetIndex]!
-  if (!hasInteraction(target)) return { room, objectiveTargetEnriched: false }
 
   const id = target.id ?? nextObjectiveTargetId(room)
   const objects = room.objects.map((object, index): RoomObject => {
-    if (index !== targetIndex || !hasInteraction(object)) return object
+    if (index !== targetIndex) return object
+    const existing = 'interaction' in object ? object.interaction : undefined
     return {
       ...object,
       id,
       interaction: {
-        ...object.interaction,
+        key: 'E',
+        prompt: 'Inspect',
+        title: 'Inspect',
+        body: 'You inspect it and leave it visibly resolved.',
+        ...existing,
         effect: { kind: 'inspect' },
       },
     } as RoomObject
@@ -89,10 +93,10 @@ function selectTargetIndex(objects: RoomObject[]): number {
 
 function candidatePriority(object: RoomObject): number | null {
   if (!isObjectiveTargetType(object.type)) return null
-  if (!hasInteraction(object)) return null
-  if (object.interaction.effect != null) return null
-  if (object.interaction.encounter != null) return null
-  if (object.interaction.exit != null) return null
+  const interaction = 'interaction' in object ? object.interaction : undefined
+  if (interaction?.effect != null) return null
+  if (interaction?.encounter != null) return null
+  if (interaction?.exit != null) return null
   return OBJECTIVE_TARGET_PRIORITY[object.type]
 }
 

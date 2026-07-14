@@ -53,7 +53,7 @@ import type { GeneratedStoryThreadKind } from './generatedStoryThread'
  *   floor-size clamp into the contract (reported separately via `sizeRepaired`).
  *   No playability repair was needed, so the host shows NO notice.
  * - `repaired`  — a deterministic `repairRoom` pass fixed a fatal playability
- *   issue (spawn clamp, budget truncation). The host shows its safe notice.
+ *   issue (currently a spawn clamp). The host shows its safe notice.
  * - `fallback`  — assembly failed; the trusted fallback room was substituted.
  *   The host shows its safe notice.
  */
@@ -77,8 +77,8 @@ export type RoomDiagnostics = {
   sizeRepaired: boolean
   /**
    * Whether any generated room object was normalized for layout: a footprint-aware
-   * clamp into the playable floor, a wall-light nudge to a wall-side, a skipped
-   * placeholder anchor clamp, or a trim to the generated-room object cap.
+   * clamp into the playable floor, a wall-light nudge to a wall-side, or a
+   * skipped placeholder anchor clamp.
    * This is a benign normalization, NOT a playability repair: object repair keeps
    * provenance `generated` and must NOT trigger the host's repair/fallback notice.
    * Always false for a fallback room (the authored fallback objects are untouched).
@@ -244,10 +244,10 @@ export function assembleRoom(
   const clamped = clampGeneratedShell(loaded)
   const sizeRepaired = clamped !== loaded
 
-  // Stage 2.6 — clamp object X/Z positions into the playable floor area and cap
-  // the object count at GENERATED_ROOM.MAX_OBJECTS. Both are benign normalizations
-  // (like sizeRepaired): they keep provenance `generated` and must NOT trigger the
-  // host's notice. Authored/fallback rooms never pass through this step.
+  // Stage 2.6 — clamp object X/Z positions into the playable floor area. This is
+  // a benign normalization (like sizeRepaired): it keeps provenance `generated`
+  // and must NOT trigger the host's notice. Authored/fallback rooms never pass
+  // through this step.
   const objectsFixed = repairGeneratedObjects(clamped)
   const objectsRepaired = objectsFixed !== clamped
 
@@ -296,25 +296,16 @@ export function assembleRoom(
   const exitsFixed = repairGeneratedExits(exitNavigationFixed)
   const exitsRepaired = exitsFixed !== exitNavigationFixed
 
-  // Stage 2.11 — assign presentation-only purposes to safe generated objects
-  // that currently lack an interaction. This is generated-room-only because
-  // authored/static/fallback/restored rooms never enter assembleRoom. It does
-  // not affect geometry, exits, effects, encounters, quests, inventory, or world
-  // state, and it returns only a count for diagnostics.
-  const purposeResult = assignGeneratedObjectPurpose(exitsFixed)
-  const purposeFixed = purposeResult.room
-  const { purposesAssigned } = purposeResult
-
-  // Stage 2.12 — optionally insert one safe generated NPC from a boolean-only
+  // Stage 2.11 — optionally insert one safe generated NPC from a boolean-only
   // prompt classifier signal. No prompt text enters this domain function.
-  const npcPresenceResult = ensureGeneratedNpcPresence(purposeFixed, {
+  const npcPresenceResult = ensureGeneratedNpcPresence(exitsFixed, {
     requested: options.requestsNpc ?? false,
     themePack: options.themePack,
   })
   const npcPresenceFixed = npcPresenceResult.room
   const { npcInserted } = npcPresenceResult
 
-  // Stage 2.12.2 - unconditionally normalize dialogue onto any generated-room NPC
+  // Stage 2.11.2 — unconditionally normalize dialogue onto any generated-room NPC
   // (inserted above or already present in the generator's raw output) that lacks
   // `interaction.dialogue`, assigning a collision-safe id first where absent.
   const npcDialogueResult = ensureGeneratedNpcDialogue(npcPresenceFixed, {
@@ -323,7 +314,7 @@ export function assembleRoom(
   const npcDialogueFixed = npcDialogueResult.room
   const { npcDialogueNormalizedCount } = npcDialogueResult
 
-  // Stage 2.12.5 - optionally promote one existing eligible generated object to
+  // Stage 2.12 — optionally promote one existing eligible generated object to
   // objective-ready. Gated off by default; adds only an inspect effect.
   const objectiveTargetResult = options.enrichObjectiveTarget === true
     ? ensureGeneratedObjectiveTarget(npcDialogueFixed)
@@ -331,8 +322,15 @@ export function assembleRoom(
   const objectiveTargetFixed = objectiveTargetResult.room
   const { objectiveTargetEnriched } = objectiveTargetResult
 
-  // Stage 2.13 - display sanitization runs after objective target enrichment.
-  const displayTextResult = sanitizeGeneratedDisplayText(objectiveTargetFixed)
+  // Stage 2.13 — give supported generated objects a stable, purposeful inspect
+  // effect and remove unsupported body-only affordances. Existing exits, encounters,
+  // dialogues, and effects remain authoritative and unchanged.
+  const purposeResult = assignGeneratedObjectPurpose(objectiveTargetFixed)
+  const purposeFixed = purposeResult.room
+  const { purposesAssigned } = purposeResult
+
+  // Stage 2.14 — display sanitization runs after all interaction enrichment.
+  const displayTextResult = sanitizeGeneratedDisplayText(purposeFixed)
   const displayTextFixed = displayTextResult.room
   const { displayTextSanitized, displayTextSanitizationCount } = displayTextResult
   const mechanicalGateAvailable = options.deriveMechanicalGateDiagnostic === true
@@ -379,10 +377,10 @@ export function assembleRoom(
   }
 
   // Stage 4 — one deterministic repair pass on the normalized room, then re-validate.
-  // NOTE: Stages 2.5–2.9 currently pre-empt every fatal that repairRoom can fix
-  // (spawn-out-of-bounds and object/light hard budgets), so the "repaired" branch
-  // is intentionally dormant through this pipeline today. It is retained for future
-  // repairable fatals that are not covered by generated-room normalizers.
+  // NOTE: Stages 2.5–2.9 currently pre-empt the spawn fatal that repairRoom can
+  // fix, so the "repaired" branch is intentionally dormant through this pipeline
+  // today. It is retained for future repairable fatals that are not covered by
+  // generated-room normalizers.
   // repairRoom itself remains unit-tested directly.
   const initialFatalCodes = distinctFatalCodes(initial)
   const repaired = repairRoom(displayTextFixed)

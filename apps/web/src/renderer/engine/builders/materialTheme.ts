@@ -8,7 +8,7 @@ export type ThemeMaterialRole = 'shell' | 'focalAnchor' | 'industrial' | 'specia
 
 export type ThemedMaterialFinish = Pick<
   THREE.MeshStandardMaterialParameters,
-  'roughness' | 'metalness'
+  'roughness' | 'metalness' | 'flatShading'
 >
 
 const THEMED_FINISH: Record<
@@ -16,16 +16,16 @@ const THEMED_FINISH: Record<
   Record<ThemeMaterialRole, ThemedMaterialFinish>
 > = {
   'fantasy-keep': {
-    shell: { roughness: 0.88, metalness: 0.01 },
-    focalAnchor: { roughness: 0.84, metalness: 0.02 },
-    industrial: { roughness: 0.82, metalness: 0.03 },
-    special: { roughness: 0.72, metalness: 0.03 },
+    shell: { roughness: 0.94, metalness: 0, flatShading: true },
+    focalAnchor: { roughness: 0.86, metalness: 0.01, flatShading: true },
+    industrial: { roughness: 0.74, metalness: 0.2, flatShading: true },
+    special: { roughness: 0.64, metalness: 0.04, flatShading: true },
   },
   'post-apoc': {
-    shell: { roughness: 0.9, metalness: 0.08 },
-    focalAnchor: { roughness: 0.86, metalness: 0.06 },
-    industrial: { roughness: 0.78, metalness: 0.16 },
-    special: { roughness: 0.68, metalness: 0.12 },
+    shell: { roughness: 0.93, metalness: 0.02, flatShading: true },
+    focalAnchor: { roughness: 0.88, metalness: 0.04, flatShading: true },
+    industrial: { roughness: 0.72, metalness: 0.28, flatShading: true },
+    special: { roughness: 0.66, metalness: 0.1, flatShading: true },
   },
 }
 

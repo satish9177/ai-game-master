@@ -46,6 +46,16 @@ describe('validateRoom', () => {
     expect(validateRoom(validRoom())).toEqual({ ok: true, issues: [] })
   })
 
+  it('accepts rich layouts without raw object or light performance warnings', () => {
+    const room = validRoom()
+    room.objects = [...rugs(500), ...torches(100)]
+
+    const result = validateRoom(room)
+
+    expect(result.ok).toBe(true)
+    expect(result.issues).toEqual([])
+  })
+
   it.each([
     ['room-too-small', (room: LoadedRoom) => {
       room.shell.dimensions.width = LIMITS.MIN_ROOM_DIM - 0.1
@@ -56,11 +66,8 @@ describe('validateRoom', () => {
     ['spawn-out-of-bounds', (room: LoadedRoom) => {
       room.spawn.position[0] = room.shell.dimensions.width
     }],
-    ['object-budget-hard-exceeded', (room: LoadedRoom) => {
-      room.objects = rugs(LIMITS.MAX_OBJECTS_HARD + 1)
-    }],
-    ['light-budget-hard-exceeded', (room: LoadedRoom) => {
-      room.objects = torches(LIMITS.MAX_LIGHTS_HARD + 1)
+    ['object-envelope-exceeded', (room: LoadedRoom) => {
+      room.objects = rugs(LIMITS.MAX_ROOM_OBJECT_ENTRIES + 1)
     }],
   ] satisfies [RoomIssueCode, (room: LoadedRoom) => void][])(
     'returns fatal %s',
@@ -91,12 +98,6 @@ describe('validateRoom', () => {
     }],
     ['no-exit', (room: LoadedRoom) => {
       room.shell.exits = []
-    }],
-    ['object-budget-exceeded', (room: LoadedRoom) => {
-      room.objects = rugs(LIMITS.MAX_OBJECTS_SOFT + 1)
-    }],
-    ['light-budget-exceeded', (room: LoadedRoom) => {
-      room.objects = torches(LIMITS.MAX_LIGHTS_SOFT + 1)
     }],
     ['interaction-empty-prompt', (room: LoadedRoom) => {
       const scroll = room.objects.find((object) => object.type === 'scroll')

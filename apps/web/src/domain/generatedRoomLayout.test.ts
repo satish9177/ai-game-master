@@ -371,7 +371,7 @@ function makeRoom(objects: unknown[]) {
 describe('repairGeneratedObjects', () => {
   const STD_BOUNDS = computePlayableBounds({ width: 18, depth: 18 }, 0.3)
 
-  it('returns the same reference when all objects are in bounds and count ≤ MAX_OBJECTS', () => {
+  it('returns the same reference when all objects are in bounds', () => {
     const room = makeRoom([{ type: 'pillar', position: [3, 0, -3] }])
     expect(repairGeneratedObjects(room)).toBe(room)
   })
@@ -425,31 +425,16 @@ describe('repairGeneratedObjects', () => {
     )
   })
 
-  it('object count is capped at GENERATED_ROOM.MAX_OBJECTS (30)', () => {
-    const objects = Array.from({ length: 35 }, () => ({ type: 'crate', position: [2, 0, 2] }))
-    const room = makeRoom(objects)
-    const fixed = repairGeneratedObjects(room)
-    expect(fixed).not.toBe(room)
-    expect(fixed.objects).toHaveLength(GENERATED_ROOM.MAX_OBJECTS)
-  })
-
-  it('critical objects are preserved when dropping by count', () => {
-    // 35 objects: 34 decorative (prop) + 1 critical (npc) — after cap to 30 the npc must survive.
-    const objects: unknown[] = Array.from({ length: 34 }, () => ({
-      type: 'prop',
+  it('preserves 500 inexpensive static pieces without count-based truncation', () => {
+    const objects = Array.from({ length: 500 }, () => ({
+      type: 'crate',
       position: [2, 0, 2],
     }))
-    objects.push({
-      type: 'npc',
-      name: 'Guard',
-      position: [1, 0, -1],
-      interaction: { key: 'F', prompt: 'Talk', body: 'Hello.' },
-    })
     const room = makeRoom(objects)
     const fixed = repairGeneratedObjects(room)
-    expect(fixed.objects).toHaveLength(GENERATED_ROOM.MAX_OBJECTS)
-    const npc = fixed.objects.find((o) => o.type === 'npc')
-    expect(npc).toBeDefined()
+    expect(fixed).toBe(room)
+    expect(fixed.objects).toHaveLength(500)
+    expect(fixed.objects.every((object) => object.type === 'crate')).toBe(true)
   })
 
   it('generated room remains valid (no fatals) after object repair', () => {

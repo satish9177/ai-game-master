@@ -20,3 +20,24 @@ describe('readDebugConfig room memory debug viewer gate', () => {
     expect(read({ DEV: true, VITE_ROOM_MEMORY_DEBUG_VIEWER: ' TRUE ' })).toBe(false)
   })
 })
+
+describe('readDebugConfig ruined kingdom showcase gate', () => {
+  it.each([
+    'village-square',
+    'ruined-tavern',
+    'crypt-entrance',
+  ] as const)('accepts the closed %s fixture in development', (showcaseId) => {
+    expect(readDebugConfig({ DEV: true }, '?showcase=' + showcaseId))
+      .toMatchObject({ ruinedKingdomShowcaseId: showcaseId })
+  })
+
+  it('ignores the query outside development', () => {
+    expect(readDebugConfig({ DEV: false }, '?showcase=village-square'))
+      .not.toHaveProperty('ruinedKingdomShowcaseId')
+  })
+
+  it('rejects unknown and path-like fixture selectors', () => {
+    expect(readDebugConfig({ DEV: true }, '?showcase=custom-room')).not.toHaveProperty('ruinedKingdomShowcaseId')
+    expect(readDebugConfig({ DEV: true }, '?showcase=../village-square')).not.toHaveProperty('ruinedKingdomShowcaseId')
+  })
+})

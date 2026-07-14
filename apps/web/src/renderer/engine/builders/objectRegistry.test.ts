@@ -102,6 +102,11 @@ const currentObjects: { [K in RoomObject['type']]: unknown } = {
   barrel: { type: 'barrel', position: [0, 0, 0] },
   debris: { type: 'debris', position: [0, 0, 0] },
   barricade: { type: 'barricade', position: [0, 0, 0] },
+  architecture: { type: 'architecture', kind: 'wall-ruined', position: [0, 0, 0] },
+  furniture: { type: 'furniture', kind: 'chair', position: [0, 0, 0] },
+  clutter: { type: 'clutter', kind: 'sack', position: [0, 0, 0] },
+  vegetation: { type: 'vegetation', kind: 'tree', position: [0, 0, 0] },
+  'light-fixture': { type: 'light-fixture', kind: 'lantern', position: [0, 0, 0] },
   zombie: { type: 'zombie', position: [0, 0, 0] },
 }
 

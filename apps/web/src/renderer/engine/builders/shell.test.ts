@@ -118,13 +118,13 @@ describe('buildShell readability', () => {
 
     const floorMaterial = standardMaterial(floor)
     expect(floorMaterial.color.getHexString()).toBe('444444')
-    expect(floorMaterial.roughness).toBeCloseTo(0.9)
-    expect(floorMaterial.metalness).toBeCloseTo(0.08)
+    expect(floorMaterial.roughness).toBeCloseTo(0.93)
+    expect(floorMaterial.metalness).toBeCloseTo(0.02)
 
     const wallMaterial = standardMaterial(wall)
     expect(wallMaterial.color.getHexString()).toBe('888888')
-    expect(wallMaterial.roughness).toBeCloseTo(0.9)
-    expect(wallMaterial.metalness).toBeCloseTo(0.08)
+    expect(wallMaterial.roughness).toBeCloseTo(0.93)
+    expect(wallMaterial.metalness).toBeCloseTo(0.02)
   })
 
   it('lays subtle floor seams that sit flush on the floor (not a tall grid)', () => {
@@ -148,6 +148,37 @@ describe('buildShell readability', () => {
     }
     expect(meshesNamed(buildShell(room()), 'curb-trim')).toHaveLength(0)
   })
+})
+
+describe('buildShell exits', () => {
+  it.each(['north', 'south', 'east', 'west'] as const)(
+    'cuts a centered visible opening in the %s wall',
+    (side) => {
+      const base = room()
+      const withExit = {
+        ...base,
+        shell: {
+          ...base.shell,
+          exits: [{ side, width: 2 }],
+        },
+      } as LoadedRoom
+      const group = buildShell(withExit)
+      const pick: Record<WallSide, (mesh: THREE.Mesh) => boolean> = {
+        north: (mesh) => mesh.position.z < -DEPTH / 3,
+        south: (mesh) => mesh.position.z > DEPTH / 3,
+        east: (mesh) => mesh.position.x > WIDTH / 3,
+        west: (mesh) => mesh.position.x < -WIDTH / 3,
+      }
+      const segments = meshesNamed(group, 'wall').filter(pick[side])
+
+      expect(segments).toHaveLength(2)
+      const offsets = segments.map((mesh) => (
+        side === 'north' || side === 'south' ? mesh.position.x : mesh.position.z
+      ))
+      expect(offsets.some((offset) => offset < 0)).toBe(true)
+      expect(offsets.some((offset) => offset > 0)).toBe(true)
+    },
+  )
 })
 
 describe('buildShell shadows', () => {

@@ -1,6 +1,7 @@
 import type * as THREE from 'three'
 import { clampToBounds, screenRelativeMove } from '../camera/isometric'
 import type { Bounds } from '../camera/isometric'
+import type { CollisionWorld2D } from './CollisionWorld2D'
 
 export type { Bounds }
 
@@ -34,7 +35,13 @@ export class MovementControls {
   }
 
   /** Advances `player` one frame from the held keys; mutates only its X/Z. */
-  update(player: THREE.Object3D, dt: number, bounds: Bounds): void {
+  update(
+    player: THREE.Object3D,
+    dt: number,
+    bounds: Bounds,
+    collisionWorld?: CollisionWorld2D,
+    playerRadius = 0.32,
+  ): void {
     if (!this.enabled) return
     let forward = 0
     let strafe = 0
@@ -50,8 +57,16 @@ export class MovementControls {
       { x: player.position.x + dir.x * dist, z: player.position.z + dir.z * dist },
       bounds,
     )
-    player.position.x = next.x
-    player.position.z = next.z
+    const resolved = collisionWorld?.moveCircle(
+      { x: player.position.x, z: player.position.z },
+      {
+        x: next.x - player.position.x,
+        z: next.z - player.position.z,
+      },
+      playerRadius,
+    ).position ?? next
+    player.position.x = resolved.x
+    player.position.z = resolved.z
   }
 
   private readonly onKeyDown = (e: KeyboardEvent): void => {

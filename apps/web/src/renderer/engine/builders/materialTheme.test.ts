@@ -45,23 +45,27 @@ function standardMaterials(root: THREE.Object3D): THREE.MeshStandardMaterial[] {
 describe('theme material helpers', () => {
   it('returns the expected fantasy-keep themed finish', () => {
     expect(themedMaterialFinish('fantasy-keep', 'shell')).toEqual({
-      roughness: 0.88,
-      metalness: 0.01,
+      roughness: 0.94,
+      metalness: 0,
+      flatShading: true,
     })
     expect(themedMaterialFinish('fantasy-keep', 'focalAnchor')).toEqual({
-      roughness: 0.84,
-      metalness: 0.02,
+      roughness: 0.86,
+      metalness: 0.01,
+      flatShading: true,
     })
   })
 
   it('returns the expected post-apoc themed finish', () => {
     expect(themedMaterialFinish('post-apoc', 'shell')).toEqual({
-      roughness: 0.9,
-      metalness: 0.08,
+      roughness: 0.93,
+      metalness: 0.02,
+      flatShading: true,
     })
     expect(themedMaterialFinish('post-apoc', 'industrial')).toEqual({
-      roughness: 0.78,
-      metalness: 0.16,
+      roughness: 0.72,
+      metalness: 0.28,
+      flatShading: true,
     })
   })
 

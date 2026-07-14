@@ -27,6 +27,8 @@ describe('Hud', () => {
     })} />)
 
     expect(html).toContain('class="hud-key"')
+    expect(html).toContain('hud--affordance-talk')
+    expect(html).toContain('aria-atomic="true"')
     expect(html).toContain('>F</span>')
     expect(html).toContain('class="hud-affordance"')
     expect(html).toContain('>Talk</span>')
@@ -61,7 +63,7 @@ describe('Hud', () => {
       prompt: 'Read the note',
     })} />)
 
-    expect(html).toContain('class="hud hud--resolved"')
+    expect(html).toContain('hud--resolved')
     expect(html).toContain('class="hud-resolved"')
     expect(html).toContain('aria-label="Already resolved"')
     expect(html).toContain('>Resolved</span>')

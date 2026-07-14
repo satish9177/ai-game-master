@@ -67,6 +67,7 @@ export function NPCDialoguePanel({
     <div className="panel-backdrop" onPointerDown={onClose}>
       <div
         className="panel npc-dialogue-panel"
+        data-panel-kind="conversation"
         role="dialog"
         aria-modal="true"
         aria-label={`Conversation with ${npcName}`}
@@ -84,7 +85,11 @@ export function NPCDialoguePanel({
         </div>
         <ol className="panel-body panel-turns npc-dialogue-turns" aria-live="polite">
           {turns.map((turn, index) => (
-            <li className="npc-dialogue-turn" key={`${turn.speaker}-${index}`}>
+            <li
+              className="npc-dialogue-turn"
+              data-speaker={turn.speaker}
+              key={`${turn.speaker}-${index}`}
+            >
               <strong className="npc-dialogue-speaker">
                 {turn.speaker === 'player' ? 'Player' : npcName}
               </strong>

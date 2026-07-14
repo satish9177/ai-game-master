@@ -54,6 +54,8 @@ describe('buildLighting', () => {
     const g = buildLighting(lighting(true), DIMS)
     expect(g.children.some((c) => c instanceof THREE.AmbientLight)).toBe(true)
     expect(g.children.some((c) => c instanceof THREE.HemisphereLight)).toBe(true)
+    expect(ambientOf(g).name).toBe('room-ambient-fill')
+    expect(hemisphereOf(g).name).toBe('room-hemisphere-fill')
   })
 
   it('omits the hemisphere light when the spec omits it', () => {
@@ -65,8 +67,12 @@ describe('buildLighting', () => {
   it('adds a renderer-internal directional key light that casts shadows', () => {
     const sun = directionalOf(buildLighting(lighting(true), DIMS))
     expect(sun.castShadow).toBe(true)
+    expect(sun.name).toBe('room-key-light')
     expect(sun.intensity).toBeCloseTo(2.35)
     expect(sun.color.getHexString()).toBe('fff6e8')
+    expect(sun.shadow.bias).toBeCloseTo(-0.0002)
+    expect(sun.shadow.normalBias).toBeCloseTo(0.035)
+    expect(sun.shadow.radius).toBe(2)
     // The light's target must be in the group so its aim applies.
     const g = buildLighting(lighting(true), DIMS)
     expect(g.children.includes(directionalOf(g).target)).toBe(true)

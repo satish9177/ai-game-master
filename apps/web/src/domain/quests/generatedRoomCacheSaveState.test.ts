@@ -152,6 +152,19 @@ describe('buildGeneratedRoomCacheSaveState', () => {
     expect(loaded).toEqual({ ok: true, state })
   })
 
+  it('round-trips the optional room environment kind', () => {
+    const room = makeRoom('crypt-room', { environmentKind: 'crypt' })
+    const state = buildGeneratedRoomCacheSaveState(
+      makeInput({ rooms: [{ room, provenance: 'generated' }] }),
+    )
+    expect(state?.rooms[0]?.room.environmentKind).toBe('crypt')
+
+    const loaded = loadGeneratedRoomCacheSaveState(JSON.stringify(state))
+
+    expect(loaded.ok).toBe(true)
+    expect(loaded.ok ? loaded.state.rooms[0]?.room.environmentKind : undefined).toBe('crypt')
+  })
+
   it('old save without objective still parses', () => {
     const state = buildGeneratedRoomCacheSaveState(makeInput())
     expect(state).not.toBeNull()
