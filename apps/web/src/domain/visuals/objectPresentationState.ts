@@ -3,6 +3,8 @@ import type { LoadedRoom } from '../loadRoomSpec'
 import type { RoomObject } from '../roomSpec'
 import type { RoomState } from '../world/worldState'
 import type { ObjectInteractionState, ObjectPresentationState } from './contracts'
+import { deriveMeaningfulObjectView } from '../objectPurpose/meaningfulObjectRuntime'
+import type { MeaningfulObjectState } from '../objectPurpose/meaningfulObjectRuntime'
 
 /** Boolean-only result compatible with the existing authored/generated gate evaluators. */
 export type ExitGatePresentationResult = Readonly<{ gated: boolean }>
@@ -16,11 +18,13 @@ export type RoomObjectPresentationInput = Readonly<{
   resolvedObjectIds?: ReadonlySet<string>
   /** Keyed by validated interaction.exit.toRoomId. */
   exitGateResults?: ExitGatePresentationResults
+  generatedPlay?: boolean
 }>
 
 type ObjectPresentationInput = Readonly<{
   resolved?: boolean
   exitGateResult?: ExitGatePresentationResult
+  meaningfulState?: MeaningfulObjectState
 }>
 
 /**
@@ -36,7 +40,12 @@ export function projectObjectPresentationState(
     condition: 'condition' in object && object.condition !== undefined
       ? object.condition
       : 'intact',
-    interactionState: interactionStateFor(object, resolved, input.exitGateResult),
+    interactionState: interactionStateFor(
+      object,
+      resolved,
+      input.exitGateResult,
+      input.meaningfulState,
+    ),
     resolved,
   }
 }
@@ -56,8 +65,14 @@ export function projectRoomObjectPresentationStates(
   for (const object of input.room.objects) {
     if (object.id === undefined || states.has(object.id)) continue
     const exitTarget = interactionFor(object)?.exit?.toRoomId
+    const meaningful = deriveMeaningfulObjectView({
+      object,
+      roomState: input.roomState,
+      generatedPlay: input.generatedPlay === true,
+    })
     states.set(object.id, projectObjectPresentationState(object, {
       resolved: resolvedIds.has(object.id),
+      ...(meaningful === undefined ? {} : { meaningfulState: meaningful.state }),
       ...(exitTarget === undefined
         ? {}
         : { exitGateResult: input.exitGateResults?.get(exitTarget) }),
@@ -71,11 +86,19 @@ function interactionStateFor(
   object: RoomObject,
   resolved: boolean,
   exitGateResult: ExitGatePresentationResult | undefined,
+  meaningfulState: MeaningfulObjectState | undefined,
 ): ObjectInteractionState {
   const interaction = interactionFor(object)
 
   if (interaction?.exit !== undefined) {
     return exitGateResult?.gated === true ? 'locked' : 'open'
+  }
+
+  if (meaningfulState !== undefined) {
+    if (meaningfulState === 'read') return 'read'
+    if (meaningfulState === 'open') return 'open'
+    if (meaningfulState === 'looted') return 'looted'
+    return defaultInteractionState(object)
   }
 
   const effect = interaction?.effect

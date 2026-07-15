@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { loadRoomSpec } from '../loadRoomSpec'
+import { meaningfulObjectStateFlagKey } from '../objectPurpose/meaningfulObjectRuntime'
 import {
   projectObjectPresentationState,
   projectRoomObjectPresentationStates,
@@ -109,6 +110,37 @@ describe('projectRoomObjectPresentationStates', () => {
       exitGateResults: new Map([['village', { gated: true }]]),
     })
     expect(states.get('gate')?.interactionState).toBe('locked')
+  })
+
+  it('projects generated meaningful state without treating generic inspect as terminal', () => {
+    const loaded = room([
+      {
+        id: 'note:one',
+        type: 'paper',
+        position: [0, 0, 0],
+        interaction: { key: 'E', prompt: 'Read', effect: { kind: 'inspect' } },
+      },
+      {
+        id: 'cache/one',
+        type: 'chest',
+        position: [1, 0, 0],
+        interaction: { key: 'E', prompt: 'Inspect', effect: { kind: 'inspect' } },
+      },
+    ])
+    const inspected = projectRoomObjectPresentationStates({
+      room: loaded,
+      generatedPlay: true,
+      roomState: {
+        visited: true,
+        flags: {
+          'interaction:note:one': true,
+          'interaction:cache/one': true,
+          [meaningfulObjectStateFlagKey('cache/one', 'open')]: true,
+        },
+      },
+    })
+    expect(inspected.get('note:one')?.interactionState).toBe('none')
+    expect(inspected.get('cache/one')?.interactionState).toBe('open')
   })
 })
 

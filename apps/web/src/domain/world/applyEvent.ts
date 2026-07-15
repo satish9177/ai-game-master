@@ -1,5 +1,6 @@
 import type { WorldEvent } from './events'
 import type { RoomState, WorldState } from './worldState'
+import { meaningfulObjectStateFlagKey } from '../objectPurpose/meaningfulObjectRuntime'
 
 export function applyEvent(state: WorldState | null, event: WorldEvent): WorldState {
   if (event.type === 'session-started') {
@@ -115,11 +116,44 @@ export function applyEvent(state: WorldState | null, event: WorldEvent): WorldSt
       }
       break
     }
+    case 'meaningful-object-applied': {
+      const existing = state.roomStates[event.payload.roomId] ?? { visited: false }
+      const flags = {
+        ...(existing.flags ?? {}),
+        [meaningfulObjectStateFlagKey(event.payload.objectId, event.payload.state)]: true,
+      }
+      const inventory = event.payload.item === undefined
+        ? state.inventory.map((item) => ({ ...item }))
+        : addInventoryItem(state.inventory, event.payload.item)
+      next = {
+        ...state,
+        inventory,
+        roomStates: {
+          ...state.roomStates,
+          [event.payload.roomId]: { visited: existing.visited, flags },
+        },
+      }
+      break
+    }
     default:
       return assertNever(event)
   }
 
   return { ...next, revision: event.seq, updatedAt: event.occurredAt }
+}
+
+function addInventoryItem(
+  existing: WorldState['inventory'],
+  item: WorldState['inventory'][number],
+): WorldState['inventory'] {
+  const inventory = existing.map((entry) => ({ ...entry }))
+  const index = inventory.findIndex((entry) => entry.itemId === item.itemId)
+  if (index === -1) inventory.push({ ...item })
+  else {
+    const current = inventory[index]!
+    inventory[index] = { ...current, quantity: current.quantity + item.quantity }
+  }
+  return inventory
 }
 
 export function projectWorldState(log: readonly WorldEvent[]): WorldState {

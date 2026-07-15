@@ -119,10 +119,23 @@ Throughout these docs:
   Purpose-Graph Validator v0 — `domain/objectPurpose/` defines the closed affordance vocabulary,
   strict fail-closed parsing, an explicit caller-supplied reference catalog, deterministic graph
   assembly, fixpoint reachability, canonical walkthrough diagnostics, and structural safety checks.
-  No production runtime module imports it (enforced by a source-scan test); it creates no
-  authoritative state and changes no room, renderer, UI, generation, provider, persistence, or
-  save/load behavior
+  Its purpose graph, validator, issue codes, and diagnostic APIs remain dry with no production
+  runtime importer (enforced by a module-specifier source scan); the frozen contracts remain the
+  typed boundary used by the separately authorized Slice B runtime
   ([ADR-0092](./decisions/ADR-0092-meaningful-object-affordance-contract-v0.md)).
+- âœ… **Implemented, Slice B only** â€” Deterministic Meaningful Object Interactions v0 â€” eligible
+  generated-play documents expose repeatable `inspect` plus one-shot `read`; containers derive
+  `closed â†’ open â†’ looted`; and remains expose repeatable `inspect` plus one-shot `search`.
+  Availability and presentation are re-derived from authoritative room flags through one pure
+  runtime evaluator. Trusted `WorldSession` construction derives `read`, `open`, or `looted` from
+  the closed family/action pair and appends one `meaningful-object-applied` event that atomically
+  projects the collision-safe `meaningful-object:${encodeURIComponent(objectId)}:${state}` flag
+  and at most one existing validated `take-item` reward. Existing event replay preserves both
+  effects across room return and save/load without a `WorldState` or save-envelope change.
+  Renderer code receives derived choices and emits intent only; purpose-graph/validator modules,
+  providers, prompts, generated prose, authored/demo/decorative interactions, clues, objectives,
+  journal projection, machines, barricades, exits, and all Slice C behavior remain unchanged
+  ([ADR-0093](./decisions/ADR-0093-deterministic-meaningful-object-interactions-v0.md)).
 - ✅ **Implemented** — Generated Mechanical Gate Fake v0 —
   deterministic builder + off-by-default diagnostic only. A pure
   `buildGeneratedMechanicalGate(room)` derives a contract-valid, satisfiable `locked-exit` gate

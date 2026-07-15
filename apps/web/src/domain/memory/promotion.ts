@@ -114,6 +114,7 @@ export function importanceFor(event: WorldEvent): number {
     case 'item-removed':
     case 'health-changed':
     case 'status-changed':
+    case 'meaningful-object-applied':
       return 1
     case 'session-started':
       return 0

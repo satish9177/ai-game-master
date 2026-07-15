@@ -113,6 +113,7 @@ type RoomViewerProps = {
   getRoomMemoryContextForNpc?: (npcId: string) => RoomMemoryDialogueContext | undefined
   getRelationshipContextForNpc?: (npcId: string) => NpcRelationshipState | undefined
   timeContext?: PromptTimeContext | null
+  generatedPlay?: boolean
   resolvedObjectIds?: ReadonlySet<string>
   exitGateResults?: ExitGatePresentationResults
   /**
@@ -146,6 +147,7 @@ export function RoomViewer({
   getRoomMemoryContextForNpc,
   getRelationshipContextForNpc,
   timeContext,
+  generatedPlay = false,
   resolvedObjectIds,
   exitGateResults,
   chaseOptInNpcIds,
@@ -164,10 +166,11 @@ export function RoomViewer({
     if (!room || !engine) return
     engine.updateObjectPresentationStates(projectRoomObjectPresentationStates({
       room,
+      generatedPlay,
       resolvedObjectIds,
       exitGateResults,
     }))
-  }, [exitGateResults, resolvedObjectIds])
+  }, [exitGateResults, generatedPlay, resolvedObjectIds])
   const effectLookupRef = useRef<InteractionEffectLookup>(new Map())
   const encounterLookupRef = useRef<EncounterLookup>(new Map())
   const exitLookupRef = useRef<ExitLookup>(new Map())
@@ -205,6 +208,7 @@ export function RoomViewer({
   const activeEncounterRef = useRef<{ encounter: EncounterSpec; ref: string | undefined } | null>(
     null,
   )
+  const activeMeaningfulObjectRef = useRef<{ objectId: string } | null>(null)
   const activeNPCDialogueRef = useRef<NPCDialogueTarget | null>(null)
   const npcDialogueRequestRef = useRef(0)
   const npcDialoguePendingRef = useRef(false)
@@ -252,6 +256,7 @@ export function RoomViewer({
       if (!room) return
       engine.updateObjectPresentationStates(projectRoomObjectPresentationStates({
         room,
+        generatedPlay,
         roomState: state.roomStates[room.id],
         exitGateResults: exitGateResultsRef.current,
       }))
@@ -276,6 +281,7 @@ export function RoomViewer({
     engine.onRequestOpenInteraction = (target) => {
       setResultMessage(undefined)
       setNavigationMessage(undefined)
+      activeMeaningfulObjectRef.current = null
       resetNPCDialogue()
 
       // Composition precedence: exit, then encounter, dialogue, then effect.
@@ -339,39 +345,63 @@ export function RoomViewer({
       }
 
       activeEncounterRef.current = null
-      setChoices(undefined)
-      setDialogue(target)
-      const effectTarget = effectLookupRef.current.get(target.id)
-      void interactionService.resolve({
+      const resolveLegacy = () => {
+        activeMeaningfulObjectRef.current = null
+        setChoices(undefined)
+        setDialogue(target)
+        const effectTarget = effectLookupRef.current.get(target.id)
+        void interactionService.resolve({
+          sessionId,
+          effect: effectTarget?.effect,
+          ref: effectTarget?.ref ?? target.id,
+        }).then((result) => {
+          if (cancelled) return
+          if (result.status === 'applied' || result.status === 'already-resolved') {
+            updateVisualStateFromWorldState(result.state)
+            onWorldStateChange?.(result.state)
+          }
+          if (result.status === 'applied' && result.events.length > 0) {
+            onCommittedInteractionEvents?.({
+              events: result.events,
+              state: result.state,
+              roomName: currentRoomNameRef.current,
+              ...(result.outcome.kind === 'item-taken'
+                ? { item: { itemId: result.outcome.item.itemId, name: result.outcome.item.name } }
+                : {}),
+            })
+          }
+          if (result.status === 'already-resolved') {
+            const body = authoredPostUseInteractionBody({ objectId: target.id, state: result.state })
+            if (body) setDialogue({ ...target, body })
+          }
+          setResultMessage(interactionResultMessage(result))
+        }).catch(() => {
+          if (cancelled) return
+          logger.error('interaction resolution threw', { code: 'interaction-failed' })
+          setResultMessage('This interaction is unavailable.')
+        })
+      }
+
+      const room = loadedRoomRef.current
+      if (!generatedPlay || target.id === undefined || room === null) {
+        resolveLegacy()
+        return
+      }
+      void interactionService.getMeaningfulObjectView({
         sessionId,
-        effect: effectTarget?.effect,
-        ref: effectTarget?.ref ?? target.id,
+        room,
+        generatedPlay: true,
+        objectId: target.id,
       }).then((result) => {
         if (cancelled) return
-        if (result.status === 'applied' || result.status === 'already-resolved') {
-          updateVisualStateFromWorldState(result.state)
-          onWorldStateChange?.(result.state)
+        if (result.status !== 'available') {
+          resolveLegacy()
+          return
         }
-        if (result.status === 'applied' && result.events.length > 0) {
-          onCommittedInteractionEvents?.({
-            events: result.events,
-            state: result.state,
-            roomName: currentRoomNameRef.current,
-            ...(result.outcome.kind === 'item-taken'
-              ? { item: { itemId: result.outcome.item.itemId, name: result.outcome.item.name } }
-              : {}),
-          })
-        }
-        if (result.status === 'already-resolved') {
-          const body = authoredPostUseInteractionBody({ objectId: target.id, state: result.state })
-          if (body) setDialogue({ ...target, body })
-        }
-        setResultMessage(interactionResultMessage(result))
-      }).catch(() => {
-        if (cancelled) return
-        logger.error('interaction resolution threw', { code: 'interaction-failed' })
-        setResultMessage('This interaction is unavailable.')
-      })
+        activeMeaningfulObjectRef.current = { objectId: target.id! }
+        setDialogue(target)
+        setChoices(result.view.choices.map((choice) => ({ ...choice })))
+      }).catch(resolveLegacy)
     }
 
     void roomSource.getRoom().then(async (result) => {
@@ -401,6 +431,7 @@ export function RoomViewer({
         }
         setRoomOptions.presentationStates = projectRoomObjectPresentationStates({
           room: result.room,
+          generatedPlay,
           resolvedObjectIds: currentResolvedObjectIds,
           exitGateResults: exitGateResultsRef.current,
         })
@@ -436,6 +467,7 @@ export function RoomViewer({
       currentRoomNameRef.current = undefined
       loadedRoomRef.current = null
       activeEncounterRef.current = null
+      activeMeaningfulObjectRef.current = null
       activeNPCDialogueRef.current = null
       npcDialogueRequestRef.current += 1
       npcDialoguePendingRef.current = false
@@ -458,6 +490,7 @@ export function RoomViewer({
     onCommittedInteractionEvents,
     chaseOptInNpcIds,
     npcRoutineModes,
+    generatedPlay,
     roomSource,
     sessionId,
     webgl2Available,
@@ -564,6 +597,57 @@ export function RoomViewer({
 
   const handleChoose = useCallback(
     (choiceId: string) => {
+      const meaningful = activeMeaningfulObjectRef.current
+      const room = loadedRoomRef.current
+      if (meaningful !== null && room !== null) {
+        if (choiceId !== 'inspect' && choiceId !== 'read' && choiceId !== 'open' && choiceId !== 'search') return
+        void interactionService.resolveMeaningfulObject({
+          sessionId,
+          room,
+          generatedPlay,
+          objectId: meaningful.objectId,
+          action: choiceId,
+        }).then(async (result) => {
+          if (activeMeaningfulObjectRef.current !== meaningful) return
+          if (result.status === 'observed') setResultMessage('You inspect it.')
+          else if (result.status === 'already-resolved') {
+            setResultMessage(result.action === 'read' ? 'Already read.' : 'Already searched.')
+          } else if (result.status === 'applied') {
+            setResultMessage(
+              choiceId === 'read' ? 'You read it.' : choiceId === 'open' ? 'You open it.' : 'You search it.',
+            )
+            engineRef.current?.updateObjectPresentationStates(projectRoomObjectPresentationStates({
+              room,
+              generatedPlay,
+              roomState: result.state.roomStates[room.id],
+              exitGateResults: exitGateResultsRef.current,
+            }))
+            onWorldStateChange?.(result.state)
+            onCommittedInteractionEvents?.({
+              events: [result.event],
+              state: result.state,
+              roomName: currentRoomNameRef.current,
+            })
+          } else if (result.status === 'failed') {
+            setResultMessage(result.reason === 'conflict' ? 'The world changed. Try again.' : 'This interaction is unavailable.')
+          } else setResultMessage('This interaction is unavailable.')
+
+          const refreshed = await interactionService.getMeaningfulObjectView({
+            sessionId,
+            room,
+            generatedPlay,
+            objectId: meaningful.objectId,
+          })
+          if (activeMeaningfulObjectRef.current === meaningful && refreshed.status === 'available') {
+            setChoices(refreshed.view.choices.map((choice) => ({ ...choice })))
+          }
+        }).catch(() => {
+          if (activeMeaningfulObjectRef.current === meaningful) {
+            setResultMessage('This interaction is unavailable.')
+          }
+        })
+        return
+      }
       const current = activeEncounterRef.current
       if (!current) return
       setChoices(undefined)
@@ -586,12 +670,13 @@ export function RoomViewer({
         setResultMessage('This encounter is unavailable.')
       })
     },
-    [encounterService, onWorldStateChange, sessionId],
+    [encounterService, generatedPlay, interactionService, onCommittedInteractionEvents, onWorldStateChange, sessionId],
   )
 
   const closeDialogue = useCallback(() => {
     engineRef.current?.setInteractionLock(false)
     activeEncounterRef.current = null
+    activeMeaningfulObjectRef.current = null
     setDialogue(null)
     setResultMessage(undefined)
     setChoices(undefined)

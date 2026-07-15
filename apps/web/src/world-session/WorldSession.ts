@@ -1,6 +1,14 @@
 import type { Clock } from '../domain/ports/Clock'
 import type { IdGenerator } from '../domain/ports/IdGenerator'
 import type { WorldStore } from '../domain/ports/WorldStore'
+import type { LoadedRoom } from '../domain/loadRoomSpec'
+import {
+  deriveMeaningfulObjectState,
+  derivedTransition,
+  meaningfulObjectFamily,
+  sameInventoryItem,
+  validatedSearchItem,
+} from '../domain/objectPurpose/meaningfulObjectRuntime'
 import { applyEvent } from '../domain/world/applyEvent'
 import { WorldCommandSchema, WorldEventSchema } from '../domain/world/events'
 import type { WorldCommand, WorldEvent } from '../domain/world/events'
@@ -31,6 +39,11 @@ export type AppendEventResult =
 export type EventLogResult =
   | { ok: true; events: WorldEvent[] }
   | { ok: false; error: WorldSessionError }
+
+export type MeaningfulObjectContext = Readonly<{
+  room: Pick<LoadedRoom, 'id' | 'objects'>
+  generatedPlay: boolean
+}>
 
 export class WorldSession {
   private readonly store: WorldStore
@@ -124,6 +137,48 @@ export class WorldSession {
       return fail(committed.error.code)
     }
 
+    this.log.info('world event appended', {
+      sessionId,
+      eventId: event.eventId,
+      eventType: event.type,
+      seq: event.seq,
+      revision: next.revision,
+    })
+    return { ok: true, state: next, event }
+  }
+
+  async applyMeaningfulObject(
+    sessionId: string,
+    command: unknown,
+    expectedRevision: number,
+    context: MeaningfulObjectContext,
+  ): Promise<AppendEventResult> {
+    const snapshot = await this.store.getSnapshot(sessionId)
+    if (!snapshot) return fail('not-found')
+    if (snapshot.revision !== expectedRevision) return fail('conflict')
+
+    const parsed = WorldCommandSchema.safeParse(command)
+    if (
+      !parsed.success
+      || parsed.data.type !== 'meaningful-object-applied'
+      || !isValidMeaningfulObjectCommand(snapshot, parsed.data, context)
+    ) return fail('invalid-command')
+
+    const event = buildEvent(
+      sessionId,
+      expectedRevision + 1,
+      this.idGenerator.newId(),
+      this.clock.now(),
+      parsed.data,
+    )
+    const next = applyEvent(snapshot, event)
+    const committed = await this.store.commit({
+      sessionId,
+      expectedRevision,
+      event,
+      snapshot: next,
+    })
+    if (!committed.ok) return fail(committed.error.code)
     this.log.info('world event appended', {
       sessionId,
       eventId: event.eventId,
@@ -243,6 +298,7 @@ export class WorldSession {
 }
 
 function isValidForState(state: WorldState, command: WorldCommand): boolean {
+  if (command.type === 'meaningful-object-applied') return false
   if (command.type === 'item-removed') {
     const held = state.inventory.find((item) => item.itemId === command.itemId)?.quantity ?? 0
     return command.quantity <= held
@@ -257,6 +313,37 @@ function isValidForState(state: WorldState, command: WorldCommand): boolean {
     return command.fromRoomId === state.currentRoomId
   }
   return true
+}
+
+function isValidMeaningfulObjectCommand(
+  state: WorldState,
+  command: Extract<WorldCommand, { type: 'meaningful-object-applied' }>,
+  context: MeaningfulObjectContext,
+): boolean {
+  if (!context.generatedPlay || command.roomId !== state.currentRoomId) return false
+  if (context.room.id !== command.roomId) return false
+  const matches = context.room.objects.filter((object) => object.id === command.objectId)
+  if (matches.length !== 1) return false
+  const object = matches[0]!
+  const family = meaningfulObjectFamily(object)
+  if (family !== command.family) return false
+  const transition = derivedTransition(command.family, command.action)
+  if (transition === undefined) return false
+  if (command.action === 'search') {
+    if (!sameInventoryItem(command.item, validatedSearchItem(object))) return false
+  } else if (command.item !== undefined) return false
+
+  const current = deriveMeaningfulObjectState(
+    object,
+    state.roomStates[command.roomId],
+    command.family,
+  )
+  if (command.family === 'document') return command.action === 'read' && current === 'closed'
+  if (command.family === 'container') {
+    return (command.action === 'open' && current === 'closed')
+      || (command.action === 'search' && current === 'open')
+  }
+  return command.action === 'search' && current === 'unsearched'
 }
 
 function buildEvent(
@@ -324,6 +411,23 @@ function buildEvent(
         },
       }
       break
+    case 'meaningful-object-applied': {
+      const state = derivedTransition(command.family, command.action)
+      if (state === undefined) throw new Error('invalid meaningful object transition')
+      raw = {
+        ...envelope,
+        type: command.type,
+        payload: {
+          roomId: command.roomId,
+          objectId: command.objectId,
+          family: command.family,
+          action: command.action,
+          state,
+          ...(command.item !== undefined ? { item: command.item } : {}),
+        },
+      }
+      break
+    }
     default:
       return assertNever(command)
   }

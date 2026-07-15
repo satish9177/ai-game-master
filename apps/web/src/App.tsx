@@ -1484,6 +1484,7 @@ function App() {
           getRoomMemoryContextForNpc={getRoomMemoryContextForNpc}
           getRelationshipContextForNpc={getRelationshipContextForNpc}
           timeContext={worldClock ? toPromptTimeContext(worldClock) : null}
+          generatedPlay={activePlay.objectivesPerRoom === true}
           {...(activePlay.objectivesPerRoom === true
             ? { resolvedObjectIds: activePlay.entryResolvedObjectIds }
             : {})}

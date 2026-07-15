@@ -24,6 +24,12 @@ function targetsObjectPurpose(specifier: string): boolean {
   return specifier.replaceAll('\\', '/').split('/').includes('objectPurpose')
 }
 
+function allowedRuntimeObjectPurposeImport(specifier: string): boolean {
+  const normalized = specifier.replaceAll('\\', '/').replace(/\.(?:ts|tsx)$/, '')
+  return normalized.endsWith('/objectPurpose/contracts')
+    || normalized.endsWith('/objectPurpose/meaningfulObjectRuntime')
+}
+
 describe('object purpose contract and validator are dry at runtime', () => {
   const sourceModules = import.meta.glob(['../../**/*.ts', '../../**/*.tsx'], { eager: true, query: '?raw', import: 'default' }) as Record<string, string>
 
@@ -47,7 +53,7 @@ describe('object purpose contract and validator are dry at runtime', () => {
     expect(['generatedRoomObjectPurpose', 'assignGeneratedObjectPurpose', 'ObjectPurposeResult'].some(targetsObjectPurpose)).toBe(false)
   })
 
-  it('has no production runtime or composition importer', () => {
+  it('allows only frozen contracts and the runtime evaluator in production', () => {
     const references = Object.entries(sourceModules).flatMap(([path, source]) => {
       const normalizedPath = path.replaceAll('\\', '/')
       const isTest = normalizedPath.endsWith('.test.ts') || normalizedPath.endsWith('.test.tsx')
@@ -55,6 +61,10 @@ describe('object purpose contract and validator are dry at runtime', () => {
       if (isTest || isObjectPurposeFile) return []
       return importModuleSpecifiers(source).filter(targetsObjectPurpose).map((specifier) => ({ path, specifier }))
     })
-    expect(references).toEqual([])
+    expect(references.filter(({ specifier }) => !allowedRuntimeObjectPurposeImport(specifier))).toEqual([])
+    expect(references.some(({ specifier }) => specifier.endsWith('/meaningfulObjectRuntime'))).toBe(true)
+    expect(references.every(({ specifier }) =>
+      !/\/(?:purposeGraph|validatePurposeGraph|issueCodes)(?:\.ts)?$/.test(specifier.replaceAll('\\', '/')),
+    )).toBe(true)
   })
 })

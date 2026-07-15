@@ -82,6 +82,19 @@ const RoomStateChangedEventSchema = z.object({
   }).strict(),
 }).strict()
 
+const MeaningfulObjectAppliedEventSchema = z.object({
+  ...eventEnvelope,
+  type: z.literal('meaningful-object-applied'),
+  payload: z.object({
+    roomId: z.string().min(1),
+    objectId: z.string().min(1),
+    family: z.enum(['document', 'container', 'remains']),
+    action: z.enum(['read', 'open', 'search']),
+    state: z.enum(['read', 'open', 'looted']),
+    item: InventoryItemSchema.optional(),
+  }).strict(),
+}).strict()
+
 export const WorldEventSchema = z.discriminatedUnion('type', [
   SessionStartedEventSchema,
   MovedToRoomEventSchema,
@@ -91,6 +104,7 @@ export const WorldEventSchema = z.discriminatedUnion('type', [
   HealthChangedEventSchema,
   StatusChangedEventSchema,
   RoomStateChangedEventSchema,
+  MeaningfulObjectAppliedEventSchema,
 ])
 
 const commandEnvelope = { schemaVersion: z.literal(WORLD_SCHEMA_VERSION) }
@@ -137,6 +151,15 @@ export const WorldCommandSchema = z.discriminatedUnion('type', [
     roomId: z.string().min(1),
     visited: z.boolean().optional(),
     flags: z.record(z.string(), z.boolean()).optional(),
+  }).strict(),
+  z.object({
+    ...commandEnvelope,
+    type: z.literal('meaningful-object-applied'),
+    roomId: z.string().min(1),
+    objectId: z.string().min(1),
+    family: z.enum(['document', 'container', 'remains']),
+    action: z.enum(['read', 'open', 'search']),
+    item: InventoryItemSchema.optional(),
   }).strict(),
 ])
 
