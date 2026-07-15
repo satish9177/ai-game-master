@@ -115,6 +115,14 @@ Throughout these docs:
   no generated-room insertion, no objective integration, and no provider/LLM/cost/schema/save-load/
   navigation/renderer/backend changes yet
   ([ADR-0061](./decisions/ADR-0061-generated-mechanical-gate-contract-v0.md)).
+- ✅ **Implemented, pure/dry domain contract only** — Meaningful Object Affordance Contract and
+  Purpose-Graph Validator v0 — `domain/objectPurpose/` defines the closed affordance vocabulary,
+  strict fail-closed parsing, an explicit caller-supplied reference catalog, deterministic graph
+  assembly, fixpoint reachability, canonical walkthrough diagnostics, and structural safety checks.
+  No production runtime module imports it (enforced by a source-scan test); it creates no
+  authoritative state and changes no room, renderer, UI, generation, provider, persistence, or
+  save/load behavior
+  ([ADR-0092](./decisions/ADR-0092-meaningful-object-affordance-contract-v0.md)).
 - ✅ **Implemented** — Generated Mechanical Gate Fake v0 —
   deterministic builder + off-by-default diagnostic only. A pure
   `buildGeneratedMechanicalGate(room)` derives a contract-valid, satisfiable `locked-exit` gate
