@@ -3,6 +3,8 @@ import appHelpersSource from './App.helpers.ts?raw'
 import type { FamiliarityBucket } from '../domain/npcRelationship/dialogueContext'
 import { NPC_RELATIONSHIP_SCHEMA_VERSION, type NpcRelationshipState } from '../domain/npcRelationship/contracts'
 import {
+  applyGeneratedMeaningfulConsequenceCatalog,
+  deriveMeaningfulObjectTrustedContext,
   INITIAL_RELATIONSHIP_FEEDBACK_STATE,
   relationshipFeedbackAfterReduction,
   relationshipFeedbackOnRoomEntry,
@@ -16,6 +18,43 @@ import { RELATIONSHIP_FAMILIARITY_INCREASED_MESSAGE } from './relationshipFeedba
 const WORLD_ID = 'world-1'
 const SESSION_ID = 'session-1'
 const SCOPE = { worldId: WORLD_ID, sessionId: SESSION_ID }
+const consequenceCatalog = { clues: [], consequences: [] }
+
+describe('meaningful consequence trusted context', () => {
+  it('uses the active room exact catalog and preserves immutable catalog updates', () => {
+    const previous = new Map([['earlier-room', consequenceCatalog]])
+    const nextCatalog = { clues: [], consequences: [] }
+    const updated = applyGeneratedMeaningfulConsequenceCatalog({
+      consequenceCatalogs: previous,
+      destinationRoomId: 'active-room',
+      activeRoom: { id: 'active-room' },
+      catalog: nextCatalog,
+    })
+
+    expect(updated.consequenceCatalogs).not.toBe(previous)
+    expect(previous.has('active-room')).toBe(false)
+    expect(updated.consequenceCatalogs.get('active-room')).toBe(nextCatalog)
+    expect(updated.activeTrustedContext).toEqual({
+      roomId: 'active-room',
+      consequenceCatalog: nextCatalog,
+    })
+  })
+
+  it('caches a stale room catalog without replacing the active room context', () => {
+    const updated = applyGeneratedMeaningfulConsequenceCatalog({
+      destinationRoomId: 'previous-room',
+      activeRoom: { id: 'current-room' },
+      catalog: consequenceCatalog,
+    })
+
+    expect(updated.consequenceCatalogs.get('previous-room')).toBe(consequenceCatalog)
+    expect(updated.activeTrustedContext).toBeUndefined()
+    expect(deriveMeaningfulObjectTrustedContext({
+      room: { id: 'previous-room' },
+      consequenceCatalogs: updated.consequenceCatalogs,
+    })).toEqual({ roomId: 'previous-room', consequenceCatalog })
+  })
+})
 
 function makeRelationshipRecord(overrides: Partial<NpcRelationshipState> = {}): NpcRelationshipState {
   return {

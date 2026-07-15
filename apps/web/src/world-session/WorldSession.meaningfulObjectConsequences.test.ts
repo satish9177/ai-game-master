@@ -54,7 +54,12 @@ const catalog: MeaningfulObjectConsequenceCatalog = {
     { id: 'body-clue', sourceObjectId: 'body' },
   ],
   consequences: [
-    { objectId: 'doc', action: 'read', clueId: 'shared-clue' },
+    {
+      objectId: 'doc',
+      action: 'read',
+      clueId: 'shared-clue',
+      discoveryText: 'A validated discovery is shown after reading.',
+    },
     { objectId: 'box', action: 'search', clueId: 'shared-clue' },
     {
       objectId: 'body',
@@ -109,7 +114,10 @@ describe('ADR-0094 meaningful object consequences', () => {
     const initial = await start(value)
 
     const read = await value.service.resolveMeaningfulObject(input(initial.sessionId, 'doc', 'read'))
-    expect(read).toMatchObject({ status: 'applied', message: 'You read it. You discovered a clue.' })
+    expect(read).toMatchObject({
+      status: 'applied',
+      message: 'You read it. A validated discovery is shown after reading. You discovered a clue.',
+    })
     if (read.status !== 'applied') return
     expect(read.event).toMatchObject({ payload: { clueId: 'shared-clue' } })
 

@@ -58,10 +58,11 @@ describe('InteractionService meaningful objects', () => {
       generatedPlay: true,
       objectId: 'doc',
     }
-    expect((await value.service.resolveMeaningfulObject({ ...input, action: 'inspect' })).status)
-      .toBe('observed')
-    expect((await value.service.resolveMeaningfulObject({ ...input, action: 'inspect' })).status)
-      .toBe('observed')
+    const firstInspect = await value.service.resolveMeaningfulObject({ ...input, action: 'inspect' })
+    const repeatedInspect = await value.service.resolveMeaningfulObject({ ...input, action: 'inspect' })
+    expect(firstInspect.status).toBe('observed')
+    expect(repeatedInspect.status).toBe('observed')
+    expect(firstInspect).not.toHaveProperty('message')
     expect(await value.store.listEvents(initial.sessionId)).toHaveLength(1)
 
     const read = await value.service.resolveMeaningfulObject({ ...input, action: 'read' })

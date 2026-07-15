@@ -125,6 +125,8 @@ import {
   memoryFeedbackAfterPromotion,
   memoryFeedbackAfterRecall,
   memoryFeedbackOnRoomEntry,
+  applyGeneratedMeaningfulConsequenceCatalog,
+  deriveMeaningfulObjectTrustedContext,
   readPerRoomObjectiveMemo,
   relationshipFeedbackAfterReduction,
   relationshipFeedbackOnRoomEntry,
@@ -134,6 +136,7 @@ import {
   selectTransientFeedbackMessage,
   shouldStartPerRoomObjectiveAttach,
   type MemoryFeedbackState,
+  type MeaningfulObjectTrustedContext,
   type PerRoomObjectiveMemo,
   type QuestHintState,
   type RelationshipFeedbackState,
@@ -200,11 +203,7 @@ const worldStore = new InMemoryWorldStore()
 const worldSession = new WorldSession(worldStore, new SystemClock(), idGenerator, logger)
 const saveGameService = new SaveGameService(worldStore, logger)
 const saveSlotStore = new LocalStorageSaveSlotStore()
-let meaningfulObjectTrustedContext: {
-  roomId: string
-  consequenceCatalog?: MeaningfulObjectConsequenceCatalog
-  questSpec?: QuestSpec
-} | undefined
+let meaningfulObjectTrustedContext: MeaningfulObjectTrustedContext | undefined
 const interactionService = new InteractionService(worldSession, logger, (roomId) => {
   const context = meaningfulObjectTrustedContext
   if (context === undefined || context.roomId !== roomId) return undefined
@@ -707,13 +706,11 @@ function App() {
 
   const enterActivePlay = useCallback((play: ActivePlay) => {
     activePlayRef.current = play
-    meaningfulObjectTrustedContext = {
-      roomId: play.room.id,
-      ...(play.consequenceCatalogs?.get(play.room.id) !== undefined
-        ? { consequenceCatalog: play.consequenceCatalogs.get(play.room.id) }
-        : {}),
-      ...(questSpecRef.current !== null ? { questSpec: questSpecRef.current } : {}),
-    }
+    meaningfulObjectTrustedContext = deriveMeaningfulObjectTrustedContext({
+      room: play.room,
+      consequenceCatalogs: play.consequenceCatalogs,
+      questSpec: questSpecRef.current,
+    })
     setActivePlay(play)
     setExitGateResults(new Map())
     roomEntrySeqRef.current += 1
@@ -1442,13 +1439,11 @@ function App() {
           : {}),
       }
       activePlayRef.current = nextPlay
-      meaningfulObjectTrustedContext = {
-        roomId: nextPlay.room.id,
-        ...(nextPlay.consequenceCatalogs?.get(nextPlay.room.id) !== undefined
-          ? { consequenceCatalog: nextPlay.consequenceCatalogs.get(nextPlay.room.id) }
-          : {}),
-        ...(nextQuestSpec !== undefined ? { questSpec: nextQuestSpec } : {}),
-      }
+      meaningfulObjectTrustedContext = deriveMeaningfulObjectTrustedContext({
+        room: nextPlay.room,
+        consequenceCatalogs: nextPlay.consequenceCatalogs,
+        questSpec: nextQuestSpec,
+      })
       setActivePlay((current) => current?.sessionId === activePlay.sessionId ? nextPlay : current)
       roomEntrySeqRef.current += 1
       setRoomEntrySeq(roomEntrySeqRef.current)
@@ -1484,10 +1479,18 @@ function App() {
             if (catalog === null) return
             const current = activePlayRef.current
             if (current?.sessionId !== destinationSessionId) return
-            const consequenceCatalogs = new Map(current.consequenceCatalogs)
-            consequenceCatalogs.set(destinationRoom.id, catalog)
-            const next = { ...current, consequenceCatalogs }
+            const updated = applyGeneratedMeaningfulConsequenceCatalog({
+              consequenceCatalogs: current.consequenceCatalogs,
+              destinationRoomId: destinationRoom.id,
+              activeRoom: current.room,
+              activeQuestSpec: questSpecRef.current,
+              catalog,
+            })
+            const next = { ...current, consequenceCatalogs: updated.consequenceCatalogs }
             activePlayRef.current = next
+            if (updated.activeTrustedContext !== undefined) {
+              meaningfulObjectTrustedContext = updated.activeTrustedContext
+            }
             setActivePlay((visible) => visible?.sessionId === destinationSessionId ? next : visible)
           },
           refreshAfterApply: async () => {

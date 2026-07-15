@@ -61,6 +61,54 @@ export type CurrentPlayIdentity = {
   sessionId: string
 } | null
 
+/** The active room's trusted, non-persisted consequence view. */
+export type MeaningfulObjectTrustedContext = Readonly<{
+  roomId: string
+  consequenceCatalog?: MeaningfulObjectConsequenceCatalog
+  questSpec?: QuestSpec
+}>
+
+export function deriveMeaningfulObjectTrustedContext(input: {
+  room: Pick<LoadedRoom, 'id'>
+  consequenceCatalogs?: ReadonlyMap<string, MeaningfulObjectConsequenceCatalog>
+  questSpec?: QuestSpec | null
+}): MeaningfulObjectTrustedContext {
+  const consequenceCatalog = input.consequenceCatalogs?.get(input.room.id)
+  return {
+    roomId: input.room.id,
+    ...(consequenceCatalog !== undefined ? { consequenceCatalog } : {}),
+    ...(input.questSpec !== null && input.questSpec !== undefined
+      ? { questSpec: input.questSpec }
+      : {}),
+  }
+}
+
+export function applyGeneratedMeaningfulConsequenceCatalog(input: {
+  consequenceCatalogs?: ReadonlyMap<string, MeaningfulObjectConsequenceCatalog>
+  destinationRoomId: string
+  activeRoom: Pick<LoadedRoom, 'id'>
+  activeQuestSpec?: QuestSpec | null
+  catalog: MeaningfulObjectConsequenceCatalog
+}): Readonly<{
+  consequenceCatalogs: Map<string, MeaningfulObjectConsequenceCatalog>
+  activeTrustedContext?: MeaningfulObjectTrustedContext
+}> {
+  const consequenceCatalogs = new Map(input.consequenceCatalogs)
+  consequenceCatalogs.set(input.destinationRoomId, input.catalog)
+  return {
+    consequenceCatalogs,
+    ...(input.activeRoom.id === input.destinationRoomId
+      ? {
+          activeTrustedContext: deriveMeaningfulObjectTrustedContext({
+            room: input.activeRoom,
+            consequenceCatalogs,
+            questSpec: input.activeQuestSpec,
+          }),
+        }
+      : {}),
+  }
+}
+
 export type RuntimeRoomMemoryRestoreSummary = {
   status: 'missing' | 'invalid' | 'restored'
   reason?: 'missing' | RoomMemorySaveLoadCode
