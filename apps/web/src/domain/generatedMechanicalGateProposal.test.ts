@@ -90,13 +90,12 @@ describe('assembleGate', () => {
     expect(result?.gate && isGeneratedGateSatisfiable(result.gate, room)).toBe(true)
   })
 
-  it('derives take-item flags through the frozen interaction flag helper', () => {
+  it('rejects a provider proposal for an intercepted meaningful container', () => {
     const room = makeRoom([takeItemObject(), exitObject('east-room')])
 
     const result = assembleGate(proposal('supply-crate', 'east-room'), room)
 
-    expect(result?.gate.condition.flag).toBe(interactionFlagKey(undefined, 'supply-crate'))
-    expect(result?.gate.effect.toRoomId).toBe('east-room')
+    expect(result).toBeNull()
   })
 
   it('returns null for bad JSON', () => {

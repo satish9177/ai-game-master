@@ -1765,14 +1765,22 @@ describe('assembleRoom', () => {
       id: 'secret-room-id',
       shell: { dimensions: { width: 18, depth: 18, height: 4 }, exits: [{ side: 'north', width: 3 }] },
       spawn: { position: [0, 1.7, 5] },
-      objects: [{ type: 'book', name: 'Secret Book Name', position: [0, 0, -2] }],
+      objects: [
+        { type: 'book', name: 'Secret Book Name', position: [0, 0, -2] },
+        {
+          type: 'machine',
+          id: 'normal-control-id',
+          position: [2, 0, -2],
+          interaction: { key: 'E', prompt: 'Inspect', effect: { kind: 'inspect' } },
+        },
+      ],
     })), fallback, {
       enrichObjectiveTarget: true,
       deriveMechanicalGateDiagnostic: true,
     })
 
     expect(result.diagnostics.provenance).toBe('generated')
-    expect(result.diagnostics.objectiveTargetEnriched).toBe(true)
+    expect(result.diagnostics.objectiveTargetEnriched).toBe(false)
     expect(result.diagnostics.mechanicalGateAvailable).toBe(true)
     expect(Object.keys(result.diagnostics)).toContain('mechanicalGateAvailable')
 
@@ -1785,6 +1793,25 @@ describe('assembleRoom', () => {
     expect(diagnosticDump).not.toContain('mechanical-gate')
     expect(diagnosticDump).not.toContain('locked-exit')
     expect(diagnosticDump).not.toContain('unlock-exit')
+  })
+
+  it('deriveMechanicalGateDiagnostic reports false for an intercepted meaningful document', () => {
+    const result = assembleRoom(raw(validSpec({
+      id: 'secret-meaningful-room',
+      shell: { dimensions: { width: 18, depth: 18, height: 4 }, exits: [{ side: 'north', width: 3 }] },
+      spawn: { position: [0, 1.7, 5] },
+      objects: [{ type: 'book', id: 'secret-document-id', name: 'Secret Document Name', position: [0, 0, -2] }],
+    })), fallback, {
+      enrichObjectiveTarget: true,
+      deriveMechanicalGateDiagnostic: true,
+    })
+
+    expect(result.diagnostics.mechanicalGateAvailable).toBe(false)
+    const diagnosticDump = JSON.stringify(result.diagnostics)
+    expect(diagnosticDump).not.toContain('secret-meaningful-room')
+    expect(diagnosticDump).not.toContain('secret-document-id')
+    expect(diagnosticDump).not.toContain('Secret Document Name')
+    expect(diagnosticDump).not.toContain('mechanical-gate')
   })
 
   it('deriveMechanicalGateDiagnostic true reports false when no flag-writer exists', () => {

@@ -22,7 +22,7 @@ export function navigationResultMessage(result: NavigationResult): string | unde
     return 'The north arch is barred until you deal with Steward Malik.'
   }
   if (result.status === 'rejected' && result.reason === 'gate-locked') {
-    return 'This way is sealed until you deal with what is in this room.'
+    return 'This way remains sealed.'
   }
   if (result.status === 'rejected' && result.reason === 'already-here') {
     return 'You are already here.'

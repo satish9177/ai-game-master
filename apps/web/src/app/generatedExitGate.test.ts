@@ -42,6 +42,23 @@ function gatedRoom(): LoadedRoom {
   ])
 }
 
+function meaningfulGateRoom(): LoadedRoom {
+  return makeRoom([
+    {
+      type: 'book',
+      id: 'document',
+      position: [0, 0, -2],
+      interaction: { key: 'E', prompt: 'Read', effect: { kind: 'inspect' } },
+    },
+    {
+      type: 'arch',
+      id: 'north-arch',
+      position: [0, 0, -8],
+      interaction: { key: 'E', prompt: 'Leave', exit: { toRoomId: 'north-room' } },
+    },
+  ])
+}
+
 function gateState(flags?: Record<string, boolean>): Pick<WorldState, 'roomStates'> {
   return {
     roomStates: {
@@ -150,6 +167,22 @@ describe('evaluateGeneratedExitGate', () => {
       room,
       toRoomId: 'north-room',
       state: gateState(),
+    })).toEqual({ gated: false })
+  })
+
+  it('fails open for an old provider gate whose meaningful-object legacy flag is unreachable', () => {
+    expect(evaluateGeneratedExitGate({
+      room: meaningfulGateRoom(),
+      toRoomId: 'north-room',
+      state: gateState(),
+      providerGateStatus: 'accepted',
+      providerGate: providerGate({
+        condition: {
+          kind: 'room-flag',
+          roomId: 'generated-room',
+          flag: 'interaction:document',
+        },
+      }),
     })).toEqual({ gated: false })
   })
 

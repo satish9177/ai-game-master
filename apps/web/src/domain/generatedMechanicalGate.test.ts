@@ -97,7 +97,7 @@ describe('buildGeneratedMechanicalGate', () => {
     expect(gate && isGeneratedGateSatisfiable(gate, room)).toBe(true)
   })
 
-  it('derives a valid satisfiable gate from a take-item flag-writer', () => {
+  it('rejects a meaningful container flag-writer because its legacy route is intercepted', () => {
     const room = makeRoom([
       {
         type: 'crate',
@@ -117,9 +117,27 @@ describe('buildGeneratedMechanicalGate', () => {
 
     const gate = buildGeneratedMechanicalGate(room)
 
-    expect(gate?.condition.flag).toBe('interaction:supply-crate')
-    expect(gate?.effect.toRoomId).toBe('east-room')
-    expect(gate && isGeneratedGateSatisfiable(gate, room)).toBe(true)
+    expect(gate).toBeNull()
+  })
+
+  it('skips an intercepted meaningful object and keeps a later normal legacy gate', () => {
+    const room = makeRoom([
+      {
+        type: 'book',
+        id: 'document',
+        position: [0, 0, -2],
+        interaction: { key: 'E', prompt: 'Read', effect: { kind: 'inspect' } },
+      },
+      {
+        type: 'machine',
+        id: 'control-panel',
+        position: [2, 0, -2],
+        interaction: { key: 'E', prompt: 'Inspect', effect: { kind: 'inspect' } },
+      },
+      exitObject(),
+    ])
+
+    expect(buildGeneratedMechanicalGate(room)?.condition.flag).toBe('interaction:control-panel')
   })
 
   it('returns null when no flag-writing interaction exists', () => {
@@ -369,7 +387,30 @@ describe('isGeneratedGateSatisfiable', () => {
     expect(isGeneratedGateSatisfiable(gate, room)).toBe(true)
   })
 
-  it('accepts a take-item derived flag because the current interaction planner writes it', () => {
+  it('rejects meaningful document, container, and remains legacy flags', () => {
+    const cases = [
+      { type: 'book', id: 'doc' },
+      { type: 'crate', id: 'container' },
+      { type: 'corpse', id: 'remains' },
+    ] as const
+    for (const object of cases) {
+      const room = makeRoom([
+        {
+          ...object,
+          position: [0, 0, -2],
+          interaction: { key: 'E', prompt: 'Inspect', effect: { kind: 'inspect' } },
+        },
+        exitObject(),
+      ])
+      const gate = validGate({
+        condition: { kind: 'room-flag', roomId: 'generated-room', flag: `interaction:${object.id}` },
+      })
+      expect(isGeneratedGateSatisfiable(gate, room)).toBe(false)
+      expect(buildGeneratedMechanicalGate(room)).toBeNull()
+    }
+  })
+
+  it('rejects a meaningful container take-item flag because its runtime route is intercepted', () => {
     const room = makeRoom([
       {
         type: 'crate',
@@ -390,7 +431,7 @@ describe('isGeneratedGateSatisfiable', () => {
       condition: { kind: 'room-flag', roomId: 'generated-room', flag: 'interaction:supply-crate' },
     })
 
-    expect(isGeneratedGateSatisfiable(gate, room)).toBe(true)
+    expect(isGeneratedGateSatisfiable(gate, room)).toBe(false)
   })
 
   it('rejects gates whose condition room does not match the room', () => {

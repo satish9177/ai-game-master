@@ -2706,7 +2706,7 @@ describe('App generated mechanical gate runtime wiring', () => {
 
     expect(result).toEqual({ status: 'rejected', reason: 'gate-locked' })
     const message = navigationResultMessage(result)
-    expect(message).toBe('This way is sealed until you deal with what is in this room.')
+    expect(message).toBe('This way remains sealed.')
     const unsafeDump = JSON.stringify({ message, logs: harness.logs })
     expect(unsafeDump).not.toContain(GENERATED_ROOM_ID)
     expect(unsafeDump).not.toContain(CONTROL_OBJECT_ID)
@@ -3076,7 +3076,7 @@ describe('generated quest restore — handleLoad wiring (ADR-0059, slice 5)', ()
 
     expect(result).toEqual({ status: 'rejected', reason: 'gate-locked' })
     const message = navigationResultMessage(result)
-    expect(message).toBe('This way is sealed until you deal with what is in this room.')
+    expect(message).toBe('This way remains sealed.')
     const unsafeDump = JSON.stringify({ message, logs: [] })
     expect(unsafeDump).not.toContain(GATE_ROOM_ID)
     expect(unsafeDump).not.toContain(GATE_OBJECT_ID)

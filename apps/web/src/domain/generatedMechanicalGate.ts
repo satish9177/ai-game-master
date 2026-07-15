@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import { interactionFlagKey } from './interactions/planInteraction'
 import type { LoadedRoom } from './loadRoomSpec'
+import { isEligibleObject } from './objectPurpose/meaningfulObjectRuntime'
 import type { RoomObject } from './roomSpec'
 import { evaluateCondition } from './quests/evaluateQuest'
 import type { ObjectiveCondition } from './quests/questSpec'
@@ -80,13 +81,24 @@ export function buildGeneratedMechanicalGate(room: LoadedRoom): GeneratedMechani
 }
 
 function hasReachableUnlockFlag(gate: GeneratedMechanicalGate, room: LoadedRoom): boolean {
-  return room.objects.some((object) => flagWrittenByObject(object) === gate.condition.flag)
+  return room.objects.some((object) =>
+    flagWrittenByObject(object) === gate.condition.flag && writesFlagOnRuntimeRoute(object),
+  )
+}
+
+/**
+ * Generated-play documents, containers, and remains are intercepted by the
+ * meaningful-object route. That route deliberately does not apply their
+ * legacy interaction effect, so its legacy flag cannot safely gate an exit.
+ */
+function writesFlagOnRuntimeRoute(object: RoomObject): boolean {
+  return !isEligibleObject(object)
 }
 
 function firstUnlockFlag(room: LoadedRoom): string | undefined {
   for (const object of room.objects) {
     const flag = flagWrittenByObject(object)
-    if (flag !== undefined) return flag
+    if (flag !== undefined && writesFlagOnRuntimeRoute(object)) return flag
   }
   return undefined
 }
