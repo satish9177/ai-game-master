@@ -15,6 +15,7 @@ import { buildGeneratedRoomCacheSaveState } from '../domain/quests/generatedRoom
 import { buildGeneratedQuestSaveState } from '../domain/quests/generatedQuestSaveState'
 import type { QuestView } from '../domain/quests/evaluateQuest'
 import type { QuestSpec } from '../domain/quests/questSpec'
+import type { MeaningfulObjectConsequenceCatalog } from '../domain/objectPurpose/meaningfulObjectConsequences'
 import type { ObjectiveGenerator } from '../domain/ports/ObjectiveGenerator'
 import type { UsageGuardConfig } from '../domain/usage/usageGuard'
 import { canAttemptOptional } from '../domain/usage/usageGuard'
@@ -197,6 +198,8 @@ export function buildGeneratedRoomCacheSaveJson(input: {
   worldState: WorldState
   themePack?: GeneratedRoomVisualTheme
   objectives?: ReadonlyMap<string, unknown>
+  consequenceCatalogs?: ReadonlyMap<string, MeaningfulObjectConsequenceCatalog>
+  currentQuestSpec?: QuestSpec
 }): string | undefined {
   if (input.objectivesPerRoom !== true) return undefined
 
@@ -204,16 +207,21 @@ export function buildGeneratedRoomCacheSaveJson(input: {
   const currentEntry = {
     room: input.room,
     provenance: currentSnapshot?.provenance ?? 'generated',
+    ...(input.consequenceCatalogs?.get(input.room.id) !== undefined
+      ? { consequenceCatalog: input.consequenceCatalogs.get(input.room.id), questSpec: input.currentQuestSpec }
+      : {}),
   } as const
   const visitedEntries = input.cachedRooms
     .filter((entry) => entry.roomId !== input.room.id)
     .filter((entry) => input.worldState.roomStates[entry.roomId]?.visited === true)
     .map((entry) => {
       const objective = input.objectives?.get(entry.roomId)
+      const consequenceCatalog = input.consequenceCatalogs?.get(entry.roomId)
       return {
         room: entry.room,
         provenance: entry.provenance ?? 'generated',
         ...(objective != null ? { objective } : {}),
+        ...(consequenceCatalog !== undefined ? { consequenceCatalog } : {}),
       }
     })
 

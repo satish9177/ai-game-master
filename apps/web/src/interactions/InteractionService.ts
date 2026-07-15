@@ -1,6 +1,12 @@
 import type { InteractionEffect } from '../domain/interactions/effects'
 import type { LoadedRoom } from '../domain/loadRoomSpec'
 import {
+  meaningfulObjectConsequenceFor,
+  validateMeaningfulObjectConsequenceCatalog,
+} from '../domain/objectPurpose/meaningfulObjectConsequences'
+import type { MeaningfulObjectConsequenceCatalog } from '../domain/objectPurpose/meaningfulObjectConsequences'
+import type { QuestSpec } from '../domain/quests/questSpec'
+import {
   deriveMeaningfulObjectState,
   deriveMeaningfulObjectView,
   validatedSearchItem,
@@ -37,7 +43,7 @@ export type ResolveInteractionInput = {
 
 export type MeaningfulObjectInteractionResult =
   | { status: 'observed'; state: WorldState }
-  | { status: 'applied'; state: WorldState; event: WorldEvent }
+  | { status: 'applied'; state: WorldState; event: WorldEvent; message: string }
   | { status: 'already-resolved'; state: WorldState; action: 'read' | 'search' }
   | { status: 'rejected' }
   | { status: 'failed'; reason: 'conflict' | 'not-found' }
@@ -55,13 +61,28 @@ export type MeaningfulObjectInput = Readonly<{
   action: MeaningfulObjectAction
 }>
 
+export type MeaningfulObjectTrustedContext = Readonly<{
+  consequenceCatalog?: MeaningfulObjectConsequenceCatalog
+  questSpec?: QuestSpec
+}>
+
+export type MeaningfulObjectTrustedContextProvider = (
+  roomId: string,
+) => MeaningfulObjectTrustedContext | undefined
+
 export class InteractionService {
   private readonly session: InteractionSession
   private readonly log: Logger
+  private readonly getTrustedContext: MeaningfulObjectTrustedContextProvider
 
-  constructor(session: InteractionSession, logger: Logger) {
+  constructor(
+    session: InteractionSession,
+    logger: Logger,
+    getTrustedContext: MeaningfulObjectTrustedContextProvider = () => undefined,
+  ) {
     this.session = session
     this.log = logger
+    this.getTrustedContext = getTrustedContext
   }
 
   async resolve(input: ResolveInteractionInput): Promise<InteractionResult> {
@@ -152,6 +173,18 @@ export class InteractionService {
 
     if (this.session.applyMeaningfulObject === undefined) return { status: 'rejected' }
     const item = input.action === 'search' ? validatedSearchItem(object) : undefined
+    const trusted = this.getTrustedContext(input.room.id)
+    const consequenceCatalog = trusted?.consequenceCatalog === undefined
+      ? undefined
+      : validateMeaningfulObjectConsequenceCatalog(trusted.consequenceCatalog, {
+          room: input.room,
+          ...(trusted.questSpec !== undefined ? { questSpec: trusted.questSpec } : {}),
+        }) ?? undefined
+    const consequence = meaningfulObjectConsequenceFor(
+      consequenceCatalog,
+      input.objectId,
+      input.action,
+    )
     const applied = await this.session.applyMeaningfulObject(
       input.sessionId,
       {
@@ -162,9 +195,16 @@ export class InteractionService {
         family: current.view.family,
         action: input.action,
         ...(item !== undefined ? { item } : {}),
+        ...(consequence?.clueId !== undefined ? { clueId: consequence.clueId } : {}),
+        ...(consequence?.objective !== undefined ? { objective: consequence.objective } : {}),
       },
       current.state.revision,
-      { room: input.room, generatedPlay: input.generatedPlay },
+      {
+        room: input.room,
+        generatedPlay: input.generatedPlay,
+        ...(consequenceCatalog !== undefined ? { consequenceCatalog } : {}),
+        ...(trusted?.questSpec !== undefined ? { questSpec: trusted.questSpec } : {}),
+      },
     )
     if (!applied.ok) {
       return applied.error.code === 'conflict'
@@ -173,7 +213,12 @@ export class InteractionService {
           ? { status: 'failed', reason: 'not-found' }
           : { status: 'rejected' }
     }
-    return { status: 'applied', state: applied.state, event: applied.event }
+    return {
+      status: 'applied',
+      state: applied.state,
+      event: applied.event,
+      message: meaningfulObjectAppliedMessage(input.action, consequence, applied.event),
+    }
   }
 
   private logResult(
@@ -193,6 +238,28 @@ export class InteractionService {
     if (status === 'failed') this.log.warn('interaction resolution failed', context)
     else this.log.info('interaction resolved', context)
   }
+}
+
+function meaningfulObjectAppliedMessage(
+  action: Exclude<MeaningfulObjectAction, 'inspect'>,
+  requested: ReturnType<typeof meaningfulObjectConsequenceFor>,
+  event: WorldEvent,
+): string {
+  const messages = [
+    action === 'read' ? 'You read it.' : action === 'open' ? 'You open it.' : 'You search it.',
+  ]
+  const applied = event.type === 'meaningful-object-applied' ? event.payload : undefined
+  if (requested?.clueId !== undefined) {
+    messages.push(applied?.clueId !== undefined
+      ? 'You discovered a clue.'
+      : 'You already knew this clue.')
+  }
+  if (requested?.objective !== undefined) {
+    messages.push(applied?.objective !== undefined
+      ? 'You advanced an objective.'
+      : 'That objective was already satisfied.')
+  }
+  return messages.join(' ')
 }
 
 function uniqueObject(room: LoadedRoom, objectId: string) {

@@ -1,6 +1,10 @@
 import type { WorldEvent } from './events'
 import type { RoomState, WorldState } from './worldState'
 import { meaningfulObjectStateFlagKey } from '../objectPurpose/meaningfulObjectRuntime'
+import {
+  meaningfulClueFlagKey,
+  meaningfulObjectiveFlagKey,
+} from '../objectPurpose/meaningfulObjectConsequences'
 
 export function applyEvent(state: WorldState | null, event: WorldEvent): WorldState {
   if (event.type === 'session-started') {
@@ -121,6 +125,17 @@ export function applyEvent(state: WorldState | null, event: WorldEvent): WorldSt
       const flags = {
         ...(existing.flags ?? {}),
         [meaningfulObjectStateFlagKey(event.payload.objectId, event.payload.state)]: true,
+        ...(event.payload.clueId !== undefined
+          ? { [meaningfulClueFlagKey(event.payload.clueId)]: true }
+          : {}),
+        ...(event.payload.objective !== undefined
+          ? {
+              [meaningfulObjectiveFlagKey(
+                event.payload.objective.questId,
+                event.payload.objective.objectiveId,
+              )]: true,
+            }
+          : {}),
       }
       const inventory = event.payload.item === undefined
         ? state.inventory.map((item) => ({ ...item }))

@@ -14,10 +14,12 @@ import { projectPlayerHud } from './renderer/ui/playerHud'
 import type { PlayerHudView } from './renderer/ui/playerHud'
 import { evaluateQuest, type QuestView } from './domain/quests/evaluateQuest'
 import type { QuestSpec } from './domain/quests/questSpec'
+import type { MeaningfulObjectConsequenceCatalog } from './domain/objectPurpose/meaningfulObjectConsequences'
 import { loadGeneratedQuestSaveState } from './domain/quests/generatedQuestSaveState'
 import { loadGeneratedRoomCacheSaveState } from './domain/quests/generatedRoomCacheSaveState'
 import { demoQuestSpec } from './domain/examples/demoQuest'
 import type { JournalView } from './domain/journal/projectJournal'
+import { mergeMeaningfulObjectConsequenceJournal } from './domain/journal/eventConsequenceJournal'
 import type { JournalSpec } from './domain/journal/journalSpec'
 import type { GeneratedConsequenceJournalInput } from './domain/journal/generatedConsequenceJournal'
 import { demoJournalSpec } from './domain/examples/demoJournal'
@@ -53,6 +55,7 @@ import { restoreGeneratedRoomCache } from './app/restoreGeneratedRoomCache'
 import { computeDerivedViews } from './app/derivedViews'
 import {
   loadEventConsequenceJournal,
+  loadMeaningfulObjectConsequenceJournal,
   readEventConsequenceJournalEnabled,
 } from './app/eventConsequenceJournalSeam'
 import { navigateWithExitGate } from './app/gatedNavigation'
@@ -196,7 +199,21 @@ const worldStore = new InMemoryWorldStore()
 const worldSession = new WorldSession(worldStore, new SystemClock(), idGenerator, logger)
 const saveGameService = new SaveGameService(worldStore, logger)
 const saveSlotStore = new LocalStorageSaveSlotStore()
-const interactionService = new InteractionService(worldSession, logger)
+let meaningfulObjectTrustedContext: {
+  roomId: string
+  consequenceCatalog?: MeaningfulObjectConsequenceCatalog
+  questSpec?: QuestSpec
+} | undefined
+const interactionService = new InteractionService(worldSession, logger, (roomId) => {
+  const context = meaningfulObjectTrustedContext
+  if (context === undefined || context.roomId !== roomId) return undefined
+  return {
+    ...(context.consequenceCatalog !== undefined
+      ? { consequenceCatalog: context.consequenceCatalog }
+      : {}),
+    ...(context.questSpec !== undefined ? { questSpec: context.questSpec } : {}),
+  }
+})
 const encounterService = new EncounterService(worldSession, logger)
 const npcDialogueService = new NPCDialogueService(worldSession, dialogueProviderSelection.provider, logger)
 // The trusted fallback room, validated once at startup. The assembly pipeline
@@ -247,6 +264,7 @@ type ActivePlay = {
   entryResolvedObjectIds?: ReadonlySet<string>
   providerGateStatus?: ProviderGateStatus
   providerGate?: GeneratedMechanicalGate
+  consequenceCatalogs?: ReadonlyMap<string, MeaningfulObjectConsequenceCatalog>
 }
 
 function projectExitGatePresentationResults(
@@ -343,7 +361,9 @@ function buildGeneratedJournalInput(
   state: WorldState,
   questSpec: QuestSpec | null,
 ): GeneratedConsequenceJournalInput {
-  const questForJournal = questSpec ? evaluateQuest(questSpec, state) : null
+  const questForJournal = questSpec
+    ? evaluateQuest(questSpec, state, { meaningfulObjectProgression: true })
+    : null
   const storyContext = play.storyKind !== undefined
     ? deriveStoryThreadContext(play.storyKind, play.room.id)
     : undefined
@@ -375,18 +395,20 @@ function restoreGeneratedRoomCacheFromSlot(
   generatedRoomCacheJson: string | undefined,
   currentRoom: LoadedRoom,
   storyKind: GeneratedStoryThreadKind | undefined,
+  currentQuestSpec: QuestSpec | undefined,
 ): {
   roomCache: SessionRoomCache
   navigation: NavigationService
   adjacentPregenerator: AdjacentRoomPregenerator
   restoredObjectives: ReadonlyMap<string, GeneratedObjectiveQuestAttachment>
+  restoredConsequenceCatalogs: ReadonlyMap<string, MeaningfulObjectConsequenceCatalog>
   restoredRoomIds: string[]
 } | null {
   if (generatedRoomCacheJson == null) return null
   const loaded = loadGeneratedRoomCacheSaveState(generatedRoomCacheJson)
   if (!loaded.ok) return null
 
-  const restored = restoreGeneratedRoomCache(loaded.state, currentRoom)
+  const restored = restoreGeneratedRoomCache(loaded.state, currentRoom, currentQuestSpec)
   const vocabulary = themeVocabulary(loaded.state.themePack)
   const generatedAdjacentGenerator = new FakeRoomGenerator(vocabulary)
   const restoredPregenerator = new AdjacentRoomPregenerator(
@@ -419,6 +441,7 @@ function restoreGeneratedRoomCacheFromSlot(
     navigation: new NavigationService(worldSession, restoredPregenerator, logger),
     adjacentPregenerator: restoredPregenerator,
     restoredObjectives: restored.objectives,
+    restoredConsequenceCatalogs: restored.consequenceCatalogs,
     restoredRoomIds: restored.restoredRoomIds,
   }
 }
@@ -683,6 +706,13 @@ function App() {
 
   const enterActivePlay = useCallback((play: ActivePlay) => {
     activePlayRef.current = play
+    meaningfulObjectTrustedContext = {
+      roomId: play.room.id,
+      ...(play.consequenceCatalogs?.get(play.room.id) !== undefined
+        ? { consequenceCatalog: play.consequenceCatalogs.get(play.room.id) }
+        : {}),
+      ...(questSpecRef.current !== null ? { questSpec: questSpecRef.current } : {}),
+    }
     setActivePlay(play)
     setExitGateResults(new Map())
     roomEntrySeqRef.current += 1
@@ -692,6 +722,15 @@ function App() {
   }, [])
   const setQuestSpecForView = useCallback((questSpec: QuestSpec | null) => {
     questSpecRef.current = questSpec
+    if (meaningfulObjectTrustedContext !== undefined) {
+      meaningfulObjectTrustedContext = {
+        roomId: meaningfulObjectTrustedContext.roomId,
+        ...(meaningfulObjectTrustedContext.consequenceCatalog !== undefined
+          ? { consequenceCatalog: meaningfulObjectTrustedContext.consequenceCatalog }
+          : {}),
+        ...(questSpec !== null ? { questSpec } : {}),
+      }
+    }
     setQuestSpecSnapshot(questSpec)
   }, [])
   const setQuestHintsForView = useCallback((hints: QuestHintState | null) => {
@@ -719,6 +758,7 @@ function App() {
       questSpecRef.current,
       journalSpecRef.current,
       generatedJournalInput,
+      play?.objectivesPerRoom === true,
     )
     setPlayerHud(views.playerHud)
     setQuest(views.quest)
@@ -739,6 +779,17 @@ function App() {
   // wins. Read-only: the only call is the in-memory getEventLog; no polling, no
   // subscriptions, no event writes.
   const eventJournalRequestRef = useRef(0)
+  const meaningfulJournalRequestRef = useRef(0)
+  const applyMeaningfulJournalFromSession = useCallback((sessionId: string) => {
+    const requestId = ++meaningfulJournalRequestRef.current
+    void loadMeaningfulObjectConsequenceJournal({
+      sessionId,
+      getEventLog: (id) => worldSession.getEventLog(id),
+    }).then((view) => {
+      if (meaningfulJournalRequestRef.current !== requestId || view === null) return
+      setJournal((current) => mergeMeaningfulObjectConsequenceJournal(current, view))
+    })
+  }, [])
   const applyEventJournalFromSession = useCallback((sessionId: string) => {
     if (!eventConsequenceJournalFromEventsEnabled) return
     const requestId = ++eventJournalRequestRef.current
@@ -776,6 +827,7 @@ function App() {
   // has on hand; this composition root builds the DisplayNameResolver (only when
   // BOTH a room name and an item name are known) and owns RoomMemoryService.
   const handleCommittedInteractionEvents = useCallback((input: CommittedInteractionEvents) => {
+    applyMeaningfulJournalFromSession(input.state.sessionId)
     const displayNames =
       input.roomName !== undefined && input.item !== undefined
         ? createDisplayNameResolver({
@@ -808,7 +860,7 @@ function App() {
       .finally(() => {
         refreshRoomMemoryContext(input.state)
       })
-  }, [refreshRoomMemoryContext])
+  }, [applyMeaningfulJournalFromSession, refreshRoomMemoryContext])
 
   // Auto-dismiss the visible memory feedback line after a fixed delay (same
   // effect-cleanup idiom as `QuestTracker`'s recently-completed timer): the
@@ -848,13 +900,14 @@ function App() {
         enterActivePlay(play)
         refreshDerivedViews(initialState)
         applyEventJournalFromSession(initialState.sessionId)
+        applyMeaningfulJournalFromSession(initialState.sessionId)
         applyWorldClockFromSession(initialState.sessionId)
       } else setFatalMessage(ROOM_UNAVAILABLE)
     })
     return () => {
       requestVersion.current += 1
     }
-  }, [applyEventJournalFromSession, applyWorldClockFromSession, enterActivePlay, refreshDerivedViews, setQuestHintsForView, setQuestSpecForView])
+  }, [applyEventJournalFromSession, applyMeaningfulJournalFromSession, applyWorldClockFromSession, enterActivePlay, refreshDerivedViews, setQuestHintsForView, setQuestSpecForView])
 
   const handlePrompt = useCallback((prompt: string) => {
     // In-flight lock: prevent a second call while one is pending.
@@ -884,6 +937,7 @@ function App() {
     setRelationshipFeedbackState(relationshipFeedbackOnRoomEntry)
     setRelationshipJournal(INITIAL_RELATIONSHIP_JOURNAL_STATE)
     activePlayRef.current = null
+    meaningfulObjectTrustedContext = undefined
     setActivePlay(null)
     setPlayerHud(null)
     setQuest(null)
@@ -1010,6 +1064,7 @@ function App() {
         })
         refreshDerivedViews(started.state)
         applyEventJournalFromSession(started.state.sessionId)
+        applyMeaningfulJournalFromSession(started.state.sessionId)
         applyWorldClockFromSession(started.state.sessionId)
         // A repaired or fallback room couldn't be built exactly as asked — show the
         // static, prompt-free notice. A clean `generated` room shows nothing.
@@ -1025,7 +1080,7 @@ function App() {
       logger.error('generated room source threw', { code: 'room-source-failed' })
       setFatalMessage(ROOM_UNAVAILABLE)
     })
-  }, [applyEventJournalFromSession, applyWorldClockFromSession, enterActivePlay, refreshDerivedViews, setQuestHintsForView, setQuestSpecForView])
+  }, [applyEventJournalFromSession, applyMeaningfulJournalFromSession, applyWorldClockFromSession, enterActivePlay, refreshDerivedViews, setQuestHintsForView, setQuestSpecForView])
 
   const handleGenerateAnyway = useCallback(() => {
     confirmGrantedRef.current = true
@@ -1097,6 +1152,8 @@ function App() {
             cachedRooms: activePlay.adjacentPregenerator.snapshotCachedRooms(),
             worldState: stateForSidecars.state,
             objectives: perRoomObjectiveMemoRef.current,
+            consequenceCatalogs: activePlay.consequenceCatalogs,
+            currentQuestSpec: questSpecRef.current ?? undefined,
             ...(activePlay.worldBible?.themePack !== undefined
               ? { themePack: activePlay.worldBible.themePack }
               : {}),
@@ -1239,6 +1296,7 @@ function App() {
           slotResult.generatedRoomCacheJson,
           restoredGeneratedPlay.room,
           restoredGeneratedPlay.storyKind,
+          restoredGeneratedPlay.questSpec,
         )
         seedRestoredGeneratedObjectiveMemo(
           perRoomObjectiveMemoRef.current,
@@ -1257,6 +1315,7 @@ function App() {
                 roomCache: restoredCache.roomCache,
                 navigation: restoredCache.navigation,
                 adjacentPregenerator: restoredCache.adjacentPregenerator,
+                consequenceCatalogs: restoredCache.restoredConsequenceCatalogs,
               }
             : {
                 navigation: exampleNavigation,
@@ -1293,6 +1352,7 @@ function App() {
       }
       refreshDerivedViews(stateResult.state)
       applyEventJournalFromSession(stateResult.state.sessionId)
+      applyMeaningfulJournalFromSession(stateResult.state.sessionId)
       applyWorldClockFromSession(stateResult.state.sessionId)
       setFatalMessage(null)
       setSaveLoadStatus('idle')
@@ -1305,7 +1365,7 @@ function App() {
       setSaveLoadStatus('error')
       setSaveLoadError('This save could not be loaded.')
     })
-  }, [applyEventJournalFromSession, applyWorldClockFromSession, enterActivePlay, refreshDerivedViews, setQuestHintsForView, setQuestSpecForView])
+  }, [applyEventJournalFromSession, applyMeaningfulJournalFromSession, applyWorldClockFromSession, enterActivePlay, refreshDerivedViews, setQuestHintsForView, setQuestSpecForView])
 
   const handleNavigate = useCallback(async (toRoomId: string): Promise<NavigationResult> => {
     if (!activePlay?.navigation) return { status: 'rejected', reason: 'missing-exit' }
@@ -1356,6 +1416,9 @@ function App() {
         adjacentPregenerator: activePlay.adjacentPregenerator,
         ...(activePlay.worldBible ? { worldBible: activePlay.worldBible } : {}),
         ...(activePlay.storyKind ? { storyKind: activePlay.storyKind } : {}),
+        ...(activePlay.consequenceCatalogs !== undefined
+          ? { consequenceCatalogs: activePlay.consequenceCatalogs }
+          : {}),
         initialPlayer: activePlay.initialPlayer,
         ...(nextQuestSpec ? { questSpec: nextQuestSpec } : {}),
         ...(activePlay.journalSpec ? { journalSpec: activePlay.journalSpec } : {}),
@@ -1371,6 +1434,13 @@ function App() {
           : {}),
       }
       activePlayRef.current = nextPlay
+      meaningfulObjectTrustedContext = {
+        roomId: nextPlay.room.id,
+        ...(nextPlay.consequenceCatalogs?.get(nextPlay.room.id) !== undefined
+          ? { consequenceCatalog: nextPlay.consequenceCatalogs.get(nextPlay.room.id) }
+          : {}),
+        ...(nextQuestSpec !== undefined ? { questSpec: nextQuestSpec } : {}),
+      }
       setActivePlay((current) => current?.sessionId === activePlay.sessionId ? nextPlay : current)
       roomEntrySeqRef.current += 1
       setRoomEntrySeq(roomEntrySeqRef.current)
@@ -1382,6 +1452,7 @@ function App() {
       // (ruined-safehouse visited) flips done immediately on entering the room.
       refreshDerivedViews(result.state)
       applyEventJournalFromSession(result.state.sessionId)
+      applyMeaningfulJournalFromSession(result.state.sessionId)
       applyWorldClockFromSession(result.state.sessionId)
       if (shouldAttachObjective) {
         const destinationRoom = result.room
@@ -1409,7 +1480,7 @@ function App() {
       }
     }
     return result
-  }, [activePlay, applyEventJournalFromSession, applyWorldClockFromSession, guardConfig, refreshDerivedViews, setQuestHintsForView, setQuestSpecForView])
+  }, [activePlay, applyEventJournalFromSession, applyMeaningfulJournalFromSession, applyWorldClockFromSession, guardConfig, refreshDerivedViews, setQuestHintsForView, setQuestSpecForView])
 
   // Demo chase opt-in (ADR-0086): ids only, derived from the active room's
   // present NPC objects. Never reads NPC name, prompt/generated text, dialogue,

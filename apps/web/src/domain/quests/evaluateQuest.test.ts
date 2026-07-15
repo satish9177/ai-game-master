@@ -3,6 +3,7 @@ import { evaluateQuest } from './evaluateQuest'
 import { QuestSpecSchema, type QuestSpec } from './questSpec'
 import { demoQuestSpec } from '../examples/demoQuest'
 import type { WorldState } from '../world/worldState'
+import { meaningfulObjectiveFlagKey } from '../objectPurpose/meaningfulObjectConsequences'
 
 const WORLD_ID = '00000000-0000-4000-8000-000000000001'
 const SESSION_ID = '00000000-0000-4000-8000-000000000002'
@@ -28,6 +29,30 @@ function done(view: ReturnType<typeof evaluateQuest>, id: string): boolean | und
 }
 
 describe('evaluateQuest — demo quest spine', () => {
+  it('uses meaningful stage-one flags only when generated progression is enabled', () => {
+    const spec: QuestSpec = {
+      questId: 'quest:one',
+      title: 'Quest',
+      anchorRoomId: 'room',
+      objectives: [{
+        id: 'objective/one',
+        text: 'Objective',
+        condition: { kind: 'has-status', status: 'never' },
+      }],
+    }
+    const state = makeState({
+      currentRoomId: 'room',
+      roomStates: {
+        room: {
+          visited: true,
+          flags: { [meaningfulObjectiveFlagKey(spec.questId, spec.objectives[0]!.id)]: true },
+        },
+      },
+    })
+    expect(evaluateQuest(spec, state).status).toBe('active')
+    expect(evaluateQuest(spec, state, { meaningfulObjectProgression: true }).status)
+      .toBe('complete')
+  })
   it('shipped demoQuestSpec satisfies the schema', () => {
     expect(() => QuestSpecSchema.parse(demoQuestSpec)).not.toThrow()
   })

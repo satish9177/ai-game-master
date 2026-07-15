@@ -1,5 +1,6 @@
 import type { WorldState } from '../world/worldState'
 import type { ObjectiveCondition, QuestSpec } from './questSpec'
+import { isMeaningfulObjectiveSatisfied } from '../objectPurpose/meaningfulObjectConsequences'
 
 export type QuestObjectiveView = {
   id: string
@@ -31,11 +32,17 @@ export function evaluateCondition(condition: ObjectiveCondition, state: WorldSta
   }
 }
 
-export function evaluateQuest(spec: QuestSpec, state: WorldState): QuestView {
+export function evaluateQuest(
+  spec: QuestSpec,
+  state: WorldState,
+  options: { meaningfulObjectProgression?: boolean } = {},
+): QuestView {
   const objectives: QuestObjectiveView[] = spec.objectives.map((obj) => ({
     id: obj.id,
     text: obj.text,
-    done: evaluateCondition(obj.condition, state),
+    done: evaluateCondition(obj.condition, state)
+      || (options.meaningfulObjectProgression === true
+        && isMeaningfulObjectiveSatisfied(state, spec.questId, obj.id, spec.anchorRoomId)),
   }))
   const complete = objectives.every((obj) => obj.done)
   const activeObjectiveId = objectives.find((obj) => !obj.done)?.id ?? null

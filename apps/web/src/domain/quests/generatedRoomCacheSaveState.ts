@@ -3,6 +3,11 @@ import type { RoomProvenance } from '../assembleRoom'
 import type { GeneratedRoomVisualTheme } from '../generatedRoomThemeVocabulary'
 import { loadRoomSpec, type LoadedRoom } from '../loadRoomSpec'
 import { RoomSpecSchema, type RoomObject, type RoomSpec } from '../roomSpec'
+import {
+  parseMeaningfulObjectConsequenceCatalog,
+  validateMeaningfulObjectConsequenceCatalog,
+} from '../objectPurpose/meaningfulObjectConsequences'
+import type { MeaningfulObjectConsequenceCatalog } from '../objectPurpose/meaningfulObjectConsequences'
 import { GENERATED_OBJECTIVE_TEXT_MAX_LENGTH } from './generatedObjectiveSpec'
 import { QuestSpecSchema, type QuestSpec } from './questSpec'
 
@@ -25,13 +30,18 @@ export const SavedGeneratedRoomEntrySchema = z
     room: RoomSpecSchema,
     provenance: z.enum(['generated', 'repaired', 'fallback']),
     objective: z.unknown().optional(),
+    consequenceCatalog: z.unknown().optional(),
   })
   .strict()
 
 type SavedGeneratedRoomEntryParseResult = z.infer<typeof SavedGeneratedRoomEntrySchema>
 
-export type SavedGeneratedRoomEntry = Omit<SavedGeneratedRoomEntryParseResult, 'objective'> & {
+export type SavedGeneratedRoomEntry = Omit<
+  SavedGeneratedRoomEntryParseResult,
+  'objective' | 'consequenceCatalog'
+> & {
   objective?: SavedGeneratedRoomObjective
+  consequenceCatalog?: MeaningfulObjectConsequenceCatalog
 }
 
 // Keep this closed enum in sync with GeneratedRoomVisualTheme.
@@ -65,6 +75,8 @@ export type GeneratedRoomCacheSaveInput = {
     room: LoadedRoom
     provenance: RoomProvenance
     objective?: unknown
+    consequenceCatalog?: unknown
+    questSpec?: QuestSpec
   }>
   themePack?: GeneratedRoomVisualTheme
 }
@@ -88,10 +100,21 @@ export function buildGeneratedRoomCacheSaveState(
     if (seenRoomIds.has(entry.room.id)) continue
     seenRoomIds.add(entry.room.id)
     const objective = parseRestorableObjective(entry.objective, entry.room)
+    const consequenceCatalog = entry.consequenceCatalog === undefined
+      ? null
+      : validateMeaningfulObjectConsequenceCatalog(entry.consequenceCatalog, {
+          room: entry.room,
+          ...(entry.questSpec !== undefined
+            ? { questSpec: entry.questSpec }
+            : objective !== null
+              ? { questSpec: objective.questSpec }
+              : {}),
+        })
     rooms.push({
       room: projectLoadedRoomToSpec(entry.room),
       provenance: entry.provenance,
       ...(objective !== null ? { objective } : {}),
+      ...(consequenceCatalog !== null ? { consequenceCatalog } : {}),
     })
     if (rooms.length >= GENERATED_ROOM_CACHE_MAX) break
   }
@@ -169,10 +192,14 @@ function sanitizeLoadedObjectives(
       }
 
       const objective = parseRestorableObjective(entry.objective, room)
+      const consequenceCatalog = parseMeaningfulObjectConsequenceCatalog(
+        entry.consequenceCatalog,
+      )
       return {
         room: entry.room,
         provenance: entry.provenance,
         ...(objective !== null ? { objective } : {}),
+        ...(consequenceCatalog !== null ? { consequenceCatalog } : {}),
       }
     }),
   }

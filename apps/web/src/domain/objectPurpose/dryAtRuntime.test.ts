@@ -28,6 +28,7 @@ function allowedRuntimeObjectPurposeImport(specifier: string): boolean {
   const normalized = specifier.replaceAll('\\', '/').replace(/\.(?:ts|tsx)$/, '')
   return normalized.endsWith('/objectPurpose/contracts')
     || normalized.endsWith('/objectPurpose/meaningfulObjectRuntime')
+    || normalized.endsWith('/objectPurpose/meaningfulObjectConsequences')
 }
 
 describe('object purpose contract and validator are dry at runtime', () => {
@@ -53,7 +54,7 @@ describe('object purpose contract and validator are dry at runtime', () => {
     expect(['generatedRoomObjectPurpose', 'assignGeneratedObjectPurpose', 'ObjectPurposeResult'].some(targetsObjectPurpose)).toBe(false)
   })
 
-  it('allows only frozen contracts and the runtime evaluator in production', () => {
+  it('allows only frozen contracts and approved meaningful-object runtime modules in production', () => {
     const references = Object.entries(sourceModules).flatMap(([path, source]) => {
       const normalizedPath = path.replaceAll('\\', '/')
       const isTest = normalizedPath.endsWith('.test.ts') || normalizedPath.endsWith('.test.tsx')

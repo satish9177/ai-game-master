@@ -92,6 +92,12 @@ const MeaningfulObjectAppliedEventSchema = z.object({
     action: z.enum(['read', 'open', 'search']),
     state: z.enum(['read', 'open', 'looted']),
     item: InventoryItemSchema.optional(),
+    clueId: z.string().min(1).optional(),
+    objective: z.object({
+      questId: z.string().min(1),
+      objectiveId: z.string().min(1),
+      toStage: z.literal(1),
+    }).strict().optional(),
   }).strict(),
 }).strict()
 
@@ -160,6 +166,11 @@ export const WorldCommandSchema = z.discriminatedUnion('type', [
     family: z.enum(['document', 'container', 'remains']),
     action: z.enum(['read', 'open', 'search']),
     item: InventoryItemSchema.optional(),
+    clueId: z.string().min(1).optional(),
+    objective: z.object({
+      objectiveId: z.string().min(1),
+      toStage: z.literal(1),
+    }).strict().optional(),
   }).strict(),
 ])
 

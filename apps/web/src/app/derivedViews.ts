@@ -31,10 +31,13 @@ export function computeDerivedViews(
   questSpec: QuestSpec | null,
   journalSpec: JournalSpec | null,
   generatedJournalInput?: GeneratedConsequenceJournalInput,
+  meaningfulObjectProgression = false,
 ): DerivedViews {
   return {
     playerHud: projectPlayerHud(state),
-    quest: questSpec ? evaluateQuest(questSpec, state) : null,
+    quest: questSpec
+      ? evaluateQuest(questSpec, state, { meaningfulObjectProgression })
+      : null,
     journal: generatedJournalInput !== undefined
       ? buildGeneratedConsequenceJournal(generatedJournalInput)
       : journalSpec ? projectJournal(journalSpec, state) : null,

@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import type { WorldEvent } from '../world/events'
 import * as eventConsequenceJournalModule from './eventConsequenceJournal'
-import { buildEventConsequenceJournal } from './eventConsequenceJournal'
+import {
+  buildEventConsequenceJournal,
+  buildMeaningfulObjectConsequenceJournal,
+  mergeMeaningfulObjectConsequenceJournal,
+} from './eventConsequenceJournal'
 
 const CAP = 15
 
@@ -353,9 +357,77 @@ describe('buildEventConsequenceJournal - leak guards', () => {
 })
 
 describe('buildEventConsequenceJournal - structural safety', () => {
-  it('has only the runtime projector export', () => {
+  it('exports only the runtime projectors and merger', () => {
     expect(Object.keys(eventConsequenceJournalModule)).toEqual([
       'buildEventConsequenceJournal',
+      'buildMeaningfulObjectConsequenceJournal',
+      'mergeMeaningfulObjectConsequenceJournal',
+    ])
+  })
+})
+
+function meaningfulApplied(
+  seq: number,
+  applied: { clueId?: string; objective?: { questId: string; objectiveId: string; toStage: 1 } },
+): WorldEvent {
+  return {
+    ...envelope(seq),
+    type: 'meaningful-object-applied',
+    payload: {
+      roomId: 'ROOM_ID_SENTINEL_XYZ',
+      objectId: 'OBJECT_ID_SENTINEL_XYZ',
+      family: 'remains',
+      action: 'search',
+      state: 'looted',
+      ...applied,
+    },
+  }
+}
+
+describe('meaningful object consequence journal', () => {
+  it('projects applied clue then objective in sequence order with collision-safe ids', () => {
+    const view = buildMeaningfulObjectConsequenceJournal([
+      meaningfulApplied(2, {
+        clueId: 'CLUE_ID_SENTINEL_XYZ',
+        objective: { questId: 'QUEST_ID_SENTINEL_XYZ', objectiveId: 'OBJECTIVE_ID_SENTINEL_XYZ', toStage: 1 },
+      }),
+    ])
+    expect(view.entries).toEqual([
+      { id: 'meaningful-2-clue', text: 'You discovered a clue.' },
+      { id: 'meaningful-2-objective', text: 'You advanced an objective.' },
+    ])
+    expect(JSON.stringify(view)).not.toContain('SENTINEL')
+  })
+
+  it('emits nothing for object/item state alone and dedupes clue/objective identities', () => {
+    const objective = { questId: 'quest', objectiveId: 'objective', toStage: 1 as const }
+    const view = buildMeaningfulObjectConsequenceJournal([
+      meaningfulApplied(1, {}),
+      meaningfulApplied(2, { clueId: 'clue', objective }),
+      meaningfulApplied(3, { clueId: 'clue', objective }),
+    ])
+    expect(view.entries).toHaveLength(2)
+    expect(view.entries.map((entry) => entry.id)).toEqual([
+      'meaningful-2-clue',
+      'meaningful-2-objective',
+    ])
+  })
+
+  it('merges without duplicate meaningful entries and keeps the display bounded', () => {
+    const meaningful = buildMeaningfulObjectConsequenceJournal([
+      meaningfulApplied(20, { clueId: 'clue' }),
+    ])
+    const merged = mergeMeaningfulObjectConsequenceJournal({
+      journalId: 'base',
+      title: 'Consequences',
+      entries: [
+        { id: 'base-entry', text: 'Base.' },
+        { id: 'meaningful-1-clue', text: 'Old projection.' },
+      ],
+    }, meaningful)
+    expect(merged?.entries).toEqual([
+      { id: 'base-entry', text: 'Base.' },
+      { id: 'meaningful-20-clue', text: 'You discovered a clue.' },
     ])
   })
 })

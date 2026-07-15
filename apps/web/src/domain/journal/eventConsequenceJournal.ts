@@ -31,6 +31,9 @@ const PHRASE_HEALTH_RECOVER = 'You recovered some vigor.'
 const PHRASE_STATUS_ADD = 'A new condition took hold.'
 const PHRASE_STATUS_CLEAR = 'A condition lifted.'
 const PHRASE_ROOM_MARK = 'Your actions left a mark here.'
+const PHRASE_CLUE_DISCOVERED = 'You discovered a clue.'
+const PHRASE_OBJECTIVE_ADVANCED = 'You advanced an objective.'
+const MEANINGFUL_ENTRY_PREFIX = 'meaningful-'
 
 /**
  * Map a single event to at most one closed phrase. Returns `null` for events
@@ -83,9 +86,68 @@ export function buildEventConsequenceJournal(events: WorldEvent[]): JournalView 
       ? qualifying.slice(qualifying.length - MAX_EVENT_JOURNAL_ENTRIES)
       : qualifying
 
-  return {
+  const base = {
     journalId: EVENT_CONSEQUENCE_JOURNAL_ID,
     title: EVENT_CONSEQUENCE_JOURNAL_TITLE,
     entries,
+  }
+  return mergeMeaningfulObjectConsequenceJournal(
+    base,
+    buildMeaningfulObjectConsequenceJournal(events),
+  ) ?? base
+}
+
+export function buildMeaningfulObjectConsequenceJournal(events: WorldEvent[]): JournalView {
+  const qualifying: JournalEntryView[] = []
+  const seenClues = new Set<string>()
+  const seenObjectives = new Set<string>()
+
+  for (const event of events) {
+    if (event.type !== 'meaningful-object-applied') continue
+    if (event.payload.clueId !== undefined && !seenClues.has(event.payload.clueId)) {
+      seenClues.add(event.payload.clueId)
+      qualifying.push({
+        id: `${MEANINGFUL_ENTRY_PREFIX}${event.seq}-clue`,
+        text: PHRASE_CLUE_DISCOVERED,
+      })
+    }
+    if (event.payload.objective !== undefined) {
+      const identity = JSON.stringify([
+        event.payload.objective.questId,
+        event.payload.objective.objectiveId,
+        event.payload.objective.toStage,
+      ])
+      if (!seenObjectives.has(identity)) {
+        seenObjectives.add(identity)
+        qualifying.push({
+          id: `${MEANINGFUL_ENTRY_PREFIX}${event.seq}-objective`,
+          text: PHRASE_OBJECTIVE_ADVANCED,
+        })
+      }
+    }
+  }
+
+  return {
+    journalId: EVENT_CONSEQUENCE_JOURNAL_ID,
+    title: EVENT_CONSEQUENCE_JOURNAL_TITLE,
+    entries: qualifying.length > MAX_EVENT_JOURNAL_ENTRIES
+      ? qualifying.slice(qualifying.length - MAX_EVENT_JOURNAL_ENTRIES)
+      : qualifying,
+  }
+}
+
+export function mergeMeaningfulObjectConsequenceJournal(
+  base: JournalView | null,
+  meaningful: JournalView,
+): JournalView | null {
+  if (meaningful.entries.length === 0) return base
+  const baseEntries = base?.entries.filter((entry) => !entry.id.startsWith(MEANINGFUL_ENTRY_PREFIX)) ?? []
+  const entries = [...baseEntries, ...meaningful.entries]
+  return {
+    journalId: base?.journalId ?? meaningful.journalId,
+    title: base?.title ?? meaningful.title,
+    entries: entries.length > MAX_EVENT_JOURNAL_ENTRIES
+      ? entries.slice(entries.length - MAX_EVENT_JOURNAL_ENTRIES)
+      : entries,
   }
 }

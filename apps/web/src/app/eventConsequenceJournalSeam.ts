@@ -1,4 +1,7 @@
-import { buildEventConsequenceJournal } from '../domain/journal/eventConsequenceJournal'
+import {
+  buildEventConsequenceJournal,
+  buildMeaningfulObjectConsequenceJournal,
+} from '../domain/journal/eventConsequenceJournal'
 import type { JournalView } from '../domain/journal/projectJournal'
 import type { EventLogResult } from '../world-session/WorldSession'
 
@@ -52,6 +55,19 @@ export async function loadEventConsequenceJournal(params: {
     const result = await params.getEventLog(params.sessionId)
     if (!result.ok) return null
     return buildEventConsequenceJournal(result.events)
+  } catch {
+    return null
+  }
+}
+
+export async function loadMeaningfulObjectConsequenceJournal(params: {
+  sessionId: string
+  getEventLog: (sessionId: string) => Promise<EventLogResult>
+}): Promise<JournalView | null> {
+  try {
+    const result = await params.getEventLog(params.sessionId)
+    if (!result.ok) return null
+    return buildMeaningfulObjectConsequenceJournal(result.events)
   } catch {
     return null
   }

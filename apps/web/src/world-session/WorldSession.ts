@@ -3,6 +3,16 @@ import type { IdGenerator } from '../domain/ports/IdGenerator'
 import type { WorldStore } from '../domain/ports/WorldStore'
 import type { LoadedRoom } from '../domain/loadRoomSpec'
 import {
+  isMeaningfulClueKnown,
+  isMeaningfulObjectiveSatisfied,
+  meaningfulObjectConsequenceFor,
+  sameRequestedMeaningfulConsequences,
+  validateMeaningfulObjectConsequenceCatalog,
+} from '../domain/objectPurpose/meaningfulObjectConsequences'
+import type {
+  MeaningfulObjectConsequenceCatalog,
+} from '../domain/objectPurpose/meaningfulObjectConsequences'
+import {
   deriveMeaningfulObjectState,
   derivedTransition,
   meaningfulObjectFamily,
@@ -14,6 +24,8 @@ import { WorldCommandSchema, WorldEventSchema } from '../domain/world/events'
 import type { WorldCommand, WorldEvent } from '../domain/world/events'
 import { CanonSeedSchema } from '../domain/world/worldState'
 import type { InventoryItem, WorldState } from '../domain/world/worldState'
+import { evaluateCondition } from '../domain/quests/evaluateQuest'
+import type { QuestSpec } from '../domain/quests/questSpec'
 import type { Logger } from '../platform/logger/Logger'
 
 export type WorldSessionErrorCode =
@@ -41,8 +53,15 @@ export type EventLogResult =
   | { ok: false; error: WorldSessionError }
 
 export type MeaningfulObjectContext = Readonly<{
-  room: Pick<LoadedRoom, 'id' | 'objects'>
+  room: LoadedRoom
   generatedPlay: boolean
+  consequenceCatalog?: MeaningfulObjectConsequenceCatalog
+  questSpec?: QuestSpec
+}>
+
+type AppliedMeaningfulConsequences = Readonly<{
+  clueId?: string
+  objective?: Readonly<{ questId: string; objectiveId: string; toStage: 1 }>
 }>
 
 export class WorldSession {
@@ -158,11 +177,11 @@ export class WorldSession {
     if (snapshot.revision !== expectedRevision) return fail('conflict')
 
     const parsed = WorldCommandSchema.safeParse(command)
-    if (
-      !parsed.success
-      || parsed.data.type !== 'meaningful-object-applied'
-      || !isValidMeaningfulObjectCommand(snapshot, parsed.data, context)
-    ) return fail('invalid-command')
+    if (!parsed.success || parsed.data.type !== 'meaningful-object-applied') {
+      return fail('invalid-command')
+    }
+    const validation = validateMeaningfulObjectCommand(snapshot, parsed.data, context)
+    if (validation === null) return fail('invalid-command')
 
     const event = buildEvent(
       sessionId,
@@ -170,6 +189,7 @@ export class WorldSession {
       this.idGenerator.newId(),
       this.clock.now(),
       parsed.data,
+      validation,
     )
     const next = applyEvent(snapshot, event)
     const committed = await this.store.commit({
@@ -315,35 +335,78 @@ function isValidForState(state: WorldState, command: WorldCommand): boolean {
   return true
 }
 
-function isValidMeaningfulObjectCommand(
+function validateMeaningfulObjectCommand(
   state: WorldState,
   command: Extract<WorldCommand, { type: 'meaningful-object-applied' }>,
   context: MeaningfulObjectContext,
-): boolean {
-  if (!context.generatedPlay || command.roomId !== state.currentRoomId) return false
-  if (context.room.id !== command.roomId) return false
+): AppliedMeaningfulConsequences | null {
+  if (!context.generatedPlay || command.roomId !== state.currentRoomId) return null
+  if (context.room.id !== command.roomId) return null
   const matches = context.room.objects.filter((object) => object.id === command.objectId)
-  if (matches.length !== 1) return false
+  if (matches.length !== 1) return null
   const object = matches[0]!
   const family = meaningfulObjectFamily(object)
-  if (family !== command.family) return false
+  if (family !== command.family) return null
   const transition = derivedTransition(command.family, command.action)
-  if (transition === undefined) return false
-  if (command.action === 'search') {
-    if (!sameInventoryItem(command.item, validatedSearchItem(object))) return false
-  } else if (command.item !== undefined) return false
+  if (transition === undefined) return null
 
   const current = deriveMeaningfulObjectState(
     object,
     state.roomStates[command.roomId],
     command.family,
   )
-  if (command.family === 'document') return command.action === 'read' && current === 'closed'
+  let validTransition = false
+  if (command.family === 'document') validTransition = command.action === 'read' && current === 'closed'
   if (command.family === 'container') {
-    return (command.action === 'open' && current === 'closed')
+    validTransition = (command.action === 'open' && current === 'closed')
       || (command.action === 'search' && current === 'open')
   }
-  return command.action === 'search' && current === 'unsearched'
+  if (command.family === 'remains') {
+    validTransition = command.action === 'search' && current === 'unsearched'
+  }
+  if (!validTransition) return null
+
+  const catalog = context.consequenceCatalog === undefined
+    ? undefined
+    : validateMeaningfulObjectConsequenceCatalog(context.consequenceCatalog, {
+        room: context.room,
+        ...(context.questSpec !== undefined ? { questSpec: context.questSpec } : {}),
+      }) ?? undefined
+  const attachment = meaningfulObjectConsequenceFor(
+    catalog,
+    command.objectId,
+    command.action,
+  )
+  if (!sameRequestedMeaningfulConsequences(command, attachment)) return null
+
+  let appliedClueId: string | undefined
+  if (attachment?.clueId !== undefined && !isMeaningfulClueKnown(state, attachment.clueId)) {
+    appliedClueId = attachment.clueId
+  }
+
+  let appliedObjective: AppliedMeaningfulConsequences['objective']
+  if (attachment?.objective !== undefined) {
+    const quest = context.questSpec
+    if (quest === undefined || quest.anchorRoomId !== command.roomId) return null
+    const objective = quest.objectives.find(
+      (candidate) => candidate.id === attachment.objective!.objectiveId,
+    )
+    if (objective === undefined) return null
+    const alreadySatisfied = evaluateCondition(objective.condition, state)
+      || isMeaningfulObjectiveSatisfied(state, quest.questId, objective.id, command.roomId)
+    if (!alreadySatisfied) {
+      appliedObjective = { questId: quest.questId, objectiveId: objective.id, toStage: 1 }
+    }
+  }
+
+  if (command.action === 'search') {
+    if (!sameInventoryItem(command.item, validatedSearchItem(object))) return null
+  } else if (command.item !== undefined) return null
+
+  return {
+    ...(appliedClueId !== undefined ? { clueId: appliedClueId } : {}),
+    ...(appliedObjective !== undefined ? { objective: appliedObjective } : {}),
+  }
 }
 
 function buildEvent(
@@ -352,6 +415,7 @@ function buildEvent(
   eventId: string,
   occurredAt: string,
   command: WorldCommand,
+  meaningfulConsequences: AppliedMeaningfulConsequences = {},
 ): WorldEvent {
   const envelope = { schemaVersion: 1 as const, eventId, sessionId, seq, occurredAt }
   let raw: unknown
@@ -424,6 +488,12 @@ function buildEvent(
           action: command.action,
           state,
           ...(command.item !== undefined ? { item: command.item } : {}),
+          ...(meaningfulConsequences.clueId !== undefined
+            ? { clueId: meaningfulConsequences.clueId }
+            : {}),
+          ...(meaningfulConsequences.objective !== undefined
+            ? { objective: meaningfulConsequences.objective }
+            : {}),
         },
       }
       break

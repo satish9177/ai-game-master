@@ -136,6 +136,24 @@ Throughout these docs:
   providers, prompts, generated prose, authored/demo/decorative interactions, clues, objectives,
   journal projection, machines, barricades, exits, and all Slice C behavior remain unchanged
   ([ADR-0093](./decisions/ADR-0093-deterministic-meaningful-object-interactions-v0.md)).
+- ✅ **Implemented, ADR-0094 Slice C only** — Validated Meaningful Object Consequences v0 —
+  eligible generated-play `read` and `search` interactions may derive a complete requested clue
+  and/or binary generated-objective attachment from one strictly validated per-room consequence
+  catalog owned only by the generated room-cache sidecar. The existing
+  `meaningful-object-applied` command/event is extended rather than duplicated: `WorldSession`
+  requires exact attachment equality, derives the trusted quest id, and atomically projects the
+  object state, optional validated item, newly discovered clue flag, and newly satisfied stage-1
+  objective flag through one append/CAS. Applied events omit already-known clues and
+  already-satisfied objectives, so the replay-derived journal emits only the closed phrases
+  `You discovered a clue.` and `You advanced an objective.` for newly applied fields. Clue
+  discovery is set-like across current-session room flags; objective progression is limited to
+  the current validated generated-play quest whose anchor equals the source room. Old Slice B
+  events, saves, and sidecars remain valid, and invalid/absent catalogs preserve Slice B behavior.
+  Automatic attachments, provider/prompt changes, prose authority, facts/fact visibility,
+  memory promotion, dialogue unlocks, clue clusters, confidence/reliability, hypotheses,
+  multi-stage or authored/cross-room objectives, machines, barricades, exit unlocking, and Slice D
+  remain excluded
+  ([ADR-0094](./decisions/ADR-0094-validated-meaningful-object-consequences-v0.md)).
 - ✅ **Implemented** — Generated Mechanical Gate Fake v0 —
   deterministic builder + off-by-default diagnostic only. A pure
   `buildGeneratedMechanicalGate(room)` derives a contract-valid, satisfiable `locked-exit` gate

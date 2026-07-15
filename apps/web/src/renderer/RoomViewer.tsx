@@ -613,9 +613,7 @@ export function RoomViewer({
           else if (result.status === 'already-resolved') {
             setResultMessage(result.action === 'read' ? 'Already read.' : 'Already searched.')
           } else if (result.status === 'applied') {
-            setResultMessage(
-              choiceId === 'read' ? 'You read it.' : choiceId === 'open' ? 'You open it.' : 'You search it.',
-            )
+            setResultMessage(result.message)
             engineRef.current?.updateObjectPresentationStates(projectRoomObjectPresentationStates({
               room,
               generatedPlay,

@@ -3,6 +3,12 @@ import type { Clock } from '../domain/ports/Clock'
 import type { IdGenerator } from '../domain/ports/IdGenerator'
 import { loadRoomSpec } from '../domain/loadRoomSpec'
 import { deriveMeaningfulObjectView } from '../domain/objectPurpose/meaningfulObjectRuntime'
+import {
+  meaningfulClueFlagKey,
+  meaningfulObjectiveFlagKey,
+} from '../domain/objectPurpose/meaningfulObjectConsequences'
+import type { MeaningfulObjectConsequenceCatalog } from '../domain/objectPurpose/meaningfulObjectConsequences'
+import type { QuestSpec } from '../domain/quests/questSpec'
 import type { Logger } from '../platform/logger/Logger'
 import { InMemoryWorldStore } from './InMemoryWorldStore'
 import { SaveGameService } from './saveGame'
@@ -38,8 +44,23 @@ const room = loadRoomSpec({
     },
   }],
 })
+const quest: QuestSpec = {
+  questId: 'generated-quest',
+  title: 'Quest',
+  anchorRoomId: room.id,
+  objectives: [{ id: 'generated-0', text: 'Search.', condition: { kind: 'has-status', status: 'never' } }],
+}
+const consequenceCatalog: MeaningfulObjectConsequenceCatalog = {
+  clues: [{ id: 'cache-clue', sourceObjectId: 'cache' }],
+  consequences: [{
+    objectId: 'cache',
+    action: 'search',
+    clueId: 'cache-clue',
+    objective: { objectiveId: 'generated-0', toStage: 1 },
+  }],
+}
 describe('saveGame meaningful object persistence', () => {
-  it('preserves atomic looted state and inventory through room return and save/load', async () => {
+  it('preserves atomic object, item, clue, and objective state through room return and save/load', async () => {
     const sourceStore = new InMemoryWorldStore()
     const sourceDeps = dependencies()
     const session = new WorldSession(sourceStore, sourceDeps.clock, sourceDeps.ids, logger)
@@ -51,7 +72,7 @@ describe('saveGame meaningful object persistence', () => {
       initialPlayer: { health: { current: 10, max: 10 }, status: [], inventory: [] },
     })
     if (!started.ok) throw new Error(started.error.code)
-    const context = { room, generatedPlay: true }
+    const context = { room, generatedPlay: true, consequenceCatalog, questSpec: quest }
     const command = {
       schemaVersion: 1 as const,
       type: 'meaningful-object-applied' as const,
@@ -68,7 +89,13 @@ describe('saveGame meaningful object persistence', () => {
     if (!opened.ok) throw new Error(opened.error.code)
     const searched = await session.applyMeaningfulObject(
       started.state.sessionId,
-      { ...command, action: 'search', item: { itemId: 'key', name: 'Key', quantity: 1 } },
+      {
+        ...command,
+        action: 'search',
+        item: { itemId: 'key', name: 'Key', quantity: 1 },
+        clueId: 'cache-clue',
+        objective: { objectiveId: 'generated-0', toStage: 1 },
+      },
       opened.state.revision,
       context,
     )
@@ -83,6 +110,11 @@ describe('saveGame meaningful object persistence', () => {
       roomState: returned.state.roomStates[room.id],
       generatedPlay: true,
     })?.state).toBe('looted')
+    expect(returned.state.roomStates[room.id]?.flags?.[meaningfulClueFlagKey('cache-clue')])
+      .toBe(true)
+    expect(returned.state.roomStates[room.id]?.flags?.[
+      meaningfulObjectiveFlagKey(quest.questId, 'generated-0')
+    ]).toBe(true)
 
     const saved = await new SaveGameService(sourceStore, logger).saveSession(returned.state.sessionId)
     if (!saved.ok) throw new Error(saved.error.code)
