@@ -20,6 +20,7 @@ export const MeaningfulObjectConsequenceSpecSchema = z.object({
   objectId: NonEmptyIdSchema,
   action: z.enum(['read', 'search']),
   clueId: NonEmptyIdSchema.optional(),
+  discoveryText: z.string().min(1).max(160).optional(),
   objective: MeaningfulObjectObjectiveConsequenceSchema.optional(),
 }).strict().refine(
   (value) => value.clueId !== undefined || value.objective !== undefined,

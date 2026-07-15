@@ -106,6 +106,7 @@ import { prepareGeneratedRoomSeed } from './app/worldBible'
 import { buildPromptGeneratedRoomSource } from './app/buildPromptGeneratedRoomSource'
 import {
   buildGeneratedObjectiveAttachment,
+  buildGeneratedObjectiveAndConsequenceAttachment,
   type GeneratedObjectiveQuestAttachment,
 } from './app/generatedObjective'
 import {
@@ -1015,6 +1016,7 @@ function App() {
         generatedPregenerator.warmAdjacent(result.room)
         const initialPlayer = projectPlayerHud(started.state)
         let generatedObjective: Awaited<ReturnType<typeof buildGeneratedObjectiveAttachment>> = null
+        let generatedConsequenceCatalog: MeaningfulObjectConsequenceCatalog | null = null
         let providerGateStatus: ProviderGateStatus | undefined
         let providerGate: GeneratedMechanicalGate | undefined
         if (result.provenance === 'generated') {
@@ -1031,13 +1033,18 @@ function App() {
           }
           if (objectiveAllowed) {
             logger.info('optional objective generation allowed', { count: usageCountRef.current, cap: guardCap })
-            generatedObjective = await buildGeneratedObjectiveAttachment(result.room, objectiveGenerator)
+            const attachment = await buildGeneratedObjectiveAndConsequenceAttachment(result.room, objectiveGenerator)
+            generatedObjective = attachment.objective
+            generatedConsequenceCatalog = attachment.consequenceCatalog
           } else {
             logger.info('optional objective generation skipped', { count: usageCountRef.current, cap: guardCap, reason: 'usage-cap' })
           }
         }
         if (version !== requestVersion.current) return
         perRoomObjectiveMemoRef.current.set(result.room.id, generatedObjective)
+        const consequenceCatalogs = generatedConsequenceCatalog === null
+          ? undefined
+          : new Map([[result.room.id, generatedConsequenceCatalog]])
         setQuestSpecForView(generatedObjective?.questSpec ?? null)
         setQuestHintsForView(generatedObjective
           ? { hint: generatedObjective.hint, completionHint: generatedObjective.completionHint }
@@ -1053,6 +1060,7 @@ function App() {
           ...(storyKind ? { storyKind } : {}),
           initialPlayer,
           ...(generatedObjective ? { questSpec: generatedObjective.questSpec } : {}),
+          ...(consequenceCatalogs !== undefined ? { consequenceCatalogs } : {}),
           objectivesPerRoom: true,
           ...(providerGateStatus !== undefined ? { providerGateStatus } : {}),
           ...(providerGate !== undefined ? { providerGate } : {}),
@@ -1471,6 +1479,16 @@ function App() {
             setQuestHintsForView(attachment
               ? { hint: attachment.hint, completionHint: attachment.completionHint }
               : null)
+          },
+          applyCatalog: (catalog) => {
+            if (catalog === null) return
+            const current = activePlayRef.current
+            if (current?.sessionId !== destinationSessionId) return
+            const consequenceCatalogs = new Map(current.consequenceCatalogs)
+            consequenceCatalogs.set(destinationRoom.id, catalog)
+            const next = { ...current, consequenceCatalogs }
+            activePlayRef.current = next
+            setActivePlay((visible) => visible?.sessionId === destinationSessionId ? next : visible)
           },
           refreshAfterApply: async () => {
             const stateResult = await worldSession.getWorldState(destinationSessionId)

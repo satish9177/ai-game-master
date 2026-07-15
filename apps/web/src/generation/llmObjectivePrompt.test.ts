@@ -36,10 +36,14 @@ describe('buildObjectivePromptDigest', () => {
     expect(buildObjectivePromptDigest(room)).toEqual({
       conditionKind: 'interact-object',
       candidates: [{ objectId: 'book-1', type: 'book' }],
+      roomLabel: 'Secret Room Name',
+      meaningfulObjectCandidates: [{
+        objectId: 'book-1', type: 'book', action: 'read', existingDiscoveryText: 'Secret body.',
+      }],
     })
   })
 
-  it('does not include room JSON, names, prompts, bodies, hints, or generated text', () => {
+  it('includes only approved bounded room/candidate display context', () => {
     const room = makeRoom([
       {
         type: 'scroll',
@@ -58,13 +62,12 @@ describe('buildObjectivePromptDigest', () => {
 
     const serialized = JSON.stringify(buildObjectivePromptDigest(room))
 
-    expect(serialized).toBe('{"conditionKind":"interact-object","candidates":[{"objectId":"scroll-1","type":"scroll"}]}')
+    expect(serialized).toContain('Secret Room Name')
+    expect(serialized).toContain('Secret generated text body')
     for (const forbidden of [
-      'Secret Room Name',
       'Secret Object Name',
       'Secret interaction prompt',
       'Secret interaction title',
-      'Secret generated text body',
       'hint',
       'provider output',
       'objects',
@@ -90,7 +93,7 @@ describe('buildObjectivePromptMessages', () => {
       { role: 'system', content: OBJECTIVE_SYSTEM_PROMPT },
       {
         role: 'user',
-        content: '{"conditionKind":"interact-object","candidates":[{"objectId":"paper-1","type":"paper"}]}',
+        content: '{"conditionKind":"interact-object","candidates":[{"objectId":"paper-1","type":"paper"}],"roomLabel":"Secret Room Name","meaningfulObjectCandidates":[{"objectId":"paper-1","type":"paper","action":"read"}]}',
       },
     ])
   })

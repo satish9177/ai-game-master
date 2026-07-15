@@ -31,8 +31,10 @@ import {
 import type { Logger } from '../platform/logger/Logger'
 import {
   buildGeneratedObjectiveAttachment,
+  buildGeneratedObjectiveAndConsequenceAttachment,
   type GeneratedObjectiveQuestAttachment,
 } from './generatedObjective'
+import type { GeneratedObjectiveAndConsequenceAttachment } from './generatedObjective'
 import {
   decideMemoryFeedback,
   EMPTY_PROMOTION_SUMMARY,
@@ -116,21 +118,31 @@ export async function attachPerRoomObjectiveOnEnter(input: {
   logger: Pick<Logger, 'debug' | 'info'>
   getCurrentPlay: () => CurrentPlayIdentity
   applyAttachment: (attachment: GeneratedObjectiveQuestAttachment | null) => void
+  applyCatalog?: (catalog: MeaningfulObjectConsequenceCatalog | null) => void
   refreshAfterApply: () => Promise<void>
   buildAttachment?: typeof buildGeneratedObjectiveAttachment
 }): Promise<void> {
   const roomId = input.room.id
   if (input.memo.has(roomId)) return
 
-  const buildAttachment = input.buildAttachment ?? buildGeneratedObjectiveAttachment
   let attachment: GeneratedObjectiveQuestAttachment | null = null
+  let catalog: MeaningfulObjectConsequenceCatalog | null = null
   if (canAttemptOptional({ count: input.usageCount }, input.guardConfig)) {
     input.logger.info('optional objective generation allowed', {
       count: input.usageCount,
       cap: input.guardConfig.cap,
       roomId,
     })
-    attachment = await buildAttachment(input.room, input.objectiveGenerator)
+    if (input.buildAttachment !== undefined) {
+      attachment = await input.buildAttachment(input.room, input.objectiveGenerator)
+    } else {
+      const combined: GeneratedObjectiveAndConsequenceAttachment = await buildGeneratedObjectiveAndConsequenceAttachment(
+        input.room,
+        input.objectiveGenerator,
+      )
+      attachment = combined.objective
+      catalog = combined.consequenceCatalog
+    }
   } else {
     input.logger.info('optional objective generation skipped', {
       count: input.usageCount,
@@ -141,6 +153,7 @@ export async function attachPerRoomObjectiveOnEnter(input: {
   }
 
   input.memo.set(roomId, attachment)
+  input.applyCatalog?.(catalog)
 
   const current = input.getCurrentPlay()
   if (current?.sessionId !== input.sessionId || current.room.id !== roomId) {

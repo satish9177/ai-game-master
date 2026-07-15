@@ -19,6 +19,11 @@ const STRUCTURAL_ID_TEST_PATTERN =
 const SAFE_ROOM_NAME = 'Generated room'
 const SAFE_NEARBY_ROOM_TEXT = 'a nearby room'
 
+/** Reuse structural-id redaction for bounded generated display sidecars. */
+export function redactGeneratedStructuralIds(value: string): string {
+  return value.replace(STRUCTURAL_ID_PATTERN, SAFE_NEARBY_ROOM_TEXT)
+}
+
 export function sanitizeGeneratedDisplayText(
   room: LoadedRoom,
 ): SanitizeGeneratedDisplayTextResult {
@@ -145,7 +150,7 @@ function sanitizeInteraction(
 }
 
 function sanitizeDisplayField(value: string): { value: string; changed: boolean } {
-  const sanitized = value.replace(STRUCTURAL_ID_PATTERN, SAFE_NEARBY_ROOM_TEXT)
+  const sanitized = redactGeneratedStructuralIds(value)
   return { value: sanitized, changed: sanitized !== value }
 }
 

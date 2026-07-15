@@ -15,7 +15,7 @@ export type OpenAICompatibleObjectiveConfig = Pick<
   'baseUrl' | 'apiKey' | 'model'
 >
 
-export const OBJECTIVE_MAX_TOKENS = 400
+export const OBJECTIVE_MAX_TOKENS = 700
 export const OBJECTIVE_TIMEOUT_MS = 12_000
 
 export const OBJECTIVE_LLM_REQUEST_FAILED = 'objective-llm-request-failed'

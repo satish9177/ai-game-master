@@ -70,6 +70,10 @@ const PURPOSE_PROMPTS = {
   },
 } as const satisfies Partial<Record<PurposeAssignableType, PurposeInteractionText>>
 
+const GENERATED_PURPOSE_BODIES: ReadonlySet<string> = new Set(
+  Object.values(PURPOSE_PROMPTS).map((value) => value.body),
+)
+
 export type GeneratedObjectPurposeResult = {
   room: LoadedRoom
   purposesAssigned: number
@@ -110,6 +114,11 @@ export function assignGeneratedObjectPurpose(room: LoadedRoom): GeneratedObjectP
 
   if (!changed) return { room, purposesAssigned }
   return { room: { ...room, objects }, purposesAssigned }
+}
+
+/** True only for the closed generic copy inserted by this normalizer. */
+export function isGeneratedPurposeDefaultBody(value: string): boolean {
+  return GENERATED_PURPOSE_BODIES.has(value)
 }
 
 function interactionFor(

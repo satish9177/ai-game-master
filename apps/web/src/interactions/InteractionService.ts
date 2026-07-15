@@ -250,6 +250,7 @@ function meaningfulObjectAppliedMessage(
   ]
   const applied = event.type === 'meaningful-object-applied' ? event.payload : undefined
   if (requested?.clueId !== undefined) {
+    if (requested.discoveryText !== undefined) messages.push(requested.discoveryText)
     messages.push(applied?.clueId !== undefined
       ? 'You discovered a clue.'
       : 'You already knew this clue.')

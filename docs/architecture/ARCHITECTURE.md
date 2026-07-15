@@ -154,6 +154,20 @@ Throughout these docs:
   multi-stage or authored/cross-room objectives, machines, barricades, exit unlocking, and Slice D
   remain excluded
   ([ADR-0094](./decisions/ADR-0094-validated-meaningful-object-consequences-v0.md)).
+- ✅ **Implemented, ADR-0095 only** — Validated Generated Meaningful-Object Consequence Attachment
+  v0 — the existing optional post-room-validation objective-provider request may independently
+  yield a strict root-key-validated objective branch and up to three bounded generated-object
+  consequence proposals; no provider call is added and the primary `RoomSpec` response is
+  unchanged. Trusted generation-time assembly resolves eligible stable generated-play objects,
+  derives room-scoped canonical clue IDs, selects only an unambiguous objective linked to the same
+  source object, normalizes/rejects display-only discovery text, removes duplicate groups, sorts
+  canonically, and persists only the final ADR-0094-valid catalog in the generated room-cache
+  sidecar. Invalid provider data, missing text, provider failure, timeout, truncation, old caches,
+  and stale room results safely retain objective-only, clue-only, or Slice B behavior. Runtime
+  still consumes only the validated catalog; events, `WorldState`, save envelope, SQLite/API,
+  journal phrases, facts, fact visibility, memory, dialogue, relationships, purpose-graph runtime
+  imports, and Slice D remain unchanged
+  ([ADR-0095](./decisions/ADR-0095-validated-generated-meaningful-object-consequence-attachment-v0.md)).
 - ✅ **Implemented** — Generated Mechanical Gate Fake v0 —
   deterministic builder + off-by-default diagnostic only. A pure
   `buildGeneratedMechanicalGate(room)` derives a contract-valid, satisfiable `locked-exit` gate
