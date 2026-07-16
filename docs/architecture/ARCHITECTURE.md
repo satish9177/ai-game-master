@@ -168,6 +168,14 @@ Throughout these docs:
   journal phrases, facts, fact visibility, memory, dialogue, relationships, purpose-graph runtime
   imports, and Slice D remain unchanged
   ([ADR-0095](./decisions/ADR-0095-validated-generated-meaningful-object-consequence-attachment-v0.md)).
+- 🔜 **Planned, ADR-0096** — Generated Objective-Bound Exit Progression v0 will let one
+  validated generated meaningful-object objective govern one trusted selected forward exit through
+  a derived room-cache binding. The provider may request this only with an optional boolean; trusted
+  code derives and validates the objective/exit identities, waits for settled independent generated-
+  gate resolution, preserves return and independent gates, and re-evaluates availability from the
+  authoritative `WorldState`. No `RoomSpec`, quest/world-state, core-save, event, flag, SQLite/API,
+  renderer-engine, or additional provider-call change is planned
+  ([ADR-0096](./decisions/ADR-0096-generated-objective-bound-exit-progression-v0.md)).
 - ✅ **Implemented** — Generated Mechanical Gate Fake v0 —
   deterministic builder + off-by-default diagnostic only. A pure
   `buildGeneratedMechanicalGate(room)` derives a contract-valid, satisfiable `locked-exit` gate
