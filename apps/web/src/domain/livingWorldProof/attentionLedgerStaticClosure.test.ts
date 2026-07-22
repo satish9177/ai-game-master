@@ -54,14 +54,42 @@ const STAGE_A_PROOF_MODULES = [
   'attentionQuestCandidateAccessor.ts',
   'attentionQuestCandidateScenario.ts',
   'attentionQuestCandidateBoundary.ts',
+  'attentionCandidatePolicy.ts',
+  'attentionCandidateIdentity.ts',
+  'attentionCandidate.ts',
+  'attentionCandidateOrdering.ts',
+  'attentionCandidateCacheKey.ts',
 ] as const
 
-/** The closed import allowlist: Stage A proof modules and nothing else. */
+/**
+ * The closed import allowlist: Stage A proof modules and nothing else.
+ *
+ * The A3 derived-candidate modules cannot name `attentionQuestCandidateContracts`
+ * or `attentionQuestCandidateAccessor` at all — the raw `QuestCandidate`, the
+ * proof snapshot, the `open | resolved` lifecycle, and the accessor-origin mint
+ * all live behind those two specifiers, so their absence here is what proves A3
+ * reads A-prime through `attentionQuestCandidateBoundary` and by no other path.
+ *
+ * `./canonicalSerialization` is the one non-attention specifier admitted. It is
+ * the long-standing proof-local key-sorting/FNV helper the controlling A3 plan
+ * section directs be "reused unchanged"; it is deliberately not added to
+ * STAGE_A_PROOF_MODULES, because it is not a Stage A module and its own header
+ * already records its proof-local, non-cryptographic limits.
+ */
 const ALLOWED_IMPORT_SPECIFIERS: Record<string, readonly string[]> = {
   'attentionQuestCandidateContracts.ts': [],
   'attentionQuestCandidateAccessor.ts': ['./attentionQuestCandidateContracts'],
   'attentionQuestCandidateScenario.ts': ['./attentionQuestCandidateContracts', './attentionQuestCandidateAccessor'],
   'attentionQuestCandidateBoundary.ts': ['./attentionQuestCandidateContracts'],
+  'attentionCandidatePolicy.ts': [],
+  'attentionCandidateIdentity.ts': ['./canonicalSerialization', './attentionCandidatePolicy'],
+  'attentionCandidate.ts': [
+    './attentionCandidatePolicy',
+    './attentionCandidateIdentity',
+    './attentionQuestCandidateBoundary',
+  ],
+  'attentionCandidateOrdering.ts': ['./attentionCandidatePolicy', './attentionCandidate'],
+  'attentionCandidateCacheKey.ts': ['./canonicalSerialization', './attentionCandidatePolicy'],
 }
 
 /** ADR-0013 D19 P1's closed forbidden-consumer list, plus its bypass vectors. */
@@ -78,7 +106,11 @@ const FORBIDDEN_SOURCE_PATTERNS: readonly (readonly [string, RegExp])[] = [
   ['generic envelope, round-trip, reflection, dynamic dispatch', /\b(JSON\.parse|JSON\.stringify|structuredClone|Reflect\.|globalThis|process\.env)\b|\b(eval|require|import)\s*\(|\bnew Function\s*\(/],
   ['network / provider / model call', /\bfetch\s*\(|XMLHttpRequest|WebSocket|\b(openai|anthropic|llm|provider|model)\b/i],
   ['console logging', /\bconsole\s*\./],
-  ['A4+ ledger / reveal / template capability', /\b(AttentionLedger|appendLedger|RevealPackage|AttentionTrace|renderTemplate|attentionCandidatePolicy)\b/],
+  // `attentionCandidatePolicy` was listed here through A2, when the A3 policy
+  // module was still an unapproved capability. A3 is the approved slice that
+  // creates it, so it moved from "must not exist" to the import allowlist
+  // above; every A4+ capability name stays forbidden.
+  ['A4+ ledger / reveal / template capability', /\b(AttentionLedger|appendLedger|RevealPackage|AttentionTrace|renderTemplate)\b/],
   ['authoritative interface aliasing', /\bimplements\b|\binterface\s+\w+\s+extends\b/],
   ['type escape hatch', /\bas\s+any\b|:\s*any\b/],
 ]
@@ -206,7 +238,13 @@ function identifierNames(source: string): Set<string> {
   return names
 }
 
-const ATTENTION_MODULE_SPECIFIER = /attention(QuestCandidate|Ledger)/
+/**
+ * Every Stage A attention proof module, by specifier shape. The A3 derived
+ * candidate modules are `attentionCandidate*`, which the A1/A2 pattern alone
+ * would not have caught, so the reverse dependency-direction scan below would
+ * have silently stopped covering the newest modules without this alternative.
+ */
+const ATTENTION_MODULE_SPECIFIER = /attention(QuestCandidate|Candidate|Ledger)/
 
 /**
  * Sound pre-filter for the whole-tree scans. Every token's text is a substring
