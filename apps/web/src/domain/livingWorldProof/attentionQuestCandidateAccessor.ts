@@ -1,4 +1,7 @@
-import { ATTENTION_QUEST_CANDIDATE_ACCESSOR_VERSION } from './attentionQuestCandidateContracts'
+import {
+  ATTENTION_QUEST_CANDIDATE_ACCESSOR_VERSION,
+  mintAttentionReadableQuestCandidateView,
+} from './attentionQuestCandidateContracts'
 import type {
   AttentionQuestCandidateAccessRequest,
   AttentionQuestCandidateAccessResult,
@@ -26,12 +29,15 @@ function toAttentionReadableView(
   const openingProvenanceId = legalOpeningProvenanceId(candidate)
   if (openingProvenanceId === null) return null
 
-  return Object.freeze({
+  // The mint is the sole origin of an attention-readable view (ADR-0013
+  // D2/D4): the lifecycle and opening-provenance gates above are the only
+  // route to it, so no view can exist that did not pass them.
+  return mintAttentionReadableQuestCandidateView({
     accessorContractVersion,
     rankingSnapshotLsn,
     candidateId: candidate.id,
     openingProvenanceId,
-    legallyVisibleParties: Object.freeze([...candidate.legallyVisibleParties]),
+    legallyVisibleParties: candidate.legallyVisibleParties,
     ...(candidate.legallyVisiblePublicStakes === undefined
       ? {}
       : { legallyVisiblePublicStakes: candidate.legallyVisiblePublicStakes }),

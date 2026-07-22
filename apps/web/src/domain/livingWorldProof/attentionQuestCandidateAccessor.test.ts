@@ -212,6 +212,42 @@ describe('readAttentionReadableQuestCandidateViews', () => {
     expectSourceLifecycleAndBytesUnchanged(sources, before)
   })
 
+  it('mints views carrying an invisible accessor-origin mark (ADR-0013 D2/D4)', () => {
+    // A1 is the sole origin of an attention-readable view: admission into A'
+    // is "obtained from the engine-owned snapshot accessor", not merely
+    // "structurally legal". The mark records that origin without becoming a
+    // readable field, so nothing player-visible or serialized changes.
+    const sources = buildA1Sources()
+    const result = readAttentionReadableQuestCandidateViews(sources.snapshot, {
+      accessorContractVersion: ATTENTION_QUEST_CANDIDATE_ACCESSOR_VERSION,
+      rankingSnapshotLsn: A1_RANKING_SNAPSHOT_LSN,
+    })
+
+    if (result.kind !== 'ok') throw new Error('expected legal view result')
+    const view = result.views[0]!
+    const markers = Object.getOwnPropertySymbols(view)
+
+    expect(markers).toHaveLength(1)
+    expect(Object.getOwnPropertyDescriptor(view, markers[0]!)).toEqual({
+      value: true,
+      enumerable: false,
+      writable: false,
+      configurable: false,
+    })
+    expect(Object.keys(view)).not.toContain('accessorMint')
+    expect(JSON.stringify(view)).toBe(JSON.stringify({
+      accessorContractVersion: ATTENTION_QUEST_CANDIDATE_ACCESSOR_VERSION,
+      rankingSnapshotLsn: A1_RANKING_SNAPSHOT_LSN,
+      candidateId: 'quest-public-open',
+      openingProvenanceId: 'consequence-public-37',
+      legallyVisibleParties: ['player', 'warden'],
+      legallyVisiblePublicStakes: 'restore-public-trust',
+      legallyVisibleOriginConsequenceReference: 'consequence-public-37',
+    }))
+    // The mark leaves canonical bytes untouched, so A1 output stays comparable.
+    expect(canonicalSerialize(view)).toBe(canonicalSerialize({ ...view }))
+  })
+
   it('returns deeply equal repeated views without sharing mutable arrays or mutating lifecycle', () => {
     const sources = buildA1Sources()
     const before = canonicalSourceBytes(sources)
