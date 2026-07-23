@@ -63,6 +63,10 @@ const STAGE_A_PROOF_MODULES = [
   'attentionTemplate.ts',
   'attentionLedger.ts',
   'attentionZeroModelProbe.ts',
+  'attentionTrace.ts',
+  'attentionReplayResources.ts',
+  'attentionReplay.ts',
+  'attentionReplayScenario.ts',
 ] as const
 
 /**
@@ -85,9 +89,23 @@ const STAGE_A_PROOF_MODULES = [
  * cannot name a raw `QuestCandidate`, a proof snapshot, or the accessor-origin
  * mint. The template reads only an already-approved package. The ledger reads the
  * normalized candidate and the presentation-result vocabulary, and — the
- * load-bearing direction — *nothing* imports the ledger: its absence from every
- * other module's allowlist is the mechanical form of ADR-0013 D12 step 2, that
- * detection and A-prime construction never read surface C.
+ * load-bearing direction — *nothing but the A5 harness and trace* import the
+ * ledger: see `LEDGER_FORBIDDEN_MODULES` below for the mechanical form of
+ * ADR-0013 D12 step 2, that *detection and A-prime construction* never read
+ * surface C (the trace and replay harness sit downstream of it, recording an
+ * outcome rather than feeding one back in).
+ *
+ * The A5 trace and replay modules extend the discipline one step further.
+ * `attentionTrace.ts` reads only the A4 reveal-package result vocabulary and
+ * canonical serialization — it never names a raw candidate, snapshot, view, or
+ * mint. `attentionReplayResources.ts` names nothing Stage-A-specific at all: it
+ * is the proof-local authoritative-domain stand-in P2 tests against, and its
+ * only Stage A dependency is the shared canonicalization helper.
+ * `attentionReplay.ts` is the one module authorized to import the complete A1-A4
+ * chain plus the trace and the authoritative resources, because composing them
+ * in the approved order is its entire job. `attentionReplayScenario.ts` builds
+ * single-world replay-level fixtures and self-validates them against the prime
+ * pipeline and the quest-candidate scenario module.
  */
 const ALLOWED_IMPORT_SPECIFIERS: Record<string, readonly string[]> = {
   'attentionQuestCandidateContracts.ts': [],
@@ -116,6 +134,29 @@ const ALLOWED_IMPORT_SPECIFIERS: Record<string, readonly string[]> = {
     './attentionRevealPackage',
   ],
   'attentionZeroModelProbe.ts': [],
+  'attentionTrace.ts': ['./canonicalSerialization', './attentionRevealPackage'],
+  'attentionReplayResources.ts': ['./canonicalSerialization'],
+  'attentionReplay.ts': [
+    './attentionQuestCandidateContracts',
+    './attentionQuestCandidateAccessor',
+    './attentionQuestCandidateBoundary',
+    './attentionCandidate',
+    './attentionCandidateOrdering',
+    './attentionCandidatePolicy',
+    './attentionRevealPackage',
+    './attentionTemplate',
+    './attentionLedger',
+    './attentionTrace',
+    './attentionReplayResources',
+    './canonicalSerialization',
+  ],
+  'attentionReplayScenario.ts': [
+    './attentionQuestCandidateContracts',
+    './attentionCandidatePolicy',
+    './attentionReplay',
+    './attentionReplayResources',
+    './attentionQuestCandidateScenario',
+  ],
 }
 
 /**
@@ -145,10 +186,10 @@ const FORBIDDEN_SOURCE_PATTERNS: readonly (readonly [string, RegExp])[] = [
   // approved slice creates the capability. `attentionCandidatePolicy` was
   // forbidden here through A2 and moved to the import allowlist when A3 created
   // it; the reveal package, template, and ledger were forbidden here through A3
-  // and move now, because A4 is the approved slice that creates them. Every A5
-  // capability name — the complete trace, the replay runner, its resources and
-  // scenarios, and the P2/P3 harnesses — stays forbidden.
-  ['A5 trace / replay capability', /\b(AttentionTrace|attentionTrace|attentionReplay\w*|attentionP2\w*|attentionP3\w*)\b/],
+  // and moved when A4 created them. The complete trace, the replay runner, its
+  // resources and scenarios, and the P2/P3 harnesses were forbidden here through
+  // A4 and move now, because A5 is the approved slice that creates them — there
+  // is no next-slice capability line left to forbid in this proof.
   ['authoritative interface aliasing', /\bimplements\b|\binterface\s+\w+\s+extends\b/],
   ['type escape hatch', /\bas\s+any\b|:\s*any\b/],
 ]
@@ -286,7 +327,7 @@ function identifierNames(source: string): Set<string> {
  * so each is named here for the same reason.
  */
 const ATTENTION_MODULE_SPECIFIER =
-  /attention(QuestCandidate|Candidate|Ledger|RevealPackage|Template|ZeroModelProbe)/
+  /attention(QuestCandidate|Candidate|Ledger|RevealPackage|Template|ZeroModelProbe|Trace|Replay)/
 
 /**
  * Sound pre-filter for the whole-tree scans. Every token's text is a substring
@@ -552,17 +593,39 @@ describe('A2 / P1 — Stage A proof modules import a closed Stage A allowlist on
   })
 })
 
-describe('A4 / D12 step 2 — no Stage A module reads the Attention Ledger (surface C)', () => {
-  it.each(STAGE_A_PROOF_MODULES)('%s does not import the ledger', (fileName) => {
+/**
+ * ADR-0013 D12 step 2 / replay spec §24 L1 scope this rule to *detection and
+ * A-prime construction* — A1 through A3's ordering/cache-key modules. The A5
+ * trace and replay harness sit downstream of the ledger append step (D12 step
+ * 14): recording an outcome is not reading the ledger back into detection, so
+ * `attentionReplay.ts` is deliberately excluded here, exactly as `attentionLedger.ts`
+ * itself already was (a module cannot "read itself" in the sense this rule closes).
+ */
+const DETECTION_AND_CONSTRUCTION_MODULES = STAGE_A_PROOF_MODULES.filter((fileName) => (
+  fileName !== 'attentionLedger.ts' && fileName !== 'attentionReplay.ts'
+))
+
+describe('A4 / D12 step 2 — detection and A-prime construction never read the Attention Ledger (surface C)', () => {
+  it.each(DETECTION_AND_CONSTRUCTION_MODULES)('%s does not import the ledger', (fileName) => {
     expect(proofModuleSpecifiers(fileName)).not.toContain(LEDGER_SPECIFIER)
   })
 
-  it('is not merely an allowlist claim: no allowlist entry admits the ledger either', () => {
+  it('is not merely an allowlist claim: no detection/construction allowlist entry admits the ledger either', () => {
     const admitting = Object.entries(ALLOWED_IMPORT_SPECIFIERS)
+      .filter(([fileName]) => (DETECTION_AND_CONSTRUCTION_MODULES as readonly string[]).includes(fileName))
       .filter(([, allowed]) => allowed.includes(LEDGER_SPECIFIER))
       .map(([fileName]) => fileName)
 
     expect(admitting).toEqual([])
+  })
+
+  it('is named by exactly one module beyond the ledger itself: the A5 replay harness, which records a ledger append result rather than feeding one back into detection', () => {
+    const admitting = Object.entries(ALLOWED_IMPORT_SPECIFIERS)
+      .filter(([, allowed]) => allowed.includes(LEDGER_SPECIFIER))
+      .map(([fileName]) => fileName)
+
+    expect(admitting.sort()).toEqual(['attentionReplay.ts'])
+    expect(proofModuleSpecifiers('attentionReplay.ts')).toContain(LEDGER_SPECIFIER)
   })
 
   it('detects a ledger import if one were added, in any import form', () => {
@@ -589,6 +652,22 @@ describe('A4 / P1 — the reverse scan covers the A4 module names too', () => {
     // The A4 names do not match the A1/A2/A3 specifier alternatives, so without
     // their own alternatives the whole-tree reverse scan would have silently
     // stopped covering the newest modules.
+    expect(importsAttentionProofModule('domain/quests/offender.ts', `import { x } from '${specifier}'`)).toBe(true)
+  })
+})
+
+describe('A5 / P1 — the reverse scan covers the A5 module names too', () => {
+  const A5_SPECIFIERS = [
+    '../livingWorldProof/attentionTrace',
+    '../livingWorldProof/attentionReplayResources',
+    '../livingWorldProof/attentionReplay',
+    '../livingWorldProof/attentionReplayScenario',
+  ] as const
+
+  it.each(A5_SPECIFIERS)('a production file importing %s is detected', (specifier) => {
+    // Neither the A1/A2/A3 nor the A4 specifier alternatives match "Trace" or
+    // "Replay", so without their own alternative the whole-tree reverse scan
+    // would have silently stopped covering the A5 modules.
     expect(importsAttentionProofModule('domain/quests/offender.ts', `import { x } from '${specifier}'`)).toBe(true)
   })
 })

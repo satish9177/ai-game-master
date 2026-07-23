@@ -82,6 +82,28 @@ import {
   isAttentionRankingSnapshotLsnInRange,
 } from './attentionCandidatePolicy'
 
+/**
+ * A5 addition — the trace cache key (ADR-0013 D15 two-clock revalidation;
+ * plan §8 "cache-key invalidation and revalidation evidence"). It folds the
+ * already-derived ranking cache key in whole, exactly as the ranking key
+ * folds the derivation key in whole, so anything that invalidates ranking
+ * (and by embedding, derivation) also invalidates the trace key — structural,
+ * not a fact a reviewer must re-derive from two parallel field lists. The
+ * two additions the trace key alone owns are the presentation-time
+ * revalidation snapshot LSN (D15's second clock; distinct from the ranking
+ * snapshot LSN already inside the folded ranking key) and the replay case
+ * ID, so two distinct replay cases run under byte-identical policy can never
+ * collide on one trace key.
+ *
+ * This is the exact, narrow edit the controlling A5 plan section (§9)
+ * authorizes: "`attentionCandidateCacheKey.ts` only for an already-pinned
+ * trace key." No new policy value is invented; the schema version pinned
+ * here is declared once, in this edit, following the same versioned-key
+ * discipline `deriveAttentionCandidateDerivationCacheKey` and
+ * `deriveAttentionCandidateRankingCacheKey` already establish.
+ */
+export const ATTENTION_TRACE_CACHE_KEY_SCHEMA_VERSION = 'attention-trace-cache-key-v1' as const
+
 /** Plan §6: the complete view/derivation-cache identity input set. */
 export interface AttentionCandidateDerivationCacheKeyInput {
   readonly accessorContractVersion: string
@@ -254,5 +276,54 @@ export function deriveAttentionCandidateRankingCacheKey(
     derivationCacheKey: derivation.derivationCacheKey,
     rankingCacheKey: ATTENTION_CANDIDATE_RANKING_CACHE_KEY_SCHEMA_VERSION
       + ':' + mintHash(canonicalSerialize(canonicalInput)),
+  }
+}
+
+/** A5: the trace-key identity input — the folded ranking key plus the two-clock and replay-case coordinates. */
+export interface AttentionTraceCacheKeyInput {
+  readonly rankingCacheKey: string
+  readonly revalidationSnapshotLsn: number
+  readonly replayCaseId: string
+}
+
+export type AttentionTraceCacheKeyRefusal =
+  | 'missing-ranking-cache-key'
+  | 'missing-revalidation-snapshot-lsn'
+  | 'revalidation-snapshot-lsn-out-of-range'
+  | 'missing-replay-case-id'
+
+export type AttentionTraceCacheKeyResult =
+  | { readonly kind: 'ok'; readonly cacheKeySchemaVersion: string; readonly traceCacheKey: string }
+  | { readonly kind: 'refused'; readonly reason: AttentionTraceCacheKeyRefusal }
+
+/**
+ * Derive the trace cache key. Checks run in declared field order, exactly as
+ * the two functions above do, so the refusal reason is stable rather than
+ * dependent on which check happened to be cheapest.
+ */
+export function deriveAttentionTraceCacheKey(input: AttentionTraceCacheKeyInput): AttentionTraceCacheKeyResult {
+  if (!isPresent(input.rankingCacheKey)) {
+    return { kind: 'refused', reason: 'missing-ranking-cache-key' }
+  }
+  if (typeof input.revalidationSnapshotLsn !== 'number') {
+    return { kind: 'refused', reason: 'missing-revalidation-snapshot-lsn' }
+  }
+  if (!isAttentionRankingSnapshotLsnInRange(input.revalidationSnapshotLsn)) {
+    return { kind: 'refused', reason: 'revalidation-snapshot-lsn-out-of-range' }
+  }
+  if (!isPresent(input.replayCaseId)) {
+    return { kind: 'refused', reason: 'missing-replay-case-id' }
+  }
+
+  const canonicalInput = {
+    rankingCacheKey: input.rankingCacheKey,
+    replayCaseId: input.replayCaseId,
+    revalidationSnapshotLsn: input.revalidationSnapshotLsn,
+  }
+
+  return {
+    kind: 'ok',
+    cacheKeySchemaVersion: ATTENTION_TRACE_CACHE_KEY_SCHEMA_VERSION,
+    traceCacheKey: ATTENTION_TRACE_CACHE_KEY_SCHEMA_VERSION + ':' + mintHash(canonicalSerialize(canonicalInput)),
   }
 }
