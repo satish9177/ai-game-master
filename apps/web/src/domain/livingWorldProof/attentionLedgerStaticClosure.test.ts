@@ -59,6 +59,10 @@ const STAGE_A_PROOF_MODULES = [
   'attentionCandidate.ts',
   'attentionCandidateOrdering.ts',
   'attentionCandidateCacheKey.ts',
+  'attentionRevealPackage.ts',
+  'attentionTemplate.ts',
+  'attentionLedger.ts',
+  'attentionZeroModelProbe.ts',
 ] as const
 
 /**
@@ -75,6 +79,15 @@ const STAGE_A_PROOF_MODULES = [
  * section directs be "reused unchanged"; it is deliberately not added to
  * STAGE_A_PROOF_MODULES, because it is not a Stage A module and its own header
  * already records its proof-local, non-cryptographic limits.
+ *
+ * The A4 presentation and ledger modules extend the same discipline one step. The
+ * reveal package reads the A3 normalized candidate and no earlier surface, so it
+ * cannot name a raw `QuestCandidate`, a proof snapshot, or the accessor-origin
+ * mint. The template reads only an already-approved package. The ledger reads the
+ * normalized candidate and the presentation-result vocabulary, and — the
+ * load-bearing direction — *nothing* imports the ledger: its absence from every
+ * other module's allowlist is the mechanical form of ADR-0013 D12 step 2, that
+ * detection and A-prime construction never read surface C.
  */
 const ALLOWED_IMPORT_SPECIFIERS: Record<string, readonly string[]> = {
   'attentionQuestCandidateContracts.ts': [],
@@ -90,7 +103,29 @@ const ALLOWED_IMPORT_SPECIFIERS: Record<string, readonly string[]> = {
   ],
   'attentionCandidateOrdering.ts': ['./attentionCandidatePolicy', './attentionCandidate'],
   'attentionCandidateCacheKey.ts': ['./canonicalSerialization', './attentionCandidatePolicy'],
+  'attentionRevealPackage.ts': ['./attentionCandidatePolicy', './attentionCandidate'],
+  'attentionTemplate.ts': [
+    './canonicalSerialization',
+    './attentionCandidatePolicy',
+    './attentionRevealPackage',
+  ],
+  'attentionLedger.ts': [
+    './canonicalSerialization',
+    './attentionCandidatePolicy',
+    './attentionCandidate',
+    './attentionRevealPackage',
+  ],
+  'attentionZeroModelProbe.ts': [],
 }
+
+/**
+ * ADR-0013 D12 step 2 and replay spec §24 L1: detection and A-prime construction
+ * may not read the Attention Ledger (surface C). The mechanical form of that rule
+ * is that no Stage A module imports `./attentionLedger` — asserted below against
+ * the allowlist itself, so a later slice that added the import would have to edit
+ * this list in the open rather than reach C quietly.
+ */
+const LEDGER_SPECIFIER = './attentionLedger'
 
 /** ADR-0013 D19 P1's closed forbidden-consumer list, plus its bypass vectors. */
 const FORBIDDEN_SOURCE_PATTERNS: readonly (readonly [string, RegExp])[] = [
@@ -106,11 +141,14 @@ const FORBIDDEN_SOURCE_PATTERNS: readonly (readonly [string, RegExp])[] = [
   ['generic envelope, round-trip, reflection, dynamic dispatch', /\b(JSON\.parse|JSON\.stringify|structuredClone|Reflect\.|globalThis|process\.env)\b|\b(eval|require|import)\s*\(|\bnew Function\s*\(/],
   ['network / provider / model call', /\bfetch\s*\(|XMLHttpRequest|WebSocket|\b(openai|anthropic|llm|provider|model)\b/i],
   ['console logging', /\bconsole\s*\./],
-  // `attentionCandidatePolicy` was listed here through A2, when the A3 policy
-  // module was still an unapproved capability. A3 is the approved slice that
-  // creates it, so it moved from "must not exist" to the import allowlist
-  // above; every A4+ capability name stays forbidden.
-  ['A4+ ledger / reveal / template capability', /\b(AttentionLedger|appendLedger|RevealPackage|AttentionTrace|renderTemplate)\b/],
+  // The capability line moves exactly one slice at a time, and only when an
+  // approved slice creates the capability. `attentionCandidatePolicy` was
+  // forbidden here through A2 and moved to the import allowlist when A3 created
+  // it; the reveal package, template, and ledger were forbidden here through A3
+  // and move now, because A4 is the approved slice that creates them. Every A5
+  // capability name — the complete trace, the replay runner, its resources and
+  // scenarios, and the P2/P3 harnesses — stays forbidden.
+  ['A5 trace / replay capability', /\b(AttentionTrace|attentionTrace|attentionReplay\w*|attentionP2\w*|attentionP3\w*)\b/],
   ['authoritative interface aliasing', /\bimplements\b|\binterface\s+\w+\s+extends\b/],
   ['type escape hatch', /\bas\s+any\b|:\s*any\b/],
 ]
@@ -243,8 +281,12 @@ function identifierNames(source: string): Set<string> {
  * candidate modules are `attentionCandidate*`, which the A1/A2 pattern alone
  * would not have caught, so the reverse dependency-direction scan below would
  * have silently stopped covering the newest modules without this alternative.
+ * The A4 presentation modules are `attentionRevealPackage`, `attentionTemplate`,
+ * and `attentionZeroModelProbe`, none of which any earlier alternative matches,
+ * so each is named here for the same reason.
  */
-const ATTENTION_MODULE_SPECIFIER = /attention(QuestCandidate|Candidate|Ledger)/
+const ATTENTION_MODULE_SPECIFIER =
+  /attention(QuestCandidate|Candidate|Ledger|RevealPackage|Template|ZeroModelProbe)/
 
 /**
  * Sound pre-filter for the whole-tree scans. Every token's text is a substring
@@ -503,6 +545,51 @@ describe('A2 / P1 — Stage A proof modules import a closed Stage A allowlist on
       const offending = specifiers.filter((specifier) => pattern.test(specifier))
       expect({ file: fileName, label, offending }).toEqual({ file: fileName, label, offending: [] })
     }
+  })
+
+  it('every Stage A module has an allowlist entry, so a new module cannot be scanned against nothing', () => {
+    expect([...STAGE_A_PROOF_MODULES].sort()).toEqual(Object.keys(ALLOWED_IMPORT_SPECIFIERS).sort())
+  })
+})
+
+describe('A4 / D12 step 2 — no Stage A module reads the Attention Ledger (surface C)', () => {
+  it.each(STAGE_A_PROOF_MODULES)('%s does not import the ledger', (fileName) => {
+    expect(proofModuleSpecifiers(fileName)).not.toContain(LEDGER_SPECIFIER)
+  })
+
+  it('is not merely an allowlist claim: no allowlist entry admits the ledger either', () => {
+    const admitting = Object.entries(ALLOWED_IMPORT_SPECIFIERS)
+      .filter(([, allowed]) => allowed.includes(LEDGER_SPECIFIER))
+      .map(([fileName]) => fileName)
+
+    expect(admitting).toEqual([])
+  })
+
+  it('detects a ledger import if one were added, in any import form', () => {
+    for (const source of [
+      "import { appendAttentionLedgerRecord } from './attentionLedger'",
+      'export { createAttentionLedger } from "./attentionLedger"',
+      "const c = await import('./attentionLedger')",
+      'const d = require("./attentionLedger")',
+    ]) {
+      expect(moduleSpecifiers('attentionCandidate.ts', stripComments(source))).toContain(LEDGER_SPECIFIER)
+    }
+  })
+})
+
+describe('A4 / P1 — the reverse scan covers the A4 module names too', () => {
+  const A4_SPECIFIERS = [
+    '../livingWorldProof/attentionRevealPackage',
+    '../livingWorldProof/attentionTemplate',
+    '../livingWorldProof/attentionLedger',
+    '../livingWorldProof/attentionZeroModelProbe',
+  ] as const
+
+  it.each(A4_SPECIFIERS)('a production file importing %s is detected', (specifier) => {
+    // The A4 names do not match the A1/A2/A3 specifier alternatives, so without
+    // their own alternatives the whole-tree reverse scan would have silently
+    // stopped covering the newest modules.
+    expect(importsAttentionProofModule('domain/quests/offender.ts', `import { x } from '${specifier}'`)).toBe(true)
   })
 })
 

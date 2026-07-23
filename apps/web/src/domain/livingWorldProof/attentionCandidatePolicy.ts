@@ -25,11 +25,18 @@
  * a silent format drift — so they are declared separately and the ordering
  * version is declared separately again.
  *
- * Deliberately absent, because the controlling A3 plan section does not
- * authorize them: ranking weights or score policy, resource/candidate caps,
- * exposure, cooldown, template, channel, and ledger policy versions. Those are
- * A4/A5 pins and adding them here early would put unowned constants into every
+ * Deliberately absent, because no controlling plan section authorizes them:
+ * ranking weights or score policy, resource/candidate caps, template assertion
+ * caps, window-density limits, cooldown/retirement thresholds, and the A5 trace
+ * pins. ADR-0013 open questions 1-3 leave every one of those experiment-owned
+ * and unpinned; inventing one here would put a constant nobody chose into every
  * later cache key and trace.
+ *
+ * The A4 block at the end of this file adds exactly the three pin families the
+ * controlling A4 plan section authorizes — "`attentionCandidatePolicy.ts` only
+ * for approved template/channel, exposure, and ledger-policy version pins" — and
+ * nothing else. No vocabulary, slot order, template text, or ledger field set
+ * lives here; each of those is owned by the A4 module that defines it.
  */
 
 /**
@@ -132,3 +139,68 @@ export const ATTENTION_CANDIDATE_SOURCE_KIND_ORDER: readonly AttentionCandidateS
 export const ATTENTION_CANDIDATE_SOURCE_AUTHORITY: Readonly<
   Record<AttentionCandidateSourceKind, AttentionCandidateSourceAuthority>
 > = Object.freeze({ quest_candidate: 'authoritative' })
+
+// ---------------------------------------------------------------------------
+// A4 pins — template/channel, exposure, and ledger policy versions
+//
+// Added by the A4 slice, which the controlling plan section allows to modify
+// this file "only for approved template/channel, exposure, and ledger-policy
+// version pins". Each is a declared replay input in Attention Ledger Replay v0
+// §4, so a run that cannot name its exact pin is not a declared run at all.
+// ---------------------------------------------------------------------------
+
+/**
+ * The versioned deterministic template (ADR-0013 D18; replay spec §4 "deterministic
+ * template version", §26 T3 "the template version is recorded in the trace").
+ *
+ * D18 fixes the accepted v0 renderer as "deterministic templates or direct
+ * structured rendering ... a mechanical, versioned mapping from assertion
+ * structure to presented text/UI", with no call to any generative service
+ * anywhere in the accepted path. This pin is that mapping's version: it names
+ * both the fixed slot labels and the fixed line shape, so any change to either
+ * is a visible version bump rather than silent output drift, and it participates
+ * in rendered-output identity so two versions can never render byte-identically.
+ */
+export const ATTENTION_TEMPLATE_VERSION = 'attention-extradiegetic-template-v1' as const
+
+/**
+ * The versioned template/channel policy (ADR-0013 D15 ranking-cache identity;
+ * plan §6 "template/channel policy version").
+ *
+ * Stage A presents extradiegetically only (ADR-0013 "Staged implementation",
+ * Stage A: "extradiegetic deterministic presentation (D10/D18) only ... no
+ * diegetic channel"), so this pin records *which* channel policy a rendered
+ * result and its ledger record were produced under. It deliberately introduces
+ * no channel, revealer, recipient, audience-scope, or reveal-scope value: D9/D10
+ * make those a diegetic and Stage C surface, and ADR-0013 D2's B-domain
+ * enumeration gives Stage A no coordinate to fill them from. A pin is a version
+ * coordinate, not a capability.
+ */
+export const ATTENTION_TEMPLATE_CHANNEL_POLICY_VERSION = 'attention-template-channel-policy-v1' as const
+
+/**
+ * The versioned exposure policy (ADR-0013 D13/D17; plan §6 "exposure-policy
+ * version", plan §7 "exposure/cooldown/repetition/non-engagement").
+ *
+ * D17 permits the ledger to influence "only later attention ranking and
+ * presentation-density decisions, and only through already-declared, versioned
+ * deterministic features". This pin is the version those declared features are
+ * declared under. It fixes no *threshold*: ADR-0013 open question 3 leaves the
+ * cooldown and retirement constants experiment-owned, so the A4 ledger exposes
+ * the feature inputs and pins none of the numbers a later policy will compare
+ * them against.
+ */
+export const ATTENTION_EXPOSURE_POLICY_VERSION = 'attention-exposure-policy-v1' as const
+
+/**
+ * The versioned ledger policy (ADR-0013 D15 ranking-cache identity and D17;
+ * plan §6 "ledger/exposure-policy version", §7 the replay-local ledger).
+ *
+ * It covers the closed ledger record field set, the append-sequence rule, and
+ * the record-identity rule in `attentionLedger.ts`. It is prefixed onto every
+ * record identity, so a record minted under a later policy can never compare
+ * equal to one minted under this policy — the same discipline D6 requires of the
+ * identity-schema version, applied to a non-authoritative, replay-local sequence
+ * that no authoritative reducer, store, migration, or event log ever sees.
+ */
+export const ATTENTION_LEDGER_POLICY_VERSION = 'attention-ledger-policy-v1' as const
