@@ -53,6 +53,52 @@ export const ATTENTION_CANDIDATE_CANONICALIZATION_VERSION = 'attention-candidate
  */
 export const ATTENTION_CANDIDATE_IDENTITY_SCHEMA_VERSION = 'attention-candidate-identity-schema-v1' as const
 
+// ---------------------------------------------------------------------------
+// B2 pins — narrative-pattern instance contracts and lifecycle only
+// ---------------------------------------------------------------------------
+
+/** The semantic contract version of the three closed v0 narrative patterns. */
+export const ATTENTION_NARRATIVE_PATTERN_SEMANTIC_VERSION = 1 as const
+
+/** The versioned identity field-set for a derived NarrativePatternInstance. */
+export const ATTENTION_NARRATIVE_PATTERN_IDENTITY_SCHEMA_VERSION =
+  'attention-narrative-pattern-identity-schema-v1' as const
+
+/** The pure coordinate-based monitor rule used by the B2 lifecycle helpers. */
+export const ATTENTION_NARRATIVE_PATTERN_MONITOR_RULE_VERSION =
+  'attention-narrative-pattern-monitor-v1' as const
+
+/** The exact coordinate horizons owned by the B2 narrative-pattern monitor. */
+export const ATTENTION_NARRATIVE_PATTERN_STALL_LSN_DELTA = 4 as const
+export const ATTENTION_RECIPROCAL_PUBLIC_AID_EXPIRY_LSN_DELTA = 12 as const
+export const ATTENTION_PUBLIC_CONFLICT_ESCALATION_EXPIRY_LSN_DELTA = 16 as const
+
+export type AttentionNarrativePatternDerivedAnnotation =
+  | 'active'
+  | 'stalled'
+  | 'expired'
+  | 'abandoned'
+
+/**
+ * The single B2 annotation rule after callers have validated the three
+ * coordinates. Structural abandonment wins over coordinate-derived expiry and
+ * stall; strict expiry starts only after the inclusive deadline.
+ */
+export function deriveAttentionNarrativePatternAnnotation(
+  evaluationSnapshotLsn: number,
+  lastProgressLsn: number,
+  expiryDeadlineLsn: number,
+  structurallyAbandoned: boolean,
+): AttentionNarrativePatternDerivedAnnotation {
+  if (structurallyAbandoned) return 'abandoned'
+  if (evaluationSnapshotLsn > expiryDeadlineLsn) return 'expired'
+  if (
+    evaluationSnapshotLsn - lastProgressLsn
+      >= ATTENTION_NARRATIVE_PATTERN_STALL_LSN_DELTA
+  ) return 'stalled'
+  return 'active'
+}
+
 /**
  * The versioned total-order key sequence (ADR-0013 D14). Ordering is ranking
  * policy, so ADR-0013 D6 forbids it from reaching candidate identity: this

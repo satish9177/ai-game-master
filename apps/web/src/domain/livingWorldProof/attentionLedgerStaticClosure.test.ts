@@ -56,6 +56,9 @@ const STAGE_A_PROOF_MODULES = [
   'attentionPatternEvidenceContracts.ts',
   'attentionPatternEvidenceAccessor.ts',
   'attentionPatternEvidenceScenario.ts',
+  'attentionNarrativePatternContracts.ts',
+  'attentionNarrativePatternIdentity.ts',
+  'attentionNarrativePatternLifecycle.ts',
   'attentionReadableBoundary.ts',
   'attentionStageAQuestOnlyGolden.ts',
   'attentionCandidatePolicy.ts',
@@ -123,6 +126,24 @@ const ALLOWED_IMPORT_SPECIFIERS: Record<string, readonly string[]> = {
   ],
   'attentionReadableBoundary.ts': [
     './attentionQuestCandidateContracts',
+    './attentionPatternEvidenceContracts',
+    './attentionPatternEvidenceAccessor',
+  ],
+  'attentionNarrativePatternContracts.ts': [
+    './attentionCandidatePolicy',
+    './attentionPatternEvidenceContracts',
+    './attentionPatternEvidenceAccessor',
+    './attentionNarrativePatternIdentity',
+  ],
+  'attentionNarrativePatternIdentity.ts': [
+    './canonicalSerialization',
+    './attentionCandidatePolicy',
+    './attentionNarrativePatternContracts',
+  ],
+  'attentionNarrativePatternLifecycle.ts': [
+    './attentionCandidatePolicy',
+    './attentionNarrativePatternContracts',
+    './attentionNarrativePatternIdentity',
     './attentionPatternEvidenceContracts',
     './attentionPatternEvidenceAccessor',
   ],
@@ -523,7 +544,7 @@ function exportedMintAuthorityRisks(fileName: string, source: string): readonly 
  * so each is named here for the same reason.
  */
 const ATTENTION_MODULE_SPECIFIER =
-  /attention(QuestCandidate|PatternEvidence|ReadableBoundary|StageAQuestOnlyGolden|Candidate|Ledger|RevealPackage|Template|ZeroModelProbe|Trace|Replay)/
+  /attention(QuestCandidate|PatternEvidence|NarrativePattern|ReadableBoundary|StageAQuestOnlyGolden|Candidate|Ledger|RevealPackage|Template|ZeroModelProbe|Trace|Replay)/
 
 /**
  * Sound pre-filter for the whole-tree scans. Every token's text is a substring
