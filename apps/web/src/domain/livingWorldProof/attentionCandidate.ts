@@ -61,7 +61,7 @@ import {
   canonicalizeAttentionCandidateStringList,
   computeAttentionCandidateIdentity,
 } from './attentionCandidateIdentity'
-import type { AttentionReadableSurface } from './attentionQuestCandidateBoundary'
+import type { AttentionReadableSurface } from './attentionReadableBoundary'
 
 /** The one legal input record: an A-prime member, reached only through A2. */
 type AttentionReadableSurfaceView = AttentionReadableSurface['questCandidateViews'][number]

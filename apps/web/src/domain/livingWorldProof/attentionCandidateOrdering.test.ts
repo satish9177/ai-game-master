@@ -7,7 +7,10 @@ import {
 } from './attentionQuestCandidateContracts'
 import type { AttentionReadableQuestCandidateView, QuestCandidate } from './attentionQuestCandidateContracts'
 import { readAttentionReadableQuestCandidateViews } from './attentionQuestCandidateAccessor'
-import { constructAttentionReadableSurface } from './attentionQuestCandidateBoundary'
+import {
+  ATTENTION_READABLE_SURFACE_SCHEMA_VERSION,
+  constructAttentionReadableSurface,
+} from './attentionReadableBoundary'
 import { A1_RANKING_SNAPSHOT_LSN } from './attentionQuestCandidateScenario'
 import {
   ATTENTION_CANDIDATE_CANONICALIZATION_VERSION,
@@ -53,6 +56,7 @@ import {
  */
 
 const A1_REQUEST = {
+  surfaceSchemaVersion: ATTENTION_READABLE_SURFACE_SCHEMA_VERSION,
   accessorContractVersion: ATTENTION_QUEST_CANDIDATE_ACCESSOR_VERSION,
   rankingSnapshotLsn: A1_RANKING_SNAPSHOT_LSN,
 } as const
@@ -83,7 +87,7 @@ function openCandidate(id: string, provenanceId: string, openedAtLsn: number): Q
 function normalizeThroughSurface(
   views: readonly AttentionReadableQuestCandidateView[],
 ): readonly AttentionCandidate[] {
-  const surface = constructAttentionReadableSurface(A1_REQUEST, views)
+  const surface = constructAttentionReadableSurface(A1_REQUEST, views, Object.freeze([]))
   if (surface.kind !== 'ok') throw new Error('expected A2 to accept accessor-minted views')
   const normalized = normalizeAttentionCandidates(surface.surface)
   if (normalized.kind !== 'ok') throw new Error('expected normalization to accept this surface')

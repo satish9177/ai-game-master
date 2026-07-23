@@ -7,8 +7,11 @@ import {
 } from './attentionQuestCandidateContracts'
 import type { AttentionReadableQuestCandidateView, QuestCandidate } from './attentionQuestCandidateContracts'
 import { readAttentionReadableQuestCandidateViews } from './attentionQuestCandidateAccessor'
-import { constructAttentionReadableSurface } from './attentionQuestCandidateBoundary'
-import type { AttentionReadableSurface } from './attentionQuestCandidateBoundary'
+import {
+  ATTENTION_READABLE_SURFACE_SCHEMA_VERSION,
+  constructAttentionReadableSurface,
+} from './attentionReadableBoundary'
+import type { AttentionReadableSurface } from './attentionReadableBoundary'
 import { A1_RANKING_SNAPSHOT_LSN, buildAttentionQuestCandidateA1Scenario } from './attentionQuestCandidateScenario'
 import {
   ATTENTION_CANDIDATE_CANONICALIZATION_VERSION,
@@ -45,6 +48,7 @@ import { normalizeAttentionCandidates } from './attentionCandidate'
  */
 
 const A1_REQUEST = {
+  surfaceSchemaVersion: ATTENTION_READABLE_SURFACE_SCHEMA_VERSION,
   accessorContractVersion: ATTENTION_QUEST_CANDIDATE_ACCESSOR_VERSION,
   rankingSnapshotLsn: A1_RANKING_SNAPSHOT_LSN,
 } as const
@@ -75,7 +79,7 @@ function readViews(candidates: readonly QuestCandidate[]): readonly AttentionRea
 }
 
 function buildSurface(views: readonly AttentionReadableQuestCandidateView[]): AttentionReadableSurface {
-  const result = constructAttentionReadableSurface(A1_REQUEST, views)
+  const result = constructAttentionReadableSurface(A1_REQUEST, views, Object.freeze([]))
   if (result.kind !== 'ok') throw new Error('expected A2 to accept accessor-minted views')
   return result.surface
 }
@@ -295,7 +299,7 @@ describe('A3 / I1 — normalization is insertion-order independent and repeatabl
   })
 })
 
-describe('A3 — duplicate and colliding identity inputs are typed refusals, never silent drops', () => {
+describe('B1/A3 — duplicate and colliding identity inputs are typed refusals, never silent drops', () => {
   it('refuses a surface carrying two views for one engine-owned candidate', () => {
     const duplicated = createProofQuestCandidate({
       id: 'quest-duplicated',
@@ -305,10 +309,13 @@ describe('A3 — duplicate and colliding identity inputs are typed refusals, nev
       openingProvenance: { visibility: 'public', provenanceId: 'consequence-public-37' },
       legallyVisibleParties: ['player'],
     })
-    const surface = buildSurface(readViews([duplicated, duplicated]))
+    const result = constructAttentionReadableSurface(
+      A1_REQUEST,
+      readViews([duplicated, duplicated]),
+      Object.freeze([]),
+    )
 
-    expect(surface.questCandidateViews).toHaveLength(2)
-    expect(normalizeAttentionCandidates(surface)).toEqual({ kind: 'refused', reason: 'duplicate-source-id' })
+    expect(result).toEqual({ kind: 'refused', reason: 'ambiguous-legal-identity' })
   })
 
   it('gives distinct engine-owned candidates distinct identities', () => {
@@ -457,7 +464,11 @@ describe('A3 — the ranking snapshot coordinate is a checked bounded integer', 
     })
     const views = readAttentionReadableQuestCandidateViews(snapshot, request)
     if (views.kind !== 'ok') throw new Error('expected the A1 accessor to admit this fixture')
-    const surface = constructAttentionReadableSurface(request, views.views)
+    const surface = constructAttentionReadableSurface(
+      { ...request, surfaceSchemaVersion: ATTENTION_READABLE_SURFACE_SCHEMA_VERSION },
+      views.views,
+      Object.freeze([]),
+    )
     if (surface.kind !== 'ok') throw new Error('expected A2 to accept accessor-minted views')
     return surface.surface
   }

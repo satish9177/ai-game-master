@@ -8,7 +8,25 @@ import {
 import type { AttentionReadableQuestCandidateView } from './attentionQuestCandidateContracts'
 import { readAttentionReadableQuestCandidateViews } from './attentionQuestCandidateAccessor'
 import { A1_RANKING_SNAPSHOT_LSN } from './attentionQuestCandidateScenario'
-import { constructAttentionReadableSurface } from './attentionQuestCandidateBoundary'
+import {
+  ATTENTION_READABLE_SURFACE_SCHEMA_VERSION,
+  constructAttentionReadableSurface as constructCommonAttentionReadableSurface,
+} from './attentionReadableBoundary'
+import type {
+  AttentionReadableSurfaceRequest,
+  AttentionReadableSurfaceResult,
+} from './attentionReadableBoundary'
+import {
+  B1_PATTERN_EVIDENCE_REQUEST,
+  buildAttentionPatternEvidenceB1Scenario,
+} from './attentionPatternEvidenceScenario'
+import * as patternEvidenceContracts from './attentionPatternEvidenceContracts'
+import type { AttentionReadablePatternEvidenceView } from './attentionPatternEvidenceContracts'
+import { readAttentionReadablePatternEvidenceViews } from './attentionPatternEvidenceAccessor'
+import {
+  attentionPrimeSurfaceDigest,
+  attentionPrimeViewIdentities,
+} from './attentionReplay'
 
 /**
  * A2 / S2 — A-prime construction closure.
@@ -46,9 +64,19 @@ import { constructAttentionReadableSurface } from './attentionQuestCandidateBoun
  */
 
 const A1_REQUEST = {
+  surfaceSchemaVersion: ATTENTION_READABLE_SURFACE_SCHEMA_VERSION,
   accessorContractVersion: ATTENTION_QUEST_CANDIDATE_ACCESSOR_VERSION,
   rankingSnapshotLsn: A1_RANKING_SNAPSHOT_LSN,
 } as const
+
+const EMPTY_PATTERN_EVIDENCE = Object.freeze([])
+
+function constructAttentionReadableSurface(
+  request: AttentionReadableSurfaceRequest,
+  questCandidateViews: readonly AttentionReadableQuestCandidateView[],
+): AttentionReadableSurfaceResult {
+  return constructCommonAttentionReadableSurface(request, questCandidateViews, EMPTY_PATTERN_EVIDENCE)
+}
 
 function buildA1Sources() {
   const publicOpenCandidate = createProofQuestCandidate({
@@ -194,6 +222,7 @@ describe('A2 / S2 — A-prime is constructed only from A1 legal views', () => {
     expect(result).toEqual({
       kind: 'ok',
       surface: {
+        surfaceSchemaVersion: ATTENTION_READABLE_SURFACE_SCHEMA_VERSION,
         accessorContractVersion: ATTENTION_QUEST_CANDIDATE_ACCESSOR_VERSION,
         rankingSnapshotLsn: A1_RANKING_SNAPSHOT_LSN,
         questCandidateViews: [{
@@ -205,6 +234,7 @@ describe('A2 / S2 — A-prime is constructed only from A1 legal views', () => {
           legallyVisiblePublicStakes: 'restore-public-trust',
           legallyVisibleOriginConsequenceReference: 'consequence-public-37',
         }],
+        patternEvidenceViews: [],
       },
     })
     expectSourceLifecycleAndBytesUnchanged(sources, before)
@@ -279,15 +309,27 @@ describe('A2 / S2 — A-prime is constructed only from A1 legal views', () => {
     const views = readLegalViews(sources)
 
     expect(constructAttentionReadableSurface(
-      { accessorContractVersion: 'unknown-accessor-version', rankingSnapshotLsn: A1_RANKING_SNAPSHOT_LSN },
+      {
+        surfaceSchemaVersion: ATTENTION_READABLE_SURFACE_SCHEMA_VERSION,
+        accessorContractVersion: 'unknown-accessor-version',
+        rankingSnapshotLsn: A1_RANKING_SNAPSHOT_LSN,
+      },
       views,
     )).toEqual({ kind: 'refused', reason: 'accessor-contract-version-mismatch' })
     expect(constructAttentionReadableSurface(
-      { accessorContractVersion: ATTENTION_QUEST_CANDIDATE_ACCESSOR_VERSION, rankingSnapshotLsn: A1_RANKING_SNAPSHOT_LSN + 1 },
+      {
+        surfaceSchemaVersion: ATTENTION_READABLE_SURFACE_SCHEMA_VERSION,
+        accessorContractVersion: ATTENTION_QUEST_CANDIDATE_ACCESSOR_VERSION,
+        rankingSnapshotLsn: A1_RANKING_SNAPSHOT_LSN + 1,
+      },
       views,
     )).toEqual({ kind: 'refused', reason: 'ranking-snapshot-lsn-mismatch' })
     expect(constructAttentionReadableSurface(
-      { accessorContractVersion: ATTENTION_QUEST_CANDIDATE_ACCESSOR_VERSION, rankingSnapshotLsn: undefined as never },
+      {
+        surfaceSchemaVersion: ATTENTION_READABLE_SURFACE_SCHEMA_VERSION,
+        accessorContractVersion: ATTENTION_QUEST_CANDIDATE_ACCESSOR_VERSION,
+        rankingSnapshotLsn: undefined as never,
+      },
       views,
     )).toEqual({ kind: 'refused', reason: 'ranking-snapshot-lsn-mismatch' })
     expectSourceLifecycleAndBytesUnchanged(sources, before)
@@ -304,6 +346,7 @@ describe('A2 / S2 — A-prime is constructed only from A1 legal views', () => {
 
     expect(constructAttentionReadableSurface(
       {
+        surfaceSchemaVersion: ATTENTION_READABLE_SURFACE_SCHEMA_VERSION,
         accessorContractVersion: ATTENTION_QUEST_CANDIDATE_ACCESSOR_VERSION,
         rankingSnapshotLsn: A1_RANKING_SNAPSHOT_LSN + 1,
       },
@@ -651,5 +694,188 @@ describe('A2 — A-prime has no reverse write path into authoritative candidate 
     const afterAccess = readAttentionReadableQuestCandidateViews(sources.snapshot, A1_REQUEST)
     expect(afterAccess).toEqual(beforeAccess)
     expectSourceLifecycleAndBytesUnchanged(sources, beforeBytes)
+  })
+})
+
+describe('B1 — the common A-prime boundary admits both separately minted legal families', () => {
+  it('records the explicit schema and retains the canonical pattern evidence list unchanged', () => {
+    const questViews = readLegalViews(buildA1Sources())
+    const scenario = buildAttentionPatternEvidenceB1Scenario()
+    const result = constructCommonAttentionReadableSurface(A1_REQUEST, questViews, scenario.views)
+
+    expect(result.kind).toBe('ok')
+    if (result.kind !== 'ok') throw new Error('expected the common surface')
+    expect(result.surface.surfaceSchemaVersion).toBe(ATTENTION_READABLE_SURFACE_SCHEMA_VERSION)
+    expect(result.surface.questCandidateViews).toEqual(questViews)
+    expect(result.surface.patternEvidenceViews).toEqual(scenario.views)
+    expect(Object.isFrozen(result.surface.patternEvidenceViews)).toBe(true)
+  })
+
+  it('refuses a missing or unsupported common-surface schema', () => {
+    const views = readLegalViews(buildA1Sources())
+    expect(constructCommonAttentionReadableSurface(
+      { ...A1_REQUEST, surfaceSchemaVersion: '' },
+      views,
+      EMPTY_PATTERN_EVIDENCE,
+    )).toEqual({ kind: 'refused', reason: 'surface-schema-version-mismatch' })
+    expect(constructCommonAttentionReadableSurface(
+      { ...A1_REQUEST, surfaceSchemaVersion: 'unknown-surface-schema' },
+      views,
+      EMPTY_PATTERN_EVIDENCE,
+    )).toEqual({ kind: 'refused', reason: 'surface-schema-version-mismatch' })
+  })
+
+  it('refuses forged, spread-copied, reversed, and duplicated pattern evidence', () => {
+    const scenario = buildAttentionPatternEvidenceB1Scenario()
+    const genuine = scenario.views[0]!
+    const copiedValues = [
+      { ...genuine },
+      Object.assign({}, genuine),
+      JSON.parse(JSON.stringify(genuine)) as unknown,
+      Object.create(
+        Object.getPrototypeOf(genuine),
+        Object.getOwnPropertyDescriptors(genuine),
+      ) as unknown,
+    ]
+    for (const copied of copiedValues) {
+      expect(constructCommonAttentionReadableSurface(
+        A1_REQUEST,
+        EMPTY_PATTERN_EVIDENCE,
+        [copied as AttentionReadablePatternEvidenceView],
+      )).toEqual({ kind: 'refused', reason: 'input-not-accessor-minted' })
+    }
+    expect(constructCommonAttentionReadableSurface(
+      A1_REQUEST,
+      EMPTY_PATTERN_EVIDENCE,
+      [...scenario.views].reverse(),
+    )).toEqual({ kind: 'refused', reason: 'pattern-evidence-order-mismatch' })
+    expect(constructCommonAttentionReadableSurface(
+      A1_REQUEST,
+      EMPTY_PATTERN_EVIDENCE,
+      [genuine, genuine],
+    )).toEqual({ kind: 'refused', reason: 'ambiguous-legal-identity' })
+  })
+
+  it('refuses a genuine pattern view widened with a private or unsupported field', () => {
+    const genuine = buildAttentionPatternEvidenceB1Scenario().views[0]!
+    const widened = Object.create(
+      Object.getPrototypeOf(genuine),
+      Object.getOwnPropertyDescriptors(genuine),
+    ) as Record<string, unknown>
+    widened.privateMotive = 'not-readable'
+
+    expect(constructCommonAttentionReadableSurface(
+      A1_REQUEST,
+      EMPTY_PATTERN_EVIDENCE,
+      [widened as unknown as AttentionReadablePatternEvidenceView],
+    )).toEqual({ kind: 'refused', reason: 'input-not-attention-readable' })
+  })
+
+  it('the complete public contracts surface exposes no authority-producing helper', () => {
+    expect(Object.keys(patternEvidenceContracts).sort()).toEqual([
+      'ATTENTION_PATTERN_EVIDENCE_ACCESSOR_VERSION',
+      'ATTENTION_PATTERN_EVIDENCE_WINDOW_LIMIT',
+      'createProofPatternEvidenceRecord',
+      'createProofPatternEvidenceSnapshot',
+      'isStructurallyValidAttentionReadablePatternEvidenceView',
+      'isStructurallyValidProofPatternEvidenceRecord',
+    ])
+
+    const legalFields = {
+      evidenceViewContractVersion: patternEvidenceContracts.ATTENTION_PATTERN_EVIDENCE_ACCESSOR_VERSION,
+      recordId: 'contracts-cannot-mint',
+      commitLsn: 1,
+      worldTimeTick: 101,
+      visibilityProvenanceId: 'public-contracts-cannot-mint',
+      recordKind: 'world_observable_availability',
+      availabilityCode: 'dead',
+      entityId: 'entity',
+    } as const
+    const source = patternEvidenceContracts.createProofPatternEvidenceRecord({
+      evidenceViewContractVersion: patternEvidenceContracts.ATTENTION_PATTERN_EVIDENCE_ACCESSOR_VERSION,
+      recordId: legalFields.recordId,
+      commitLsn: legalFields.commitLsn,
+      worldTimeTick: legalFields.worldTimeTick,
+      visibilityProvenance: { visibility: 'public', provenanceId: legalFields.visibilityProvenanceId },
+      recordKind: legalFields.recordKind,
+      availabilityCode: legalFields.availabilityCode,
+      entityId: legalFields.entityId,
+    })
+    const snapshot = patternEvidenceContracts.createProofPatternEvidenceSnapshot({
+      evidenceViewContractVersion: patternEvidenceContracts.ATTENTION_PATTERN_EVIDENCE_ACCESSOR_VERSION,
+      records: [source],
+    })
+
+    for (const value of [legalFields, source, snapshot]) {
+      const result = constructCommonAttentionReadableSurface(
+        A1_REQUEST,
+        EMPTY_PATTERN_EVIDENCE,
+        [value as unknown as AttentionReadablePatternEvidenceView],
+      )
+      expect(result.kind).toBe('refused')
+    }
+  })
+
+  it('compares non-empty quest and pattern premise components independently', () => {
+    const questViews = readLegalViews(buildA1Sources())
+    const scenario = buildAttentionPatternEvidenceB1Scenario()
+    const reorderedSnapshot = patternEvidenceContracts.createProofPatternEvidenceSnapshot({
+      evidenceViewContractVersion: patternEvidenceContracts.ATTENTION_PATTERN_EVIDENCE_ACCESSOR_VERSION,
+      records: [...scenario.snapshot.records].reverse(),
+    })
+    const withoutHiddenSnapshot = patternEvidenceContracts.createProofPatternEvidenceSnapshot({
+      evidenceViewContractVersion: patternEvidenceContracts.ATTENTION_PATTERN_EVIDENCE_ACCESSOR_VERSION,
+      records: scenario.snapshot.records.filter((record) => record.recordId !== scenario.hiddenRecordId),
+    })
+    const reorderedAccess = readAttentionReadablePatternEvidenceViews(
+      reorderedSnapshot,
+      B1_PATTERN_EVIDENCE_REQUEST,
+    )
+    const withoutHiddenAccess = readAttentionReadablePatternEvidenceViews(
+      withoutHiddenSnapshot,
+      B1_PATTERN_EVIDENCE_REQUEST,
+    )
+    if (reorderedAccess.kind !== 'ok' || withoutHiddenAccess.kind !== 'ok') {
+      throw new Error('expected independently projected pattern premises')
+    }
+
+    const buildCommonSurface = (
+      quests: readonly AttentionReadableQuestCandidateView[],
+      patterns: readonly AttentionReadablePatternEvidenceView[],
+    ) => {
+      const result = constructCommonAttentionReadableSurface(A1_REQUEST, quests, patterns)
+      if (result.kind !== 'ok') throw new Error(`expected common premise: ${result.reason}`)
+      return result.surface
+    }
+
+    const baseline = buildCommonSurface(questViews, scenario.views)
+    const identical = buildCommonSurface(questViews, reorderedAccess.views)
+    const hiddenRemoved = buildCommonSurface(questViews, withoutHiddenAccess.views)
+    const questChanged = buildCommonSurface([], scenario.views)
+    const patternChanged = buildCommonSurface(questViews, scenario.views.slice(0, -1))
+
+    const baselineIdentities = attentionPrimeViewIdentities(baseline)
+    const identicalIdentities = attentionPrimeViewIdentities(identical)
+    const hiddenRemovedIdentities = attentionPrimeViewIdentities(hiddenRemoved)
+    const questChangedIdentities = attentionPrimeViewIdentities(questChanged)
+    const patternChangedIdentities = attentionPrimeViewIdentities(patternChanged)
+
+    expect(baseline.patternEvidenceViews.length).toBeGreaterThan(0)
+    expect(identicalIdentities).toEqual(baselineIdentities)
+    expect(attentionPrimeSurfaceDigest(identical)).toBe(attentionPrimeSurfaceDigest(baseline))
+    expect(hiddenRemovedIdentities).toEqual(baselineIdentities)
+    expect(attentionPrimeSurfaceDigest(hiddenRemoved)).toBe(attentionPrimeSurfaceDigest(baseline))
+
+    expect(questChangedIdentities.questCandidateViewIdentities)
+      .not.toEqual(baselineIdentities.questCandidateViewIdentities)
+    expect(questChangedIdentities.patternEvidenceViewIdentities)
+      .toEqual(baselineIdentities.patternEvidenceViewIdentities)
+    expect(attentionPrimeSurfaceDigest(questChanged)).not.toBe(attentionPrimeSurfaceDigest(baseline))
+
+    expect(patternChangedIdentities.questCandidateViewIdentities)
+      .toEqual(baselineIdentities.questCandidateViewIdentities)
+    expect(patternChangedIdentities.patternEvidenceViewIdentities)
+      .not.toEqual(baselineIdentities.patternEvidenceViewIdentities)
+    expect(attentionPrimeSurfaceDigest(patternChanged)).not.toBe(attentionPrimeSurfaceDigest(baseline))
   })
 })

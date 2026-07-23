@@ -2,7 +2,7 @@ import { readdirSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import * as ts from 'typescript'
 import { describe, expect, it } from 'vitest'
-import { constructAttentionReadableSurface } from './attentionQuestCandidateBoundary'
+import { constructAttentionReadableSurface } from './attentionReadableBoundary'
 
 /**
  * A2 / P1 — static forbidden-consumer and dependency-direction closure, plus
@@ -53,7 +53,11 @@ const STAGE_A_PROOF_MODULES = [
   'attentionQuestCandidateContracts.ts',
   'attentionQuestCandidateAccessor.ts',
   'attentionQuestCandidateScenario.ts',
-  'attentionQuestCandidateBoundary.ts',
+  'attentionPatternEvidenceContracts.ts',
+  'attentionPatternEvidenceAccessor.ts',
+  'attentionPatternEvidenceScenario.ts',
+  'attentionReadableBoundary.ts',
+  'attentionStageAQuestOnlyGolden.ts',
   'attentionCandidatePolicy.ts',
   'attentionCandidateIdentity.ts',
   'attentionCandidate.ts',
@@ -76,7 +80,7 @@ const STAGE_A_PROOF_MODULES = [
  * or `attentionQuestCandidateAccessor` at all — the raw `QuestCandidate`, the
  * proof snapshot, the `open | resolved` lifecycle, and the accessor-origin mint
  * all live behind those two specifiers, so their absence here is what proves A3
- * reads A-prime through `attentionQuestCandidateBoundary` and by no other path.
+ * reads A-prime through `attentionReadableBoundary` and by no other path.
  *
  * `./canonicalSerialization` is the one non-attention specifier admitted. It is
  * the long-standing proof-local key-sorting/FNV helper the controlling A3 plan
@@ -111,13 +115,24 @@ const ALLOWED_IMPORT_SPECIFIERS: Record<string, readonly string[]> = {
   'attentionQuestCandidateContracts.ts': [],
   'attentionQuestCandidateAccessor.ts': ['./attentionQuestCandidateContracts'],
   'attentionQuestCandidateScenario.ts': ['./attentionQuestCandidateContracts', './attentionQuestCandidateAccessor'],
-  'attentionQuestCandidateBoundary.ts': ['./attentionQuestCandidateContracts'],
+  'attentionPatternEvidenceContracts.ts': [],
+  'attentionPatternEvidenceAccessor.ts': ['./attentionPatternEvidenceContracts'],
+  'attentionPatternEvidenceScenario.ts': [
+    './attentionPatternEvidenceContracts',
+    './attentionPatternEvidenceAccessor',
+  ],
+  'attentionReadableBoundary.ts': [
+    './attentionQuestCandidateContracts',
+    './attentionPatternEvidenceContracts',
+    './attentionPatternEvidenceAccessor',
+  ],
+  'attentionStageAQuestOnlyGolden.ts': [],
   'attentionCandidatePolicy.ts': [],
   'attentionCandidateIdentity.ts': ['./canonicalSerialization', './attentionCandidatePolicy'],
   'attentionCandidate.ts': [
     './attentionCandidatePolicy',
     './attentionCandidateIdentity',
-    './attentionQuestCandidateBoundary',
+    './attentionReadableBoundary',
   ],
   'attentionCandidateOrdering.ts': ['./attentionCandidatePolicy', './attentionCandidate'],
   'attentionCandidateCacheKey.ts': ['./canonicalSerialization', './attentionCandidatePolicy'],
@@ -139,7 +154,7 @@ const ALLOWED_IMPORT_SPECIFIERS: Record<string, readonly string[]> = {
   'attentionReplay.ts': [
     './attentionQuestCandidateContracts',
     './attentionQuestCandidateAccessor',
-    './attentionQuestCandidateBoundary',
+    './attentionReadableBoundary',
     './attentionCandidate',
     './attentionCandidateOrdering',
     './attentionCandidatePolicy',
@@ -212,6 +227,11 @@ const FORBIDDEN_BOUNDARY_PATTERNS: readonly (readonly [string, RegExp])[] = [
   ['view mint (A-prime never mints its own views)', /\bmintAttentionReadableQuestCandidateView\b/],
   ['raw candidate field', /\b(privateParties|secretOpeningDetail|openingProvenance|openedAtLsn|candidates|status)\b/],
   ['candidate lifecycle vocabulary', /\b(open|resolved)\b/],
+  ['raw pattern-evidence constructor', /\b(createProofPatternEvidenceRecord|createProofPatternEvidenceSnapshot)\b/],
+  ['raw pattern-evidence type', /\b(ProofPatternEvidenceRecord|ProofPatternEvidenceRecordInput|ProofPatternEvidenceSnapshot|ProofPatternEvidenceSnapshotInput|PatternEvidenceVisibilityProvenance)\b/],
+  ['pattern accessor invocation', /\breadAttentionReadablePatternEvidenceViews\b/],
+  ['pattern view mint', /\bmintAttentionReadablePatternEvidenceView\b/],
+  ['raw pattern-evidence field', /\b(visibilityProvenance|records)\b/],
 ]
 
 /**
@@ -222,6 +242,38 @@ const VIEW_MINT_IDENTIFIER = 'mintAttentionReadableQuestCandidateView'
 const MINT_AUTHORIZED_FILES = [
   'domain/livingWorldProof/attentionQuestCandidateAccessor.ts',
   'domain/livingWorldProof/attentionQuestCandidateContracts.ts',
+] as const
+
+const PATTERN_VIEW_MINT_IDENTIFIER = 'mintAttentionReadablePatternEvidenceView'
+const PATTERN_MINT_CALLER_FILES = [
+  'domain/livingWorldProof/attentionPatternEvidenceAccessor.ts',
+] as const
+
+const PATTERN_CONTRACTS_ALLOWED_EXPORTS = [
+  'ATTENTION_PATTERN_EVIDENCE_ACCESSOR_VERSION',
+  'ATTENTION_PATTERN_EVIDENCE_WINDOW_LIMIT',
+  'AttentionPatternEvidenceAccessRefusal',
+  'AttentionPatternEvidenceAccessRequest',
+  'AttentionPatternEvidenceAccessResult',
+  'AttentionReadablePatternEvidenceView',
+  'AttentionReadablePatternEvidenceViewFields',
+  'ObservableActionEvidenceViewFields',
+  'PatternEvidenceVisibilityProvenance',
+  'ProofPatternEvidenceRecord',
+  'ProofPatternEvidenceRecordInput',
+  'ProofPatternEvidenceSnapshot',
+  'ProofPatternEvidenceSnapshotInput',
+  'ValidatedPublicCommunicationEvidenceViewFields',
+  'WorldObservableAvailabilityEvidenceViewFields',
+  'createProofPatternEvidenceRecord',
+  'createProofPatternEvidenceSnapshot',
+  'isStructurallyValidAttentionReadablePatternEvidenceView',
+  'isStructurallyValidProofPatternEvidenceRecord',
+] as const
+
+const PATTERN_ACCESSOR_ALLOWED_EXPORTS = [
+  'isAttentionReadablePatternEvidenceViewFromAccessor',
+  'readAttentionReadablePatternEvidenceViews',
 ] as const
 
 const SRC_ROOT = fileURLToPath(new URL('../../', import.meta.url))
@@ -308,13 +360,157 @@ function stripComments(source: string): string {
   return stripped
 }
 
-/** Identifier tokens only: never a name that merely appears in prose or a string. */
-function identifierNames(source: string): Set<string> {
+/** Complete AST identifier traversal: never prose/string text and never truncated by templates. */
+function identifierNames(source: string, fileName = 'identifier-scan.ts'): Set<string> {
   const names = new Set<string>()
-  scanTokens(source, (token, text) => {
-    if (token === ts.SyntaxKind.Identifier) names.add(text)
-  })
+  const visit = (node: ts.Node): void => {
+    if (ts.isIdentifier(node)) names.add(node.text)
+    ts.forEachChild(node, visit)
+  }
+  visit(parse(fileName, source))
   return names
+}
+
+type ExportEntryKind =
+  | 'declaration'
+  | 'named-export'
+  | 're-export'
+  | 'export-star'
+  | 'namespace-export'
+  | 'default-export'
+
+interface ExportEntry {
+  readonly kind: ExportEntryKind
+  readonly exportedName: string
+  readonly localName: string | null
+  readonly identifiers: readonly string[]
+}
+
+function hasExportModifier(node: ts.Node): boolean {
+  return ts.canHaveModifiers(node)
+    && (ts.getModifiers(node)?.some((modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword) ?? false)
+}
+
+function hasDefaultModifier(node: ts.Node): boolean {
+  return ts.canHaveModifiers(node)
+    && (ts.getModifiers(node)?.some((modifier) => modifier.kind === ts.SyntaxKind.DefaultKeyword) ?? false)
+}
+
+function bindingNames(name: ts.BindingName): string[] {
+  if (ts.isIdentifier(name)) return [name.text]
+  return name.elements.flatMap((element) => (
+    ts.isOmittedExpression(element) ? [] : bindingNames(element.name)
+  ))
+}
+
+function identifiersWithin(node: ts.Node): readonly string[] {
+  const names = new Set<string>()
+  const visit = (child: ts.Node): void => {
+    if (ts.isIdentifier(child)) names.add(child.text)
+    ts.forEachChild(child, visit)
+  }
+  visit(node)
+  return [...names].sort()
+}
+
+/**
+ * Complete public-export surface, including declarations, aliases, default
+ * exports, re-exports, export-star, and namespace exports. TypeScript's parser
+ * owns template-literal state, so declarations after nested/interpolated
+ * templates cannot disappear from this oracle.
+ */
+function exportedEntries(fileName: string, source: string): readonly ExportEntry[] {
+  const entries: ExportEntry[] = []
+  const sourceFile = parse(fileName, source)
+
+  const visit = (node: ts.Node): void => {
+    if (ts.isExportAssignment(node)) {
+      entries.push({
+        kind: 'default-export',
+        exportedName: 'default',
+        localName: ts.isIdentifier(node.expression) ? node.expression.text : null,
+        identifiers: identifiersWithin(node.expression),
+      })
+    } else if (ts.isExportDeclaration(node)) {
+      const moduleSpecifier = staticLiteralText(node.moduleSpecifier)
+      if (node.exportClause === undefined) {
+        entries.push({
+          kind: 'export-star',
+          exportedName: '*',
+          localName: moduleSpecifier,
+          identifiers: [],
+        })
+      } else if (ts.isNamespaceExport(node.exportClause)) {
+        entries.push({
+          kind: 'namespace-export',
+          exportedName: node.exportClause.name.text,
+          localName: moduleSpecifier,
+          identifiers: [node.exportClause.name.text],
+        })
+      } else {
+        for (const element of node.exportClause.elements) {
+          const localName = element.propertyName?.text ?? element.name.text
+          entries.push({
+            kind: moduleSpecifier === null ? 'named-export' : 're-export',
+            exportedName: element.name.text,
+            localName,
+            identifiers: [localName, element.name.text],
+          })
+        }
+      }
+    } else if (ts.isVariableStatement(node) && hasExportModifier(node)) {
+      for (const declaration of node.declarationList.declarations) {
+        for (const name of bindingNames(declaration.name)) {
+          entries.push({
+            kind: hasDefaultModifier(node) ? 'default-export' : 'declaration',
+            exportedName: hasDefaultModifier(node) ? 'default' : name,
+            localName: name,
+            identifiers: identifiersWithin(declaration),
+          })
+        }
+      }
+    } else if (
+      (
+        ts.isFunctionDeclaration(node)
+        || ts.isClassDeclaration(node)
+        || ts.isInterfaceDeclaration(node)
+        || ts.isTypeAliasDeclaration(node)
+        || ts.isEnumDeclaration(node)
+        || ts.isModuleDeclaration(node)
+      )
+      && hasExportModifier(node)
+    ) {
+      const localName = node.name === undefined
+        ? null
+        : ts.isIdentifier(node.name)
+          ? node.name.text
+          : node.name.text
+      entries.push({
+        kind: hasDefaultModifier(node) ? 'default-export' : 'declaration',
+        exportedName: hasDefaultModifier(node) ? 'default' : (localName ?? '<anonymous>'),
+        localName,
+        identifiers: identifiersWithin(node),
+      })
+    }
+    ts.forEachChild(node, visit)
+  }
+
+  visit(sourceFile)
+  return entries
+}
+
+function publicExportNames(fileName: string, source: string): readonly string[] {
+  return [...new Set(exportedEntries(fileName, source).map((entry) => entry.exportedName))].sort()
+}
+
+function exportedMintAuthorityRisks(fileName: string, source: string): readonly ExportEntry[] {
+  return exportedEntries(fileName, source).filter((entry) => (
+    entry.kind === 'export-star'
+    || entry.kind === 'namespace-export'
+    || entry.kind === 'default-export'
+    || [entry.exportedName, entry.localName, ...entry.identifiers]
+      .some((name) => typeof name === 'string' && /mint/i.test(name))
+  ))
 }
 
 /**
@@ -327,7 +523,7 @@ function identifierNames(source: string): Set<string> {
  * so each is named here for the same reason.
  */
 const ATTENTION_MODULE_SPECIFIER =
-  /attention(QuestCandidate|Candidate|Ledger|RevealPackage|Template|ZeroModelProbe|Trace|Replay)/
+  /attention(QuestCandidate|PatternEvidence|ReadableBoundary|StageAQuestOnlyGolden|Candidate|Ledger|RevealPackage|Template|ZeroModelProbe|Trace|Replay)/
 
 /**
  * Sound pre-filter for the whole-tree scans. Every token's text is a substring
@@ -351,6 +547,11 @@ function importsAttentionProofModule(fileName: string, source: string): boolean 
 function namesViewMint(source: string): boolean {
   if (!mayContain(source, VIEW_MINT_IDENTIFIER)) return false
   return identifierNames(source).has(VIEW_MINT_IDENTIFIER)
+}
+
+function namesPatternViewMint(source: string): boolean {
+  if (!mayContain(source, PATTERN_VIEW_MINT_IDENTIFIER)) return false
+  return identifierNames(source).has(PATTERN_VIEW_MINT_IDENTIFIER)
 }
 
 function readProofSource(fileName: string): string {
@@ -476,7 +677,7 @@ describe('A2 evidence mechanism — parser-backed extraction separates dependenc
     expect(stripped.split('\n')).toHaveLength(source.split('\n').length)
   })
 
-  it('collects identifier tokens without picking up names in comments or strings', () => {
+  it('collects AST identifiers without picking up names in comments or strings', () => {
     const source = [
       '// mintAttentionReadableQuestCandidateView named in a comment',
       "const label = 'mintAttentionReadableQuestCandidateView in a string'",
@@ -488,9 +689,72 @@ describe('A2 evidence mechanism — parser-backed extraction separates dependenc
     expect(names.has('realIdentifier')).toBe(true)
   })
 
+  it.each([
+    [
+      'template before exported mint',
+      [
+        'const label = `before ${value}`',
+        'export function mintPatternView() { return {} }',
+      ].join('\n'),
+    ],
+    [
+      'multiple template expressions before exported mint',
+      [
+        'const label = `before ${first} middle ${second}`',
+        'export const mintPatternView = () => ({})',
+      ].join('\n'),
+    ],
+    [
+      'nested template before exported mint',
+      [
+        'const label = `outer ${`inner ${value}`}`',
+        'export class MintPatternView {}',
+      ].join('\n'),
+    ],
+    [
+      'aliased exported mint',
+      [
+        'const mintPatternView = () => ({})',
+        'export { mintPatternView as apparentlySafe }',
+      ].join('\n'),
+    ],
+    [
+      'exported variable assigned to mint function',
+      [
+        'const mintPatternView = () => ({})',
+        'export const apparentlySafe = mintPatternView',
+      ].join('\n'),
+    ],
+    [
+      'single-quoted re-export',
+      "export { mintPatternView as apparentlySafe } from './mint-source'",
+    ],
+    [
+      'double-quoted re-export',
+      'export { mintPatternView as apparentlySafe } from "./mint-source"',
+    ],
+    [
+      'export-star',
+      "export * from './mint-source'",
+    ],
+    [
+      'namespace export',
+      'export * as mintNamespace from "./mint-source"',
+    ],
+    [
+      'default export',
+      [
+        'const apparentlySafe = () => ({})',
+        'export default apparentlySafe',
+      ].join('\n'),
+    ],
+  ])('detects the complete exported authority surface: %s', (_label, source) => {
+    expect(exportedMintAuthorityRisks('adversarial-export.ts', source).length).toBeGreaterThan(0)
+  })
+
   it('keeps real module code after stripping that module\'s doc comments', () => {
     const contracts = readStrippedSource('attentionQuestCandidateContracts.ts')
-    const boundary = readStrippedSource('attentionQuestCandidateBoundary.ts')
+    const boundary = readStrippedSource('attentionReadableBoundary.ts')
 
     expect(contracts).toMatch(/export interface QuestCandidate\b/)
     expect(contracts).not.toMatch(/not a production quest API/)
@@ -500,19 +764,19 @@ describe('A2 evidence mechanism — parser-backed extraction separates dependenc
 })
 
 describe('A2 / P1 — negative controls: a forbidden import is caught in every syntax', () => {
-  const BOUNDARY_SPECIFIER = /attention(QuestCandidate|Ledger)/
+  const BOUNDARY_SPECIFIER = /attention(ReadableBoundary|QuestCandidate|Ledger)/
 
   const forbiddenProductionImports: [string, string][] = [
-    ['single-quoted static', "import { constructAttentionReadableSurface } from '../livingWorldProof/attentionQuestCandidateBoundary'"],
-    ['double-quoted static', 'import { constructAttentionReadableSurface } from "../livingWorldProof/attentionQuestCandidateBoundary"'],
-    ['export-from', "export { constructAttentionReadableSurface } from '../livingWorldProof/attentionQuestCandidateBoundary'"],
-    ['export-star double-quoted', 'export * from "../livingWorldProof/attentionQuestCandidateBoundary"'],
-    ['dynamic import single-quoted', "const m = await import('../livingWorldProof/attentionQuestCandidateBoundary')"],
-    ['dynamic import double-quoted', 'const m = await import("../livingWorldProof/attentionQuestCandidateBoundary")'],
-    ['dynamic import template', 'const m = await import(`../livingWorldProof/attentionQuestCandidateBoundary`)'],
-    ['require single-quoted', "const m = require('../livingWorldProof/attentionQuestCandidateBoundary')"],
-    ['require double-quoted', 'const m = require("../livingWorldProof/attentionQuestCandidateBoundary")'],
-    ['import-equals require', "import m = require('../livingWorldProof/attentionQuestCandidateBoundary')"],
+    ['single-quoted static', "import { constructAttentionReadableSurface } from '../livingWorldProof/attentionReadableBoundary'"],
+    ['double-quoted static', 'import { constructAttentionReadableSurface } from "../livingWorldProof/attentionReadableBoundary"'],
+    ['export-from', "export { constructAttentionReadableSurface } from '../livingWorldProof/attentionReadableBoundary'"],
+    ['export-star double-quoted', 'export * from "../livingWorldProof/attentionReadableBoundary"'],
+    ['dynamic import single-quoted', "const m = await import('../livingWorldProof/attentionReadableBoundary')"],
+    ['dynamic import double-quoted', 'const m = await import("../livingWorldProof/attentionReadableBoundary")'],
+    ['dynamic import template', 'const m = await import(`../livingWorldProof/attentionReadableBoundary`)'],
+    ['require single-quoted', "const m = require('../livingWorldProof/attentionReadableBoundary')"],
+    ['require double-quoted', 'const m = require("../livingWorldProof/attentionReadableBoundary")'],
+    ['import-equals require', "import m = require('../livingWorldProof/attentionReadableBoundary')"],
   ]
 
   it.each(forbiddenProductionImports)('a production file reaching A-prime by %s is detected', (_label, source) => {
@@ -524,7 +788,7 @@ describe('A2 / P1 — negative controls: a forbidden import is caught in every s
 
   it('does not flag a production file that only mentions the proof modules in prose', () => {
     const innocent = [
-      "// This module deliberately does not import attentionQuestCandidateBoundary.",
+      "// This module deliberately does not import attentionReadableBoundary.",
       "const note = 'see attentionLedgerStaticClosure for the closure evidence'",
       "import { evaluateQuest } from './evaluateQuest'",
     ].join('\n')
@@ -542,8 +806,8 @@ describe('A2 / P1 — negative controls: a forbidden import is caught in every s
   ]
 
   it.each(forbiddenBoundaryImports)('a Stage A module importing ../stableHash by %s breaks the allowlist', (_label, source) => {
-    const allowed = ALLOWED_IMPORT_SPECIFIERS['attentionQuestCandidateBoundary.ts'] ?? []
-    const specifiers = moduleSpecifiers('attentionQuestCandidateBoundary.ts', stripComments(source))
+    const allowed = ALLOWED_IMPORT_SPECIFIERS['attentionReadableBoundary.ts'] ?? []
+    const specifiers = moduleSpecifiers('attentionReadableBoundary.ts', stripComments(source))
 
     expect(specifiers).toContain('../stableHash')
     expect(specifiers.filter((specifier) => !allowed.includes(specifier))).not.toEqual([])
@@ -555,7 +819,7 @@ describe('A2 / P1 — negative controls: a forbidden import is caught in every s
       'import { applyEvent } from "../world/applyEvent"',
       'const m = await import("../world/applyEvent")',
     ]) {
-      const specifiers = moduleSpecifiers('attentionQuestCandidateBoundary.ts', stripComments(source))
+      const specifiers = moduleSpecifiers('attentionReadableBoundary.ts', stripComments(source))
       const [, pattern] = FORBIDDEN_SPECIFIER_PATTERNS[0]!
       expect(specifiers.some((specifier) => pattern.test(specifier))).toBe(true)
     }
@@ -672,26 +936,28 @@ describe('A5 / P1 — the reverse scan covers the A5 module names too', () => {
   })
 })
 
-describe('A2 / S2 — the A-prime constructor names no raw A-domain surface', () => {
-  it('imports only the Stage A contracts module', () => {
-    const specifiers = proofModuleSpecifiers('attentionQuestCandidateBoundary.ts')
+describe('B1 / S2 — the common A-prime constructor names no raw A-domain surface', () => {
+  it('imports only the quest contract, pattern contract, and read-only pattern authority verifier', () => {
+    const specifiers = proofModuleSpecifiers('attentionReadableBoundary.ts')
 
     expect(specifiers.length).toBeGreaterThan(0)
-    expect([...new Set(specifiers)]).toEqual(['./attentionQuestCandidateContracts'])
+    expect([...new Set(specifiers)].sort()).toEqual([
+      './attentionPatternEvidenceAccessor',
+      './attentionPatternEvidenceContracts',
+      './attentionQuestCandidateContracts',
+    ])
   })
 
-  it('never names a raw QuestCandidate, snapshot, accessor call, mint, private field, or lifecycle value', () => {
-    const source = readStrippedSource('attentionQuestCandidateBoundary.ts')
+  it('never names a raw quest/pattern record, snapshot, accessor call, mint, private field, or lifecycle value', () => {
+    const source = readStrippedSource('attentionReadableBoundary.ts')
 
     for (const [label, pattern] of FORBIDDEN_BOUNDARY_PATTERNS) {
       expect({ label, matched: pattern.test(source) }).toEqual({ label, matched: false })
     }
   })
 
-  it('exposes exactly one two-parameter constructor: a pinned request and a legal-view list', () => {
-    // Structural: there is no third parameter through which a raw candidate,
-    // snapshot, ledger record, or diagnostic could be threaded in.
-    expect(constructAttentionReadableSurface.length).toBe(2)
+  it('exposes exactly one three-parameter constructor: request, quest views, and pattern views', () => {
+    expect(constructAttentionReadableSurface.length).toBe(3)
   })
 })
 
@@ -715,7 +981,7 @@ describe('A2 / D2 — only the A1 accessor may mint an attention-readable view',
   })
 
   it('is not named by the A-prime boundary, which receives minted views rather than making them', () => {
-    expect(identifierNames(readProofSource('attentionQuestCandidateBoundary.ts')).has(VIEW_MINT_IDENTIFIER)).toBe(false)
+    expect(identifierNames(readProofSource('attentionReadableBoundary.ts')).has(VIEW_MINT_IDENTIFIER)).toBe(false)
   })
 
   it('is not exported through the marker itself, which stays module-private to the contracts seam', () => {
@@ -726,6 +992,85 @@ describe('A2 / D2 — only the A1 accessor may mint an attention-readable view',
     expect(contracts).toMatch(/^const ACCESSOR_MINT_MARKER: unique symbol = Symbol\(/m)
     expect(contracts).not.toMatch(/export\s+(const|declare const)\s+ACCESSOR_MINT_MARKER\b/)
     expect(proofModuleSpecifiers('attentionQuestCandidateContracts.ts')).toEqual([])
+  })
+})
+
+describe('B1 / D2 — only the pattern-evidence accessor may mint a pattern view', () => {
+  it('names the private mint only in the sole pattern accessor', () => {
+    const files = listSourceFiles(SRC_ROOT, '')
+      .concat(readdirSync(`${SRC_ROOT}${PROOF_DIRECTORY}/`).map((name) => `${PROOF_DIRECTORY}/${name}`))
+      .filter((file) => /\.tsx?$/.test(file))
+      .filter((file) => !file.endsWith('attentionLedgerStaticClosure.test.ts'))
+    const namingFiles = files.filter((file) => (
+      namesPatternViewMint(readFileSync(`${SRC_ROOT}${file}`, 'utf8'))
+    ))
+
+    expect([...namingFiles].sort()).toEqual([...PATTERN_MINT_CALLER_FILES].sort())
+    expect(readProofSource('attentionPatternEvidenceContracts.ts'))
+      .not.toMatch(/\bmintAttentionReadablePatternEvidenceView\b/)
+  })
+
+  it('pins the exact contracts and accessor public export surfaces', () => {
+    const contracts = readProofSource('attentionPatternEvidenceContracts.ts')
+    const accessor = readProofSource('attentionPatternEvidenceAccessor.ts')
+
+    expect(publicExportNames('attentionPatternEvidenceContracts.ts', contracts))
+      .toEqual([...PATTERN_CONTRACTS_ALLOWED_EXPORTS].sort())
+    expect(publicExportNames('attentionPatternEvidenceAccessor.ts', accessor))
+      .toEqual([...PATTERN_ACCESSOR_ALLOWED_EXPORTS].sort())
+    expect(exportedMintAuthorityRisks('attentionPatternEvidenceContracts.ts', contracts)).toEqual([])
+  })
+
+  it('keeps the pattern marker and authority registry module-private and requires both origin predicates', () => {
+    const accessor = readStrippedSource('attentionPatternEvidenceAccessor.ts')
+    const boundaryNames = identifierNames(readProofSource('attentionReadableBoundary.ts'))
+
+    expect(accessor).toMatch(/^const ACCESSOR_MINT_MARKER: unique symbol =/m)
+    expect(accessor).toMatch(/^const ACCESSOR_MINTED_PATTERN_EVIDENCE_VIEWS = new WeakSet<object>\(\)/m)
+    expect(accessor).not.toMatch(/export\s+(const|declare const)\s+ACCESSOR_MINT_MARKER\b/)
+    expect(accessor).not.toMatch(/export\s+(const|declare const)\s+ACCESSOR_MINTED_PATTERN_EVIDENCE_VIEWS\b/)
+    expect(boundaryNames.has(PATTERN_VIEW_MINT_IDENTIFIER)).toBe(false)
+    expect(boundaryNames.has('isAccessorMintedAttentionReadableQuestCandidateView')).toBe(true)
+    expect(boundaryNames.has('isAttentionReadablePatternEvidenceViewFromAccessor')).toBe(true)
+  })
+
+  it('keeps evidence admission upstream of ledger, trace, and presentation modules', () => {
+    const forbidden = [
+      './attentionLedger',
+      './attentionTrace',
+      './attentionRevealPackage',
+      './attentionTemplate',
+    ]
+    for (const fileName of [
+      'attentionPatternEvidenceContracts.ts',
+      'attentionPatternEvidenceAccessor.ts',
+      'attentionPatternEvidenceScenario.ts',
+      'attentionReadableBoundary.ts',
+    ]) {
+      expect(proofModuleSpecifiers(fileName).filter((specifier) => forbidden.includes(specifier)))
+        .toEqual([])
+    }
+  })
+})
+
+describe('B1 boundary rename closure', () => {
+  const OLD_BOUNDARY_FILE = 'attentionQuestCandidateBoundary.ts'
+  const OLD_BOUNDARY_SPECIFIER = 'attentionQuestCandidateBoundary'
+
+  it('the old boundary file is absent and no parsed import/export/require form reaches it', () => {
+    const proofFiles = readdirSync(fileURLToPath(new URL('./', import.meta.url)))
+      .filter((name) => /\.tsx?$/.test(name))
+    expect(proofFiles).not.toContain(OLD_BOUNDARY_FILE)
+
+    const allFiles = listSourceFiles(SRC_ROOT, '')
+      .concat(proofFiles.map((name) => `${PROOF_DIRECTORY}/${name}`))
+    const offenders = allFiles.filter((file) => {
+      const source = readFileSync(`${SRC_ROOT}${file}`, 'utf8')
+      return source.includes(OLD_BOUNDARY_SPECIFIER)
+        && moduleSpecifiers(file, source)
+          .some((specifier) => specifier.includes(OLD_BOUNDARY_SPECIFIER))
+    })
+    expect(offenders).toEqual([])
   })
 })
 
@@ -755,7 +1100,7 @@ describe('A2 / P1 — dependency direction: nothing outside the proof rig import
     expect(files.every((file) => !file.startsWith(PROOF_DIRECTORY))).toBe(true)
   })
 
-  it('no production reducer, application layer, or runtime entry point imports attentionQuestCandidate*/attentionLedger*', () => {
+  it('no production reducer, application layer, or runtime entry point imports any attention proof module', () => {
     const files = listSourceFiles(SRC_ROOT, '')
 
     const offenders = files.filter((file) => (

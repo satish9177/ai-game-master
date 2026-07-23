@@ -7,7 +7,10 @@ import {
 } from './attentionQuestCandidateContracts'
 import type { QuestCandidate } from './attentionQuestCandidateContracts'
 import { readAttentionReadableQuestCandidateViews } from './attentionQuestCandidateAccessor'
-import { constructAttentionReadableSurface } from './attentionQuestCandidateBoundary'
+import {
+  ATTENTION_READABLE_SURFACE_SCHEMA_VERSION,
+  constructAttentionReadableSurface,
+} from './attentionReadableBoundary'
 import { A1_RANKING_SNAPSHOT_LSN } from './attentionQuestCandidateScenario'
 import {
   ATTENTION_EXPOSURE_POLICY_VERSION,
@@ -56,6 +59,7 @@ import type { AttentionLedger, AttentionLedgerAppendInput, AttentionLedgerOutcom
  */
 
 const A1_REQUEST = {
+  surfaceSchemaVersion: ATTENTION_READABLE_SURFACE_SCHEMA_VERSION,
   accessorContractVersion: ATTENTION_QUEST_CANDIDATE_ACCESSOR_VERSION,
   rankingSnapshotLsn: A1_RANKING_SNAPSHOT_LSN,
 } as const
@@ -68,7 +72,7 @@ function orderedCandidates(candidates: readonly QuestCandidate[]): readonly Atte
   })
   const access = readAttentionReadableQuestCandidateViews(snapshot, A1_REQUEST)
   if (access.kind !== 'ok') throw new Error('expected the A1 accessor to admit these fixtures')
-  const surface = constructAttentionReadableSurface(A1_REQUEST, access.views)
+  const surface = constructAttentionReadableSurface(A1_REQUEST, access.views, Object.freeze([]))
   if (surface.kind !== 'ok') throw new Error('expected the A2 boundary to admit these views')
   const normalized = normalizeAttentionCandidates(surface.surface)
   if (normalized.kind !== 'ok') throw new Error('expected A3 normalization to succeed')

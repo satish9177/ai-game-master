@@ -1,5 +1,5 @@
 /**
- * Stage A / A2 — the sole A-prime (attention-readable surface) construction
+ * Stage A / B1 — the sole A-prime (attention-readable surface) construction
  * boundary. This is not a production module, reducer, event, or persistence
  * contract; it is proof-local to `domain/livingWorldProof`.
  *
@@ -18,8 +18,9 @@
  * These are the governing documents. This repository's own ADR-0013 is
  * "World State & Event Log v0" and is unrelated to attention.
  *
- * Its single accepted input class is the A1 legal view
- * `AttentionReadableQuestCandidateView` minted by the A1 accessor. It imports
+ * Its two accepted input classes are the separately authoritative legal
+ * `AttentionReadableQuestCandidateView` and
+ * `AttentionReadablePatternEvidenceView` mints. It imports
  * no authoritative record, reducer, event, world session, store, persistence,
  * cognition, planner, action, scheduler, RNG, ledger, or diagnostic module, and
  * it evaluates no candidate lifecycle: the lifecycle stays owned by the A1
@@ -63,24 +64,43 @@ import {
   isAccessorMintedAttentionReadableQuestCandidateView,
 } from './attentionQuestCandidateContracts'
 import type { AttentionReadableQuestCandidateView } from './attentionQuestCandidateContracts'
+import {
+  ATTENTION_PATTERN_EVIDENCE_ACCESSOR_VERSION,
+  isStructurallyValidAttentionReadablePatternEvidenceView,
+} from './attentionPatternEvidenceContracts'
+import type { AttentionReadablePatternEvidenceView } from './attentionPatternEvidenceContracts'
+import {
+  isAttentionReadablePatternEvidenceViewFromAccessor,
+} from './attentionPatternEvidenceAccessor'
+
+export const ATTENTION_READABLE_SURFACE_SCHEMA_VERSION =
+  'attention-readable-surface-schema-v1' as const
 
 export interface AttentionReadableSurfaceRequest {
+  readonly surfaceSchemaVersion: string
   readonly accessorContractVersion: string
   readonly rankingSnapshotLsn: number
 }
 
 /** A-prime: the only Stage A surface downstream attention work may read. */
 export interface AttentionReadableSurface {
+  readonly surfaceSchemaVersion: string
   readonly accessorContractVersion: string
   readonly rankingSnapshotLsn: number
   readonly questCandidateViews: readonly AttentionReadableQuestCandidateView[]
+  readonly patternEvidenceViews: readonly AttentionReadablePatternEvidenceView[]
 }
 
 export type AttentionReadableSurfaceRefusal =
+  | 'surface-schema-version-mismatch'
   | 'accessor-contract-version-mismatch'
   | 'ranking-snapshot-lsn-mismatch'
+  | 'pattern-evidence-contract-version-mismatch'
   | 'input-not-attention-readable'
   | 'input-not-accessor-minted'
+  | 'quest-view-order-mismatch'
+  | 'pattern-evidence-order-mismatch'
+  | 'ambiguous-legal-identity'
 
 export type AttentionReadableSurfaceResult =
   | { readonly kind: 'ok'; readonly surface: AttentionReadableSurface }
@@ -127,7 +147,7 @@ function isNonEmptyStringList(value: unknown): value is readonly string[] {
 function hasOnlyLegalViewShape(value: unknown): boolean {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false
 
-  const keys = Object.keys(value)
+  const keys = Object.getOwnPropertyNames(value)
   if (keys.some((key) => !LEGALLY_VISIBLE_VIEW_KEYS.includes(key))) return false
   if (REQUIRED_VIEW_KEYS.some((key) => !keys.includes(key))) return false
 
@@ -147,6 +167,17 @@ function hasOnlyLegalViewShape(value: unknown): boolean {
   return true
 }
 
+function comparePatternEvidence(
+  left: AttentionReadablePatternEvidenceView,
+  right: AttentionReadablePatternEvidenceView,
+): number {
+  if (left.commitLsn < right.commitLsn) return -1
+  if (left.commitLsn > right.commitLsn) return 1
+  if (left.recordId < right.recordId) return -1
+  if (left.recordId > right.recordId) return 1
+  return 0
+}
+
 /**
  * The sole A-prime constructor. It accepts accessor-minted legal views only, at
  * the pinned accessor version and ranking snapshot coordinate, and returns an
@@ -155,18 +186,23 @@ function hasOnlyLegalViewShape(value: unknown): boolean {
 export function constructAttentionReadableSurface(
   request: AttentionReadableSurfaceRequest,
   questCandidateViews: readonly AttentionReadableQuestCandidateView[],
+  patternEvidenceViews: readonly AttentionReadablePatternEvidenceView[],
 ): AttentionReadableSurfaceResult {
+  if (request.surfaceSchemaVersion !== ATTENTION_READABLE_SURFACE_SCHEMA_VERSION) {
+    return { kind: 'refused', reason: 'surface-schema-version-mismatch' }
+  }
   if (request.accessorContractVersion !== ATTENTION_QUEST_CANDIDATE_ACCESSOR_VERSION) {
     return { kind: 'refused', reason: 'accessor-contract-version-mismatch' }
   }
   if (!isNonNegativeInteger(request.rankingSnapshotLsn)) {
     return { kind: 'refused', reason: 'ranking-snapshot-lsn-mismatch' }
   }
-  if (!Array.isArray(questCandidateViews)) {
+  if (!Array.isArray(questCandidateViews) || !Array.isArray(patternEvidenceViews)) {
     return { kind: 'refused', reason: 'input-not-attention-readable' }
   }
 
-  const accepted: AttentionReadableQuestCandidateView[] = []
+  const acceptedQuestViews: AttentionReadableQuestCandidateView[] = []
+  const questIdentities = new Set<string>()
   for (const view of questCandidateViews) {
     if (!hasOnlyLegalViewShape(view)) {
       return { kind: 'refused', reason: 'input-not-attention-readable' }
@@ -174,21 +210,57 @@ export function constructAttentionReadableSurface(
     if (!isAccessorMintedAttentionReadableQuestCandidateView(view)) {
       return { kind: 'refused', reason: 'input-not-accessor-minted' }
     }
+    if (Object.getOwnPropertySymbols(view).length !== 1) {
+      return { kind: 'refused', reason: 'input-not-attention-readable' }
+    }
     if (view.accessorContractVersion !== request.accessorContractVersion) {
       return { kind: 'refused', reason: 'accessor-contract-version-mismatch' }
     }
     if (view.rankingSnapshotLsn !== request.rankingSnapshotLsn) {
       return { kind: 'refused', reason: 'ranking-snapshot-lsn-mismatch' }
     }
-    accepted.push(view)
+    if (questIdentities.has(view.candidateId)) {
+      return { kind: 'refused', reason: 'ambiguous-legal-identity' }
+    }
+    questIdentities.add(view.candidateId)
+    acceptedQuestViews.push(view)
+  }
+
+  const acceptedPatternViews: AttentionReadablePatternEvidenceView[] = []
+  const patternRecordIds = new Set<string>()
+  let previousPatternView: AttentionReadablePatternEvidenceView | null = null
+  for (const view of patternEvidenceViews) {
+    if (!isStructurallyValidAttentionReadablePatternEvidenceView(view)) {
+      return { kind: 'refused', reason: 'input-not-attention-readable' }
+    }
+    if (!isAttentionReadablePatternEvidenceViewFromAccessor(view)) {
+      return { kind: 'refused', reason: 'input-not-accessor-minted' }
+    }
+    if (Object.getOwnPropertySymbols(view).length !== 1) {
+      return { kind: 'refused', reason: 'input-not-attention-readable' }
+    }
+    if (view.evidenceViewContractVersion !== ATTENTION_PATTERN_EVIDENCE_ACCESSOR_VERSION) {
+      return { kind: 'refused', reason: 'pattern-evidence-contract-version-mismatch' }
+    }
+    if (patternRecordIds.has(view.recordId)) {
+      return { kind: 'refused', reason: 'ambiguous-legal-identity' }
+    }
+    if (previousPatternView !== null && comparePatternEvidence(previousPatternView, view) >= 0) {
+      return { kind: 'refused', reason: 'pattern-evidence-order-mismatch' }
+    }
+    patternRecordIds.add(view.recordId)
+    previousPatternView = view
+    acceptedPatternViews.push(view)
   }
 
   return {
     kind: 'ok',
     surface: Object.freeze({
+      surfaceSchemaVersion: request.surfaceSchemaVersion,
       accessorContractVersion: request.accessorContractVersion,
       rankingSnapshotLsn: request.rankingSnapshotLsn,
-      questCandidateViews: Object.freeze(accepted),
+      questCandidateViews: Object.freeze(acceptedQuestViews),
+      patternEvidenceViews: Object.freeze(acceptedPatternViews),
     }),
   }
 }

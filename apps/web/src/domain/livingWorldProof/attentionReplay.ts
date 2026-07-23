@@ -59,8 +59,14 @@ import {
 } from './attentionQuestCandidateContracts'
 import type { ProofQuestCandidateSnapshot } from './attentionQuestCandidateContracts'
 import { readAttentionReadableQuestCandidateViews } from './attentionQuestCandidateAccessor'
-import { constructAttentionReadableSurface } from './attentionQuestCandidateBoundary'
-import type { AttentionReadableSurface } from './attentionQuestCandidateBoundary'
+import {
+  ATTENTION_READABLE_SURFACE_SCHEMA_VERSION,
+  constructAttentionReadableSurface,
+} from './attentionReadableBoundary'
+import type {
+  AttentionReadableSurface,
+  AttentionReadableSurfaceRequest,
+} from './attentionReadableBoundary'
 import { normalizeAttentionCandidates } from './attentionCandidate'
 import type { AttentionCandidate } from './attentionCandidate'
 import {
@@ -129,7 +135,11 @@ export function runAttentionQuestCandidatePrimePipeline(
   const access = readAttentionReadableQuestCandidateViews(input.snapshot, input.request)
   if (access.kind !== 'ok') return { kind: 'refused', refusal: { stage: 'accessor', reason: access.reason } }
 
-  const surface = constructAttentionReadableSurface(input.request, access.views)
+  const surface = constructAttentionReadableSurface(
+    commonSurfaceRequest(input.request),
+    access.views,
+    Object.freeze([]),
+  )
   if (surface.kind !== 'ok') return { kind: 'refused', refusal: { stage: 'boundary', reason: surface.reason } }
 
   return { kind: 'ok', surface: surface.surface }
@@ -140,9 +150,29 @@ export function attentionPrimeSurfaceDigest(surface: AttentionReadableSurface): 
   return canonicalSerialize(surface)
 }
 
-/** The A-prime view identity set, in the surface's own (stable, accessor-supplied) order. */
-export function attentionPrimeViewIdentities(surface: AttentionReadableSurface): readonly string[] {
-  return Object.freeze(surface.questCandidateViews.map((view) => view.candidateId))
+export interface AttentionPrimeViewIdentities {
+  readonly questCandidateViewIdentities: readonly string[]
+  readonly patternEvidenceViewIdentities: readonly string[]
+}
+
+/** The two A-prime identity premises remain disjoint and independently comparable. */
+export function attentionPrimeViewIdentities(surface: AttentionReadableSurface): AttentionPrimeViewIdentities {
+  return Object.freeze({
+    questCandidateViewIdentities: Object.freeze(surface.questCandidateViews.map((view) => view.candidateId)),
+    patternEvidenceViewIdentities: Object.freeze(surface.patternEvidenceViews.map((view) => (
+      canonicalSerialize([view.commitLsn, view.recordId])
+    ))),
+  })
+}
+
+function commonSurfaceRequest(
+  request: AttentionQuestCandidateWorldInput['request'],
+): AttentionReadableSurfaceRequest {
+  return Object.freeze({
+    surfaceSchemaVersion: ATTENTION_READABLE_SURFACE_SCHEMA_VERSION,
+    accessorContractVersion: request.accessorContractVersion,
+    rankingSnapshotLsn: request.rankingSnapshotLsn,
+  })
 }
 
 function sortedIdentitySetEqual(left: readonly string[], right: readonly string[]): boolean {
@@ -246,7 +276,11 @@ export function runAttentionQuestCandidateReplayPass(
   const access = readAttentionReadableQuestCandidateViews(input.snapshot, input.request)
   if (access.kind !== 'ok') return { kind: 'refused', refusal: { stage: 'accessor', reason: access.reason } }
 
-  const surface = constructAttentionReadableSurface(input.request, access.views)
+  const surface = constructAttentionReadableSurface(
+    commonSurfaceRequest(input.request),
+    access.views,
+    Object.freeze([]),
+  )
   if (surface.kind !== 'ok') return { kind: 'refused', refusal: { stage: 'boundary', reason: surface.reason } }
 
   const normalized = normalizeAttentionCandidates(surface.surface)
@@ -345,7 +379,8 @@ export function runAttentionQuestCandidateReplayPass(
     ledgerPolicyVersion: ATTENTION_LEDGER_POLICY_VERSION,
     rankingSnapshotLsn: input.request.rankingSnapshotLsn,
     revalidationSnapshotLsn: input.revalidationSnapshotLsn,
-    admittedQuestCandidateSourceIds: attentionPrimeViewIdentities(surface.surface),
+    admittedQuestCandidateSourceIds:
+      attentionPrimeViewIdentities(surface.surface).questCandidateViewIdentities,
     orderedAttentionCandidates: Object.freeze(candidateEntries),
     orderingTrace: buildAttentionOrderingTrace(ordered.orderedCandidates),
     presentations: Object.freeze(presentations),
@@ -413,16 +448,23 @@ export function runAttentionP3PairedWorldCheck(input: AttentionP3PairedWorldInpu
 
   const leftAPrimeDigest = attentionPrimeSurfaceDigest(primeA.surface)
   const rightAPrimeDigest = attentionPrimeSurfaceDigest(primeB.surface)
-  const leftViewIdentities = attentionPrimeViewIdentities(primeA.surface)
-  const rightViewIdentities = attentionPrimeViewIdentities(primeB.surface)
+  const leftIdentities = attentionPrimeViewIdentities(primeA.surface)
+  const rightIdentities = attentionPrimeViewIdentities(primeB.surface)
   const equivalent = leftAPrimeDigest === rightAPrimeDigest
-    && sortedIdentitySetEqual(leftViewIdentities, rightViewIdentities)
+    && sortedIdentitySetEqual(
+      leftIdentities.questCandidateViewIdentities,
+      rightIdentities.questCandidateViewIdentities,
+    )
+    && sortedIdentitySetEqual(
+      leftIdentities.patternEvidenceViewIdentities,
+      rightIdentities.patternEvidenceViewIdentities,
+    )
 
   const premiseCheck: AttentionTraceP3PremiseCheck = Object.freeze({
     leftAPrimeDigest,
     rightAPrimeDigest,
-    leftViewIdentities,
-    rightViewIdentities,
+    leftViewIdentities: leftIdentities.questCandidateViewIdentities,
+    rightViewIdentities: rightIdentities.questCandidateViewIdentities,
     equivalent,
   })
 
