@@ -72,6 +72,10 @@ export function buildAttentionQuestCandidateA1Scenario() {
   return Object.freeze({
     expectedVisibleCandidateIds: Object.freeze(['quest-public-open']),
     views: result.views,
+    // B4 — the accessor mints one opening-coordinate sidecar per admitted
+    // candidate, in the same canonical order, so every fixture that builds a
+    // surface from this scenario carries the collection the join requires.
+    openingCoordinateViews: result.openingCoordinateViews,
   })
 }
 
@@ -87,6 +91,19 @@ function snapshotOf(candidates: Parameters<typeof createProofQuestCandidateSnaps
 export interface AttentionQuestCandidatePairedWorld {
   readonly snapshot: ProofQuestCandidateSnapshot
   readonly request: { readonly accessorContractVersion: string; readonly rankingSnapshotLsn: number }
+}
+
+/**
+ * B4 — build one world input from an explicit candidate list. Shared by the
+ * ordering, sidecar-join, and mixed-family fixtures so each can construct the
+ * exact competing set it needs (and its reversed permutation) without a private
+ * copy of the snapshot/request shape.
+ */
+export function buildAttentionQuestCandidateWorld(
+  candidates: Parameters<typeof createProofQuestCandidateSnapshot>[0]['candidates'],
+  snapshotLsn: number = A1_RANKING_SNAPSHOT_LSN,
+): AttentionQuestCandidatePairedWorld {
+  return pairedWorld(snapshotOf(candidates, snapshotLsn))
 }
 
 function pairedWorld(snapshot: ProofQuestCandidateSnapshot): AttentionQuestCandidatePairedWorld {
@@ -132,6 +149,116 @@ export function buildAttentionQuestCandidateTwoVisibleCandidates() {
     legallyVisibleOriginConsequenceReference: 'consequence-declassified-22',
   })
   return Object.freeze({ first, second })
+}
+
+/**
+ * B4 / RN019 §9.2 — the **adversarial provenance fixture**, the standing
+ * regression guard for the forbidden key-7 list.
+ *
+ * Each pair carries two legal quest candidates that are equal through ordering
+ * keys 1-6 and differ only at key 7, whose opaque `openingProvenanceId` strings
+ * sort in the exact *inverse* of their numeric `openedAtLsn` order. Any
+ * implementation that compares provenance text — by UTF-16 code unit, by
+ * parsing a number out of it, or by any other textual route — produces the
+ * reversed sequence and fails.
+ *
+ *  - `opaquePrefixPair` uses unrelated opaque prefixes: `a-…` sits on the later
+ *    LSN (100) and `z-…` on the earlier one (20), so lexical order says
+ *    later-first while numeric order says earlier-first.
+ *  - `numericSuffixPair` is the `…-100` / `…-20` case RN019 names explicitly:
+ *    `consequence-public-100` sorts *before* `consequence-public-20` by code
+ *    unit (because `'1' < '2'`) while 20 is numerically before 100.
+ *
+ * In both pairs the correct result is the numeric one: the lower `openedAtLsn`
+ * orders first regardless of how the provenance text sorts.
+ */
+export function buildAttentionQuestCandidateAdversarialOrderingCandidates() {
+  const opaqueLaterLsn = createProofQuestCandidate({
+    id: 'quest-adversarial-opaque-later-lsn',
+    type: 'reputation_repair',
+    status: 'open',
+    openedAtLsn: 100,
+    openingProvenance: { visibility: 'public', provenanceId: 'a-opaque-opening-token' },
+    legallyVisibleParties: ['player'],
+  })
+  const opaqueEarlierLsn = createProofQuestCandidate({
+    id: 'quest-adversarial-opaque-earlier-lsn',
+    type: 'reputation_repair',
+    status: 'open',
+    openedAtLsn: 20,
+    openingProvenance: { visibility: 'public', provenanceId: 'z-opaque-opening-token' },
+    legallyVisibleParties: ['player'],
+  })
+  const numericSuffixLaterLsn = createProofQuestCandidate({
+    id: 'quest-adversarial-suffix-later-lsn',
+    type: 'reputation_repair',
+    status: 'open',
+    openedAtLsn: 100,
+    openingProvenance: { visibility: 'public', provenanceId: 'consequence-public-100' },
+    legallyVisibleParties: ['player'],
+  })
+  const numericSuffixEarlierLsn = createProofQuestCandidate({
+    id: 'quest-adversarial-suffix-earlier-lsn',
+    type: 'reputation_repair',
+    status: 'open',
+    openedAtLsn: 20,
+    openingProvenance: { visibility: 'public', provenanceId: 'consequence-public-20' },
+    legallyVisibleParties: ['player'],
+  })
+
+  return Object.freeze({
+    opaquePrefixPair: Object.freeze({
+      earlierLsn: opaqueEarlierLsn,
+      laterLsn: opaqueLaterLsn,
+    }),
+    numericSuffixPair: Object.freeze({
+      earlierLsn: numericSuffixEarlierLsn,
+      laterLsn: numericSuffixLaterLsn,
+    }),
+  })
+}
+
+/**
+ * B4 — two legal quest candidates with **equal** `openedAtLsn` and different
+ * source IDs, so key 8 (source ID) is the first key that can decide. This is
+ * the corrected source-ID fixture: it no longer resolves accidentally at key 7.
+ */
+export function buildAttentionQuestCandidateEqualOpeningLsnCandidates() {
+  const alpha = createProofQuestCandidate({
+    id: 'quest-equal-opening-lsn-alpha',
+    type: 'reputation_repair',
+    status: 'open',
+    openedAtLsn: 33,
+    openingProvenance: { visibility: 'public', provenanceId: 'consequence-public-equal-alpha' },
+    legallyVisibleParties: ['player'],
+  })
+  const beta = createProofQuestCandidate({
+    id: 'quest-equal-opening-lsn-beta',
+    type: 'reputation_repair',
+    status: 'open',
+    openedAtLsn: 33,
+    openingProvenance: { visibility: 'public', provenanceId: 'consequence-public-equal-beta' },
+    legallyVisibleParties: ['player'],
+  })
+  return Object.freeze({ alpha, beta })
+}
+
+/**
+ * B4 — a legal, admitted candidate whose authoritative `openedAtLsn` is an
+ * integer past the safe-integer ceiling. `createProofQuestCandidate` accepts it
+ * (`Number.isInteger` is true past the ceiling) and the accessor mints its
+ * sidecar, so the §4.3 join's `unsafe-quest-opened-at-lsn` refusal is reachable
+ * through the ordinary legal path rather than only by forging a sidecar.
+ */
+export function buildAttentionQuestCandidateUnsafeOpeningLsnCandidate() {
+  return createProofQuestCandidate({
+    id: 'quest-unsafe-opening-lsn',
+    type: 'reputation_repair',
+    status: 'open',
+    openedAtLsn: Number.MAX_SAFE_INTEGER + 2,
+    openingProvenance: { visibility: 'public', provenanceId: 'consequence-public-unsafe' },
+    legallyVisibleParties: ['player'],
+  })
 }
 
 /**

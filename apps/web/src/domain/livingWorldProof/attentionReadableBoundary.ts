@@ -18,8 +18,9 @@
  * These are the governing documents. This repository's own ADR-0013 is
  * "World State & Event Log v0" and is unrelated to attention.
  *
- * Its two accepted input classes are the separately authoritative legal
- * `AttentionReadableQuestCandidateView` and
+ * Its three accepted input classes are the separately authoritative legal
+ * `AttentionReadableQuestCandidateView`,
+ * `AttentionReadableQuestOpeningCoordinateView`, and
  * `AttentionReadablePatternEvidenceView` mints. It imports
  * no authoritative record, reducer, event, world session, store, persistence,
  * cognition, planner, action, scheduler, RNG, ledger, or diagnostic module, and
@@ -61,9 +62,15 @@
  */
 import {
   ATTENTION_QUEST_CANDIDATE_ACCESSOR_VERSION,
+  ATTENTION_QUEST_OPENING_COORDINATE_CONTRACT_VERSION,
   isAccessorMintedAttentionReadableQuestCandidateView,
+  isAccessorMintedAttentionReadableQuestOpeningCoordinateView,
+  isStructurallyValidAttentionReadableQuestOpeningCoordinateView,
 } from './attentionQuestCandidateContracts'
-import type { AttentionReadableQuestCandidateView } from './attentionQuestCandidateContracts'
+import type {
+  AttentionReadableQuestCandidateView,
+  AttentionReadableQuestOpeningCoordinateView,
+} from './attentionQuestCandidateContracts'
 import {
   ATTENTION_PATTERN_EVIDENCE_ACCESSOR_VERSION,
   isStructurallyValidAttentionReadablePatternEvidenceView,
@@ -73,8 +80,43 @@ import {
   isAttentionReadablePatternEvidenceViewFromAccessor,
 } from './attentionPatternEvidenceAccessor'
 
-export const ATTENTION_READABLE_SURFACE_SCHEMA_VERSION =
+/**
+ * The committed B1-B3 common surface schema: exactly `questCandidateViews` and
+ * `patternEvidenceViews`. Retained as a named pin so a v1 surface is never
+ * silently reinterpreted as v2 (RN019 §4.3).
+ */
+export const ATTENTION_READABLE_SURFACE_SCHEMA_V1 =
   'attention-readable-surface-schema-v1' as const
+
+/**
+ * B4's common surface schema: `questCandidateViews`,
+ * `questOpeningCoordinateViews`, and `patternEvidenceViews`. Version v2 begins
+ * exactly when the sidecar collection joins the one surface. Cross-schema
+ * whole-surface byte equality is not claimed; only within-schema comparisons
+ * are. The canonical bytes of every embedded
+ * `AttentionReadableQuestCandidateView` remain exactly the committed Stage A
+ * bytes — the sidecar is a sibling collection, never a new view field.
+ */
+export const ATTENTION_READABLE_SURFACE_SCHEMA_V2 =
+  'attention-readable-surface-schema-v2' as const
+
+/** The schema this build constructs and accepts. */
+export const ATTENTION_READABLE_SURFACE_SCHEMA_VERSION = ATTENTION_READABLE_SURFACE_SCHEMA_V2
+
+/**
+ * Re-exported for the downstream B4 modules that must independently re-check
+ * sidecar authority and contract version — the candidate normalizer's join
+ * (RN019 §4.3) and the derivation cache-key bundle. They reach these through
+ * this boundary rather than through `attentionQuestCandidateContracts`, so the
+ * closed import allowlist keeps the raw `QuestCandidate`, the proof snapshot,
+ * the `open | resolved` lifecycle, and both accessor mints out of their reach.
+ */
+export {
+  ATTENTION_QUEST_CANDIDATE_ACCESSOR_VERSION,
+  ATTENTION_QUEST_OPENING_COORDINATE_CONTRACT_VERSION,
+  isAccessorMintedAttentionReadableQuestOpeningCoordinateView,
+}
+export type { AttentionReadableQuestOpeningCoordinateView }
 
 export interface AttentionReadableSurfaceRequest {
   readonly surfaceSchemaVersion: string
@@ -82,12 +124,13 @@ export interface AttentionReadableSurfaceRequest {
   readonly rankingSnapshotLsn: number
 }
 
-/** A-prime: the only Stage A surface downstream attention work may read. */
+/** A-prime: the only surface downstream attention work may read. */
 export interface AttentionReadableSurface {
   readonly surfaceSchemaVersion: string
   readonly accessorContractVersion: string
   readonly rankingSnapshotLsn: number
   readonly questCandidateViews: readonly AttentionReadableQuestCandidateView[]
+  readonly questOpeningCoordinateViews: readonly AttentionReadableQuestOpeningCoordinateView[]
   readonly patternEvidenceViews: readonly AttentionReadablePatternEvidenceView[]
 }
 
@@ -96,9 +139,11 @@ export type AttentionReadableSurfaceRefusal =
   | 'accessor-contract-version-mismatch'
   | 'ranking-snapshot-lsn-mismatch'
   | 'pattern-evidence-contract-version-mismatch'
+  | 'quest-opening-coordinate-contract-version-mismatch'
   | 'input-not-attention-readable'
   | 'input-not-accessor-minted'
   | 'quest-view-order-mismatch'
+  | 'quest-opening-coordinate-order-mismatch'
   | 'pattern-evidence-order-mismatch'
   | 'ambiguous-legal-identity'
 
@@ -179,13 +224,21 @@ function comparePatternEvidence(
 }
 
 /**
- * The sole A-prime constructor. It accepts accessor-minted legal views only, at
- * the pinned accessor version and ranking snapshot coordinate, and returns an
- * immutable surface or a typed refusal.
+ * The sole A-prime constructor — still one function with one exported name. B4
+ * adds a third required readonly input (the accessor-minted quest
+ * opening-coordinate sidecars) and a surface-schema version; it does not add a
+ * second boundary, a second accessor seam, or an alternative construction path.
+ *
+ * Every class the constructor already refuses for the view collections is
+ * refused for the sidecar collection too: an unsupported contract version, any
+ * own key outside the closed four-field set, a structurally legal but unminted
+ * value (an object literal, a spread copy, or a serialized round-trip), and a
+ * duplicate stable identity.
  */
 export function constructAttentionReadableSurface(
   request: AttentionReadableSurfaceRequest,
   questCandidateViews: readonly AttentionReadableQuestCandidateView[],
+  questOpeningCoordinateViews: readonly AttentionReadableQuestOpeningCoordinateView[],
   patternEvidenceViews: readonly AttentionReadablePatternEvidenceView[],
 ): AttentionReadableSurfaceResult {
   if (request.surfaceSchemaVersion !== ATTENTION_READABLE_SURFACE_SCHEMA_VERSION) {
@@ -197,7 +250,11 @@ export function constructAttentionReadableSurface(
   if (!isNonNegativeInteger(request.rankingSnapshotLsn)) {
     return { kind: 'refused', reason: 'ranking-snapshot-lsn-mismatch' }
   }
-  if (!Array.isArray(questCandidateViews) || !Array.isArray(patternEvidenceViews)) {
+  if (
+    !Array.isArray(questCandidateViews)
+    || !Array.isArray(questOpeningCoordinateViews)
+    || !Array.isArray(patternEvidenceViews)
+  ) {
     return { kind: 'refused', reason: 'input-not-attention-readable' }
   }
 
@@ -224,6 +281,38 @@ export function constructAttentionReadableSurface(
     }
     questIdentities.add(view.candidateId)
     acceptedQuestViews.push(view)
+  }
+
+  // B4 / RN019 §4.3 — the sidecar collection. It is admitted in the same
+  // canonical `candidateId` order the accessor already uses for quest views, so
+  // whole-surface bytes stay insertion-order independent. Structural legality is
+  // owned by the contracts module's closed four-field predicate: this
+  // constructor never names a raw authoritative field.
+  const acceptedOpeningCoordinateViews: AttentionReadableQuestOpeningCoordinateView[] = []
+  const openingCoordinateIdentities = new Set<string>()
+  let previousOpeningCoordinateId: string | null = null
+  for (const sidecar of questOpeningCoordinateViews) {
+    if (!isStructurallyValidAttentionReadableQuestOpeningCoordinateView(sidecar)) {
+      return { kind: 'refused', reason: 'input-not-attention-readable' }
+    }
+    if (!isAccessorMintedAttentionReadableQuestOpeningCoordinateView(sidecar)) {
+      return { kind: 'refused', reason: 'input-not-accessor-minted' }
+    }
+    if (Object.getOwnPropertySymbols(sidecar).length !== 1) {
+      return { kind: 'refused', reason: 'input-not-attention-readable' }
+    }
+    if (sidecar.openingCoordinateContractVersion !== ATTENTION_QUEST_OPENING_COORDINATE_CONTRACT_VERSION) {
+      return { kind: 'refused', reason: 'quest-opening-coordinate-contract-version-mismatch' }
+    }
+    if (openingCoordinateIdentities.has(sidecar.candidateId)) {
+      return { kind: 'refused', reason: 'ambiguous-legal-identity' }
+    }
+    if (previousOpeningCoordinateId !== null && previousOpeningCoordinateId >= sidecar.candidateId) {
+      return { kind: 'refused', reason: 'quest-opening-coordinate-order-mismatch' }
+    }
+    openingCoordinateIdentities.add(sidecar.candidateId)
+    previousOpeningCoordinateId = sidecar.candidateId
+    acceptedOpeningCoordinateViews.push(sidecar)
   }
 
   const acceptedPatternViews: AttentionReadablePatternEvidenceView[] = []
@@ -260,6 +349,7 @@ export function constructAttentionReadableSurface(
       accessorContractVersion: request.accessorContractVersion,
       rankingSnapshotLsn: request.rankingSnapshotLsn,
       questCandidateViews: Object.freeze(acceptedQuestViews),
+      questOpeningCoordinateViews: Object.freeze(acceptedOpeningCoordinateViews),
       patternEvidenceViews: Object.freeze(acceptedPatternViews),
     }),
   }

@@ -1,86 +1,114 @@
 /**
- * Stage A / A3 — deterministic attention-candidate identity and the explicit,
- * versioned canonicalization that identity is computed over. Proof-local to
+ * Stage A / A3 + Stage B / B4 — deterministic attention-candidate identity as a
+ * discriminated two-family function, and the explicit, versioned
+ * canonicalization each branch is computed over. Proof-local to
  * `domain/livingWorldProof`; not a production module, reducer, event, or
  * persistence contract.
  *
  * Source of authority — the read-only sibling research repository
- * `living-ai-worlds-research` @ fc0eadf0b8cdc672f2530d020376c8022f3bede1:
+ * `living-ai-worlds-research`:
  *
  *  - `docs/decisions/ADR-0013-consequence-bounded-narrative-attention.md`
  *    (D6 deterministic candidate identity; identity-affecting inputs disjoint
  *    from ranking-only policy);
- *  - `docs/experiments/attention-ledger-replay-v0.md`
- *    (§14 "Candidate identity fixtures", I1-I7);
+ *  - `docs/research-notes/2026-07-23-019-narrative-pattern-instances-stage-b.md`
+ *    (RN019 §7.2 the pattern identity inputs, §9.1 the common candidate);
  *  - `docs/architecture/implementation-plans/`
- *    `2026-07-16-attention-ledger-replay-stage-a-implementation-plan.md`
- *    (§6 A3 identity obligations, §9 A3 slice plan).
+ *    `2026-07-23-attention-ledger-replay-stage-b-implementation-plan.md`
+ *    (§4.2 the disjoint quest/pattern identity branches, §6 the exact
+ *    pattern-candidate canonical input).
  *
- * These are the governing documents. This repository's own ADR-0013 is
- * "World State & Event Log v0" and is unrelated to attention.
+ * This repository's own ADR-0013 ("World State & Event Log v0") is unrelated to
+ * attention and is not the source of any rule asserted here.
  *
- * The identity input set is closed and small, exactly as the controlling A3
- * plan section fixes it: source kind, source candidate ID, identity-schema
- * version, canonicalization version, and the accepted public/declassified
- * opening-provenance identity. ADR-0013 D6 is explicit that identity-affecting
- * inputs are *disjoint* from ranking-only policy, so nothing else may enter —
- * in particular not the ranking snapshot coordinate, the accessor-contract
- * version, the ordering version, legally-visible parties, stakes, or the origin
- * consequence reference. A ranking-only or snapshot-only change must therefore
- * leave every candidate ID byte-identical, which is what keeps later exposure
- * and cooldown history joinable across such a change.
+ * **One module, two disjoint branches.** The common function dispatches only by
+ * `sourceKind`:
  *
- * Determinism rules honoured here, and asserted in
- * `attentionCandidateIdentity.test.ts`:
+ *  - the **quest** branch is byte-identical to committed Stage A: its canonical
+ *    input remains exactly `canonicalizationVersion`, `identitySchemaVersion`,
+ *    `openingProvenanceId`, `sourceId`, `sourceKind`, and the resulting quest
+ *    candidate IDs are unchanged;
+ *  - the **pattern** branch is a disjoint schema whose canonical input is
+ *    exactly `sourceKind`, `sourceId` (the `patternInstanceId`),
+ *    `patternSemanticVersion`, `canonicalBindingTuple`,
+ *    `canonicalSupportingRecordIdentityTuple`, `canonicalizationVersion`, and
+ *    `patternCandidateIdentitySchemaVersion`. It has no `openingProvenanceId`
+ *    field and invents no empty/fabricated sentinel.
  *
- *  - canonicalization is explicit: the identity input is rebuilt as a closed
- *    record whose keys are written in sorted order and then serialized by the
- *    proof rig's deep key-sorting `canonicalSerialize`, so no construction or
- *    property-insertion order can reach the bytes;
- *  - collections are canonicalized by a stated rule before use, by UTF-16
- *    code-unit order — never `localeCompare`, whose collation depends on the
- *    host locale and ICU data and would make the result environment-sensitive;
- *  - no RNG, wall clock, random UUID, process-local counter, object identity,
- *    or map/set iteration order participates;
- *  - both versions are folded into the hashed bytes *and* the identity-schema
- *    version is prefixed onto the ID, so a version bump is visible in the ID
- *    itself and can never be silently reinterpreted as an older one.
+ * Both branches exclude ranking/evaluation snapshot LSN, source committed LSN,
+ * ordering version, rank, score, resource-policy version, retained/dropped
+ * status, exposure, cooldown, retirement, template/presentation version, and
+ * ledger state. A ranking-only, resource-only, or presentation-only change
+ * therefore preserves every candidate ID.
  *
- * `canonicalSerialization.ts` is reused unchanged, as the controlling A3 plan
- * section directs. Its own header records that it is a proof-local stand-in and
- * not a production canonical-serialization or cryptographic-hash choice; that
- * limit is unchanged here, and nothing in this module promotes it. Because the
- * helper is explicitly not collision-resistant, the normalizer refuses rather
- * than aliases when two distinct identity inputs would produce one ID.
+ * A missing branch-specific field, a quest field on the pattern branch, a
+ * pattern field on the quest branch, a mixed/ambiguous input, or an unsupported
+ * branch identity-schema version refuses (throws) rather than aliasing. Because
+ * `canonicalSerialization.ts` is documented as not collision-resistant, the
+ * normalizer refuses rather than aliases when two distinct inputs would produce
+ * one ID.
  */
 import { canonicalSerialize, mintHash } from './canonicalSerialization'
 import {
   ATTENTION_CANDIDATE_CANONICALIZATION_VERSION,
   ATTENTION_CANDIDATE_IDENTITY_SCHEMA_VERSION,
+  ATTENTION_PATTERN_CANDIDATE_IDENTITY_SCHEMA_VERSION,
 } from './attentionCandidatePolicy'
-import type { AttentionCandidateSourceKind } from './attentionCandidatePolicy'
 
-/** The closed set of identity-affecting inputs a caller supplies. */
-export interface AttentionCandidateIdentityInput {
-  readonly sourceKind: AttentionCandidateSourceKind
+/** The quest identity branch input a caller supplies (committed Stage A shape). */
+export interface AttentionQuestCandidateIdentityInput {
+  readonly sourceKind: 'quest_candidate'
   readonly sourceId: string
   readonly openingProvenanceId: string
 }
 
+/** One canonical `(role, entityId)` binding pair for the pattern branch. */
+export type AttentionPatternCandidateBindingTupleEntry = readonly [string, string]
+
 /**
- * The canonical form actually hashed. The two versions are added here rather
- * than accepted from the caller, so no call site can compute an identity under
- * a version it did not declare.
+ * One canonical supporting-record identity entry for the pattern branch:
+ * `(semanticRole, recordKind, recordId, visibilityProvenanceId, commitLsn)`.
  */
-export interface CanonicalAttentionCandidateIdentityInput {
+export type AttentionPatternCandidateSupportingTupleEntry =
+  readonly [string, string, string, string, number]
+
+/** The pattern identity branch input the normalizer supplies from an instance. */
+export interface AttentionPatternCandidateIdentityInput {
+  readonly sourceKind: 'narrative_pattern_instance'
+  readonly sourceId: string
+  readonly patternSemanticVersion: number
+  readonly canonicalBindingTuple: readonly AttentionPatternCandidateBindingTupleEntry[]
+  readonly canonicalSupportingRecordIdentityTuple:
+    readonly AttentionPatternCandidateSupportingTupleEntry[]
+}
+
+/** The closed set of identity-affecting inputs, discriminated by `sourceKind`. */
+export type AttentionCandidateIdentityInput =
+  | AttentionQuestCandidateIdentityInput
+  | AttentionPatternCandidateIdentityInput
+
+/** The quest canonical form actually hashed — unchanged from committed Stage A. */
+export interface CanonicalAttentionQuestCandidateIdentityInput {
   readonly canonicalizationVersion: string
   readonly identitySchemaVersion: string
   readonly openingProvenanceId: string
   readonly sourceId: string
-  readonly sourceKind: AttentionCandidateSourceKind
+  readonly sourceKind: 'quest_candidate'
 }
 
-/** The exact own keys of the canonical identity input, in canonical order. */
+/** The pattern canonical form actually hashed (plan §6). */
+export interface CanonicalAttentionPatternCandidateIdentityInput {
+  readonly canonicalBindingTuple: readonly AttentionPatternCandidateBindingTupleEntry[]
+  readonly canonicalSupportingRecordIdentityTuple:
+    readonly AttentionPatternCandidateSupportingTupleEntry[]
+  readonly canonicalizationVersion: string
+  readonly patternCandidateIdentitySchemaVersion: string
+  readonly patternSemanticVersion: number
+  readonly sourceId: string
+  readonly sourceKind: 'narrative_pattern_instance'
+}
+
+/** The exact own keys of the quest canonical identity input, in canonical order. */
 export const ATTENTION_CANDIDATE_IDENTITY_INPUT_KEYS: readonly string[] = Object.freeze([
   'canonicalizationVersion',
   'identitySchemaVersion',
@@ -89,10 +117,25 @@ export const ATTENTION_CANDIDATE_IDENTITY_INPUT_KEYS: readonly string[] = Object
   'sourceKind',
 ])
 
-function requireIdentityField(value: string, name: string): void {
-  if (value.trim().length === 0) {
+/** The exact own keys of the pattern canonical identity input, in canonical order. */
+export const ATTENTION_PATTERN_CANDIDATE_IDENTITY_INPUT_KEYS: readonly string[] = Object.freeze([
+  'canonicalBindingTuple',
+  'canonicalSupportingRecordIdentityTuple',
+  'canonicalizationVersion',
+  'patternCandidateIdentitySchemaVersion',
+  'patternSemanticVersion',
+  'sourceId',
+  'sourceKind',
+])
+
+function requireIdentityField(value: unknown, name: string): asserts value is string {
+  if (typeof value !== 'string' || value.trim().length === 0) {
     throw new Error('attentionCandidateIdentity: ' + name + ' must be non-empty')
   }
+}
+
+function hasOwn(value: object, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(value, key)
 }
 
 /**
@@ -117,13 +160,24 @@ export function canonicalizeAttentionCandidateStringList(values: readonly string
 }
 
 /**
- * Build the closed, versioned canonical identity input. Keys are written in
- * canonical order here and re-sorted by `canonicalSerialize`, so the bytes are
- * fixed by the rule rather than by this literal's layout.
+ * Build the closed, versioned quest canonical identity input. Keys are written
+ * in canonical order here and re-sorted by `canonicalSerialize`, so the bytes
+ * are fixed by the rule rather than by this literal's layout. Refuses a pattern
+ * field appearing on the quest branch.
  */
 export function canonicalAttentionCandidateIdentityInput(
-  input: AttentionCandidateIdentityInput,
-): CanonicalAttentionCandidateIdentityInput {
+  input: AttentionQuestCandidateIdentityInput,
+): CanonicalAttentionQuestCandidateIdentityInput {
+  if (input.sourceKind !== 'quest_candidate') {
+    throw new Error('attentionCandidateIdentity: quest branch requires source kind quest_candidate')
+  }
+  if (
+    hasOwn(input, 'patternSemanticVersion')
+    || hasOwn(input, 'canonicalBindingTuple')
+    || hasOwn(input, 'canonicalSupportingRecordIdentityTuple')
+  ) {
+    throw new Error('attentionCandidateIdentity: quest branch must not carry pattern fields')
+  }
   requireIdentityField(input.sourceId, 'source id')
   requireIdentityField(input.openingProvenanceId, 'opening provenance id')
 
@@ -132,21 +186,108 @@ export function canonicalAttentionCandidateIdentityInput(
     identitySchemaVersion: ATTENTION_CANDIDATE_IDENTITY_SCHEMA_VERSION,
     openingProvenanceId: input.openingProvenanceId,
     sourceId: input.sourceId,
-    sourceKind: input.sourceKind,
+    sourceKind: 'quest_candidate',
   })
 }
 
-/** The canonical bytes an identity is computed over — exposed for evidence. */
-export function canonicalAttentionCandidateIdentityBytes(input: AttentionCandidateIdentityInput): string {
-  return canonicalSerialize(canonicalAttentionCandidateIdentityInput(input))
+function requireBindingTuple(
+  value: readonly AttentionPatternCandidateBindingTupleEntry[],
+): readonly AttentionPatternCandidateBindingTupleEntry[] {
+  if (!Array.isArray(value) || value.length === 0) {
+    throw new Error('attentionCandidateIdentity: pattern branch requires a non-empty binding tuple')
+  }
+  return Object.freeze(value.map((entry) => {
+    if (!Array.isArray(entry) || entry.length !== 2) {
+      throw new Error('attentionCandidateIdentity: invalid binding tuple entry')
+    }
+    requireIdentityField(entry[0], 'binding role')
+    requireIdentityField(entry[1], 'binding entity id')
+    return Object.freeze([entry[0], entry[1]] as const)
+  }))
+}
+
+function requireSupportingTuple(
+  value: readonly AttentionPatternCandidateSupportingTupleEntry[],
+): readonly AttentionPatternCandidateSupportingTupleEntry[] {
+  if (!Array.isArray(value) || value.length === 0) {
+    throw new Error('attentionCandidateIdentity: pattern branch requires a non-empty supporting tuple')
+  }
+  return Object.freeze(value.map((entry) => {
+    if (!Array.isArray(entry) || entry.length !== 5) {
+      throw new Error('attentionCandidateIdentity: invalid supporting tuple entry')
+    }
+    requireIdentityField(entry[0], 'supporting role')
+    requireIdentityField(entry[1], 'supporting record kind')
+    requireIdentityField(entry[2], 'supporting record id')
+    requireIdentityField(entry[3], 'supporting visibility provenance id')
+    if (typeof entry[4] !== 'number' || !Number.isSafeInteger(entry[4]) || entry[4] < 0) {
+      throw new Error('attentionCandidateIdentity: invalid supporting commit lsn')
+    }
+    return Object.freeze([entry[0], entry[1], entry[2], entry[3], entry[4]] as const)
+  }))
 }
 
 /**
- * The deterministic attention-candidate ID: a pure function of the versioned
- * canonical input above and of nothing else. The identity-schema version is
- * prefixed so an ID minted under a later schema can never be mistaken for, or
- * compared equal to, one minted under this schema.
+ * Build the closed, versioned pattern canonical identity input (plan §6). Keys
+ * are written in canonical order and re-sorted by `canonicalSerialize`. Refuses
+ * a quest field appearing on the pattern branch.
+ */
+export function canonicalPatternAttentionCandidateIdentityInput(
+  input: AttentionPatternCandidateIdentityInput,
+): CanonicalAttentionPatternCandidateIdentityInput {
+  if (input.sourceKind !== 'narrative_pattern_instance') {
+    throw new Error('attentionCandidateIdentity: pattern branch requires source kind narrative_pattern_instance')
+  }
+  if (hasOwn(input, 'openingProvenanceId')) {
+    throw new Error('attentionCandidateIdentity: pattern branch must not carry the quest opening-provenance field')
+  }
+  requireIdentityField(input.sourceId, 'source id')
+  if (
+    typeof input.patternSemanticVersion !== 'number'
+    || !Number.isSafeInteger(input.patternSemanticVersion)
+    || input.patternSemanticVersion < 0
+  ) {
+    throw new Error('attentionCandidateIdentity: pattern semantic version must be a non-negative integer')
+  }
+
+  return Object.freeze({
+    canonicalBindingTuple: requireBindingTuple(input.canonicalBindingTuple),
+    canonicalSupportingRecordIdentityTuple: requireSupportingTuple(input.canonicalSupportingRecordIdentityTuple),
+    canonicalizationVersion: ATTENTION_CANDIDATE_CANONICALIZATION_VERSION,
+    patternCandidateIdentitySchemaVersion: ATTENTION_PATTERN_CANDIDATE_IDENTITY_SCHEMA_VERSION,
+    patternSemanticVersion: input.patternSemanticVersion,
+    sourceId: input.sourceId,
+    sourceKind: 'narrative_pattern_instance',
+  })
+}
+
+/** The quest canonical bytes an identity is computed over — exposed for evidence. */
+export function canonicalAttentionCandidateIdentityBytes(
+  input: AttentionQuestCandidateIdentityInput,
+): string {
+  return canonicalSerialize(canonicalAttentionCandidateIdentityInput(input))
+}
+
+/** The pattern canonical bytes an identity is computed over — exposed for evidence. */
+export function canonicalPatternAttentionCandidateIdentityBytes(
+  input: AttentionPatternCandidateIdentityInput,
+): string {
+  return canonicalSerialize(canonicalPatternAttentionCandidateIdentityInput(input))
+}
+
+/**
+ * The deterministic attention-candidate ID, dispatched by `sourceKind`. The
+ * relevant identity-schema version is prefixed so an ID minted under one branch
+ * or a later schema can never be compared equal to one minted under another.
  */
 export function computeAttentionCandidateIdentity(input: AttentionCandidateIdentityInput): string {
-  return ATTENTION_CANDIDATE_IDENTITY_SCHEMA_VERSION + ':' + mintHash(canonicalAttentionCandidateIdentityBytes(input))
+  if (input.sourceKind === 'quest_candidate') {
+    return ATTENTION_CANDIDATE_IDENTITY_SCHEMA_VERSION
+      + ':' + mintHash(canonicalAttentionCandidateIdentityBytes(input))
+  }
+  if (input.sourceKind === 'narrative_pattern_instance') {
+    return ATTENTION_PATTERN_CANDIDATE_IDENTITY_SCHEMA_VERSION
+      + ':' + mintHash(canonicalPatternAttentionCandidateIdentityBytes(input))
+  }
+  throw new Error('attentionCandidateIdentity: unsupported source kind')
 }

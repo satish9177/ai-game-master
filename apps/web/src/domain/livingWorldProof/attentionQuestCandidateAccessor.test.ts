@@ -102,6 +102,14 @@ describe('readAttentionReadableQuestCandidateViews', () => {
         legallyVisiblePublicStakes: 'restore-public-trust',
         legallyVisibleOriginConsequenceReference: 'consequence-public-37',
       }],
+      // B4 — the sidecar's complete four-field set. It exposes no status, no
+      // private party, no secret opening detail, and no raw provenance object.
+      openingCoordinateViews: [{
+        openingCoordinateContractVersion: 'attention-quest-opening-coordinate-v1',
+        candidateId: 'quest-public-open',
+        openingProvenanceId: 'consequence-public-37',
+        openedAtLsn: 37,
+      }],
     })
     expect(scenario).not.toHaveProperty('snapshot')
     expect(scenario).not.toHaveProperty('publicOpenCandidate')
@@ -129,6 +137,12 @@ describe('readAttentionReadableQuestCandidateViews', () => {
         legallyVisiblePublicStakes: 'restore-public-trust',
         legallyVisibleOriginConsequenceReference: 'consequence-public-37',
       }],
+      openingCoordinateViews: [{
+        openingCoordinateContractVersion: 'attention-quest-opening-coordinate-v1',
+        candidateId: 'quest-public-open',
+        openingProvenanceId: 'consequence-public-37',
+        openedAtLsn: 37,
+      }],
     })
     if (result.kind !== 'ok') throw new Error('expected legal view result')
     const view = result.views[0]!
@@ -140,6 +154,20 @@ describe('readAttentionReadableQuestCandidateViews', () => {
     expect(Object.isFrozen(result.views)).toBe(true)
     expect(Object.isFrozen(view)).toBe(true)
     expect(Object.isFrozen(view.legallyVisibleParties)).toBe(true)
+
+    // B4 — the sidecar shares no mutable state with the authoritative record
+    // either, and exposes nothing beyond its four legal fields.
+    const sidecar = result.openingCoordinateViews[0]!
+    expect(sidecar).not.toBe(sources.publicOpenCandidate)
+    expect(containsObjectReference(sidecar, sources.publicOpenCandidate)).toBe(false)
+    expect(sidecar).not.toHaveProperty('privateParties')
+    expect(sidecar).not.toHaveProperty('secretOpeningDetail')
+    expect(sidecar).not.toHaveProperty('status')
+    expect(sidecar).not.toHaveProperty('openingProvenance')
+    expect(Object.isFrozen(result.openingCoordinateViews)).toBe(true)
+    expect(Object.isFrozen(sidecar)).toBe(true)
+    // The legal quest view does not widen: it still carries no numeric coordinate.
+    expect(view).not.toHaveProperty('openedAtLsn')
     expectSourceLifecycleAndBytesUnchanged(sources, before)
   })
 

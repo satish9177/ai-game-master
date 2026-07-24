@@ -150,6 +150,7 @@ export interface AttentionRevealPackageRequest {
 
 /** The closed typed refusal set. Every case refuses; none approximates. */
 export type AttentionRevealPackageRefusal =
+  | 'unsupported-source-family'
   | 'missing-template-version'
   | 'unsupported-template-version'
   | 'missing-accessor-contract-version'
@@ -196,6 +197,15 @@ export function buildAttentionRevealPackage(
   attentionCandidate: AttentionCandidate,
   request: AttentionRevealPackageRequest,
 ): AttentionRevealPackageResult {
+  // B4 dispatches the two-family candidate union: the quest branch below is
+  // byte-for-byte the committed Stage A package, and a `narrative_pattern_instance`
+  // candidate returns a typed, deterministic unsupported-family refusal. This
+  // refusal is temporary until B5 extends this same package/template pipeline
+  // with the bounded pattern direct-evidence branch; B4 invents no pattern
+  // assertion or pattern prose here (plan §10).
+  if (attentionCandidate.sourceKind !== 'quest_candidate') {
+    return { kind: 'refused', reason: 'unsupported-source-family' }
+  }
   if (!isPresent(request.templateVersion)) {
     return { kind: 'refused', reason: 'missing-template-version' }
   }

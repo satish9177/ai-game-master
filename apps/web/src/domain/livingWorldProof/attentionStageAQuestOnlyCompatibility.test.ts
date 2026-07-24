@@ -58,16 +58,21 @@ describe(`B1 quest-only compatibility with ${ATTENTION_STAGE_A_QUEST_ONLY_BASELI
     const surface = constructAttentionReadableSurface(
       COMMON_REQUEST,
       scenario.views,
+      scenario.openingCoordinateViews,
       EMPTY_PATTERN_EVIDENCE,
     )
     expect(surface.kind).toBe('ok')
     if (surface.kind !== 'ok') throw new Error('expected common A-prime')
 
+    // The load-bearing B4 compatibility claim: adding the sidecar collection to
+    // the surface leaves every embedded legal quest view byte-identical to the
+    // pinned Stage A golden. The sidecar is a sibling collection, never a field.
     expect(surface.surface.questCandidateViews.map(canonicalSerialize))
       .toEqual(ATTENTION_STAGE_A_QUEST_ONLY_GOLDEN.completeCanonicalQuestViewBytes)
     expect(canonicalSerialize(surface.surface.questCandidateViews.map((view) => view.candidateId)))
       .toBe(ATTENTION_STAGE_A_QUEST_ONLY_GOLDEN.questViewIdentityBytes)
     expect(surface.surface.patternEvidenceViews).toEqual([])
+    expect(surface.surface.questOpeningCoordinateViews).toHaveLength(1)
   })
 
   it('preserves single-quest IDs, package, rendered bytes/identity, ledger/features, and observable trace', () => {
@@ -171,12 +176,19 @@ describe(`B1 quest-only compatibility with ${ATTENTION_STAGE_A_QUEST_ONLY_BASELI
   })
 
   it('claims equality only within the explicit common schema', () => {
-    const views = buildAttentionQuestCandidateA1Scenario().views
-    const first = constructAttentionReadableSurface(COMMON_REQUEST, views, EMPTY_PATTERN_EVIDENCE)
-    const second = constructAttentionReadableSurface(COMMON_REQUEST, views, EMPTY_PATTERN_EVIDENCE)
+    const scenario = buildAttentionQuestCandidateA1Scenario()
+    const first = constructAttentionReadableSurface(
+      COMMON_REQUEST, scenario.views, scenario.openingCoordinateViews, EMPTY_PATTERN_EVIDENCE,
+    )
+    const second = constructAttentionReadableSurface(
+      COMMON_REQUEST, scenario.views, scenario.openingCoordinateViews, EMPTY_PATTERN_EVIDENCE,
+    )
     if (first.kind !== 'ok' || second.kind !== 'ok') throw new Error('expected common surfaces')
 
+    // Within-schema only: cross-schema v1/v2 whole-surface byte equality is not
+    // claimed, and this surface is explicitly v2.
     expect(first.surface.surfaceSchemaVersion).toBe(ATTENTION_READABLE_SURFACE_SCHEMA_VERSION)
+    expect(first.surface.surfaceSchemaVersion).toBe('attention-readable-surface-schema-v2')
     expect(canonicalSerialize(first.surface)).toBe(canonicalSerialize(second.surface))
     expect(first.surface.patternEvidenceViews).toEqual([])
   })

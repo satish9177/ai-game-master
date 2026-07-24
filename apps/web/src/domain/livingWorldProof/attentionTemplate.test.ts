@@ -60,7 +60,7 @@ function normalizedCandidate(candidate: QuestCandidate): AttentionCandidate {
   })
   const access = readAttentionReadableQuestCandidateViews(snapshot, A1_REQUEST)
   if (access.kind !== 'ok') throw new Error('expected the A1 accessor to admit this fixture')
-  const surface = constructAttentionReadableSurface(A1_REQUEST, access.views, Object.freeze([]))
+  const surface = constructAttentionReadableSurface(A1_REQUEST, access.views, access.openingCoordinateViews, Object.freeze([]))
   if (surface.kind !== 'ok') throw new Error('expected the A2 boundary to admit this view')
   const normalized = normalizeAttentionCandidates(surface.surface)
   if (normalized.kind !== 'ok') throw new Error('expected A3 normalization to succeed')

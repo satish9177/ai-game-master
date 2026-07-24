@@ -32,13 +32,16 @@
  * so a trace is self-describing: replaying it later under a different
  * version is visibly a different trace, never a silent reinterpretation.
  *
- * **The player-observable subtrace (D11/P3).** Stage A carries no engine-only
- * diagnostic beyond the already-typed refusal reasons A1-A4 define (there is
- * no resource-limit or inference-provenance diagnostic in this slice's
- * surface), so the observable subtrace is the candidate-presence, ordering,
- * timing (LSN-based, never wall-clock-latency), and presented-output
+ * **The player-observable subtrace (D11/P3).** It is the candidate-presence,
+ * ordering, timing (LSN-based, never wall-clock-latency), and presented-output
  * projection of the full trace — exactly the P3 comparison surface, with
- * nothing internal-only mixed in.
+ * nothing internal-only mixed in. B4 adds real engine-only material to the
+ * trusted trace — the `sourceKind` discriminator, the complete nine-key
+ * ordering evidence, structural-retention decisions, and
+ * `resource_limit_exceeded` diagnostics — and every one of those stays a
+ * top-level trusted field. D11 classes `resource_limit_exceeded` engine-only,
+ * so none of it may reach this projection, whose bytes remain exactly the
+ * committed Stage A golden's.
  *
  * Determinism: the trace is a plain frozen value built from already-frozen
  * inputs; canonical identity reuses the proof rig's key-sorting
@@ -49,32 +52,186 @@
 import { canonicalSerialize, mintHash } from './canonicalSerialization'
 import type { AttentionRevealResultTag } from './attentionRevealPackage'
 
-/** A5's own schema version for the trace's shape and canonical identity rule. */
-export const ATTENTION_TRACE_SCHEMA_VERSION = 'attention-trace-schema-v1' as const
+/**
+ * **Two schemas, versioned separately (RN019 §9.6).** The trusted/internal trace
+ * changes shape at B4 — its ordering evidence widens from the narrower Stage A
+ * projection to the complete nine-key tuple, it gains a `sourceKind`
+ * discriminator, and it gains structural-retention and resource diagnostics —
+ * so it is bumped to v2 in the same slice that changes it. The
+ * player-observable projection is versioned independently and frozen: its shape
+ * *and bytes* remain byte-identical to the committed Stage A golden, so the two
+ * can never drift silently again.
+ *
+ * A future trusted-trace shape change bumps only the trusted version; a change
+ * to the observable projection is a Stage A compatibility break requiring its
+ * own decision.
+ */
+export const ATTENTION_TRACE_SCHEMA_VERSION = 'attention-trace-schema-v2' as const
+
+/** The frozen player-observable projection schema (RN019 §9.6). Its bytes do not move. */
+export const ATTENTION_OBSERVABLE_TRACE_SCHEMA_VERSION = 'attention-observable-trace-schema-v1' as const
 
 /** The closed ledger-outcome vocabulary the trace records, restated locally so this module needs no ledger import beyond the type it already re-exports the same values for. */
 export type AttentionTraceLedgerOutcome = AttentionRevealResultTag | 'non-engagement'
 
-export interface AttentionTraceCandidateEntry {
-  readonly candidateId: string
-  readonly sourceId: string
-  readonly openingProvenanceId: string
-}
+/** The two candidate families, restated locally so this module needs no candidate import. */
+export type AttentionTraceSourceKind = 'quest_candidate' | 'narrative_pattern_instance'
 
 /**
  * The closed order/tie-break key vocabulary A3's ordering module defines,
  * restated locally exactly as `AttentionTraceLedgerOutcome` above restates
  * the ledger's own outcome vocabulary — so this module still needs no import
- * beyond `attentionRevealPackage` and `canonicalSerialization`. The four
- * literals are structurally identical to `attentionCandidateOrdering.ts`'s
- * own `AttentionCandidateOrderingKey`, so a caller that already has one of
- * those values may assign it here directly, with no cast.
+ * beyond `attentionRevealPackage` and `canonicalSerialization`. The **nine**
+ * literals are structurally identical to `attentionCandidateOrdering.ts`'s own
+ * `AttentionCandidateOrderingKey`, so a caller that already has one of those
+ * values may assign it here directly, with no cast.
  */
 export type AttentionTraceOrderingKey =
+  | 'eligibility'
+  | 'proof-score'
   | 'source-kind'
+  | 'semantic-version'
+  | 'canonical-binding-tuple'
+  | 'canonical-supporting-record-identity-tuple'
+  | 'source-committed-lsn'
   | 'source-id'
-  | 'opening-provenance-id'
   | 'candidate-id'
+
+/** The nine ordering keys, in the exact sequence the comparator applies them. */
+export const ATTENTION_TRACE_ORDERING_KEYS: readonly AttentionTraceOrderingKey[] = Object.freeze([
+  'eligibility',
+  'proof-score',
+  'source-kind',
+  'semantic-version',
+  'canonical-binding-tuple',
+  'canonical-supporting-record-identity-tuple',
+  'source-committed-lsn',
+  'source-id',
+  'candidate-id',
+])
+
+/** One candidate's value at one ordering key. Trusted trace v2 records all nine per candidate. */
+export interface AttentionTraceOrderingKeyValue {
+  readonly key: AttentionTraceOrderingKey
+  readonly value: string
+}
+
+/** Fields both trusted candidate-entry branches share (RN019 §9.6). */
+export interface AttentionTraceCandidateEntryCommon {
+  readonly sourceKind: AttentionTraceSourceKind
+  readonly sourceId: string
+  readonly candidateId: string
+  readonly sourceCommittedLsn: number
+  readonly orderingKeyValues: readonly AttentionTraceOrderingKeyValue[]
+}
+
+/** The quest branch. `openingProvenanceId` and `openedAtLsn` exist only here. */
+export type AttentionTraceQuestCandidateEntry = AttentionTraceCandidateEntryCommon & {
+  readonly sourceKind: 'quest_candidate'
+  readonly openingProvenanceId: string
+  readonly openedAtLsn: number
+}
+
+/**
+ * The pattern branch. Its `sourceId` **is** the `patternInstanceId`; no pattern
+ * value is ever written into a quest-named field such as `openingProvenanceId`,
+ * and there is no family-specific sentinel in either direction.
+ */
+export type AttentionTracePatternCandidateEntry = AttentionTraceCandidateEntryCommon & {
+  readonly sourceKind: 'narrative_pattern_instance'
+  readonly patternInstanceId: string
+  readonly patternSemanticVersion: number
+  readonly canonicalBindingTuple: readonly (readonly [string, string])[]
+  readonly canonicalSupportingRecordIdentityTuple:
+    readonly (readonly [string, string, string, string, number])[]
+  readonly lastProgressLsn: number
+}
+
+/** The `sourceKind`-discriminated trusted candidate entry (RN019 §9.6). */
+export type AttentionTraceCandidateEntry =
+  | AttentionTraceQuestCandidateEntry
+  | AttentionTracePatternCandidateEntry
+
+/** Own keys legal only on the quest branch. */
+const QUEST_ONLY_ENTRY_KEYS: readonly string[] = Object.freeze([
+  'openingProvenanceId',
+  'openedAtLsn',
+])
+
+/** Own keys legal only on the pattern branch. */
+const PATTERN_ONLY_ENTRY_KEYS: readonly string[] = Object.freeze([
+  'patternInstanceId',
+  'patternSemanticVersion',
+  'canonicalBindingTuple',
+  'canonicalSupportingRecordIdentityTuple',
+  'lastProgressLsn',
+])
+
+/**
+ * One engine-only resource-limit diagnostic, carried into trusted trace v2
+ * (RN019 §8.3/§9.6). It is trusted-only, deterministic, non-authoritative, and
+ * not identity-affecting: no value here reaches a pattern-instance ID or a
+ * candidate ID, nothing is appended to or read back from the world log, and it
+ * is not B5 presentation history — it describes this evaluation's structural
+ * retention, not exposure, cooldown, or retirement.
+ */
+export interface AttentionTraceResourceLimitEntry {
+  readonly boundId: string
+  readonly patternType: string | null
+  readonly configuredValue: number
+  readonly observedValue: number
+  readonly retainedIds: readonly string[]
+  readonly droppedIds: readonly string[]
+}
+
+/**
+ * The structural-retention and resource evidence trusted trace v2 carries. Every
+ * identity collection is emitted in the canonical retention order the resource
+ * policy applied, so the sets are replayable and byte-stable under reversed
+ * input order. None of it appears in the player-observable projection.
+ */
+export interface AttentionTraceStructuralRetention {
+  readonly retainedPatternInstanceIds: readonly string[]
+  readonly droppedPatternInstanceIds: readonly string[]
+  readonly mixedFamilyRetainedCandidateIds: readonly string[]
+  readonly mixedFamilyDroppedCandidateIds: readonly string[]
+  readonly resourceLimits: readonly AttentionTraceResourceLimitEntry[]
+}
+
+/** An empty structural-retention record, for a pass in which no bound bound. */
+export function emptyAttentionTraceStructuralRetention(): AttentionTraceStructuralRetention {
+  return Object.freeze({
+    retainedPatternInstanceIds: Object.freeze([]),
+    droppedPatternInstanceIds: Object.freeze([]),
+    mixedFamilyRetainedCandidateIds: Object.freeze([]),
+    mixedFamilyDroppedCandidateIds: Object.freeze([]),
+    resourceLimits: Object.freeze([]),
+  })
+}
+
+/**
+ * Build one trusted resource-limit trace entry from a resource decision. A pure
+ * copy: it reads the decision's already-frozen identity sets and neither mutates
+ * nor re-orders them, so the canonical retention order the policy applied is the
+ * order that reaches the trace.
+ */
+export function attentionTraceResourceLimitEntry(input: {
+  readonly boundId: string
+  readonly patternType?: string | null
+  readonly configuredValue: number
+  readonly observedValue: number
+  readonly retainedIds: readonly string[]
+  readonly droppedIds: readonly string[]
+}): AttentionTraceResourceLimitEntry {
+  return Object.freeze({
+    boundId: input.boundId,
+    patternType: input.patternType ?? null,
+    configuredValue: input.configuredValue,
+    observedValue: input.observedValue,
+    retainedIds: Object.freeze([...input.retainedIds]),
+    droppedIds: Object.freeze([...input.droppedIds]),
+  })
+}
 
 /**
  * One adjacent-pair comparison from the ordered candidate sequence (D14).
@@ -84,10 +241,11 @@ export type AttentionTraceOrderingKey =
  * does, so recording every adjacent pair records the complete tie-break
  * path, not a sample of it. `evaluatedKeys` is the prefix of the full
  * ordering-key sequence that was actually checked before `decidingKey`
- * stopped the comparison — never the full four-key table regardless of
+ * stopped the comparison — never the complete nine-key table regardless of
  * where it decided, so a reader can see the short-circuit, not merely infer
- * it. Every value here is already legally-visible A3 candidate identity
- * data (source kind, source id, opening-provenance id, candidate id); no raw
+ * it. Every value here is already legally-visible candidate ordering data
+ * (eligibility, fixed score, source-kind rank, semantic version, canonical
+ * tuples, the numeric committed LSN, source id, candidate id); no raw
  * `QuestCandidate` field or private provenance is reachable through it.
  */
 export interface AttentionTraceOrderingComparisonEntry {
@@ -116,12 +274,20 @@ export interface AttentionTraceRevalidationEntry {
   readonly outcome: AttentionTraceRevalidationOutcome
 }
 
-/** The A′-equivalence premise-check result, present only for paired-world (P3) fixtures. */
+/**
+ * The A′-equivalence premise-check result, present only for paired-world (P3)
+ * fixtures. From B4 the digests cover the complete v2 surface — all three
+ * collections — and the opening-coordinate identity sets are compared
+ * independently alongside the quest-view identity sets, so two worlds differing
+ * only in a sidecar are not Stage B-readable-equivalent (RN019 §4.3, §10.3).
+ */
 export interface AttentionTraceP3PremiseCheck {
   readonly leftAPrimeDigest: string
   readonly rightAPrimeDigest: string
   readonly leftViewIdentities: readonly string[]
   readonly rightViewIdentities: readonly string[]
+  readonly leftOpeningCoordinateIdentities: readonly string[]
+  readonly rightOpeningCoordinateIdentities: readonly string[]
   readonly equivalent: boolean
 }
 
@@ -162,6 +328,13 @@ export interface AttentionTraceInput {
    * observable-subtrace comparison surface.
    */
   readonly orderingTrace: readonly AttentionTraceOrderingComparisonEntry[]
+  /**
+   * B4 / RN019 §9.6 — the structural-retention and resource-limit evidence for
+   * this pass. Trusted-only: it is a top-level trace field and never enters
+   * `playerObservable` below, because D11 classes `resource_limit_exceeded` as
+   * engine-only.
+   */
+  readonly structuralRetention: AttentionTraceStructuralRetention
   readonly presentations: readonly AttentionTracePresentationEntry[]
   readonly revalidations: readonly AttentionTraceRevalidationEntry[]
   readonly authoritativeLogDigestBefore: string
@@ -169,7 +342,16 @@ export interface AttentionTraceInput {
   readonly p3PremiseCheck?: AttentionTraceP3PremiseCheck
 }
 
-/** The player-observable comparison surface (D11/P3): presence, ordering, timing, visible output — never an internal-only diagnostic. */
+/**
+ * The player-observable comparison surface (D11/P3): presence, ordering,
+ * timing, visible output — never an internal-only diagnostic.
+ *
+ * **Frozen at `attention-observable-trace-schema-v1`.** Its field set and its
+ * canonical bytes are exactly the committed Stage A projection's: no
+ * pattern-only field, no resource diagnostic, no trusted ordering table, and no
+ * schema-version field of its own (the pin is carried as a top-level trusted
+ * trace field, precisely so adding it cannot move these bytes).
+ */
 export interface AttentionTracePlayerObservableSubtrace {
   readonly rankingSnapshotLsn: number
   readonly revalidationSnapshotLsn: number
@@ -192,6 +374,7 @@ export interface AttentionTracePlayerObservableSubtrace {
  */
 export type AttentionTrace = AttentionTraceInput & {
   readonly schemaVersion: string
+  readonly observableTraceSchemaVersion: string
   readonly traceIdentity: string
   readonly playerObservable: AttentionTracePlayerObservableSubtrace
 }
@@ -212,6 +395,8 @@ export type AttentionTraceRefusal =
   | 'missing-revalidation-snapshot-lsn'
   | 'missing-authoritative-log-digest-before'
   | 'missing-authoritative-log-digest-after'
+  | 'missing-structural-retention'
+  | 'mixed-trace-candidate-entry'
 
 export type AttentionTraceResult =
   | { readonly kind: 'ok'; readonly trace: AttentionTrace }
@@ -219,6 +404,47 @@ export type AttentionTraceResult =
 
 function isPresent(value: unknown): value is string {
   return typeof value === 'string' && value.trim().length > 0
+}
+
+function hasOwn(value: object, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(value, key)
+}
+
+/**
+ * The discriminated-entry guard (RN019 §9.6). A structurally mixed entry — a
+ * quest branch carrying pattern fields, or a pattern branch carrying quest
+ * fields — refuses, as does an entry missing a field its own branch requires.
+ * There is no quest-named sentinel for pattern candidates and no pattern-named
+ * sentinel for quest candidates in either direction.
+ */
+function isWellFormedCandidateEntry(entry: AttentionTraceCandidateEntry): boolean {
+  if (typeof entry !== 'object' || entry === null) return false
+  if (!isPresent(entry.sourceId) || !isPresent(entry.candidateId)) return false
+  if (!Number.isSafeInteger(entry.sourceCommittedLsn) || entry.sourceCommittedLsn < 0) return false
+  if (!Array.isArray(entry.orderingKeyValues)) return false
+  if (entry.orderingKeyValues.length !== ATTENTION_TRACE_ORDERING_KEYS.length) return false
+  if (entry.orderingKeyValues.some((value, index) => value.key !== ATTENTION_TRACE_ORDERING_KEYS[index])) {
+    return false
+  }
+
+  if (entry.sourceKind === 'quest_candidate') {
+    if (PATTERN_ONLY_ENTRY_KEYS.some((key) => hasOwn(entry, key))) return false
+    if (QUEST_ONLY_ENTRY_KEYS.some((key) => !hasOwn(entry, key))) return false
+    if (!isPresent(entry.openingProvenanceId)) return false
+    return Number.isSafeInteger(entry.openedAtLsn) && entry.openedAtLsn >= 0
+  }
+  if (entry.sourceKind === 'narrative_pattern_instance') {
+    if (QUEST_ONLY_ENTRY_KEYS.some((key) => hasOwn(entry, key))) return false
+    if (PATTERN_ONLY_ENTRY_KEYS.some((key) => !hasOwn(entry, key))) return false
+    if (!isPresent(entry.patternInstanceId)) return false
+    if (entry.patternInstanceId !== entry.sourceId) return false
+    if (!Number.isSafeInteger(entry.patternSemanticVersion)) return false
+    if (!Array.isArray(entry.canonicalBindingTuple)) return false
+    if (!Array.isArray(entry.canonicalSupportingRecordIdentityTuple)) return false
+    return Number.isSafeInteger(entry.lastProgressLsn) && entry.lastProgressLsn >= 0
+  }
+  // An entry whose `sourceKind` is neither family is ambiguous by construction.
+  return false
 }
 
 function playerObservableSubtrace(input: AttentionTraceInput): AttentionTracePlayerObservableSubtrace {
@@ -269,10 +495,17 @@ export function buildAttentionTrace(input: AttentionTraceInput): AttentionTraceR
   if (!isPresent(input.authoritativeLogDigestAfter)) {
     return { kind: 'refused', reason: 'missing-authoritative-log-digest-after' }
   }
+  if (input.structuralRetention === undefined || input.structuralRetention === null) {
+    return { kind: 'refused', reason: 'missing-structural-retention' }
+  }
+  if (!input.orderedAttentionCandidates.every(isWellFormedCandidateEntry)) {
+    return { kind: 'refused', reason: 'mixed-trace-candidate-entry' }
+  }
 
   const withoutIdentity = {
     ...input,
     schemaVersion: ATTENTION_TRACE_SCHEMA_VERSION,
+    observableTraceSchemaVersion: ATTENTION_OBSERVABLE_TRACE_SCHEMA_VERSION,
     playerObservable: playerObservableSubtrace(input),
   }
 
@@ -284,7 +517,16 @@ export function buildAttentionTrace(input: AttentionTraceInput): AttentionTraceR
   }
 }
 
-/** The complete canonical bytes of a built trace — exported for byte-comparison evidence. */
+/** The complete canonical bytes of a built trusted trace — exported for byte-comparison evidence. */
 export function canonicalAttentionTraceBytes(trace: AttentionTrace): string {
   return canonicalSerialize(trace)
+}
+
+/**
+ * The canonical bytes of the player-observable projection alone, under its own
+ * frozen `attention-observable-trace-schema-v1` — the exact surface the Stage A
+ * golden pins and the P3 comparison compares.
+ */
+export function canonicalAttentionObservableTraceBytes(trace: AttentionTrace): string {
+  return canonicalSerialize(trace.playerObservable)
 }

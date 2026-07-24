@@ -121,8 +121,19 @@ export type AttentionQuestCandidateAccessRefusal =
   | 'missing-ranking-snapshot-lsn'
   | 'ranking-snapshot-lsn-mismatch'
 
+/**
+ * The accessor's ok result. B4 adds `openingCoordinateViews` as a **separate
+ * typed collection** beside the legal views (plan §9): the legal view itself
+ * does not widen, and its canonical bytes are unchanged. The two collections
+ * are index-aligned and both are in the same canonical `candidateId` order, so
+ * a candidate that yields no legal view yields no sidecar either.
+ */
 export type AttentionQuestCandidateAccessResult =
-  | { readonly kind: 'ok'; readonly views: readonly AttentionReadableQuestCandidateView[] }
+  | {
+      readonly kind: 'ok'
+      readonly views: readonly AttentionReadableQuestCandidateView[]
+      readonly openingCoordinateViews: readonly AttentionReadableQuestOpeningCoordinateView[]
+    }
   | { readonly kind: 'refused'; readonly reason: AttentionQuestCandidateAccessRefusal }
 
 function requireNonEmptyString(value: string, name: string): void {
@@ -231,6 +242,139 @@ export function isAccessorMintedAttentionReadableQuestCandidateView(
 ): value is AttentionReadableQuestCandidateView {
   if (typeof value !== 'object' || value === null) return false
   return (value as { readonly [ACCESSOR_MINT_MARKER]?: unknown })[ACCESSOR_MINT_MARKER] === true
+}
+
+// ---------------------------------------------------------------------------
+// B4 — the quest opening-coordinate sidecar (RN019 §4.3)
+//
+// §9.2 key 7 orders quest candidates by their committed opening LSN. That
+// coordinate does not exist on `AttentionReadableQuestCandidateView`: the
+// committed legal view carries only the opaque, author-supplied
+// `openingProvenanceId`. The authoritative `QuestCandidate` owns `openedAtLsn`,
+// but the ordering module may not read an authoritative record and the legal
+// view may not widen — its field set and canonical bytes are frozen.
+//
+// The sidecar is therefore a *separate* accessor-minted A-prime member, never a
+// new field on the legal view. It carries exactly the four fields RN019 §4.3
+// fixes and nothing else: no status, no private parties, no secret opening
+// detail, no raw provenance object, no raw `QuestCandidate`.
+// ---------------------------------------------------------------------------
+
+/** The pinned sidecar contract version (RN019 §4.3; plan §3.1). */
+export const ATTENTION_QUEST_OPENING_COORDINATE_CONTRACT_VERSION =
+  'attention-quest-opening-coordinate-v1' as const
+
+/** The complete, closed sidecar field set. Any other own key refuses. */
+export interface AttentionReadableQuestOpeningCoordinateViewFields {
+  readonly openingCoordinateContractVersion: string
+  readonly candidateId: string
+  readonly openingProvenanceId: string
+  readonly openedAtLsn: number
+}
+
+/** The exact own keys of a minted sidecar — exported as closure evidence. */
+export const ATTENTION_QUEST_OPENING_COORDINATE_VIEW_KEYS: readonly string[] = Object.freeze([
+  'candidateId',
+  'openedAtLsn',
+  'openingCoordinateContractVersion',
+  'openingProvenanceId',
+])
+
+/**
+ * An **independent** module-private nominal mint marker, deliberately not the
+ * one the legal quest view uses. Two separate symbols mean a legal quest view
+ * can never answer the sidecar authority check, and a sidecar can never answer
+ * the view authority check — accessor origin is proven per contract, not per
+ * module. Like `ACCESSOR_MINT_MARKER` it is never exported, so no other module
+ * can name the key, satisfy the branded type, or mint a value answering to it.
+ */
+const OPENING_COORDINATE_MINT_MARKER: unique symbol = Symbol('attentionReadableQuestOpeningCoordinate.accessorMint')
+
+/**
+ * The sidecar as it leaves the accessor: the closed four-field surface plus its
+ * own accessor-origin marker. The marker is installed non-enumerably, so it is
+ * absent from `Object.keys`, spread, `for...in`, and `canonicalSerialize` —
+ * only the four legal fields are ever observable or serialized.
+ */
+export type AttentionReadableQuestOpeningCoordinateView =
+  AttentionReadableQuestOpeningCoordinateViewFields
+    & { readonly [OPENING_COORDINATE_MINT_MARKER]: true }
+
+/**
+ * The sole mint for a sidecar. Only the quest accessor may call it —
+ * `attentionLedgerStaticClosure.test.ts` asserts that no other module in
+ * `apps/web/src` so much as names it. It copies and deeply freezes the four
+ * legal fields, so a minted sidecar shares no mutable state with the
+ * authoritative candidate it was projected from.
+ */
+export function mintAttentionReadableQuestOpeningCoordinateView(
+  fields: AttentionReadableQuestOpeningCoordinateViewFields,
+): AttentionReadableQuestOpeningCoordinateView {
+  requireNonEmptyString(fields.openingCoordinateContractVersion, 'opening coordinate contract version')
+  if (fields.openingCoordinateContractVersion !== ATTENTION_QUEST_OPENING_COORDINATE_CONTRACT_VERSION) {
+    throw new Error('attentionQuestCandidateContracts: unsupported opening coordinate contract version')
+  }
+  requireNonEmptyString(fields.candidateId, 'opening coordinate candidate id')
+  requireNonEmptyString(fields.openingProvenanceId, 'opening coordinate opening provenance id')
+  requireLsn(fields.openedAtLsn, 'opened-at LSN')
+
+  const sidecar: Record<string, unknown> = {
+    openingCoordinateContractVersion: fields.openingCoordinateContractVersion,
+    candidateId: fields.candidateId,
+    openingProvenanceId: fields.openingProvenanceId,
+    openedAtLsn: fields.openedAtLsn,
+  }
+  Object.defineProperty(sidecar, OPENING_COORDINATE_MINT_MARKER, {
+    value: true,
+    enumerable: false,
+    writable: false,
+    configurable: false,
+  })
+  return Object.freeze(sidecar) as unknown as AttentionReadableQuestOpeningCoordinateView
+}
+
+/**
+ * Runtime half of the sidecar's nominal boundary. A structurally identical
+ * object literal, a spread copy of a genuine sidecar, and a
+ * serialize/deserialize round-trip each answer `false`, because none of them
+ * carries the module-private marker.
+ */
+export function isAccessorMintedAttentionReadableQuestOpeningCoordinateView(
+  value: unknown,
+): value is AttentionReadableQuestOpeningCoordinateView {
+  if (typeof value !== 'object' || value === null) return false
+  return (value as { readonly [OPENING_COORDINATE_MINT_MARKER]?: unknown })[OPENING_COORDINATE_MINT_MARKER] === true
+}
+
+/**
+ * Structural half of the sidecar boundary, owned here rather than at the
+ * A-prime constructor so that constructor never has to name `openedAtLsn` —
+ * a raw authoritative field name the static closure proof forbids it from
+ * mentioning at all. It admits exactly the closed four-field shape: any own key
+ * outside the set, any missing key, and any ill-typed value refuse.
+ *
+ * The LSN check here is `Number.isInteger`, matching `requireLsn` — the
+ * *safe*-integer check belongs to the candidate join (RN019 §4.3's
+ * `unsafe-quest-opened-at-lsn`), so that refusal stays independently reachable
+ * through the legal accessor path rather than being pre-empted here.
+ */
+export function isStructurallyValidAttentionReadableQuestOpeningCoordinateView(
+  value: unknown,
+): boolean {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false
+
+  const keys = Object.getOwnPropertyNames(value).sort()
+  if (keys.length !== ATTENTION_QUEST_OPENING_COORDINATE_VIEW_KEYS.length) return false
+  if (keys.some((key, index) => key !== ATTENTION_QUEST_OPENING_COORDINATE_VIEW_KEYS[index])) return false
+
+  const record = value as Record<string, unknown>
+  if (typeof record.openingCoordinateContractVersion !== 'string') return false
+  if (record.openingCoordinateContractVersion.trim().length === 0) return false
+  if (typeof record.candidateId !== 'string' || record.candidateId.trim().length === 0) return false
+  if (typeof record.openingProvenanceId !== 'string' || record.openingProvenanceId.trim().length === 0) return false
+  if (typeof record.openedAtLsn !== 'number') return false
+  if (!Number.isInteger(record.openedAtLsn) || record.openedAtLsn < 0) return false
+  return true
 }
 
 export function createProofQuestCandidateSnapshot(

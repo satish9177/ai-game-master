@@ -28,16 +28,23 @@
  * later, separately approved slice to be able to prove that a stale value is
  * never reused. Nothing in the Stage A path calls these functions in production.
  *
- * Two key classes, exactly as plan §6 splits them:
+ * **Dependencies are explicit typed values, never ambient module constants read
+ * behind the caller's back (RN019 §9.3).** A dependency a test cannot vary is a
+ * dependency the suite cannot prove participates. Both canonical key functions
+ * therefore *receive* their complete dependency bundle as a parameter and
+ * serialize every field of it. A default bundle built from this rig's pinned
+ * constants is available for ordinary call sites, but the key functions never
+ * reach for a module-level constant themselves — so every one of the thirteen
+ * derivation dependencies and every ranking-only dependency is independently
+ * variable under test.
  *
- *  - the **derivation** key covers everything a normalized candidate set
- *    depends on: accessor-contract version, canonicalization version,
- *    identity-schema version, the pinned ranking snapshot coordinate, the
- *    resource-policy version, and the opening-provenance-policy version;
- *  - the **ranking** key is the derivation key *plus* the ordering version, the
- *    ranking-policy hash, the ledger/exposure-policy version, the
- *    template/channel-policy version, and the canonical relevant-ledger-input
- *    identity.
+ * Two key classes:
+ *
+ *  - the **derivation** key covers exactly the closed thirteen-field RN019 §9.3
+ *    derivation dependency bundle, in its declared order;
+ *  - the **ranking** key is exactly the complete derivation key embedded whole,
+ *    plus the ordering version, the ranking-policy hash, and the B4-owned
+ *    eligibility/resource state.
  *
  * The ranking key embeds the derivation key as a component rather than
  * re-listing its parts. That is what makes "anything that invalidates derivation
@@ -46,23 +53,19 @@
  * construction, which is D15's "a re-weighting must not invalidate cached
  * candidate derivation" and D6's identity/ranking disjointness.
  *
- * **Coordinates owned by later slices are required opaque inputs, never
- * defaults.** The resource-policy, opening-provenance-policy, ranking-policy,
- * ledger/exposure-policy and template/channel-policy coordinates, and the
- * relevant-ledger-input identity, are pinned by slices that do not exist yet.
- * This module therefore takes each as an explicit required string and refuses
- * when one is absent, rather than substituting a placeholder — an invented
- * default would silently key every cached value to a policy nobody chose, which
- * is the exact failure D15's "Missing versions refuse" and the replay spec's K3
- * ("the harness refuses, it does not approximate") forbid. Implementing any of
- * those later capabilities is explicitly not part of this slice.
+ * **No B5 dependency lives here.** At B4 the ranking bundle carries no exposure,
+ * cooldown, retirement, ledger, presentation-history, relevant-ledger-input, or
+ * template/package dependency. Those belong to B5 and are added when B5 owns the
+ * behavior they key; adding one early would key every cached value to a policy
+ * this slice does not implement.
  *
- * The three versions Stage A itself owns — canonicalization, identity-schema,
- * ordering — are validated against their pins instead, because this rig cannot
- * honestly key a derivation to a canonicalization rule it does not implement.
- * The accessor-contract version is carried as an opaque required input: A1's
- * accessor already enforces which version it will serve, and the cache key's job
- * is to record *which* version produced the cached value so that a change to it
+ * The versions this rig itself owns — canonicalization, quest and pattern
+ * candidate identity schema, surface schema, sidecar contract, ordering — are
+ * validated against their pins, because this rig cannot honestly key a
+ * derivation to a rule it does not implement. Hashes and the pattern-instance
+ * identity/monitor coordinates are carried as opaque required values: the module
+ * that owns each already enforces what it will serve, and the cache key's job is
+ * to record *which* value produced the cached result so that a change to it
  * invalidates the key whether or not this build still supports it.
  *
  * Determinism: the canonical input is rebuilt as a closed record with keys
@@ -79,8 +82,148 @@ import {
   ATTENTION_CANDIDATE_IDENTITY_SCHEMA_VERSION,
   ATTENTION_CANDIDATE_ORDERING_VERSION,
   ATTENTION_CANDIDATE_RANKING_CACHE_KEY_SCHEMA_VERSION,
+  ATTENTION_NARRATIVE_PATTERN_IDENTITY_SCHEMA_VERSION,
+  ATTENTION_NARRATIVE_PATTERN_MONITOR_RULE_VERSION,
+  ATTENTION_PATTERN_CANDIDATE_IDENTITY_SCHEMA_VERSION,
   isAttentionRankingSnapshotLsnInRange,
 } from './attentionCandidatePolicy'
+import {
+  ATTENTION_QUEST_CANDIDATE_ACCESSOR_VERSION,
+  ATTENTION_QUEST_OPENING_COORDINATE_CONTRACT_VERSION,
+  ATTENTION_READABLE_SURFACE_SCHEMA_VERSION,
+} from './attentionReadableBoundary'
+import { ATTENTION_PATTERN_EVIDENCE_ACCESSOR_VERSION } from './attentionPatternEvidenceContracts'
+import { ATTENTION_NARRATIVE_PATTERN_LIBRARY_HASH } from './attentionNarrativePatternLibrary'
+import {
+  ATTENTION_NARRATIVE_PATTERN_POLICY_HASH,
+  ATTENTION_STAGE_B_RESOURCE_POLICY_VERSION,
+  attentionStageBResourcePolicy,
+} from './attentionNarrativePatternResourcePolicy'
+
+/**
+ * RN019 §9.3's closed derivation dependency bundle: exactly these thirteen
+ * fields, in exactly this order. One typed, deeply immutable record; the
+ * canonical derivation-key function receives it explicitly and serializes every
+ * field.
+ *
+ * Why three separate identity-schema fields rather than one:
+ * `questCandidateIdentitySchemaVersion` is present because quest candidate
+ * derivation and cache validity depend on its canonical identity schema exactly
+ * as the pattern branches depend on theirs; omitting it would leave one
+ * family's identity-schema dependency untracked while the other two are
+ * tracked. `patternInstanceIdentitySchemaVersion` and
+ * `patternCandidateIdentitySchemaVersion` stay distinct because they identify
+ * two different derived layers — the reconstructed instance and the normalized
+ * candidate — and a change to one must not be conflated with a change to the
+ * other. `attentionReadableSurfaceSchemaVersion` is present because the
+ * canonical A-prime premise shape moves from v1 to v2 at B4, and a derivation
+ * key that cannot see that change is not sound across it.
+ */
+export interface AttentionCandidateDerivationDependencyBundle {
+  readonly questAccessorContractVersion: string
+  readonly questOpeningCoordinateContractVersion: string
+  readonly patternEvidenceAccessorContractVersion: string
+  readonly attentionReadableSurfaceSchemaVersion: string
+  readonly snapshotLsn: number
+  readonly patternLibraryHash: string
+  readonly patternPolicyHash: string
+  readonly monitorRuleVersion: string
+  readonly canonicalizationVersion: string
+  readonly questCandidateIdentitySchemaVersion: string
+  readonly patternInstanceIdentitySchemaVersion: string
+  readonly patternCandidateIdentitySchemaVersion: string
+  readonly resourcePolicyVersion: string
+}
+
+/** The thirteen derivation-bundle field names, in RN019 §9.3's declared order. */
+export const ATTENTION_CANDIDATE_DERIVATION_DEPENDENCY_FIELDS: readonly string[] = Object.freeze([
+  'questAccessorContractVersion',
+  'questOpeningCoordinateContractVersion',
+  'patternEvidenceAccessorContractVersion',
+  'attentionReadableSurfaceSchemaVersion',
+  'snapshotLsn',
+  'patternLibraryHash',
+  'patternPolicyHash',
+  'monitorRuleVersion',
+  'canonicalizationVersion',
+  'questCandidateIdentitySchemaVersion',
+  'patternInstanceIdentitySchemaVersion',
+  'patternCandidateIdentitySchemaVersion',
+  'resourcePolicyVersion',
+])
+
+/**
+ * The B4-owned eligibility/resource state the ranking key depends on and the
+ * derivation key deliberately does not. It is ranking-only policy: changing it
+ * moves the ranking key while leaving the derivation key, the pattern-instance
+ * identity, and every candidate identity exactly where they were (ADR-0013 D6).
+ *
+ * It carries no exposure, cooldown, retirement, ledger, presentation-history, or
+ * template coordinate — those are B5's.
+ */
+export interface AttentionCandidateRankingEligibilityResourceState {
+  readonly mixedFamilyCandidateCap: number
+  readonly retentionClassOrder: readonly string[]
+  readonly rankableClasses: readonly string[]
+}
+
+/** RN019 §9.3's ranking dependency bundle: the derivation bundle plus exactly three ranking-only members. */
+export interface AttentionCandidateRankingDependencyBundle {
+  readonly derivation: AttentionCandidateDerivationDependencyBundle
+  readonly orderingVersion: string
+  readonly rankingPolicyHash: string
+  readonly eligibilityResourceState: AttentionCandidateRankingEligibilityResourceState
+}
+
+/**
+ * A default derivation bundle built from this rig's pinned constants, for
+ * ordinary call sites. It is a convenience for callers, never a fallback inside
+ * the key functions: `snapshotLsn` has no pin and must always be supplied, and
+ * every other field may be overridden so a test can vary exactly one dependency
+ * at a time.
+ */
+export function attentionCandidateDerivationDependencyBundle(
+  input: { readonly snapshotLsn: number } & Partial<AttentionCandidateDerivationDependencyBundle>,
+): AttentionCandidateDerivationDependencyBundle {
+  return Object.freeze({
+    questAccessorContractVersion:
+      input.questAccessorContractVersion ?? ATTENTION_QUEST_CANDIDATE_ACCESSOR_VERSION,
+    questOpeningCoordinateContractVersion:
+      input.questOpeningCoordinateContractVersion ?? ATTENTION_QUEST_OPENING_COORDINATE_CONTRACT_VERSION,
+    patternEvidenceAccessorContractVersion:
+      input.patternEvidenceAccessorContractVersion ?? ATTENTION_PATTERN_EVIDENCE_ACCESSOR_VERSION,
+    attentionReadableSurfaceSchemaVersion:
+      input.attentionReadableSurfaceSchemaVersion ?? ATTENTION_READABLE_SURFACE_SCHEMA_VERSION,
+    snapshotLsn: input.snapshotLsn,
+    patternLibraryHash: input.patternLibraryHash ?? ATTENTION_NARRATIVE_PATTERN_LIBRARY_HASH,
+    patternPolicyHash: input.patternPolicyHash ?? ATTENTION_NARRATIVE_PATTERN_POLICY_HASH,
+    monitorRuleVersion: input.monitorRuleVersion ?? ATTENTION_NARRATIVE_PATTERN_MONITOR_RULE_VERSION,
+    canonicalizationVersion:
+      input.canonicalizationVersion ?? ATTENTION_CANDIDATE_CANONICALIZATION_VERSION,
+    questCandidateIdentitySchemaVersion:
+      input.questCandidateIdentitySchemaVersion ?? ATTENTION_CANDIDATE_IDENTITY_SCHEMA_VERSION,
+    patternInstanceIdentitySchemaVersion:
+      input.patternInstanceIdentitySchemaVersion ?? ATTENTION_NARRATIVE_PATTERN_IDENTITY_SCHEMA_VERSION,
+    patternCandidateIdentitySchemaVersion:
+      input.patternCandidateIdentitySchemaVersion ?? ATTENTION_PATTERN_CANDIDATE_IDENTITY_SCHEMA_VERSION,
+    resourcePolicyVersion: input.resourcePolicyVersion ?? ATTENTION_STAGE_B_RESOURCE_POLICY_VERSION,
+  })
+}
+
+/** The default B4 eligibility/resource state, read from the pinned resource policy. */
+export function attentionCandidateRankingEligibilityResourceState(
+  overrides: Partial<AttentionCandidateRankingEligibilityResourceState> = {},
+): AttentionCandidateRankingEligibilityResourceState {
+  const policy = attentionStageBResourcePolicy()
+  return Object.freeze({
+    mixedFamilyCandidateCap:
+      overrides.mixedFamilyCandidateCap ?? policy.mixedFamilyCandidatesAfterOrdering,
+    retentionClassOrder: Object.freeze([...(overrides.retentionClassOrder ?? policy.retentionClassOrder)]),
+    rankableClasses: Object.freeze([
+      ...(overrides.rankableClasses ?? ['satisfied', 'active', 'stalled']),
+    ]),
+  })
+}
 
 /**
  * A5 addition — the trace cache key (ADR-0013 D15 two-clock revalidation;
@@ -104,52 +247,31 @@ import {
  */
 export const ATTENTION_TRACE_CACHE_KEY_SCHEMA_VERSION = 'attention-trace-cache-key-v1' as const
 
-/** Plan §6: the complete view/derivation-cache identity input set. */
-export interface AttentionCandidateDerivationCacheKeyInput {
-  readonly accessorContractVersion: string
-  readonly canonicalizationVersion: string
-  readonly identitySchemaVersion: string
-  readonly rankingSnapshotLsn: number
-  readonly resourcePolicyVersion: string
-  readonly openingProvenancePolicyVersion: string
-}
-
-/**
- * Plan §6: the derivation input set plus the ranking-only additions. Written
- * flat rather than as an extension of the derivation input, so the ranking key's
- * dependency list is legible in one place.
- */
-export interface AttentionCandidateRankingCacheKeyInput {
-  readonly accessorContractVersion: string
-  readonly canonicalizationVersion: string
-  readonly identitySchemaVersion: string
-  readonly rankingSnapshotLsn: number
-  readonly resourcePolicyVersion: string
-  readonly openingProvenancePolicyVersion: string
-  readonly orderingVersion: string
-  readonly rankingPolicyHash: string
-  readonly ledgerExposurePolicyVersion: string
-  readonly templateChannelPolicyVersion: string
-  readonly relevantLedgerInputIdentity: string
-}
-
 /** The closed typed refusal set. Every case refuses; none approximates. */
 export type AttentionCandidateCacheKeyRefusal =
-  | 'missing-accessor-contract-version'
+  | 'missing-quest-accessor-contract-version'
+  | 'missing-quest-opening-coordinate-contract-version'
+  | 'unsupported-quest-opening-coordinate-contract-version'
+  | 'missing-pattern-evidence-accessor-contract-version'
+  | 'missing-attention-readable-surface-schema-version'
+  | 'unsupported-attention-readable-surface-schema-version'
+  | 'missing-snapshot-lsn'
+  | 'snapshot-lsn-out-of-range'
+  | 'missing-pattern-library-hash'
+  | 'missing-pattern-policy-hash'
+  | 'missing-monitor-rule-version'
   | 'missing-canonicalization-version'
   | 'unsupported-canonicalization-version'
-  | 'missing-identity-schema-version'
-  | 'unsupported-identity-schema-version'
-  | 'missing-ranking-snapshot-lsn'
-  | 'ranking-snapshot-lsn-out-of-range'
+  | 'missing-quest-candidate-identity-schema-version'
+  | 'unsupported-quest-candidate-identity-schema-version'
+  | 'missing-pattern-instance-identity-schema-version'
+  | 'missing-pattern-candidate-identity-schema-version'
+  | 'unsupported-pattern-candidate-identity-schema-version'
   | 'missing-resource-policy-version'
-  | 'missing-opening-provenance-policy-version'
   | 'missing-ordering-version'
   | 'unsupported-ordering-version'
   | 'missing-ranking-policy-hash'
-  | 'missing-ledger-exposure-policy-version'
-  | 'missing-template-channel-policy-version'
-  | 'missing-relevant-ledger-input-identity'
+  | 'missing-eligibility-resource-state'
 
 export type AttentionCandidateDerivationCacheKeyResult =
   | {
@@ -173,50 +295,91 @@ function isPresent(value: string): boolean {
 }
 
 /**
- * Derive the candidate-derivation cache key.
+ * Derive the candidate-derivation cache key from the explicit thirteen-field
+ * bundle. Every field is serialized into the canonical key bytes; none is read
+ * from module ambient state.
  *
- * Checks run in the declared field order and stop at the first failure, so the
- * reason a caller receives is stable rather than dependent on which check
+ * Checks run in the bundle's declared field order and stop at the first failure,
+ * so the reason a caller receives is stable rather than dependent on which check
  * happened to be cheapest.
  */
 export function deriveAttentionCandidateDerivationCacheKey(
-  input: AttentionCandidateDerivationCacheKeyInput,
+  bundle: AttentionCandidateDerivationDependencyBundle,
 ): AttentionCandidateDerivationCacheKeyResult {
-  if (!isPresent(input.accessorContractVersion)) {
-    return { kind: 'refused', reason: 'missing-accessor-contract-version' }
+  if (!isPresent(bundle.questAccessorContractVersion)) {
+    return { kind: 'refused', reason: 'missing-quest-accessor-contract-version' }
   }
-  if (!isPresent(input.canonicalizationVersion)) {
+  if (!isPresent(bundle.questOpeningCoordinateContractVersion)) {
+    return { kind: 'refused', reason: 'missing-quest-opening-coordinate-contract-version' }
+  }
+  if (bundle.questOpeningCoordinateContractVersion !== ATTENTION_QUEST_OPENING_COORDINATE_CONTRACT_VERSION) {
+    return { kind: 'refused', reason: 'unsupported-quest-opening-coordinate-contract-version' }
+  }
+  if (!isPresent(bundle.patternEvidenceAccessorContractVersion)) {
+    return { kind: 'refused', reason: 'missing-pattern-evidence-accessor-contract-version' }
+  }
+  if (!isPresent(bundle.attentionReadableSurfaceSchemaVersion)) {
+    return { kind: 'refused', reason: 'missing-attention-readable-surface-schema-version' }
+  }
+  if (bundle.attentionReadableSurfaceSchemaVersion !== ATTENTION_READABLE_SURFACE_SCHEMA_VERSION) {
+    return { kind: 'refused', reason: 'unsupported-attention-readable-surface-schema-version' }
+  }
+  if (typeof bundle.snapshotLsn !== 'number') {
+    return { kind: 'refused', reason: 'missing-snapshot-lsn' }
+  }
+  if (!isAttentionRankingSnapshotLsnInRange(bundle.snapshotLsn)) {
+    return { kind: 'refused', reason: 'snapshot-lsn-out-of-range' }
+  }
+  if (!isPresent(bundle.patternLibraryHash)) {
+    return { kind: 'refused', reason: 'missing-pattern-library-hash' }
+  }
+  if (!isPresent(bundle.patternPolicyHash)) {
+    return { kind: 'refused', reason: 'missing-pattern-policy-hash' }
+  }
+  if (!isPresent(bundle.monitorRuleVersion)) {
+    return { kind: 'refused', reason: 'missing-monitor-rule-version' }
+  }
+  if (!isPresent(bundle.canonicalizationVersion)) {
     return { kind: 'refused', reason: 'missing-canonicalization-version' }
   }
-  if (input.canonicalizationVersion !== ATTENTION_CANDIDATE_CANONICALIZATION_VERSION) {
+  if (bundle.canonicalizationVersion !== ATTENTION_CANDIDATE_CANONICALIZATION_VERSION) {
     return { kind: 'refused', reason: 'unsupported-canonicalization-version' }
   }
-  if (!isPresent(input.identitySchemaVersion)) {
-    return { kind: 'refused', reason: 'missing-identity-schema-version' }
+  if (!isPresent(bundle.questCandidateIdentitySchemaVersion)) {
+    return { kind: 'refused', reason: 'missing-quest-candidate-identity-schema-version' }
   }
-  if (input.identitySchemaVersion !== ATTENTION_CANDIDATE_IDENTITY_SCHEMA_VERSION) {
-    return { kind: 'refused', reason: 'unsupported-identity-schema-version' }
+  if (bundle.questCandidateIdentitySchemaVersion !== ATTENTION_CANDIDATE_IDENTITY_SCHEMA_VERSION) {
+    return { kind: 'refused', reason: 'unsupported-quest-candidate-identity-schema-version' }
   }
-  if (typeof input.rankingSnapshotLsn !== 'number') {
-    return { kind: 'refused', reason: 'missing-ranking-snapshot-lsn' }
+  if (!isPresent(bundle.patternInstanceIdentitySchemaVersion)) {
+    return { kind: 'refused', reason: 'missing-pattern-instance-identity-schema-version' }
   }
-  if (!isAttentionRankingSnapshotLsnInRange(input.rankingSnapshotLsn)) {
-    return { kind: 'refused', reason: 'ranking-snapshot-lsn-out-of-range' }
+  if (!isPresent(bundle.patternCandidateIdentitySchemaVersion)) {
+    return { kind: 'refused', reason: 'missing-pattern-candidate-identity-schema-version' }
   }
-  if (!isPresent(input.resourcePolicyVersion)) {
+  if (bundle.patternCandidateIdentitySchemaVersion !== ATTENTION_PATTERN_CANDIDATE_IDENTITY_SCHEMA_VERSION) {
+    return { kind: 'refused', reason: 'unsupported-pattern-candidate-identity-schema-version' }
+  }
+  if (!isPresent(bundle.resourcePolicyVersion)) {
     return { kind: 'refused', reason: 'missing-resource-policy-version' }
   }
-  if (!isPresent(input.openingProvenancePolicyVersion)) {
-    return { kind: 'refused', reason: 'missing-opening-provenance-policy-version' }
-  }
 
+  // Rebuilt as a closed record from the bundle's own values, so the literal's
+  // property order — and the caller's — cannot reach the bytes.
   const canonicalInput = {
-    accessorContractVersion: input.accessorContractVersion,
-    canonicalizationVersion: input.canonicalizationVersion,
-    identitySchemaVersion: input.identitySchemaVersion,
-    openingProvenancePolicyVersion: input.openingProvenancePolicyVersion,
-    rankingSnapshotLsn: input.rankingSnapshotLsn,
-    resourcePolicyVersion: input.resourcePolicyVersion,
+    attentionReadableSurfaceSchemaVersion: bundle.attentionReadableSurfaceSchemaVersion,
+    canonicalizationVersion: bundle.canonicalizationVersion,
+    monitorRuleVersion: bundle.monitorRuleVersion,
+    patternCandidateIdentitySchemaVersion: bundle.patternCandidateIdentitySchemaVersion,
+    patternEvidenceAccessorContractVersion: bundle.patternEvidenceAccessorContractVersion,
+    patternInstanceIdentitySchemaVersion: bundle.patternInstanceIdentitySchemaVersion,
+    patternLibraryHash: bundle.patternLibraryHash,
+    patternPolicyHash: bundle.patternPolicyHash,
+    questAccessorContractVersion: bundle.questAccessorContractVersion,
+    questCandidateIdentitySchemaVersion: bundle.questCandidateIdentitySchemaVersion,
+    questOpeningCoordinateContractVersion: bundle.questOpeningCoordinateContractVersion,
+    resourcePolicyVersion: bundle.resourcePolicyVersion,
+    snapshotLsn: bundle.snapshotLsn,
   }
 
   return {
@@ -227,47 +390,55 @@ export function deriveAttentionCandidateDerivationCacheKey(
   }
 }
 
+function isEligibilityResourceState(
+  value: AttentionCandidateRankingEligibilityResourceState | undefined,
+): value is AttentionCandidateRankingEligibilityResourceState {
+  if (value === undefined || value === null) return false
+  if (!Number.isSafeInteger(value.mixedFamilyCandidateCap) || value.mixedFamilyCandidateCap < 0) return false
+  if (!Array.isArray(value.retentionClassOrder) || value.retentionClassOrder.length === 0) return false
+  if (!Array.isArray(value.rankableClasses) || value.rankableClasses.length === 0) return false
+  return true
+}
+
 /**
- * Derive the ranking cache key.
+ * Derive the ranking cache key from the explicit ranking bundle.
  *
- * The derivation key is computed first and folded in whole, so every derivation
- * dependency reaches this key without being restated — and a ranking-only change
- * provably cannot reach the derivation key, because it is not one of its inputs.
+ * The derivation key is computed first from the embedded derivation bundle and
+ * folded in whole, so every one of the thirteen derivation dependencies reaches
+ * this key without being restated — and a ranking-only change provably cannot
+ * reach the derivation key, because none of the three ranking-only members is
+ * one of its inputs.
  */
 export function deriveAttentionCandidateRankingCacheKey(
-  input: AttentionCandidateRankingCacheKeyInput,
+  bundle: AttentionCandidateRankingDependencyBundle,
 ): AttentionCandidateRankingCacheKeyResult {
-  const derivation = deriveAttentionCandidateDerivationCacheKey(input)
+  const derivation = deriveAttentionCandidateDerivationCacheKey(bundle.derivation)
   if (derivation.kind !== 'ok') {
     return { kind: 'refused', reason: derivation.reason }
   }
 
-  if (!isPresent(input.orderingVersion)) {
+  if (!isPresent(bundle.orderingVersion)) {
     return { kind: 'refused', reason: 'missing-ordering-version' }
   }
-  if (input.orderingVersion !== ATTENTION_CANDIDATE_ORDERING_VERSION) {
+  if (bundle.orderingVersion !== ATTENTION_CANDIDATE_ORDERING_VERSION) {
     return { kind: 'refused', reason: 'unsupported-ordering-version' }
   }
-  if (!isPresent(input.rankingPolicyHash)) {
+  if (!isPresent(bundle.rankingPolicyHash)) {
     return { kind: 'refused', reason: 'missing-ranking-policy-hash' }
   }
-  if (!isPresent(input.ledgerExposurePolicyVersion)) {
-    return { kind: 'refused', reason: 'missing-ledger-exposure-policy-version' }
-  }
-  if (!isPresent(input.templateChannelPolicyVersion)) {
-    return { kind: 'refused', reason: 'missing-template-channel-policy-version' }
-  }
-  if (!isPresent(input.relevantLedgerInputIdentity)) {
-    return { kind: 'refused', reason: 'missing-relevant-ledger-input-identity' }
+  if (!isEligibilityResourceState(bundle.eligibilityResourceState)) {
+    return { kind: 'refused', reason: 'missing-eligibility-resource-state' }
   }
 
   const canonicalInput = {
     derivationCacheKey: derivation.derivationCacheKey,
-    ledgerExposurePolicyVersion: input.ledgerExposurePolicyVersion,
-    orderingVersion: input.orderingVersion,
-    rankingPolicyHash: input.rankingPolicyHash,
-    relevantLedgerInputIdentity: input.relevantLedgerInputIdentity,
-    templateChannelPolicyVersion: input.templateChannelPolicyVersion,
+    eligibilityResourceState: {
+      mixedFamilyCandidateCap: bundle.eligibilityResourceState.mixedFamilyCandidateCap,
+      rankableClasses: [...bundle.eligibilityResourceState.rankableClasses],
+      retentionClassOrder: [...bundle.eligibilityResourceState.retentionClassOrder],
+    },
+    orderingVersion: bundle.orderingVersion,
+    rankingPolicyHash: bundle.rankingPolicyHash,
   }
 
   return {

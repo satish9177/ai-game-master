@@ -2,10 +2,12 @@ import { describe, expect, it } from 'vitest'
 import { canonicalSerialize } from './canonicalSerialization'
 import { A1_RANKING_SNAPSHOT_LSN } from './attentionQuestCandidateScenario'
 import {
+  canonicalAttentionObservableTraceBytes,
   canonicalAttentionTraceBytes,
   runAttentionQuestCandidateReplayPass,
   stableWorldReplayPassInput,
 } from './attentionReplay'
+import { ATTENTION_STAGE_A_QUEST_ONLY_GOLDEN } from './attentionStageAQuestOnlyGolden'
 import { digestAttentionReplayAuthoritativeLog } from './attentionReplayResources'
 import {
   assertAttentionZeroModelProbeUnused,
@@ -57,8 +59,95 @@ describe('A5 — the complete trace is byte-identical across repeated cold runs'
   it('carries an explicit schema version and a canonical, versioned identity', () => {
     const { trace } = runOnce()
 
-    expect(trace.schemaVersion).toBe('attention-trace-schema-v1')
-    expect(trace.traceIdentity.startsWith('attention-trace-schema-v1:')).toBe(true)
+    // B4 / RN019 §9.6 — the trusted trace changed shape in this slice (nine-key
+    // ordering evidence, the `sourceKind` discriminator, structural retention
+    // and resource diagnostics), so its schema version moves with it.
+    expect(trace.schemaVersion).toBe('attention-trace-schema-v2')
+    expect(trace.traceIdentity.startsWith('attention-trace-schema-v2:')).toBe(true)
+  })
+
+  it('pins the player-observable projection under its own frozen schema, separately versioned', () => {
+    const { trace } = runOnce()
+
+    // The observable projection is versioned independently of the trusted trace
+    // and is frozen: a future trusted-shape change bumps only the trusted
+    // version, and moving these bytes is a Stage A compatibility break.
+    expect(trace.observableTraceSchemaVersion).toBe('attention-observable-trace-schema-v1')
+    expect(canonicalAttentionObservableTraceBytes(trace))
+      .toBe(ATTENTION_STAGE_A_QUEST_ONLY_GOLDEN.single.playerObservableTraceBytes)
+  })
+
+  it('keeps every pattern-only field, resource diagnostic, and trusted ordering table out of the observable projection', () => {
+    const { trace } = runOnce()
+    const observableBytes = canonicalAttentionObservableTraceBytes(trace)
+
+    for (const forbidden of [
+      'sourceKind',
+      'patternInstanceId',
+      'patternSemanticVersion',
+      'lastProgressLsn',
+      'structuralRetention',
+      'resourceLimits',
+      'resource_limit_exceeded',
+      'orderingTrace',
+      'orderingKeyValues',
+      'openedAtLsn',
+      'openingProvenanceId',
+    ]) {
+      expect({ forbidden, present: observableBytes.includes(forbidden) })
+        .toEqual({ forbidden, present: false })
+    }
+  })
+
+  it('records a sourceKind-discriminated trusted candidate entry with all nine ordering-key values', () => {
+    const { trace } = runOnce()
+    const [entry] = trace.orderedAttentionCandidates
+    if (entry === undefined) throw new Error('expected one trusted candidate entry')
+    if (entry.sourceKind !== 'quest_candidate') throw new Error('expected a quest entry')
+
+    expect(entry.sourceKind).toBe('quest_candidate')
+    expect(entry.openingProvenanceId).toBe('consequence-public-30')
+    expect(entry.openedAtLsn).toBe(30)
+    expect(entry.sourceCommittedLsn).toBe(30)
+    // No pattern-named field appears on a quest entry, in either direction —
+    // and no pattern `sourceId` is smuggled into `openingProvenanceId`.
+    for (const patternOnly of [
+      'patternInstanceId',
+      'patternSemanticVersion',
+      'canonicalBindingTuple',
+      'canonicalSupportingRecordIdentityTuple',
+      'lastProgressLsn',
+    ]) {
+      expect({ patternOnly, present: patternOnly in entry }).toEqual({ patternOnly, present: false })
+    }
+
+    expect(entry.orderingKeyValues.map((value) => value.key)).toEqual([
+      'eligibility',
+      'proof-score',
+      'source-kind',
+      'semantic-version',
+      'canonical-binding-tuple',
+      'canonical-supporting-record-identity-tuple',
+      'source-committed-lsn',
+      'source-id',
+      'candidate-id',
+    ])
+    // Key 7 is recorded as the numeric committed coordinate, never provenance text.
+    expect(entry.orderingKeyValues.find((value) => value.key === 'source-committed-lsn')?.value)
+      .toBe('30')
+  })
+
+  it('carries the mixed-family resource decision into the trusted trace and nowhere else', () => {
+    const { trace } = runOnce()
+
+    expect(trace.structuralRetention.mixedFamilyRetainedCandidateIds)
+      .toEqual(trace.orderedAttentionCandidates.map((entry) => entry.candidateId))
+    expect(trace.structuralRetention.mixedFamilyDroppedCandidateIds).toEqual([])
+    // One candidate is far below the cap of 4, so no bound binds and no
+    // `resource_limit_exceeded` diagnostic is recorded.
+    expect(trace.structuralRetention.resourceLimits).toEqual([])
+    expect(trace.structuralRetention.retainedPatternInstanceIds).toEqual([])
+    expect(trace.structuralRetention.droppedPatternInstanceIds).toEqual([])
   })
 
   it('records the ranking snapshot LSN, the revalidation LSN, and the admitted candidate', () => {
@@ -126,11 +215,21 @@ describe('A5 — order/tie-break trace over two independently admitted candidate
     expect(trace.orderingTrace).toHaveLength(1)
     const [entry] = trace.orderingTrace
 
-    // source-kind ties (Stage A has exactly one kind), so source-id -- the
-    // candidates' only other difference -- is the real decider, not a
-    // trivial or default value.
-    expect(entry?.decidingKey).toBe('source-id')
-    expect(entry?.evaluatedKeys).toEqual(['source-kind', 'source-id'])
+    // B4 nine-key tuple: eligibility, proof score, and source kind tie (both
+    // are eligible quests), the quest semantic-version/binding/supporting
+    // sentinels tie, and the two candidates then resolve at key 7
+    // (source-committed-lsn = the quest opening-provenance coordinate), which
+    // precedes source-id -- the real decider, not a trivial or default value.
+    expect(entry?.decidingKey).toBe('source-committed-lsn')
+    expect(entry?.evaluatedKeys).toEqual([
+      'eligibility',
+      'proof-score',
+      'source-kind',
+      'semantic-version',
+      'canonical-binding-tuple',
+      'canonical-supporting-record-identity-tuple',
+      'source-committed-lsn',
+    ])
     expect(entry?.leftValue).not.toBe(entry?.rightValue)
     expect(entry?.result).toBe('left-first')
     expect(entry?.leftCandidateId).not.toBe(entry?.rightCandidateId)

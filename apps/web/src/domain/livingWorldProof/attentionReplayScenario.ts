@@ -41,6 +41,7 @@ import {
   ATTENTION_RANKING_SNAPSHOT_LSN_MAX,
   ATTENTION_RANKING_SNAPSHOT_LSN_MIN,
 } from './attentionCandidatePolicy'
+import type { QuestCandidate } from './attentionQuestCandidateContracts'
 import { runAttentionQuestCandidatePrimePipeline } from './attentionReplay'
 import type { AttentionQuestCandidateWorldInput } from './attentionReplay'
 import type { AttentionReplayWallClockInput } from './attentionReplayResources'
@@ -106,6 +107,35 @@ export function buildAttentionReplayTwoQuestCandidateWorld(
     accessorContractVersion: ATTENTION_QUEST_CANDIDATE_ACCESSOR_VERSION,
     snapshotLsn: A1_RANKING_SNAPSHOT_LSN,
     candidates,
+  })
+  return Object.freeze({
+    snapshot,
+    request: Object.freeze({
+      accessorContractVersion: ATTENTION_QUEST_CANDIDATE_ACCESSOR_VERSION,
+      rankingSnapshotLsn: A1_RANKING_SNAPSHOT_LSN,
+    }),
+  })
+}
+
+/**
+ * B4 — a replay world over an explicit candidate list, in authored or reversed
+ * snapshot order. Every world built here threads the accessor-minted quest
+ * opening-coordinate sidecars through the full replay pass exactly as the
+ * committed worlds do: the accessor mints one sidecar per admitted candidate,
+ * the common boundary carries the collection under surface schema v2, and the
+ * one normalizer joins it one-to-one before ordering. Reversing the snapshot
+ * order must not move the resulting sequence, the sidecar collection, or the
+ * canonical premise bytes.
+ */
+export function buildAttentionReplayQuestCandidateWorld(
+  candidates: readonly QuestCandidate[],
+  order: 'authored' | 'reversed' = 'authored',
+): AttentionQuestCandidateWorldInput {
+  const ordered = order === 'authored' ? [...candidates] : [...candidates].reverse()
+  const snapshot = createProofQuestCandidateSnapshot({
+    accessorContractVersion: ATTENTION_QUEST_CANDIDATE_ACCESSOR_VERSION,
+    snapshotLsn: A1_RANKING_SNAPSHOT_LSN,
+    candidates: ordered,
   })
   return Object.freeze({
     snapshot,

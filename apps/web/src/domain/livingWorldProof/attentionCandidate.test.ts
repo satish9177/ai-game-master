@@ -5,7 +5,11 @@ import {
   createProofQuestCandidate,
   createProofQuestCandidateSnapshot,
 } from './attentionQuestCandidateContracts'
-import type { AttentionReadableQuestCandidateView, QuestCandidate } from './attentionQuestCandidateContracts'
+import type {
+  AttentionReadableQuestCandidateView,
+  AttentionReadableQuestOpeningCoordinateView,
+  QuestCandidate,
+} from './attentionQuestCandidateContracts'
 import { readAttentionReadableQuestCandidateViews } from './attentionQuestCandidateAccessor'
 import {
   ATTENTION_READABLE_SURFACE_SCHEMA_VERSION,
@@ -53,13 +57,20 @@ const A1_REQUEST = {
   rankingSnapshotLsn: A1_RANKING_SNAPSHOT_LSN,
 } as const
 
-/** The closed normalized field set, for exact-shape assertions. */
+/**
+ * The closed normalized quest-branch field set, for exact-shape assertions. B4
+ * adds the common `eligibility` flag (RN019 §9.1) and the numeric `openedAtLsn`
+ * joined one-to-one from the accessor-minted opening-coordinate sidecar (RN019
+ * §4.3); every other key is exactly the committed Stage A quest candidate field.
+ */
 const NORMALIZED_REQUIRED_KEYS = [
   'accessorContractVersion',
   'candidateId',
   'canonicalizationVersion',
+  'eligibility',
   'identitySchemaVersion',
   'legallyVisibleParties',
+  'openedAtLsn',
   'openingProvenanceId',
   'rankingSnapshotLsn',
   'sourceAuthority',
@@ -78,10 +89,37 @@ function readViews(candidates: readonly QuestCandidate[]): readonly AttentionRea
   return result.views
 }
 
-function buildSurface(views: readonly AttentionReadableQuestCandidateView[]): AttentionReadableSurface {
-  const result = constructAttentionReadableSurface(A1_REQUEST, views, Object.freeze([]))
+/** The accessor-minted opening-coordinate sidecars for the same fixtures (RN019 §4.3). */
+function readOpeningCoordinates(
+  candidates: readonly QuestCandidate[],
+): readonly AttentionReadableQuestOpeningCoordinateView[] {
+  const snapshot = createProofQuestCandidateSnapshot({
+    accessorContractVersion: ATTENTION_QUEST_CANDIDATE_ACCESSOR_VERSION,
+    snapshotLsn: A1_RANKING_SNAPSHOT_LSN,
+    candidates,
+  })
+  const result = readAttentionReadableQuestCandidateViews(snapshot, A1_REQUEST)
+  if (result.kind !== 'ok') throw new Error('expected the A1 accessor to admit these fixtures')
+  return result.openingCoordinateViews
+}
+
+function buildSurface(
+  views: readonly AttentionReadableQuestCandidateView[],
+  openingCoordinateViews: readonly AttentionReadableQuestOpeningCoordinateView[] = [],
+): AttentionReadableSurface {
+  const result = constructAttentionReadableSurface(
+    A1_REQUEST,
+    views,
+    openingCoordinateViews,
+    Object.freeze([]),
+  )
   if (result.kind !== 'ok') throw new Error('expected A2 to accept accessor-minted views')
   return result.surface
+}
+
+/** Build the surface for a candidate list through the one legal accessor path. */
+function buildSurfaceFor(candidates: readonly QuestCandidate[]): AttentionReadableSurface {
+  return buildSurface(readViews(candidates), readOpeningCoordinates(candidates))
 }
 
 function normalizedOrThrow(surface: AttentionReadableSurface) {
@@ -93,7 +131,7 @@ function normalizedOrThrow(surface: AttentionReadableSurface) {
 describe('A3 / D5 — normalization preserves exactly the legal, source-authoritative fields', () => {
   it('projects one accessor-minted view into one normalized candidate', () => {
     const scenario = buildAttentionQuestCandidateA1Scenario()
-    const attentionCandidates = normalizedOrThrow(buildSurface(scenario.views))
+    const attentionCandidates = normalizedOrThrow(buildSurface(scenario.views, scenario.openingCoordinateViews))
 
     expect(attentionCandidates).toHaveLength(1)
     expect(attentionCandidates.map((candidate) => candidate.sourceId)).toEqual([...scenario.expectedVisibleCandidateIds])
@@ -101,7 +139,7 @@ describe('A3 / D5 — normalization preserves exactly the legal, source-authorit
 
   it('carries the closed normalized field set and nothing else', () => {
     const scenario = buildAttentionQuestCandidateA1Scenario()
-    const [attentionCandidate] = normalizedOrThrow(buildSurface(scenario.views))
+    const [attentionCandidate] = normalizedOrThrow(buildSurface(scenario.views, scenario.openingCoordinateViews))
     if (attentionCandidate === undefined) throw new Error('expected one normalized candidate')
 
     expect(Object.keys(attentionCandidate).sort()).toEqual(
@@ -116,11 +154,17 @@ describe('A3 / D5 — normalization preserves exactly the legal, source-authorit
         sourceId: 'quest-public-open',
         openingProvenanceId: 'consequence-public-37',
       }),
+      eligibility: 'eligible',
       accessorContractVersion: ATTENTION_QUEST_CANDIDATE_ACCESSOR_VERSION,
       canonicalizationVersion: ATTENTION_CANDIDATE_CANONICALIZATION_VERSION,
       identitySchemaVersion: ATTENTION_CANDIDATE_IDENTITY_SCHEMA_VERSION,
       rankingSnapshotLsn: A1_RANKING_SNAPSHOT_LSN,
       openingProvenanceId: 'consequence-public-37',
+      // The one legally readable numeric opening coordinate, joined from the
+      // sidecar. It is a ranking coordinate, not an identity input: the
+      // `candidateId` above is computed without it and is byte-identical to
+      // committed Stage A.
+      openedAtLsn: 37,
       legallyVisibleParties: ['player', 'warden'],
       legallyVisiblePublicStakes: 'restore-public-trust',
       legallyVisibleOriginConsequenceReference: 'consequence-public-37',
@@ -128,7 +172,7 @@ describe('A3 / D5 — normalization preserves exactly the legal, source-authorit
   })
 
   it('omits an optional legal field that the view itself did not carry', () => {
-    const views = readViews([
+    const candidates = [
       createProofQuestCandidate({
         id: 'quest-minimal-open',
         type: 'reputation_repair',
@@ -139,23 +183,22 @@ describe('A3 / D5 — normalization preserves exactly the legal, source-authorit
         privateParties: ['informant'],
         secretOpeningDetail: 'private-belief-overturn',
       }),
-    ])
-    const [attentionCandidate] = normalizedOrThrow(buildSurface(views))
+    ]
+    const [attentionCandidate] = normalizedOrThrow(buildSurfaceFor(candidates))
     if (attentionCandidate === undefined) throw new Error('expected one normalized candidate')
 
     expect(Object.keys(attentionCandidate).sort()).toEqual([...NORMALIZED_REQUIRED_KEYS].sort())
   })
 
-  it('never carries a private field, a lifecycle value, or a raw opened-at coordinate', () => {
+  it('never carries a private field or a lifecycle value', () => {
     const scenario = buildAttentionQuestCandidateA1Scenario()
-    const bytes = canonicalSerialize(normalizedOrThrow(buildSurface(scenario.views)))
+    const bytes = canonicalSerialize(normalizedOrThrow(buildSurface(scenario.views, scenario.openingCoordinateViews)))
 
     for (const forbidden of [
       'privateParties',
       'secretOpeningDetail',
       'warden-confidant',
       'private-belief-overturn',
-      'openedAtLsn',
       'status',
       'resolved',
     ]) {
@@ -163,16 +206,31 @@ describe('A3 / D5 — normalization preserves exactly the legal, source-authorit
     }
   })
 
+  it('carries the numeric opening coordinate only from the accessor-minted sidecar, never a raw record read', () => {
+    const scenario = buildAttentionQuestCandidateA1Scenario()
+    const [candidate] = normalizedOrThrow(buildSurface(scenario.views, scenario.openingCoordinateViews))
+    if (candidate === undefined || candidate.sourceKind !== 'quest_candidate') {
+      throw new Error('expected one normalized quest candidate')
+    }
+
+    // The value equals the sidecar's, and the sidecar is the only place it was
+    // ever legally readable — the committed legal quest view carries no numeric
+    // coordinate at all, which is exactly why the sidecar exists.
+    expect(candidate.openedAtLsn).toBe(37)
+    expect(scenario.openingCoordinateViews.map((sidecar) => sidecar.openedAtLsn)).toEqual([37])
+    expect(Object.keys(scenario.views[0]!)).not.toContain('openedAtLsn')
+  })
+
   it('preserves source kind and source authority, so a derived source could never be mistaken for this one', () => {
     const scenario = buildAttentionQuestCandidateA1Scenario()
-    const [attentionCandidate] = normalizedOrThrow(buildSurface(scenario.views))
+    const [attentionCandidate] = normalizedOrThrow(buildSurface(scenario.views, scenario.openingCoordinateViews))
 
     expect(attentionCandidate?.sourceKind).toBe('quest_candidate')
     expect(attentionCandidate?.sourceAuthority).toBe('authoritative')
   })
 
   it('canonicalizes the legally-visible party collection into the stated order', () => {
-    const views = readViews([
+    const candidates = [
       createProofQuestCandidate({
         id: 'quest-unsorted-parties',
         type: 'reputation_repair',
@@ -181,15 +239,15 @@ describe('A3 / D5 — normalization preserves exactly the legal, source-authorit
         openingProvenance: { visibility: 'public', provenanceId: 'consequence-public-40' },
         legallyVisibleParties: ['warden', 'player', 'merchant'],
       }),
-    ])
-    const [attentionCandidate] = normalizedOrThrow(buildSurface(views))
+    ]
+    const [attentionCandidate] = normalizedOrThrow(buildSurfaceFor(candidates))
 
     expect(attentionCandidate?.legallyVisibleParties).toEqual(['merchant', 'player', 'warden'])
   })
 
   it('freezes every normalized candidate and the collection it returns', () => {
     const scenario = buildAttentionQuestCandidateA1Scenario()
-    const attentionCandidates = normalizedOrThrow(buildSurface(scenario.views))
+    const attentionCandidates = normalizedOrThrow(buildSurface(scenario.views, scenario.openingCoordinateViews))
 
     expect(Object.isFrozen(attentionCandidates)).toBe(true)
     expect(attentionCandidates.every((candidate) => Object.isFrozen(candidate))).toBe(true)
@@ -200,7 +258,7 @@ describe('A3 / D5 — normalization preserves exactly the legal, source-authorit
 describe('A3 — hidden-open and resolved candidates stay absent, exactly as A1/A2 left them', () => {
   it('normalizes only the publicly-opened candidate from the full A1 scenario', () => {
     const scenario = buildAttentionQuestCandidateA1Scenario()
-    const attentionCandidates = normalizedOrThrow(buildSurface(scenario.views))
+    const attentionCandidates = normalizedOrThrow(buildSurface(scenario.views, scenario.openingCoordinateViews))
     const bytes = canonicalSerialize(attentionCandidates)
 
     expect(attentionCandidates.map((candidate) => candidate.sourceId)).toEqual(['quest-public-open'])
@@ -227,7 +285,7 @@ describe('A3 — hidden-open and resolved candidates stay absent, exactly as A1/
       openingProvenance: { visibility: 'private' },
       legallyVisibleParties: ['player'],
     })
-    const surface = buildSurface(readViews([publicOpenCandidate, hiddenOpenCandidate]))
+    const surface = buildSurfaceFor([publicOpenCandidate, hiddenOpenCandidate])
 
     const rawBytesBefore = canonicalSerialize([publicOpenCandidate, hiddenOpenCandidate])
     const surfaceBytesBefore = canonicalSerialize(surface)
@@ -244,7 +302,7 @@ describe('A3 — hidden-open and resolved candidates stay absent, exactly as A1/
 
 describe('A3 / I1 — normalization is insertion-order independent and repeatable', () => {
   function buildThreeSurface(reversed: boolean): AttentionReadableSurface {
-    const views = readViews([
+    const candidates = [
       createProofQuestCandidate({
         id: 'quest-beta-open',
         type: 'reputation_repair',
@@ -269,8 +327,16 @@ describe('A3 / I1 — normalization is insertion-order independent and repeatabl
         openingProvenance: { visibility: 'public', provenanceId: 'consequence-public-g' },
         legallyVisibleParties: ['merchant'],
       }),
-    ])
-    return buildSurface(reversed ? [...views].reverse() : views)
+    ]
+    // Reverse the *arrival order of the views*, exactly as before. The sidecar
+    // collection stays in its canonical `candidateId` order — the A-prime
+    // boundary requires that of the sidecars specifically — so this still
+    // isolates view arrival order as the only thing that varies.
+    const views = readViews(candidates)
+    return buildSurface(
+      reversed ? [...views].reverse() : views,
+      readOpeningCoordinates(candidates),
+    )
   }
 
   it('mints identical candidate identities whatever order the views arrive in', () => {
@@ -313,6 +379,7 @@ describe('B1/A3 — duplicate and colliding identity inputs are typed refusals, 
       A1_REQUEST,
       readViews([duplicated, duplicated]),
       Object.freeze([]),
+      Object.freeze([]),
     )
 
     expect(result).toEqual({ kind: 'refused', reason: 'ambiguous-legal-identity' })
@@ -320,7 +387,7 @@ describe('B1/A3 — duplicate and colliding identity inputs are typed refusals, 
 
   it('gives distinct engine-owned candidates distinct identities', () => {
     const attentionCandidates = normalizedOrThrow(
-      buildSurface(readViews([
+      buildSurfaceFor([
         createProofQuestCandidate({
           id: 'quest-alpha-open',
           type: 'reputation_repair',
@@ -337,7 +404,7 @@ describe('B1/A3 — duplicate and colliding identity inputs are typed refusals, 
           openingProvenance: { visibility: 'public', provenanceId: 'consequence-public-b' },
           legallyVisibleParties: ['player'],
         }),
-      ])),
+      ]),
     )
 
     expect(new Set(attentionCandidates.map((candidate) => candidate.candidateId)).size).toBe(2)
@@ -371,7 +438,7 @@ describe('B1/A3 — duplicate and colliding identity inputs are typed refusals, 
    *    collision that somehow passed here could not silently produce an order.
    */
   it('mints an injective identity across a wider fixture family', () => {
-    const attentionCandidates = normalizedOrThrow(buildSurface(readViews([
+    const attentionCandidates = normalizedOrThrow(buildSurfaceFor([
       createProofQuestCandidate({
         id: 'quest-alpha-open',
         type: 'reputation_repair',
@@ -404,14 +471,14 @@ describe('B1/A3 — duplicate and colliding identity inputs are typed refusals, 
         openingProvenance: { visibility: 'declassified', provenanceId: 'declassification-d' },
         legallyVisibleParties: ['warden'],
       }),
-    ])))
+    ]))
 
     expect(attentionCandidates).toHaveLength(4)
     expect(new Set(attentionCandidates.map((candidate) => candidate.candidateId)).size).toBe(4)
   })
 
   it('normalizes an empty surface into an empty candidate set rather than refusing', () => {
-    const surface = buildSurface(readViews([
+    const surface = buildSurfaceFor([
       createProofQuestCandidate({
         id: 'quest-hidden-only',
         type: 'reputation_repair',
@@ -420,7 +487,7 @@ describe('B1/A3 — duplicate and colliding identity inputs are typed refusals, 
         openingProvenance: { visibility: 'unobserved' },
         legallyVisibleParties: ['player'],
       }),
-    ]))
+    ])
 
     expect(surface.questCandidateViews).toEqual([])
     expect(normalizeAttentionCandidates(surface)).toEqual({ kind: 'ok', attentionCandidates: [] })
@@ -467,6 +534,7 @@ describe('A3 — the ranking snapshot coordinate is a checked bounded integer', 
     const surface = constructAttentionReadableSurface(
       { ...request, surfaceSchemaVersion: ATTENTION_READABLE_SURFACE_SCHEMA_VERSION },
       views.views,
+      views.openingCoordinateViews,
       Object.freeze([]),
     )
     if (surface.kind !== 'ok') throw new Error('expected A2 to accept accessor-minted views')
@@ -526,7 +594,7 @@ describe('A3 — presentation eligibility is A-prime admission, and carries no e
    */
   it('normalizes exactly the A-prime membership set, one candidate per admitted view', () => {
     const scenario = buildAttentionQuestCandidateA1Scenario()
-    const surface = buildSurface(scenario.views)
+    const surface = buildSurface(scenario.views, scenario.openingCoordinateViews)
     const attentionCandidates = normalizedOrThrow(surface)
 
     expect(attentionCandidates).toHaveLength(surface.questCandidateViews.length)
@@ -539,21 +607,24 @@ describe('A3 — presentation eligibility is A-prime admission, and carries no e
     // resolved. Only the first is an A-prime member, so only it is normalized —
     // the other two are absent rather than present-and-flagged.
     const scenario = buildAttentionQuestCandidateA1Scenario()
-    const attentionCandidates = normalizedOrThrow(buildSurface(scenario.views))
+    const attentionCandidates = normalizedOrThrow(buildSurface(scenario.views, scenario.openingCoordinateViews))
 
     expect(attentionCandidates.map((candidate) => candidate.sourceId)).toEqual(['quest-public-open'])
-    expect(attentionCandidates.every((candidate) => candidate.openingProvenanceId.trim().length > 0)).toBe(true)
+    expect(attentionCandidates.every((candidate) => (
+      candidate.sourceKind === 'quest_candidate' && candidate.openingProvenanceId.trim().length > 0))).toBe(true)
   })
 
-  it('carries no eligibility, verdict, annotation, or gate field on the normalized candidate', () => {
+  it('carries the B4 common eligibility flag but no verdict, annotation, or gate field', () => {
     const scenario = buildAttentionQuestCandidateA1Scenario()
-    const [attentionCandidate] = normalizedOrThrow(buildSurface(scenario.views))
+    const [attentionCandidate] = normalizedOrThrow(buildSurface(scenario.views, scenario.openingCoordinateViews))
     if (attentionCandidate === undefined) throw new Error('expected one normalized candidate')
 
+    // B4 adds the common `eligibility` flag the nine-key order reads (RN019
+    // §9.2). A normalized candidate is eligible; ineligibility is a B5 ledger
+    // concern. No verdict/annotation/gate field leaks onto the candidate.
+    expect(attentionCandidate.eligibility).toBe('eligible')
     for (const absent of [
       'presentationEligibility',
-      'eligibility',
-      'eligible',
       'monitorVerdict',
       'narrativeAnnotation',
       'gate',

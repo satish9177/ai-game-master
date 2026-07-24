@@ -1,38 +1,60 @@
 import { describe, expect, it } from 'vitest'
 import { canonicalSerialize } from './canonicalSerialization'
-import { ATTENTION_QUEST_CANDIDATE_ACCESSOR_VERSION } from './attentionQuestCandidateContracts'
 import {
   ATTENTION_CANDIDATE_CANONICALIZATION_VERSION,
   ATTENTION_CANDIDATE_DERIVATION_CACHE_KEY_SCHEMA_VERSION,
   ATTENTION_CANDIDATE_IDENTITY_SCHEMA_VERSION,
   ATTENTION_CANDIDATE_ORDERING_VERSION,
   ATTENTION_CANDIDATE_RANKING_CACHE_KEY_SCHEMA_VERSION,
+  ATTENTION_NARRATIVE_PATTERN_IDENTITY_SCHEMA_VERSION,
+  ATTENTION_NARRATIVE_PATTERN_MONITOR_RULE_VERSION,
+  ATTENTION_PATTERN_CANDIDATE_IDENTITY_SCHEMA_VERSION,
   ATTENTION_RANKING_SNAPSHOT_LSN_MAX,
   ATTENTION_RANKING_SNAPSHOT_LSN_MIN,
 } from './attentionCandidatePolicy'
 import {
+  ATTENTION_CANDIDATE_DERIVATION_DEPENDENCY_FIELDS,
+  attentionCandidateDerivationDependencyBundle,
+  attentionCandidateRankingEligibilityResourceState,
   deriveAttentionCandidateDerivationCacheKey,
   deriveAttentionCandidateRankingCacheKey,
 } from './attentionCandidateCacheKey'
 import type {
-  AttentionCandidateDerivationCacheKeyInput,
-  AttentionCandidateRankingCacheKeyInput,
+  AttentionCandidateDerivationDependencyBundle,
+  AttentionCandidateRankingDependencyBundle,
+  AttentionCandidateRankingEligibilityResourceState,
 } from './attentionCandidateCacheKey'
+import {
+  ATTENTION_QUEST_CANDIDATE_ACCESSOR_VERSION,
+  ATTENTION_QUEST_OPENING_COORDINATE_CONTRACT_VERSION,
+  ATTENTION_READABLE_SURFACE_SCHEMA_VERSION,
+} from './attentionReadableBoundary'
+import { ATTENTION_PATTERN_EVIDENCE_ACCESSOR_VERSION } from './attentionPatternEvidenceContracts'
+import { ATTENTION_NARRATIVE_PATTERN_LIBRARY_HASH } from './attentionNarrativePatternLibrary'
+import {
+  ATTENTION_NARRATIVE_PATTERN_POLICY_HASH,
+  ATTENTION_STAGE_B_RESOURCE_POLICY_VERSION,
+} from './attentionNarrativePatternResourcePolicy'
+import { computeAttentionCandidateIdentity } from './attentionCandidateIdentity'
 
 /**
- * A3 — the two separately-keyed cache identities.
+ * A3 + B4 — the two separately-keyed cache identities, built from the explicit
+ * RN019 §9.3 dependency bundles.
  *
  * Source of authority — the read-only sibling research repository
- * `living-ai-worlds-research` @ fc0eadf0b8cdc672f2530d020376c8022f3bede1:
+ * `living-ai-worlds-research`:
  *
  *  - `docs/decisions/ADR-0013-consequence-bounded-narrative-attention.md`
  *    (D15 derivation and ranking caches are separately keyed; D6 identity is
  *    disjoint from ranking-only policy);
+ *  - `docs/research-notes/2026-07-23-019-narrative-pattern-instances-stage-b.md`
+ *    (RN019 §9.3 the closed thirteen-field derivation bundle, and the ranking
+ *    bundle's exactly three additional members);
  *  - `docs/experiments/attention-ledger-replay-v0.md`
  *    (§22 "Cache and policy-mismatch fixtures" K1-K3);
  *  - `docs/architecture/implementation-plans/`
- *    `2026-07-16-attention-ledger-replay-stage-a-implementation-plan.md`
- *    (§6 view-cache/ranking-cache identity sets, §9 A3 slice plan).
+ *    `2026-07-23-attention-ledger-replay-stage-b-implementation-plan.md`
+ *    (§4.5, §9 B4 obligations).
  *
  * This repository's own ADR-0013 ("World State & Event Log v0") is unrelated to
  * attention and is not the source of any rule asserted here.
@@ -41,267 +63,426 @@ import type {
  * is no store, lookup, eviction, or persistence in this slice, so "invalidation"
  * here means exactly what D15 needs it to mean — the key changes, so a later
  * cache keyed on it cannot return the stale value.
+ *
+ * **The load-bearing B4 correction.** Every dependency is passed in explicitly.
+ * A dependency a test cannot vary is a dependency the suite cannot prove
+ * participates, so each of the thirteen derivation fields and each ranking-only
+ * member is varied on its own below.
  */
 
-/**
- * The later-slice coordinates are opaque required inputs. These fixture values
- * stand in for versions A4/A5 will pin; nothing in the module defaults them.
- */
-const DERIVATION_INPUT: AttentionCandidateDerivationCacheKeyInput = {
-  accessorContractVersion: ATTENTION_QUEST_CANDIDATE_ACCESSOR_VERSION,
-  canonicalizationVersion: ATTENTION_CANDIDATE_CANONICALIZATION_VERSION,
-  identitySchemaVersion: ATTENTION_CANDIDATE_IDENTITY_SCHEMA_VERSION,
-  rankingSnapshotLsn: 41,
-  resourcePolicyVersion: 'fixture-resource-policy-v1',
-  openingProvenancePolicyVersion: 'fixture-opening-provenance-policy-v1',
+const SNAPSHOT_LSN = 41
+
+function derivation(
+  overrides: Partial<AttentionCandidateDerivationDependencyBundle> = {},
+): AttentionCandidateDerivationDependencyBundle {
+  return attentionCandidateDerivationDependencyBundle({ snapshotLsn: SNAPSHOT_LSN, ...overrides })
 }
 
-const RANKING_INPUT: AttentionCandidateRankingCacheKeyInput = {
-  ...DERIVATION_INPUT,
-  orderingVersion: ATTENTION_CANDIDATE_ORDERING_VERSION,
-  rankingPolicyHash: 'fixture-ranking-policy-hash-v1',
-  ledgerExposurePolicyVersion: 'fixture-ledger-exposure-policy-v1',
-  templateChannelPolicyVersion: 'fixture-template-channel-policy-v1',
-  relevantLedgerInputIdentity: 'fixture-ledger-input-identity-empty',
+function ranking(
+  overrides: Partial<AttentionCandidateRankingDependencyBundle> = {},
+): AttentionCandidateRankingDependencyBundle {
+  return {
+    derivation: derivation(),
+    orderingVersion: ATTENTION_CANDIDATE_ORDERING_VERSION,
+    rankingPolicyHash: 'fixture-ranking-policy-hash-v1',
+    eligibilityResourceState: attentionCandidateRankingEligibilityResourceState(),
+    ...overrides,
+  }
 }
 
-function derivationKey(overrides: Partial<AttentionCandidateDerivationCacheKeyInput> = {}): string {
-  const result = deriveAttentionCandidateDerivationCacheKey({ ...DERIVATION_INPUT, ...overrides })
-  if (result.kind !== 'ok') throw new Error('expected a derivation cache key, got ' + result.reason)
+function derivationKeyOrThrow(bundle: AttentionCandidateDerivationDependencyBundle): string {
+  const result = deriveAttentionCandidateDerivationCacheKey(bundle)
+  if (result.kind !== 'ok') throw new Error(`expected a derivation cache key, got ${result.reason}`)
   return result.derivationCacheKey
 }
 
-function rankingKey(overrides: Partial<AttentionCandidateRankingCacheKeyInput> = {}): string {
-  const result = deriveAttentionCandidateRankingCacheKey({ ...RANKING_INPUT, ...overrides })
-  if (result.kind !== 'ok') throw new Error('expected a ranking cache key, got ' + result.reason)
-  return result.rankingCacheKey
+function rankingKeysOrThrow(bundle: AttentionCandidateRankingDependencyBundle): {
+  readonly derivationCacheKey: string
+  readonly rankingCacheKey: string
+} {
+  const result = deriveAttentionCandidateRankingCacheKey(bundle)
+  if (result.kind !== 'ok') throw new Error(`expected a ranking cache key, got ${result.reason}`)
+  return { derivationCacheKey: result.derivationCacheKey, rankingCacheKey: result.rankingCacheKey }
 }
 
-describe('A3 / D15 — the two keys are versioned, distinct, and deterministic', () => {
-  it('prefixes each key with its own schema version', () => {
-    const derivation = deriveAttentionCandidateDerivationCacheKey(DERIVATION_INPUT)
-    const ranking = deriveAttentionCandidateRankingCacheKey(RANKING_INPUT)
+/**
+ * The one candidate identity every cache variation must leave alone (D6): cache
+ * and ranking policy are not identity inputs.
+ */
+const PINNED_CANDIDATE_IDENTITY = computeAttentionCandidateIdentity({
+  sourceKind: 'quest_candidate',
+  sourceId: 'quest-public-open',
+  openingProvenanceId: 'consequence-public-37',
+})
 
-    expect(derivation).toMatchObject({
-      kind: 'ok',
-      cacheKeySchemaVersion: ATTENTION_CANDIDATE_DERIVATION_CACHE_KEY_SCHEMA_VERSION,
-    })
-    expect(ranking).toMatchObject({
-      kind: 'ok',
-      cacheKeySchemaVersion: ATTENTION_CANDIDATE_RANKING_CACHE_KEY_SCHEMA_VERSION,
-    })
-    expect(derivationKey()).toMatch(/^attention-candidate-derivation-cache-key-v1:fnv1a64-v1:[0-9a-f]{16}$/)
-    expect(rankingKey()).toMatch(/^attention-candidate-ranking-cache-key-v1:fnv1a64-v1:[0-9a-f]{16}$/)
-    expect(ATTENTION_CANDIDATE_DERIVATION_CACHE_KEY_SCHEMA_VERSION)
-      .not.toBe(ATTENTION_CANDIDATE_RANKING_CACHE_KEY_SCHEMA_VERSION)
-    expect(derivationKey()).not.toBe(rankingKey())
+/**
+ * The thirteen derivation dependencies, each with a distinct alternative value.
+ * Kept as an explicit table so a field added to the bundle without a case here
+ * fails the completeness assertion below rather than going unwitnessed.
+ */
+const DERIVATION_VARIATIONS: readonly (readonly [
+  keyof AttentionCandidateDerivationDependencyBundle,
+  Partial<AttentionCandidateDerivationDependencyBundle>,
+])[] = [
+  ['questAccessorContractVersion', { questAccessorContractVersion: 'fixture-quest-accessor-v2' }],
+  [
+    'questOpeningCoordinateContractVersion',
+    { questOpeningCoordinateContractVersion: 'attention-quest-opening-coordinate-v2' },
+  ],
+  [
+    'patternEvidenceAccessorContractVersion',
+    { patternEvidenceAccessorContractVersion: 'fixture-pattern-evidence-accessor-v2' },
+  ],
+  [
+    'attentionReadableSurfaceSchemaVersion',
+    { attentionReadableSurfaceSchemaVersion: 'attention-readable-surface-schema-v1' },
+  ],
+  ['snapshotLsn', { snapshotLsn: SNAPSHOT_LSN + 1 }],
+  ['patternLibraryHash', { patternLibraryHash: 'fixture-pattern-library-hash-v2' }],
+  ['patternPolicyHash', { patternPolicyHash: 'fixture-pattern-policy-hash-v2' }],
+  ['monitorRuleVersion', { monitorRuleVersion: 'fixture-monitor-rule-v2' }],
+  ['canonicalizationVersion', { canonicalizationVersion: 'attention-candidate-canonicalization-v2' }],
+  [
+    'questCandidateIdentitySchemaVersion',
+    { questCandidateIdentitySchemaVersion: 'attention-candidate-identity-schema-v2' },
+  ],
+  [
+    'patternInstanceIdentitySchemaVersion',
+    { patternInstanceIdentitySchemaVersion: 'fixture-pattern-instance-identity-v2' },
+  ],
+  [
+    'patternCandidateIdentitySchemaVersion',
+    { patternCandidateIdentitySchemaVersion: 'attention-pattern-candidate-identity-schema-v2' },
+  ],
+  ['resourcePolicyVersion', { resourcePolicyVersion: 'fixture-resource-policy-v2' }],
+]
+
+/**
+ * The derivation fields this build validates against a pin. Varying one of them
+ * is *refused* rather than keyed — the stronger K3 outcome, asserted separately
+ * below, because this rig cannot honestly key a derivation to a canonical,
+ * identity, surface, or sidecar rule it does not implement.
+ */
+const PINNED_DERIVATION_FIELDS: readonly (keyof AttentionCandidateDerivationDependencyBundle)[] = [
+  'questOpeningCoordinateContractVersion',
+  'attentionReadableSurfaceSchemaVersion',
+  'canonicalizationVersion',
+  'questCandidateIdentitySchemaVersion',
+  'patternCandidateIdentitySchemaVersion',
+]
+
+describe('B4 / RN019 §9.3 — the derivation bundle is the closed thirteen-field set', () => {
+  it('declares exactly the thirteen fields, in RN019\'s declared order', () => {
+    expect(ATTENTION_CANDIDATE_DERIVATION_DEPENDENCY_FIELDS).toEqual([
+      'questAccessorContractVersion',
+      'questOpeningCoordinateContractVersion',
+      'patternEvidenceAccessorContractVersion',
+      'attentionReadableSurfaceSchemaVersion',
+      'snapshotLsn',
+      'patternLibraryHash',
+      'patternPolicyHash',
+      'monitorRuleVersion',
+      'canonicalizationVersion',
+      'questCandidateIdentitySchemaVersion',
+      'patternInstanceIdentitySchemaVersion',
+      'patternCandidateIdentitySchemaVersion',
+      'resourcePolicyVersion',
+    ])
+    expect(ATTENTION_CANDIDATE_DERIVATION_DEPENDENCY_FIELDS).toHaveLength(13)
   })
 
-  it('embeds the derivation key in the ranking result, so the two stay joined', () => {
-    const ranking = deriveAttentionCandidateRankingCacheKey(RANKING_INPUT)
-    if (ranking.kind !== 'ok') throw new Error('expected a ranking cache key')
+  it('builds a default bundle from the pinned constants, with no field left ambient', () => {
+    expect(derivation()).toEqual({
+      questAccessorContractVersion: ATTENTION_QUEST_CANDIDATE_ACCESSOR_VERSION,
+      questOpeningCoordinateContractVersion: ATTENTION_QUEST_OPENING_COORDINATE_CONTRACT_VERSION,
+      patternEvidenceAccessorContractVersion: ATTENTION_PATTERN_EVIDENCE_ACCESSOR_VERSION,
+      attentionReadableSurfaceSchemaVersion: ATTENTION_READABLE_SURFACE_SCHEMA_VERSION,
+      snapshotLsn: SNAPSHOT_LSN,
+      patternLibraryHash: ATTENTION_NARRATIVE_PATTERN_LIBRARY_HASH,
+      patternPolicyHash: ATTENTION_NARRATIVE_PATTERN_POLICY_HASH,
+      monitorRuleVersion: ATTENTION_NARRATIVE_PATTERN_MONITOR_RULE_VERSION,
+      canonicalizationVersion: ATTENTION_CANDIDATE_CANONICALIZATION_VERSION,
+      questCandidateIdentitySchemaVersion: ATTENTION_CANDIDATE_IDENTITY_SCHEMA_VERSION,
+      patternInstanceIdentitySchemaVersion: ATTENTION_NARRATIVE_PATTERN_IDENTITY_SCHEMA_VERSION,
+      patternCandidateIdentitySchemaVersion: ATTENTION_PATTERN_CANDIDATE_IDENTITY_SCHEMA_VERSION,
+      resourcePolicyVersion: ATTENTION_STAGE_B_RESOURCE_POLICY_VERSION,
+    })
+    expect(Object.isFrozen(derivation())).toBe(true)
+  })
 
-    expect(ranking.derivationCacheKey).toBe(derivationKey())
+  it('bumps the derivation and ranking key schemas to their explicit v2 strings', () => {
+    expect(ATTENTION_CANDIDATE_DERIVATION_CACHE_KEY_SCHEMA_VERSION)
+      .toBe('attention-candidate-derivation-cache-key-v2')
+    expect(ATTENTION_CANDIDATE_RANKING_CACHE_KEY_SCHEMA_VERSION)
+      .toBe('attention-candidate-ranking-cache-key-v2')
+  })
+
+  it('has a variation case for every declared field, so none is unwitnessed', () => {
+    expect(DERIVATION_VARIATIONS.map(([field]) => field).sort())
+      .toEqual([...ATTENTION_CANDIDATE_DERIVATION_DEPENDENCY_FIELDS].sort())
+  })
+})
+
+describe('B4 / K1 — every derivation dependency independently moves both keys', () => {
+  const baselineDerivation = derivationKeyOrThrow(derivation())
+  const baselineRanking = rankingKeysOrThrow(ranking())
+
+  it.each(DERIVATION_VARIATIONS.filter(([field]) => !PINNED_DERIVATION_FIELDS.includes(field)))(
+    'varying %s alone changes the derivation key and, by embedding, the ranking key',
+    (_field, override) => {
+      const variedDerivation = derivationKeyOrThrow(derivation(override))
+      const variedRanking = rankingKeysOrThrow(ranking({ derivation: derivation(override) }))
+
+      expect(variedDerivation).not.toBe(baselineDerivation)
+      expect(variedRanking.derivationCacheKey).toBe(variedDerivation)
+      expect(variedRanking.rankingCacheKey).not.toBe(baselineRanking.rankingCacheKey)
+    },
+  )
+
+  it.each(DERIVATION_VARIATIONS.filter(([field]) => PINNED_DERIVATION_FIELDS.includes(field)))(
+    'varying the pinned %s refuses rather than keying to a rule this build does not implement',
+    (_field, override) => {
+      expect(deriveAttentionCandidateDerivationCacheKey(derivation(override)).kind).toBe('refused')
+      expect(deriveAttentionCandidateRankingCacheKey(ranking({ derivation: derivation(override) })).kind)
+        .toBe('refused')
+    },
+  )
+
+  it('leaves source and candidate identity untouched by every derivation variation', () => {
+    for (const [, override] of DERIVATION_VARIATIONS) {
+      // Building the bundle cannot reach identity: the identity function is not
+      // given a bundle at all, and its canonical input names no cache field.
+      void derivation(override)
+      expect(computeAttentionCandidateIdentity({
+        sourceKind: 'quest_candidate',
+        sourceId: 'quest-public-open',
+        openingProvenanceId: 'consequence-public-37',
+      })).toBe(PINNED_CANDIDATE_IDENTITY)
+    }
+  })
+})
+
+describe('B4 / K2 — every ranking-only dependency moves only the ranking key', () => {
+  const baseline = rankingKeysOrThrow(ranking())
+
+  const RANKING_ONLY_VARIATIONS: readonly (readonly [
+    string,
+    Partial<AttentionCandidateRankingDependencyBundle>,
+  ])[] = [
+    ['rankingPolicyHash', { rankingPolicyHash: 'fixture-ranking-policy-hash-v2' }],
+    [
+      'eligibilityResourceState.mixedFamilyCandidateCap',
+      {
+        eligibilityResourceState: attentionCandidateRankingEligibilityResourceState({
+          mixedFamilyCandidateCap: 3,
+        }),
+      },
+    ],
+    [
+      'eligibilityResourceState.retentionClassOrder',
+      {
+        eligibilityResourceState: attentionCandidateRankingEligibilityResourceState({
+          retentionClassOrder: ['active', 'satisfied', 'stalled', 'violated', 'expired', 'abandoned'],
+        }),
+      },
+    ],
+    [
+      'eligibilityResourceState.rankableClasses',
+      {
+        eligibilityResourceState: attentionCandidateRankingEligibilityResourceState({
+          rankableClasses: ['satisfied', 'active'],
+        }),
+      },
+    ],
+  ]
+
+  it.each(RANKING_ONLY_VARIATIONS)(
+    'varying %s changes the ranking key but never the derivation key',
+    (_label, override) => {
+      const varied = rankingKeysOrThrow(ranking(override))
+
+      expect(varied.rankingCacheKey).not.toBe(baseline.rankingCacheKey)
+      expect(varied.derivationCacheKey).toBe(baseline.derivationCacheKey)
+    },
+  )
+
+  it('keeps every ranking-only coordinate out of the derivation key material entirely', () => {
+    // The derivation key is a pure function of the derivation bundle: it is not
+    // even given the ranking bundle, so a ranking-only change structurally
+    // cannot reach it.
+    expect(deriveAttentionCandidateDerivationCacheKey.length).toBe(1)
+    for (const [, override] of RANKING_ONLY_VARIATIONS) {
+      expect(rankingKeysOrThrow(ranking(override)).derivationCacheKey)
+        .toBe(derivationKeyOrThrow(derivation()))
+    }
+  })
+
+  it('carries no B5-only exposure, cooldown, retirement, ledger, or template dependency', () => {
+    const bundle = ranking()
+
+    expect(Object.keys(bundle).sort())
+      .toEqual(['derivation', 'eligibilityResourceState', 'orderingVersion', 'rankingPolicyHash'])
+    const bytes = canonicalSerialize(bundle).toLowerCase()
+    for (const forbidden of [
+      'exposure',
+      'cooldown',
+      'retirement',
+      'ledger',
+      'template',
+      'presentation',
+      'relevantledgerinputidentity',
+    ]) {
+      expect({ forbidden, present: bytes.includes(forbidden) }).toEqual({ forbidden, present: false })
+    }
+  })
+
+  it('refuses an unsupported ordering version rather than reinterpreting a v1 key as v2', () => {
+    expect(deriveAttentionCandidateRankingCacheKey(ranking({ orderingVersion: 'attention-candidate-ordering-v1' })))
+      .toEqual({ kind: 'refused', reason: 'unsupported-ordering-version' })
+    expect(ATTENTION_CANDIDATE_ORDERING_VERSION).toBe('attention-candidate-ordering-v2')
+  })
+})
+
+describe('B4 / K3 — missing or unsupported bundle material refuses, never approximates', () => {
+  const MISSING_CASES: readonly (readonly [
+    Partial<AttentionCandidateDerivationDependencyBundle>,
+    string,
+  ])[] = [
+    [{ questAccessorContractVersion: '' }, 'missing-quest-accessor-contract-version'],
+    [{ questOpeningCoordinateContractVersion: '' }, 'missing-quest-opening-coordinate-contract-version'],
+    [{ patternEvidenceAccessorContractVersion: '' }, 'missing-pattern-evidence-accessor-contract-version'],
+    [{ attentionReadableSurfaceSchemaVersion: '' }, 'missing-attention-readable-surface-schema-version'],
+    [{ patternLibraryHash: '' }, 'missing-pattern-library-hash'],
+    [{ patternPolicyHash: '' }, 'missing-pattern-policy-hash'],
+    [{ monitorRuleVersion: '' }, 'missing-monitor-rule-version'],
+    [{ canonicalizationVersion: '' }, 'missing-canonicalization-version'],
+    [{ questCandidateIdentitySchemaVersion: '' }, 'missing-quest-candidate-identity-schema-version'],
+    [{ patternInstanceIdentitySchemaVersion: '' }, 'missing-pattern-instance-identity-schema-version'],
+    [{ patternCandidateIdentitySchemaVersion: '' }, 'missing-pattern-candidate-identity-schema-version'],
+    [{ resourcePolicyVersion: '' }, 'missing-resource-policy-version'],
+  ]
+
+  it.each(MISSING_CASES)('refuses the missing field in %o with its own typed reason', (override, reason) => {
+    expect(deriveAttentionCandidateDerivationCacheKey(derivation(override)))
+      .toEqual({ kind: 'refused', reason })
+  })
+
+  it('refuses a missing snapshot coordinate and an unsafe one, without clamping or repairing', () => {
+    expect(deriveAttentionCandidateDerivationCacheKey(
+      derivation({ snapshotLsn: undefined as unknown as number }),
+    )).toEqual({ kind: 'refused', reason: 'missing-snapshot-lsn' })
+
+    for (const unsafe of [-1, 1.5, 1e21, Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]) {
+      expect(deriveAttentionCandidateDerivationCacheKey(derivation({ snapshotLsn: unsafe })))
+        .toEqual({ kind: 'refused', reason: 'snapshot-lsn-out-of-range' })
+    }
+  })
+
+  it('accepts both pinned snapshot boundary values and does not conflate them', () => {
+    const atMin = derivationKeyOrThrow(derivation({ snapshotLsn: ATTENTION_RANKING_SNAPSHOT_LSN_MIN }))
+    const atMax = derivationKeyOrThrow(derivation({ snapshotLsn: ATTENTION_RANKING_SNAPSHOT_LSN_MAX }))
+
+    expect(atMin).not.toBe(atMax)
+  })
+
+  it('refuses a missing ranking-policy hash and a missing eligibility/resource state', () => {
+    expect(deriveAttentionCandidateRankingCacheKey(ranking({ rankingPolicyHash: '' })))
+      .toEqual({ kind: 'refused', reason: 'missing-ranking-policy-hash' })
+    expect(deriveAttentionCandidateRankingCacheKey(ranking({
+      eligibilityResourceState: undefined as unknown as AttentionCandidateRankingEligibilityResourceState,
+    }))).toEqual({ kind: 'refused', reason: 'missing-eligibility-resource-state' })
+  })
+
+  it('refuses deterministically, with the same reason on every run', () => {
+    const reasons = new Set<string>()
+    for (let run = 0; run < 5; run += 1) {
+      const result = deriveAttentionCandidateDerivationCacheKey(derivation({ resourcePolicyVersion: '' }))
+      reasons.add(result.kind === 'refused' ? result.reason : 'ok')
+    }
+
+    expect([...reasons]).toEqual(['missing-resource-policy-version'])
+  })
+})
+
+describe('A3 / D15 — the two keys are versioned, distinct, deterministic, and whole-match only', () => {
+  it('prefixes each key with its own schema version', () => {
+    const keys = rankingKeysOrThrow(ranking())
+
+    expect(keys.derivationCacheKey.startsWith(`${ATTENTION_CANDIDATE_DERIVATION_CACHE_KEY_SCHEMA_VERSION}:`))
+      .toBe(true)
+    expect(keys.rankingCacheKey.startsWith(`${ATTENTION_CANDIDATE_RANKING_CACHE_KEY_SCHEMA_VERSION}:`))
+      .toBe(true)
+    expect(keys.derivationCacheKey).not.toBe(keys.rankingCacheKey)
+  })
+
+  it('is insertion-order independent: bundle literal property order cannot reach the bytes', () => {
+    const forward: AttentionCandidateDerivationDependencyBundle = {
+      questAccessorContractVersion: ATTENTION_QUEST_CANDIDATE_ACCESSOR_VERSION,
+      questOpeningCoordinateContractVersion: ATTENTION_QUEST_OPENING_COORDINATE_CONTRACT_VERSION,
+      patternEvidenceAccessorContractVersion: ATTENTION_PATTERN_EVIDENCE_ACCESSOR_VERSION,
+      attentionReadableSurfaceSchemaVersion: ATTENTION_READABLE_SURFACE_SCHEMA_VERSION,
+      snapshotLsn: SNAPSHOT_LSN,
+      patternLibraryHash: ATTENTION_NARRATIVE_PATTERN_LIBRARY_HASH,
+      patternPolicyHash: ATTENTION_NARRATIVE_PATTERN_POLICY_HASH,
+      monitorRuleVersion: ATTENTION_NARRATIVE_PATTERN_MONITOR_RULE_VERSION,
+      canonicalizationVersion: ATTENTION_CANDIDATE_CANONICALIZATION_VERSION,
+      questCandidateIdentitySchemaVersion: ATTENTION_CANDIDATE_IDENTITY_SCHEMA_VERSION,
+      patternInstanceIdentitySchemaVersion: ATTENTION_NARRATIVE_PATTERN_IDENTITY_SCHEMA_VERSION,
+      patternCandidateIdentitySchemaVersion: ATTENTION_PATTERN_CANDIDATE_IDENTITY_SCHEMA_VERSION,
+      resourcePolicyVersion: ATTENTION_STAGE_B_RESOURCE_POLICY_VERSION,
+    }
+    const reversed: AttentionCandidateDerivationDependencyBundle = {
+      resourcePolicyVersion: ATTENTION_STAGE_B_RESOURCE_POLICY_VERSION,
+      patternCandidateIdentitySchemaVersion: ATTENTION_PATTERN_CANDIDATE_IDENTITY_SCHEMA_VERSION,
+      patternInstanceIdentitySchemaVersion: ATTENTION_NARRATIVE_PATTERN_IDENTITY_SCHEMA_VERSION,
+      questCandidateIdentitySchemaVersion: ATTENTION_CANDIDATE_IDENTITY_SCHEMA_VERSION,
+      canonicalizationVersion: ATTENTION_CANDIDATE_CANONICALIZATION_VERSION,
+      monitorRuleVersion: ATTENTION_NARRATIVE_PATTERN_MONITOR_RULE_VERSION,
+      patternPolicyHash: ATTENTION_NARRATIVE_PATTERN_POLICY_HASH,
+      patternLibraryHash: ATTENTION_NARRATIVE_PATTERN_LIBRARY_HASH,
+      snapshotLsn: SNAPSHOT_LSN,
+      attentionReadableSurfaceSchemaVersion: ATTENTION_READABLE_SURFACE_SCHEMA_VERSION,
+      patternEvidenceAccessorContractVersion: ATTENTION_PATTERN_EVIDENCE_ACCESSOR_VERSION,
+      questOpeningCoordinateContractVersion: ATTENTION_QUEST_OPENING_COORDINATE_CONTRACT_VERSION,
+      questAccessorContractVersion: ATTENTION_QUEST_CANDIDATE_ACCESSOR_VERSION,
+    }
+
+    expect(derivationKeyOrThrow(reversed)).toBe(derivationKeyOrThrow(forward))
   })
 
   it('produces byte-identical keys across repeated independent runs', () => {
     const derivationKeys = new Set<string>()
     const rankingKeys = new Set<string>()
-
     for (let run = 0; run < 5; run += 1) {
-      derivationKeys.add(derivationKey())
-      rankingKeys.add(rankingKey())
+      const keys = rankingKeysOrThrow(ranking())
+      derivationKeys.add(keys.derivationCacheKey)
+      rankingKeys.add(keys.rankingCacheKey)
     }
 
     expect(derivationKeys.size).toBe(1)
     expect(rankingKeys.size).toBe(1)
   })
 
-  it('ignores the order the input object literal was written in', () => {
-    const reordered: AttentionCandidateDerivationCacheKeyInput = {
-      openingProvenancePolicyVersion: DERIVATION_INPUT.openingProvenancePolicyVersion,
-      resourcePolicyVersion: DERIVATION_INPUT.resourcePolicyVersion,
-      rankingSnapshotLsn: DERIVATION_INPUT.rankingSnapshotLsn,
-      identitySchemaVersion: DERIVATION_INPUT.identitySchemaVersion,
-      canonicalizationVersion: DERIVATION_INPUT.canonicalizationVersion,
-      accessorContractVersion: DERIVATION_INPUT.accessorContractVersion,
-    }
-    const reorderedRanking: AttentionCandidateRankingCacheKeyInput = {
-      relevantLedgerInputIdentity: RANKING_INPUT.relevantLedgerInputIdentity,
-      templateChannelPolicyVersion: RANKING_INPUT.templateChannelPolicyVersion,
-      ledgerExposurePolicyVersion: RANKING_INPUT.ledgerExposurePolicyVersion,
-      rankingPolicyHash: RANKING_INPUT.rankingPolicyHash,
-      orderingVersion: RANKING_INPUT.orderingVersion,
-      ...reordered,
-    }
+  it('matches whole or misses: no partial, approximate, or prefix-matched reuse exists', () => {
+    const baseline = derivationKeyOrThrow(derivation())
+    const varied = derivationKeyOrThrow(derivation({ snapshotLsn: SNAPSHOT_LSN + 1 }))
 
-    expect(deriveAttentionCandidateDerivationCacheKey(reordered)).toEqual(
-      deriveAttentionCandidateDerivationCacheKey(DERIVATION_INPUT),
-    )
-    expect(deriveAttentionCandidateRankingCacheKey(reorderedRanking)).toEqual(
-      deriveAttentionCandidateRankingCacheKey(RANKING_INPUT),
-    )
+    // Both carry the schema prefix and nothing else in common — a prefix match
+    // is never a key match, and no API here exposes a partial lookup to try one.
+    expect(varied.startsWith(ATTENTION_CANDIDATE_DERIVATION_CACHE_KEY_SCHEMA_VERSION)).toBe(true)
+    expect(baseline.startsWith(ATTENTION_CANDIDATE_DERIVATION_CACHE_KEY_SCHEMA_VERSION)).toBe(true)
+    expect(varied).not.toBe(baseline)
+    expect(varied.startsWith(baseline)).toBe(false)
+    expect(baseline.startsWith(varied)).toBe(false)
   })
 
-  it('does not mutate the inputs it is given', () => {
-    const derivationBytes = canonicalSerialize(DERIVATION_INPUT)
-    const rankingBytes = canonicalSerialize(RANKING_INPUT)
+  it('mutates no input bundle', () => {
+    const bundle = derivation()
+    const before = canonicalSerialize(bundle)
 
-    deriveAttentionCandidateDerivationCacheKey(DERIVATION_INPUT)
-    deriveAttentionCandidateRankingCacheKey(RANKING_INPUT)
+    derivationKeyOrThrow(bundle)
+    rankingKeysOrThrow(ranking({ derivation: bundle }))
 
-    expect(canonicalSerialize(DERIVATION_INPUT)).toBe(derivationBytes)
-    expect(canonicalSerialize(RANKING_INPUT)).toBe(rankingBytes)
-  })
-})
-
-describe('A3 / K1 — every derivation dependency invalidates both keys', () => {
-  const derivationDependencies: [string, Partial<AttentionCandidateDerivationCacheKeyInput>][] = [
-    ['accessor-contract version', { accessorContractVersion: 'attention-quest-candidate-accessor-v2' }],
-    ['ranking snapshot coordinate', { rankingSnapshotLsn: 42 }],
-    ['resource-policy version', { resourcePolicyVersion: 'fixture-resource-policy-v2' }],
-    ['opening-provenance-policy version', { openingProvenancePolicyVersion: 'fixture-opening-provenance-policy-v2' }],
-  ]
-
-  it.each(derivationDependencies)('changing the %s invalidates the derivation key', (_label, override) => {
-    expect(derivationKey(override)).not.toBe(derivationKey())
-  })
-
-  it.each(derivationDependencies)('changing the %s also invalidates the ranking key', (_label, override) => {
-    expect(rankingKey(override)).not.toBe(rankingKey())
-  })
-})
-
-describe('A3 / K2 — a ranking-only change invalidates ranking, never derivation or identity', () => {
-  const rankingOnlyDependencies: [string, Partial<AttentionCandidateRankingCacheKeyInput>][] = [
-    ['ranking-policy hash', { rankingPolicyHash: 'fixture-ranking-policy-hash-v2' }],
-    ['ledger/exposure-policy version', { ledgerExposurePolicyVersion: 'fixture-ledger-exposure-policy-v2' }],
-    ['template/channel-policy version', { templateChannelPolicyVersion: 'fixture-template-channel-policy-v2' }],
-    ['relevant-ledger-input identity', { relevantLedgerInputIdentity: 'fixture-ledger-input-identity-one-append' }],
-  ]
-
-  it.each(rankingOnlyDependencies)('changing the %s invalidates the ranking key', (_label, override) => {
-    expect(rankingKey(override)).not.toBe(rankingKey())
-  })
-
-  it.each(rankingOnlyDependencies)('changing the %s leaves the derivation key untouched', (_label, override) => {
-    const ranking = deriveAttentionCandidateRankingCacheKey({ ...RANKING_INPUT, ...override })
-    if (ranking.kind !== 'ok') throw new Error('expected a ranking cache key')
-
-    expect(ranking.derivationCacheKey).toBe(derivationKey())
-  })
-
-  it('keeps ranking-only coordinates out of the derivation key material entirely', () => {
-    // The derivation input type has no field for any of them; this asserts the
-    // consequence, so a later widening of that type is caught here too.
-    expect(Object.keys(DERIVATION_INPUT).sort()).toEqual([
-      'accessorContractVersion',
-      'canonicalizationVersion',
-      'identitySchemaVersion',
-      'openingProvenancePolicyVersion',
-      'rankingSnapshotLsn',
-      'resourcePolicyVersion',
-    ])
-  })
-})
-
-describe('A3 / K3 — missing or unsupported key material refuses, never approximates', () => {
-  const missingCases: [string, Partial<AttentionCandidateRankingCacheKeyInput>, string][] = [
-    ['accessor-contract version', { accessorContractVersion: '' }, 'missing-accessor-contract-version'],
-    ['canonicalization version', { canonicalizationVersion: '   ' }, 'missing-canonicalization-version'],
-    ['identity-schema version', { identitySchemaVersion: '' }, 'missing-identity-schema-version'],
-    ['resource-policy version', { resourcePolicyVersion: '' }, 'missing-resource-policy-version'],
-    ['opening-provenance-policy version', { openingProvenancePolicyVersion: '  ' }, 'missing-opening-provenance-policy-version'],
-    ['ordering version', { orderingVersion: '' }, 'missing-ordering-version'],
-    ['ranking-policy hash', { rankingPolicyHash: '' }, 'missing-ranking-policy-hash'],
-    ['ledger/exposure-policy version', { ledgerExposurePolicyVersion: '' }, 'missing-ledger-exposure-policy-version'],
-    ['template/channel-policy version', { templateChannelPolicyVersion: '' }, 'missing-template-channel-policy-version'],
-    ['relevant-ledger-input identity', { relevantLedgerInputIdentity: '' }, 'missing-relevant-ledger-input-identity'],
-  ]
-
-  it.each(missingCases)('refuses when the %s is absent', (_label, override, reason) => {
-    expect(deriveAttentionCandidateRankingCacheKey({ ...RANKING_INPUT, ...override }))
-      .toEqual({ kind: 'refused', reason })
-  })
-
-  const unsupportedCases: [string, Partial<AttentionCandidateRankingCacheKeyInput>, string][] = [
-    ['canonicalization version', { canonicalizationVersion: 'attention-candidate-canonicalization-v2' }, 'unsupported-canonicalization-version'],
-    ['identity-schema version', { identitySchemaVersion: 'attention-candidate-identity-schema-v2' }, 'unsupported-identity-schema-version'],
-    ['ordering version', { orderingVersion: 'attention-candidate-ordering-v2' }, 'unsupported-ordering-version'],
-  ]
-
-  it.each(unsupportedCases)('refuses a %s this build does not implement', (_label, override, reason) => {
-    expect(deriveAttentionCandidateRankingCacheKey({ ...RANKING_INPUT, ...override }))
-      .toEqual({ kind: 'refused', reason })
-  })
-
-  it('refuses the whole ranking key when a derivation dependency is missing', () => {
-    // A ranking key must never be mintable over an unkeyable derivation.
-    expect(deriveAttentionCandidateRankingCacheKey({ ...RANKING_INPUT, resourcePolicyVersion: '' }))
-      .toEqual({ kind: 'refused', reason: 'missing-resource-policy-version' })
-  })
-
-  it('refuses deterministically, with the same reason on every run', () => {
-    const reasons = new Set<string>()
-
-    for (let run = 0; run < 5; run += 1) {
-      const result = deriveAttentionCandidateRankingCacheKey({ ...RANKING_INPUT, rankingPolicyHash: '' })
-      reasons.add(result.kind === 'refused' ? result.reason : 'unexpected-ok')
-    }
-
-    expect([...reasons]).toEqual(['missing-ranking-policy-hash'])
-  })
-})
-
-describe('A3 — the ranking snapshot coordinate is a checked bounded integer', () => {
-  it('accepts the pinned minimum', () => {
-    expect(deriveAttentionCandidateDerivationCacheKey({
-      ...DERIVATION_INPUT,
-      rankingSnapshotLsn: ATTENTION_RANKING_SNAPSHOT_LSN_MIN,
-    }).kind).toBe('ok')
-    expect(ATTENTION_RANKING_SNAPSHOT_LSN_MIN).toBe(0)
-  })
-
-  it('accepts the pinned maximum', () => {
-    expect(deriveAttentionCandidateDerivationCacheKey({
-      ...DERIVATION_INPUT,
-      rankingSnapshotLsn: ATTENTION_RANKING_SNAPSHOT_LSN_MAX,
-    }).kind).toBe('ok')
-    expect(ATTENTION_RANKING_SNAPSHOT_LSN_MAX).toBe(Number.MAX_SAFE_INTEGER)
-  })
-
-  it('accepts an ordinary in-range coordinate', () => {
-    expect(deriveAttentionCandidateDerivationCacheKey({ ...DERIVATION_INPUT, rankingSnapshotLsn: 41 }).kind).toBe('ok')
-  })
-
-  const outOfRangeCases: [string, number][] = [
-    ['below the minimum', -1],
-    ['far below the minimum', -41],
-    ['above the maximum', Number.MAX_SAFE_INTEGER + 2],
-    ['fractional', 41.5],
-    ['NaN', Number.NaN],
-    ['positive Infinity', Number.POSITIVE_INFINITY],
-    ['negative Infinity', Number.NEGATIVE_INFINITY],
-  ]
-
-  it.each(outOfRangeCases)('refuses a coordinate that is %s, without clamping or repairing it', (_label, value) => {
-    expect(deriveAttentionCandidateDerivationCacheKey({ ...DERIVATION_INPUT, rankingSnapshotLsn: value }))
-      .toEqual({ kind: 'refused', reason: 'ranking-snapshot-lsn-out-of-range' })
-    expect(deriveAttentionCandidateRankingCacheKey({ ...RANKING_INPUT, rankingSnapshotLsn: value }))
-      .toEqual({ kind: 'refused', reason: 'ranking-snapshot-lsn-out-of-range' })
-  })
-
-  it('leaves the input bytes unchanged after a refusal', () => {
-    const rejected = { ...DERIVATION_INPUT, rankingSnapshotLsn: 41.5 }
-    const before = canonicalSerialize(rejected)
-
-    expect(deriveAttentionCandidateDerivationCacheKey(rejected).kind).toBe('refused')
-    expect(canonicalSerialize(rejected)).toBe(before)
-    expect(rejected.rankingSnapshotLsn).toBe(41.5)
-  })
-
-  it('does not treat the two boundary values as the same key', () => {
-    expect(derivationKey({ rankingSnapshotLsn: ATTENTION_RANKING_SNAPSHOT_LSN_MIN }))
-      .not.toBe(derivationKey({ rankingSnapshotLsn: ATTENTION_RANKING_SNAPSHOT_LSN_MAX }))
+    expect(canonicalSerialize(bundle)).toBe(before)
   })
 })

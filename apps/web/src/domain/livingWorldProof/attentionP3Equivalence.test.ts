@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import { canonicalSerialize } from './canonicalSerialization'
+import { createProofQuestCandidate } from './attentionQuestCandidateContracts'
 import {
   buildAttentionQuestCandidateHiddenPairScenario,
   buildAttentionQuestCandidatePublicOpenPairScenario,
   buildAttentionQuestCandidateResolvedPairScenario,
+  buildAttentionQuestCandidateWorld,
 } from './attentionQuestCandidateScenario'
+import type { AttentionQuestCandidatePairedWorld } from './attentionQuestCandidateScenario'
 import { runAttentionP3PairedWorldCheck } from './attentionReplay'
 
 /**
@@ -221,5 +224,63 @@ describe('A5 / P3 — a non-equivalent pair fails as malformed, never reaching a
     expect(premiseCheck.equivalent).toBe(false)
     expect(traceA).toBeUndefined()
     expect(traceB).toBeUndefined()
+  })
+})
+
+/**
+ * B4 / RN019 §4.3 + §10.3 — the quest opening-coordinate sidecar is a third
+ * independently compared P3 premise component.
+ *
+ * Two worlds whose legal quest views are byte-identical but whose committed
+ * opening coordinates differ are **not** Stage B-readable-equivalent: the
+ * coordinate is legally readable A-prime material and decides ordering key 7,
+ * so a premise oracle blind to it would let a real observable difference pass.
+ */
+describe('B4 / P3 — readable-surface equality compares the sidecar collection too', () => {
+  function worldWithOpeningLsn(openedAtLsn: number): AttentionQuestCandidatePairedWorld {
+    return buildAttentionQuestCandidateWorld([
+      createProofQuestCandidate({
+        id: 'quest-p3-sidecar',
+        type: 'reputation_repair',
+        status: 'open',
+        openedAtLsn,
+        openingProvenance: { visibility: 'public', provenanceId: 'consequence-public-shared' },
+        legallyVisibleParties: ['player'],
+      }),
+    ])
+  }
+
+  it('passes the premise when the two worlds agree on every collection, including the sidecar', () => {
+    const result = runAttentionP3PairedWorldCheck({
+      replayCaseId: 'p3-sidecar-equal',
+      worldA: worldWithOpeningLsn(20),
+      worldB: worldWithOpeningLsn(20),
+    })
+
+    expect(result.premiseCheck.equivalent).toBe(true)
+    expect(result.premiseCheck.leftOpeningCoordinateIdentities)
+      .toEqual(result.premiseCheck.rightOpeningCoordinateIdentities)
+    expect(result.traceA).toBeDefined()
+    expect(canonicalSerialize(result.traceA?.playerObservable))
+      .toBe(canonicalSerialize(result.traceB?.playerObservable))
+  })
+
+  it('fails the premise when the worlds differ only in the committed opening coordinate', () => {
+    const result = runAttentionP3PairedWorldCheck({
+      replayCaseId: 'p3-sidecar-differs',
+      worldA: worldWithOpeningLsn(20),
+      worldB: worldWithOpeningLsn(100),
+    })
+
+    // The legal quest views are byte-identical — the difference lives entirely
+    // in the sidecar — so a premise check that compared only the quest views
+    // would wrongly admit this pair.
+    expect(result.premiseCheck.leftViewIdentities).toEqual(result.premiseCheck.rightViewIdentities)
+    expect(result.premiseCheck.leftOpeningCoordinateIdentities)
+      .not.toEqual(result.premiseCheck.rightOpeningCoordinateIdentities)
+    expect(result.premiseCheck.equivalent).toBe(false)
+    // Mandatory early stop: no downstream comparison is attempted.
+    expect(result.traceA).toBeUndefined()
+    expect(result.traceB).toBeUndefined()
   })
 })

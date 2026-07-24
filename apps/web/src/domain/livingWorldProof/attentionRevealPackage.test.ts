@@ -18,7 +18,7 @@ import {
   ATTENTION_TEMPLATE_VERSION,
 } from './attentionCandidatePolicy'
 import { normalizeAttentionCandidates } from './attentionCandidate'
-import type { AttentionCandidate } from './attentionCandidate'
+import type { AttentionCandidate, AttentionQuestCandidate } from './attentionCandidate'
 import { orderAttentionCandidates } from './attentionCandidateOrdering'
 import {
   ATTENTION_REVEAL_PACKAGE_KEYS,
@@ -72,7 +72,7 @@ function orderedCandidates(candidates: readonly QuestCandidate[]): readonly Atte
   })
   const access = readAttentionReadableQuestCandidateViews(snapshot, A1_REQUEST)
   if (access.kind !== 'ok') throw new Error('expected the A1 accessor to admit these fixtures')
-  const surface = constructAttentionReadableSurface(A1_REQUEST, access.views, Object.freeze([]))
+  const surface = constructAttentionReadableSurface(A1_REQUEST, access.views, access.openingCoordinateViews, Object.freeze([]))
   if (surface.kind !== 'ok') throw new Error('expected the A2 boundary to admit these views')
   const normalized = normalizeAttentionCandidates(surface.surface)
   if (normalized.kind !== 'ok') throw new Error('expected A3 normalization to succeed')
@@ -81,10 +81,12 @@ function orderedCandidates(candidates: readonly QuestCandidate[]): readonly Atte
   return ordered.orderedCandidates
 }
 
-function onlyCandidate(candidate: QuestCandidate): AttentionCandidate {
+function onlyCandidate(candidate: QuestCandidate): AttentionQuestCandidate {
   const ordered = orderedCandidates([candidate])
   const only = ordered[0]
-  if (only === undefined) throw new Error('expected exactly one normalized candidate')
+  if (only === undefined || only.sourceKind !== 'quest_candidate') {
+    throw new Error('expected exactly one normalized quest candidate')
+  }
   return only
 }
 
@@ -246,7 +248,7 @@ describe('A4 — determinism and immutability', () => {
     })
     const access = readAttentionReadableQuestCandidateViews(snapshot, A1_REQUEST)
     if (access.kind !== 'ok') throw new Error('expected the A1 accessor to admit these fixtures')
-    const surface = constructAttentionReadableSurface(A1_REQUEST, access.views, Object.freeze([]))
+    const surface = constructAttentionReadableSurface(A1_REQUEST, access.views, access.openingCoordinateViews, Object.freeze([]))
     if (surface.kind !== 'ok') throw new Error('expected the A2 boundary to admit these views')
     const normalized = normalizeAttentionCandidates(surface.surface)
     if (normalized.kind !== 'ok') throw new Error('expected A3 normalization to succeed')
@@ -270,10 +272,64 @@ describe('A4 — determinism and immutability', () => {
   it('builds one package per candidate in the A3 total order, unchanged', () => {
     const ordered = orderedCandidates([MINIMALLY_POPULATED, FULLY_POPULATED])
 
+    // B4 nine-key order: the two quests tie through eligibility, proof score,
+    // source kind, semantic version, binding, and supporting keys, then resolve
+    // at key 7 (source-committed-lsn = opening-provenance coordinate):
+    // `consequence-public-37` < `declassification-38`, so the public-open quest
+    // orders first — before source-id would have decided under the old order.
     expect(ordered.map((attentionCandidate) => attentionCandidate.sourceId))
-      .toEqual(['quest-minimal-open', 'quest-public-open'])
+      .toEqual(['quest-public-open', 'quest-minimal-open'])
     expect(ordered.map((attentionCandidate) => buildOrThrow(attentionCandidate).candidateId))
       .toEqual(ordered.map((attentionCandidate) => attentionCandidate.candidateId))
+  })
+})
+
+describe('B4 — the reveal package dispatches the two-family candidate union', () => {
+  /**
+   * A minimal `narrative_pattern_instance` candidate. B4 dispatches on
+   * `sourceKind` and returns a typed unsupported-family refusal for the pattern
+   * branch before reading any pattern field, so this literal need only be a
+   * well-typed pattern candidate; B5 extends the same seam with the bounded
+   * pattern direct-evidence branch.
+   */
+  const PATTERN_CANDIDATE: AttentionCandidate = Object.freeze({
+    sourceKind: 'narrative_pattern_instance',
+    sourceAuthority: 'derived',
+    sourceId: 'attention-narrative-pattern-identity-schema-v1:fnv1a64-v1:0000000000000001',
+    candidateId: 'attention-pattern-candidate-identity-schema-v1:fnv1a64-v1:0000000000000002',
+    eligibility: 'eligible',
+    accessorContractVersion: 'attention-pattern-evidence-accessor-v1',
+    canonicalizationVersion: ATTENTION_CANDIDATE_CANONICALIZATION_VERSION,
+    identitySchemaVersion: 'attention-pattern-candidate-identity-schema-v1',
+    rankingSnapshotLsn: A1_RANKING_SNAPSHOT_LSN,
+    legallyVisibleParties: Object.freeze(['ally-a', 'ally-b']),
+    patternType: 'reciprocal_public_aid',
+    patternSemanticVersion: 1,
+    canonicalBindingTuple: Object.freeze([
+      Object.freeze(['initiator', 'ally-a'] as const),
+      Object.freeze(['counterparty', 'ally-b'] as const),
+    ]),
+    canonicalSupportingRecordIdentityTuple: Object.freeze([
+      Object.freeze(['aid-start', 'observable_action', 'rec-1', 'public-rec-1', 10] as const),
+      Object.freeze(['aid-return', 'observable_action', 'rec-2', 'public-rec-2', 12] as const),
+    ]),
+    lastProgressLsn: 12,
+  })
+
+  it('refuses a narrative_pattern_instance candidate with a typed unsupported-family result and emits no pattern-visible bytes', () => {
+    const result = buildAttentionRevealPackage(PATTERN_CANDIDATE, TEMPLATE_REQUEST)
+
+    expect(result).toEqual({ kind: 'refused', reason: 'unsupported-source-family' })
+  })
+
+  it('still builds the committed quest package byte-for-byte for a quest candidate', () => {
+    const questPackage = buildAttentionRevealPackage(onlyCandidate(FULLY_POPULATED), TEMPLATE_REQUEST)
+
+    expect(questPackage.kind).toBe('ok')
+    if (questPackage.kind !== 'ok') throw new Error('expected a quest package')
+    expect([...ATTENTION_REVEAL_PACKAGE_KEYS].sort())
+      .toEqual([...Object.keys(questPackage.revealPackage)].sort())
+    expect(questPackage.revealPackage.templateVersion).toBe(ATTENTION_TEMPLATE_VERSION)
   })
 })
 

@@ -70,11 +70,10 @@ import type {
 import { normalizeAttentionCandidates } from './attentionCandidate'
 import type { AttentionCandidate } from './attentionCandidate'
 import {
-  ATTENTION_CANDIDATE_ORDERING_KEYS,
+  attentionCandidateOrderingKeyValue,
   orderAttentionCandidates,
-  resolveAttentionCandidateOrderingKey,
 } from './attentionCandidateOrdering'
-import type { AttentionCandidateOrderingKey } from './attentionCandidateOrdering'
+import type { AttentionCandidateOrderingComparison } from './attentionCandidateOrdering'
 import {
   ATTENTION_CANDIDATE_CANONICALIZATION_VERSION,
   ATTENTION_CANDIDATE_DERIVATION_CACHE_KEY_SCHEMA_VERSION,
@@ -90,15 +89,24 @@ import { buildAttentionRevealPackage } from './attentionRevealPackage'
 import { renderAttentionRevealPackage } from './attentionTemplate'
 import { appendAttentionLedgerRecord, createAttentionLedger } from './attentionLedger'
 import type { AttentionLedger } from './attentionLedger'
-import { buildAttentionTrace, canonicalAttentionTraceBytes } from './attentionTrace'
+import {
+  ATTENTION_TRACE_ORDERING_KEYS,
+  attentionTraceResourceLimitEntry,
+  buildAttentionTrace,
+  canonicalAttentionObservableTraceBytes,
+  canonicalAttentionTraceBytes,
+} from './attentionTrace'
 import type {
   AttentionTrace,
   AttentionTraceCandidateEntry,
   AttentionTraceOrderingComparisonEntry,
+  AttentionTraceOrderingKeyValue,
   AttentionTraceP3PremiseCheck,
   AttentionTracePresentationEntry,
+  AttentionTraceResourceLimitEntry,
   AttentionTraceRevalidationEntry,
 } from './attentionTrace'
+import { applyMixedFamilyCandidateCap } from './attentionNarrativePatternResourcePolicy'
 import {
   commitAttentionReplayAuthoritativeCommand,
   digestAttentionReplayAuthoritativeLog,
@@ -109,7 +117,7 @@ import type {
 } from './attentionReplayResources'
 import { canonicalSerialize } from './canonicalSerialization'
 
-export { canonicalAttentionTraceBytes }
+export { canonicalAttentionTraceBytes, canonicalAttentionObservableTraceBytes }
 
 // ---------------------------------------------------------------------------
 // A1 -> A2 only: the shared premise-pipeline every P3 fixture needs
@@ -138,6 +146,7 @@ export function runAttentionQuestCandidatePrimePipeline(
   const surface = constructAttentionReadableSurface(
     commonSurfaceRequest(input.request),
     access.views,
+    access.openingCoordinateViews,
     Object.freeze([]),
   )
   if (surface.kind !== 'ok') return { kind: 'refused', refusal: { stage: 'boundary', reason: surface.reason } }
@@ -152,13 +161,23 @@ export function attentionPrimeSurfaceDigest(surface: AttentionReadableSurface): 
 
 export interface AttentionPrimeViewIdentities {
   readonly questCandidateViewIdentities: readonly string[]
+  readonly questOpeningCoordinateViewIdentities: readonly string[]
   readonly patternEvidenceViewIdentities: readonly string[]
 }
 
-/** The two A-prime identity premises remain disjoint and independently comparable. */
+/**
+ * The three A-prime identity premises remain disjoint and independently
+ * comparable (RN019 §10.3). The sidecar identity folds in the numeric committed
+ * coordinate as well as the stable candidate identity, so two worlds whose
+ * quest views match but whose opening coordinates differ are correctly *not*
+ * Stage B-readable-equivalent.
+ */
 export function attentionPrimeViewIdentities(surface: AttentionReadableSurface): AttentionPrimeViewIdentities {
   return Object.freeze({
     questCandidateViewIdentities: Object.freeze(surface.questCandidateViews.map((view) => view.candidateId)),
+    questOpeningCoordinateViewIdentities: Object.freeze(surface.questOpeningCoordinateViews.map((sidecar) => (
+      canonicalSerialize([sidecar.candidateId, sidecar.openedAtLsn])
+    ))),
     patternEvidenceViewIdentities: Object.freeze(surface.patternEvidenceViews.map((view) => (
       canonicalSerialize([view.commitLsn, view.recordId])
     ))),
@@ -181,56 +200,76 @@ function sortedIdentitySetEqual(left: readonly string[], right: readonly string[
   return canonicalSerialize(leftSorted) === canonicalSerialize(rightSorted)
 }
 
-/** The candidate's own field value at one ordering key -- exactly what `attentionCandidateOrdering.ts`'s comparator compares, restated as a string for trace legibility. */
-function attentionCandidateOrderingKeyValue(candidate: AttentionCandidate, key: AttentionCandidateOrderingKey): string {
-  switch (key) {
-    case 'source-kind': return candidate.sourceKind
-    case 'source-id': return candidate.sourceId
-    case 'opening-provenance-id': return candidate.openingProvenanceId
-    case 'candidate-id': return candidate.candidateId
-  }
+/**
+ * Map the ordering module's adjacent-pair comparisons (the B4 nine-key tuple)
+ * into the trusted trace's ordering-comparison entries.
+ * `orderAttentionCandidates` already computed the complete adjacent-pair
+ * order/tie-break path (D14; replay spec §13.1) and refused any surviving tie,
+ * so every entry here is strictly ordered left-before-right by construction.
+ * This module never recomputes the tie-break path and never reads a
+ * branch-specific candidate field here, so it stays agnostic to the two-family
+ * candidate union.
+ */
+function toOrderingTrace(
+  comparisons: readonly AttentionCandidateOrderingComparison[],
+): readonly AttentionTraceOrderingComparisonEntry[] {
+  return Object.freeze(comparisons.map((comparison) => Object.freeze({
+    leftCandidateId: comparison.leftCandidateId,
+    rightCandidateId: comparison.rightCandidateId,
+    evaluatedKeys: comparison.evaluatedKeys,
+    decidingKey: comparison.decidingKey,
+    leftValue: comparison.leftValue,
+    rightValue: comparison.rightValue,
+    result: 'left-first' as const,
+  })))
 }
 
 /**
- * The complete adjacent-pair order/tie-break path (D14; replay spec §13.1)
- * over an already-totally-ordered candidate sequence. Adjacent-pair coverage
- * is sound by the same argument `orderAttentionCandidates` itself relies on:
- * in a sorted sequence, two entries compare equal somewhere if and only if
- * some adjacent pair does. `orderAttentionCandidates` has already refused
- * (`ordering-tie-not-total`) before this function is ever called, so every
- * adjacent pair here is guaranteed to have a non-null deciding key -- a
- * structural guarantee, not an assumption, because both this function and
- * `orderAttentionCandidates` read the same ordering-key table.
+ * All nine ordering-key values for one candidate, in the comparator's own key
+ * sequence. Trusted trace v2 records the complete tuple per candidate, not only
+ * the key that happened to decide an adjacent comparison.
  */
-function buildAttentionOrderingTrace(
-  orderedCandidates: readonly AttentionCandidate[],
-): readonly AttentionTraceOrderingComparisonEntry[] {
-  const entries: AttentionTraceOrderingComparisonEntry[] = []
-  for (let index = 0; index < orderedCandidates.length - 1; index += 1) {
-    const left = orderedCandidates[index]!
-    const right = orderedCandidates[index + 1]!
-    const decidingKey = resolveAttentionCandidateOrderingKey(left, right)
-    if (decidingKey === null) {
-      throw new Error(
-        'attentionReplay: adjacent ordered candidates unexpectedly tied through every key '
-        + '-- orderAttentionCandidates should have already refused this input',
-      )
-    }
-    const cutoff = ATTENTION_CANDIDATE_ORDERING_KEYS.indexOf(decidingKey)
-    entries.push(Object.freeze({
-      leftCandidateId: left.candidateId,
-      rightCandidateId: right.candidateId,
-      evaluatedKeys: Object.freeze(ATTENTION_CANDIDATE_ORDERING_KEYS.slice(0, cutoff + 1)),
-      decidingKey,
-      leftValue: attentionCandidateOrderingKeyValue(left, decidingKey),
-      rightValue: attentionCandidateOrderingKeyValue(right, decidingKey),
-      // Always 'left-first': orderAttentionCandidates has already sorted the
-      // sequence and refused any surviving tie, so every adjacent pair it
-      // returns is strictly ordered left-before-right by construction.
-      result: 'left-first' as const,
-    }))
+function orderingKeyValuesOf(candidate: AttentionCandidate): readonly AttentionTraceOrderingKeyValue[] {
+  return Object.freeze(ATTENTION_TRACE_ORDERING_KEYS.map((key) => Object.freeze({
+    key,
+    value: attentionCandidateOrderingKeyValue(candidate, key),
+  })))
+}
+
+/**
+ * Build the `sourceKind`-discriminated trusted candidate entry (RN019 §9.6).
+ * The quest branch carries `openingProvenanceId` and the numeric `openedAtLsn`;
+ * the pattern branch carries its pattern-named fields and its own
+ * `lastProgressLsn`. A pattern `sourceId` is never written into
+ * `openingProvenanceId` or any other quest-named field, and no quest value is
+ * written into a pattern-named one — the union is the mechanism, not a
+ * convention.
+ */
+function toTraceCandidateEntry(candidate: AttentionCandidate): AttentionTraceCandidateEntry {
+  const orderingKeyValues = orderingKeyValuesOf(candidate)
+  if (candidate.sourceKind === 'quest_candidate') {
+    return Object.freeze({
+      sourceKind: 'quest_candidate' as const,
+      sourceId: candidate.sourceId,
+      candidateId: candidate.candidateId,
+      sourceCommittedLsn: candidate.openedAtLsn,
+      orderingKeyValues,
+      openingProvenanceId: candidate.openingProvenanceId,
+      openedAtLsn: candidate.openedAtLsn,
+    })
   }
-  return Object.freeze(entries)
+  return Object.freeze({
+    sourceKind: 'narrative_pattern_instance' as const,
+    sourceId: candidate.sourceId,
+    candidateId: candidate.candidateId,
+    sourceCommittedLsn: candidate.lastProgressLsn,
+    orderingKeyValues,
+    patternInstanceId: candidate.sourceId,
+    patternSemanticVersion: candidate.patternSemanticVersion,
+    canonicalBindingTuple: candidate.canonicalBindingTuple,
+    canonicalSupportingRecordIdentityTuple: candidate.canonicalSupportingRecordIdentityTuple,
+    lastProgressLsn: candidate.lastProgressLsn,
+  })
 }
 
 // ---------------------------------------------------------------------------
@@ -279,6 +318,7 @@ export function runAttentionQuestCandidateReplayPass(
   const surface = constructAttentionReadableSurface(
     commonSurfaceRequest(input.request),
     access.views,
+    access.openingCoordinateViews,
     Object.freeze([]),
   )
   if (surface.kind !== 'ok') return { kind: 'refused', refusal: { stage: 'boundary', reason: surface.reason } }
@@ -289,6 +329,25 @@ export function runAttentionQuestCandidateReplayPass(
   const ordered = orderAttentionCandidates(normalized.attentionCandidates)
   if (ordered.kind !== 'ok') return { kind: 'refused', refusal: { stage: 'ordering', reason: ordered.reason } }
 
+  // RN019 §8.3 step 6: the global mixed-family candidate cap applies *after* the
+  // complete order, so it always retains the top of the final total order rather
+  // than an independently-ordered truncation. Its decision is a resource
+  // decision like any other and is recorded in the trusted trace below — never
+  // in the player-observable projection.
+  const capped = applyMixedFamilyCandidateCap(ordered.orderedCandidates)
+  const retainedCandidates = capped.retainedCandidates
+  const resourceLimits: AttentionTraceResourceLimitEntry[] = []
+  if (capped.resourceTrace !== null) {
+    resourceLimits.push(attentionTraceResourceLimitEntry({
+      boundId: capped.resourceTrace.boundId,
+      patternType: capped.resourceTrace.patternType,
+      configuredValue: capped.resourceTrace.configuredValue,
+      observedValue: capped.resourceTrace.observedValue,
+      retainedIds: capped.resourceTrace.retainedIdentities,
+      droppedIds: capped.resourceTrace.droppedIdentities,
+    }))
+  }
+
   // D12 step 11: revalidate at the presentation-time coordinate. The sole
   // stage permitted to invalidate an earlier eligibility result, and it does
   // so explicitly via a typed outcome per candidate, never silently.
@@ -297,12 +356,12 @@ export function runAttentionQuestCandidateReplayPass(
     rankingSnapshotLsn: input.revalidationSnapshotLsn,
   })
   const revalidations: AttentionTraceRevalidationEntry[] = revalidationAccess.kind !== 'ok'
-    ? ordered.orderedCandidates.map((candidate) => (
+    ? retainedCandidates.map((candidate) => (
       Object.freeze({ candidateId: candidate.candidateId, outcome: 'stale-snapshot' as const })
     ))
     : (() => {
       const admittedAtRevalidation = new Set(revalidationAccess.views.map((view) => view.candidateId))
-      return ordered.orderedCandidates.map((candidate) => Object.freeze({
+      return retainedCandidates.map((candidate) => Object.freeze({
         candidateId: candidate.candidateId,
         outcome: admittedAtRevalidation.has(candidate.sourceId)
           ? 'still-legal' as const
@@ -319,12 +378,8 @@ export function runAttentionQuestCandidateReplayPass(
   const candidateEntries: AttentionTraceCandidateEntry[] = []
   const presentations: AttentionTracePresentationEntry[] = []
 
-  for (const candidate of ordered.orderedCandidates) {
-    candidateEntries.push(Object.freeze({
-      candidateId: candidate.candidateId,
-      sourceId: candidate.sourceId,
-      openingProvenanceId: candidate.openingProvenanceId,
-    }))
+  for (const candidate of retainedCandidates) {
+    candidateEntries.push(toTraceCandidateEntry(candidate))
 
     const revalidation = revalidations.find((entry) => entry.candidateId === candidate.candidateId)
     if (revalidation === undefined || revalidation.outcome !== 'still-legal') {
@@ -382,7 +437,22 @@ export function runAttentionQuestCandidateReplayPass(
     admittedQuestCandidateSourceIds:
       attentionPrimeViewIdentities(surface.surface).questCandidateViewIdentities,
     orderedAttentionCandidates: Object.freeze(candidateEntries),
-    orderingTrace: buildAttentionOrderingTrace(ordered.orderedCandidates),
+    orderingTrace: toOrderingTrace(ordered.comparisons),
+    structuralRetention: Object.freeze({
+      // The B4 replay pass normalizes quest candidates only; the mixed-family
+      // pass is B6, so no pattern instance is reconstructed or retained here.
+      // The mixed-family cap decision below is a real B4 resource decision and
+      // reaches the trusted trace on every pass.
+      retainedPatternInstanceIds: Object.freeze([]),
+      droppedPatternInstanceIds: Object.freeze([]),
+      mixedFamilyRetainedCandidateIds: Object.freeze(retainedCandidates.map((c) => c.candidateId)),
+      mixedFamilyDroppedCandidateIds: Object.freeze(
+        ordered.orderedCandidates
+          .filter((candidate) => !retainedCandidates.includes(candidate))
+          .map((candidate) => candidate.candidateId),
+      ),
+      resourceLimits: Object.freeze(resourceLimits),
+    }),
     presentations: Object.freeze(presentations),
     revalidations: Object.freeze(revalidations),
     authoritativeLogDigestBefore: input.authoritativeLogDigestBefore,
@@ -450,10 +520,15 @@ export function runAttentionP3PairedWorldCheck(input: AttentionP3PairedWorldInpu
   const rightAPrimeDigest = attentionPrimeSurfaceDigest(primeB.surface)
   const leftIdentities = attentionPrimeViewIdentities(primeA.surface)
   const rightIdentities = attentionPrimeViewIdentities(primeB.surface)
+  // RN019 §10.3: P3 readable-surface equality compares all three v2 collections.
   const equivalent = leftAPrimeDigest === rightAPrimeDigest
     && sortedIdentitySetEqual(
       leftIdentities.questCandidateViewIdentities,
       rightIdentities.questCandidateViewIdentities,
+    )
+    && sortedIdentitySetEqual(
+      leftIdentities.questOpeningCoordinateViewIdentities,
+      rightIdentities.questOpeningCoordinateViewIdentities,
     )
     && sortedIdentitySetEqual(
       leftIdentities.patternEvidenceViewIdentities,
@@ -465,6 +540,8 @@ export function runAttentionP3PairedWorldCheck(input: AttentionP3PairedWorldInpu
     rightAPrimeDigest,
     leftViewIdentities: leftIdentities.questCandidateViewIdentities,
     rightViewIdentities: rightIdentities.questCandidateViewIdentities,
+    leftOpeningCoordinateIdentities: leftIdentities.questOpeningCoordinateViewIdentities,
+    rightOpeningCoordinateIdentities: rightIdentities.questOpeningCoordinateViewIdentities,
     equivalent,
   })
 

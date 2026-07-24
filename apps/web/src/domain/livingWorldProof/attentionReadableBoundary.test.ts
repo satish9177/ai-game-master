@@ -5,10 +5,15 @@ import {
   createProofQuestCandidate,
   createProofQuestCandidateSnapshot,
 } from './attentionQuestCandidateContracts'
-import type { AttentionReadableQuestCandidateView } from './attentionQuestCandidateContracts'
+import type {
+  AttentionReadableQuestCandidateView,
+  AttentionReadableQuestOpeningCoordinateView,
+} from './attentionQuestCandidateContracts'
 import { readAttentionReadableQuestCandidateViews } from './attentionQuestCandidateAccessor'
 import { A1_RANKING_SNAPSHOT_LSN } from './attentionQuestCandidateScenario'
 import {
+  ATTENTION_READABLE_SURFACE_SCHEMA_V1,
+  ATTENTION_READABLE_SURFACE_SCHEMA_V2,
   ATTENTION_READABLE_SURFACE_SCHEMA_VERSION,
   constructAttentionReadableSurface as constructCommonAttentionReadableSurface,
 } from './attentionReadableBoundary'
@@ -70,12 +75,27 @@ const A1_REQUEST = {
 } as const
 
 const EMPTY_PATTERN_EVIDENCE = Object.freeze([])
+const EMPTY_OPENING_COORDINATES: readonly AttentionReadableQuestOpeningCoordinateView[] = Object.freeze([])
 
+/**
+ * B4 — the sidecar collection is a third required constructor input. The tests
+ * below that probe *view* legality pass an empty sidecar list, because the
+ * one-to-one view/sidecar bijection is the candidate normalizer's join (RN019
+ * §4.3), not the A-prime constructor's job: the constructor validates each
+ * collection independently. The sidecar-specific cases pass real or forged
+ * sidecars explicitly.
+ */
 function constructAttentionReadableSurface(
   request: AttentionReadableSurfaceRequest,
   questCandidateViews: readonly AttentionReadableQuestCandidateView[],
+  questOpeningCoordinateViews: readonly AttentionReadableQuestOpeningCoordinateView[] = EMPTY_OPENING_COORDINATES,
 ): AttentionReadableSurfaceResult {
-  return constructCommonAttentionReadableSurface(request, questCandidateViews, EMPTY_PATTERN_EVIDENCE)
+  return constructCommonAttentionReadableSurface(
+    request,
+    questCandidateViews,
+    questOpeningCoordinateViews,
+    EMPTY_PATTERN_EVIDENCE,
+  )
 }
 
 function buildA1Sources() {
@@ -143,6 +163,15 @@ function readLegalViews(sources: ReturnType<typeof buildA1Sources>): readonly At
   const result = readAttentionReadableQuestCandidateViews(sources.snapshot, A1_REQUEST)
   if (result.kind !== 'ok') throw new Error('expected the A1 accessor to admit its public candidate')
   return result.views
+}
+
+/** The accessor-minted sidecars for the same admitted candidates (RN019 §4.3). */
+function readLegalOpeningCoordinates(
+  sources: ReturnType<typeof buildA1Sources>,
+): readonly AttentionReadableQuestOpeningCoordinateView[] {
+  const result = readAttentionReadableQuestCandidateViews(sources.snapshot, A1_REQUEST)
+  if (result.kind !== 'ok') throw new Error('expected the A1 accessor to admit its public candidate')
+  return result.openingCoordinateViews
 }
 
 /**
@@ -217,7 +246,11 @@ describe('A2 / S2 — A-prime is constructed only from A1 legal views', () => {
     const sources = buildA1Sources()
     const before = canonicalSourceBytes(sources)
 
-    const result = constructAttentionReadableSurface(A1_REQUEST, readLegalViews(sources))
+    const result = constructAttentionReadableSurface(
+      A1_REQUEST,
+      readLegalViews(sources),
+      readLegalOpeningCoordinates(sources),
+    )
 
     expect(result).toEqual({
       kind: 'ok',
@@ -234,10 +267,112 @@ describe('A2 / S2 — A-prime is constructed only from A1 legal views', () => {
           legallyVisiblePublicStakes: 'restore-public-trust',
           legallyVisibleOriginConsequenceReference: 'consequence-public-37',
         }],
+        // B4: the sidecar is a sibling collection carrying exactly the closed
+        // four-field set — never a new field on the legal view above, whose
+        // canonical bytes are unchanged from committed Stage A.
+        questOpeningCoordinateViews: [{
+          openingCoordinateContractVersion: 'attention-quest-opening-coordinate-v1',
+          candidateId: 'quest-public-open',
+          openingProvenanceId: 'consequence-public-37',
+          openedAtLsn: 37,
+        }],
         patternEvidenceViews: [],
       },
     })
     expectSourceLifecycleAndBytesUnchanged(sources, before)
+  })
+
+  it('records surface schema v2 and never reinterprets a v1 surface as v2', () => {
+    const sources = buildA1Sources()
+    const result = constructAttentionReadableSurface(
+      A1_REQUEST,
+      readLegalViews(sources),
+      readLegalOpeningCoordinates(sources),
+    )
+    if (result.kind !== 'ok') throw new Error('expected the common surface to admit its legal inputs')
+
+    expect(ATTENTION_READABLE_SURFACE_SCHEMA_V1).toBe('attention-readable-surface-schema-v1')
+    expect(ATTENTION_READABLE_SURFACE_SCHEMA_V2).toBe('attention-readable-surface-schema-v2')
+    expect(ATTENTION_READABLE_SURFACE_SCHEMA_VERSION).toBe(ATTENTION_READABLE_SURFACE_SCHEMA_V2)
+    expect(result.surface.surfaceSchemaVersion).toBe(ATTENTION_READABLE_SURFACE_SCHEMA_V2)
+
+    // A request pinned to v1 refuses rather than being reinterpreted as v2.
+    expect(constructAttentionReadableSurface(
+      { ...A1_REQUEST, surfaceSchemaVersion: ATTENTION_READABLE_SURFACE_SCHEMA_V1 },
+      readLegalViews(sources),
+      readLegalOpeningCoordinates(sources),
+    )).toEqual({ kind: 'refused', reason: 'surface-schema-version-mismatch' })
+  })
+
+  it('carries all three collections into the canonical premise bytes', () => {
+    const sources = buildA1Sources()
+    const withSidecars = constructAttentionReadableSurface(
+      A1_REQUEST,
+      readLegalViews(sources),
+      readLegalOpeningCoordinates(sources),
+    )
+    const withoutSidecars = constructAttentionReadableSurface(A1_REQUEST, readLegalViews(sources))
+    if (withSidecars.kind !== 'ok' || withoutSidecars.kind !== 'ok') {
+      throw new Error('expected both surfaces to be admitted')
+    }
+
+    // The sidecar collection is part of the whole-surface canonical bytes by
+    // construction, so two surfaces differing only in it are not equivalent.
+    expect(attentionPrimeSurfaceDigest(withSidecars.surface))
+      .not.toBe(attentionPrimeSurfaceDigest(withoutSidecars.surface))
+    expect(attentionPrimeSurfaceDigest(withSidecars.surface)).toContain('questOpeningCoordinateViews')
+    expect(attentionPrimeViewIdentities(withSidecars.surface).questOpeningCoordinateViewIdentities)
+      .toEqual(['["quest-public-open",37]'])
+    expect(attentionPrimeViewIdentities(withoutSidecars.surface).questOpeningCoordinateViewIdentities)
+      .toEqual([])
+  })
+
+  it('refuses a forged, spread-copied, or serialized-round-tripped sidecar', () => {
+    const sources = buildA1Sources()
+    const genuine = readLegalOpeningCoordinates(sources)
+    const views = readLegalViews(sources)
+
+    const literal = {
+      openingCoordinateContractVersion: 'attention-quest-opening-coordinate-v1',
+      candidateId: 'quest-public-open',
+      openingProvenanceId: 'consequence-public-37',
+      openedAtLsn: 37,
+    } as unknown as AttentionReadableQuestOpeningCoordinateView
+    const spreadCopy = { ...genuine[0]! } as AttentionReadableQuestOpeningCoordinateView
+    const roundTripped = JSON.parse(
+      JSON.stringify(genuine[0]!),
+    ) as AttentionReadableQuestOpeningCoordinateView
+
+    for (const forged of [literal, spreadCopy, roundTripped]) {
+      expect(constructAttentionReadableSurface(A1_REQUEST, views, [forged]))
+        .toEqual({ kind: 'refused', reason: 'input-not-accessor-minted' })
+    }
+    // A genuine mint alongside a forgery still fails closed.
+    expect(constructAttentionReadableSurface(A1_REQUEST, views, [genuine[0]!, literal]).kind)
+      .toBe('refused')
+  })
+
+  it('refuses a sidecar carrying an own key outside the closed four-field set, rather than trimming it', () => {
+    const sources = buildA1Sources()
+    const widened = {
+      openingCoordinateContractVersion: 'attention-quest-opening-coordinate-v1',
+      candidateId: 'quest-public-open',
+      openingProvenanceId: 'consequence-public-37',
+      openedAtLsn: 37,
+      secretOpeningDetail: 'private-belief-overturn',
+    } as unknown as AttentionReadableQuestOpeningCoordinateView
+
+    expect(constructAttentionReadableSurface(A1_REQUEST, readLegalViews(sources), [widened]))
+      .toEqual({ kind: 'refused', reason: 'input-not-attention-readable' })
+  })
+
+  it('refuses duplicate sidecar identities and out-of-order sidecar collections', () => {
+    const sources = buildA1Sources()
+    const views = readLegalViews(sources)
+    const genuine = readLegalOpeningCoordinates(sources)
+
+    expect(constructAttentionReadableSurface(A1_REQUEST, views, [genuine[0]!, genuine[0]!]))
+      .toEqual({ kind: 'refused', reason: 'ambiguous-legal-identity' })
   })
 
   it('keeps hidden-open and resolved candidates, private parties, and secret opening detail out of A-prime', () => {
@@ -699,15 +834,24 @@ describe('A2 — A-prime has no reverse write path into authoritative candidate 
 
 describe('B1 — the common A-prime boundary admits both separately minted legal families', () => {
   it('records the explicit schema and retains the canonical pattern evidence list unchanged', () => {
-    const questViews = readLegalViews(buildA1Sources())
+    const sources = buildA1Sources()
+    const questViews = readLegalViews(sources)
+    const questSidecars = readLegalOpeningCoordinates(sources)
     const scenario = buildAttentionPatternEvidenceB1Scenario()
-    const result = constructCommonAttentionReadableSurface(A1_REQUEST, questViews, scenario.views)
+    const result = constructCommonAttentionReadableSurface(
+      A1_REQUEST,
+      questViews,
+      questSidecars,
+      scenario.views,
+    )
 
     expect(result.kind).toBe('ok')
     if (result.kind !== 'ok') throw new Error('expected the common surface')
     expect(result.surface.surfaceSchemaVersion).toBe(ATTENTION_READABLE_SURFACE_SCHEMA_VERSION)
     expect(result.surface.questCandidateViews).toEqual(questViews)
+    expect(result.surface.questOpeningCoordinateViews).toEqual(questSidecars)
     expect(result.surface.patternEvidenceViews).toEqual(scenario.views)
+    expect(Object.isFrozen(result.surface.questOpeningCoordinateViews)).toBe(true)
     expect(Object.isFrozen(result.surface.patternEvidenceViews)).toBe(true)
   })
 
@@ -716,11 +860,13 @@ describe('B1 — the common A-prime boundary admits both separately minted legal
     expect(constructCommonAttentionReadableSurface(
       { ...A1_REQUEST, surfaceSchemaVersion: '' },
       views,
+      EMPTY_OPENING_COORDINATES,
       EMPTY_PATTERN_EVIDENCE,
     )).toEqual({ kind: 'refused', reason: 'surface-schema-version-mismatch' })
     expect(constructCommonAttentionReadableSurface(
       { ...A1_REQUEST, surfaceSchemaVersion: 'unknown-surface-schema' },
       views,
+      EMPTY_OPENING_COORDINATES,
       EMPTY_PATTERN_EVIDENCE,
     )).toEqual({ kind: 'refused', reason: 'surface-schema-version-mismatch' })
   })
@@ -741,17 +887,20 @@ describe('B1 — the common A-prime boundary admits both separately minted legal
       expect(constructCommonAttentionReadableSurface(
         A1_REQUEST,
         EMPTY_PATTERN_EVIDENCE,
+        EMPTY_OPENING_COORDINATES,
         [copied as AttentionReadablePatternEvidenceView],
       )).toEqual({ kind: 'refused', reason: 'input-not-accessor-minted' })
     }
     expect(constructCommonAttentionReadableSurface(
       A1_REQUEST,
       EMPTY_PATTERN_EVIDENCE,
+      EMPTY_OPENING_COORDINATES,
       [...scenario.views].reverse(),
     )).toEqual({ kind: 'refused', reason: 'pattern-evidence-order-mismatch' })
     expect(constructCommonAttentionReadableSurface(
       A1_REQUEST,
       EMPTY_PATTERN_EVIDENCE,
+      EMPTY_OPENING_COORDINATES,
       [genuine, genuine],
     )).toEqual({ kind: 'refused', reason: 'ambiguous-legal-identity' })
   })
@@ -767,6 +916,7 @@ describe('B1 — the common A-prime boundary admits both separately minted legal
     expect(constructCommonAttentionReadableSurface(
       A1_REQUEST,
       EMPTY_PATTERN_EVIDENCE,
+      EMPTY_OPENING_COORDINATES,
       [widened as unknown as AttentionReadablePatternEvidenceView],
     )).toEqual({ kind: 'refused', reason: 'input-not-attention-readable' })
   })
@@ -810,14 +960,17 @@ describe('B1 — the common A-prime boundary admits both separately minted legal
       const result = constructCommonAttentionReadableSurface(
         A1_REQUEST,
         EMPTY_PATTERN_EVIDENCE,
+        EMPTY_OPENING_COORDINATES,
         [value as unknown as AttentionReadablePatternEvidenceView],
       )
       expect(result.kind).toBe('refused')
     }
   })
 
-  it('compares non-empty quest and pattern premise components independently', () => {
-    const questViews = readLegalViews(buildA1Sources())
+  it('compares non-empty quest, sidecar, and pattern premise components independently', () => {
+    const sources = buildA1Sources()
+    const questViews = readLegalViews(sources)
+    const questSidecars = readLegalOpeningCoordinates(sources)
     const scenario = buildAttentionPatternEvidenceB1Scenario()
     const reorderedSnapshot = patternEvidenceContracts.createProofPatternEvidenceSnapshot({
       evidenceViewContractVersion: patternEvidenceContracts.ATTENTION_PATTERN_EVIDENCE_ACCESSOR_VERSION,
@@ -842,8 +995,9 @@ describe('B1 — the common A-prime boundary admits both separately minted legal
     const buildCommonSurface = (
       quests: readonly AttentionReadableQuestCandidateView[],
       patterns: readonly AttentionReadablePatternEvidenceView[],
+      sidecars: readonly AttentionReadableQuestOpeningCoordinateView[] = questSidecars,
     ) => {
-      const result = constructCommonAttentionReadableSurface(A1_REQUEST, quests, patterns)
+      const result = constructCommonAttentionReadableSurface(A1_REQUEST, quests, sidecars, patterns)
       if (result.kind !== 'ok') throw new Error(`expected common premise: ${result.reason}`)
       return result.surface
     }
@@ -851,8 +1005,16 @@ describe('B1 — the common A-prime boundary admits both separately minted legal
     const baseline = buildCommonSurface(questViews, scenario.views)
     const identical = buildCommonSurface(questViews, reorderedAccess.views)
     const hiddenRemoved = buildCommonSurface(questViews, withoutHiddenAccess.views)
-    const questChanged = buildCommonSurface([], scenario.views)
+    const questChanged = buildCommonSurface([], scenario.views, EMPTY_OPENING_COORDINATES)
     const patternChanged = buildCommonSurface(questViews, scenario.views.slice(0, -1))
+    // The sidecar collection is a third independently compared premise component.
+    const sidecarChanged = buildCommonSurface(questViews, scenario.views, EMPTY_OPENING_COORDINATES)
+
+    expect(attentionPrimeSurfaceDigest(sidecarChanged)).not.toBe(attentionPrimeSurfaceDigest(baseline))
+    expect(attentionPrimeViewIdentities(sidecarChanged).questCandidateViewIdentities)
+      .toEqual(attentionPrimeViewIdentities(baseline).questCandidateViewIdentities)
+    expect(attentionPrimeViewIdentities(sidecarChanged).questOpeningCoordinateViewIdentities)
+      .not.toEqual(attentionPrimeViewIdentities(baseline).questOpeningCoordinateViewIdentities)
 
     const baselineIdentities = attentionPrimeViewIdentities(baseline)
     const identicalIdentities = attentionPrimeViewIdentities(identical)

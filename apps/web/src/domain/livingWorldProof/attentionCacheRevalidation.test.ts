@@ -1,18 +1,15 @@
 import { describe, expect, it } from 'vitest'
 import {
-  ATTENTION_QUEST_CANDIDATE_ACCESSOR_VERSION,
-} from './attentionQuestCandidateContracts'
-import {
-  ATTENTION_CANDIDATE_CANONICALIZATION_VERSION,
-  ATTENTION_CANDIDATE_IDENTITY_SCHEMA_VERSION,
   ATTENTION_CANDIDATE_ORDERING_VERSION,
 } from './attentionCandidatePolicy'
 import {
+  attentionCandidateDerivationDependencyBundle,
+  attentionCandidateRankingEligibilityResourceState,
   deriveAttentionCandidateDerivationCacheKey,
   deriveAttentionCandidateRankingCacheKey,
   deriveAttentionTraceCacheKey,
 } from './attentionCandidateCacheKey'
-import type { AttentionCandidateRankingCacheKeyInput } from './attentionCandidateCacheKey'
+import type { AttentionCandidateRankingDependencyBundle } from './attentionCandidateCacheKey'
 import { A1_RANKING_SNAPSHOT_LSN, A5_REVALIDATION_SNAPSHOT_LSN, buildAttentionQuestCandidateRevalidationScenarios } from './attentionQuestCandidateScenario'
 import { runAttentionQuestCandidateReplayPass } from './attentionReplay'
 import { digestAttentionReplayAuthoritativeLog } from './attentionReplayResources'
@@ -45,25 +42,24 @@ import { digestAttentionReplayAuthoritativeLog } from './attentionReplayResource
 
 const NO_AUTHORITATIVE_LOG_DIGEST = digestAttentionReplayAuthoritativeLog({ commits: [] })
 
-const BASE_DERIVATION_INPUT = {
-  accessorContractVersion: ATTENTION_QUEST_CANDIDATE_ACCESSOR_VERSION,
-  canonicalizationVersion: ATTENTION_CANDIDATE_CANONICALIZATION_VERSION,
-  identitySchemaVersion: ATTENTION_CANDIDATE_IDENTITY_SCHEMA_VERSION,
-  rankingSnapshotLsn: A1_RANKING_SNAPSHOT_LSN,
-  resourcePolicyVersion: 'resource-policy-v1',
-  openingProvenancePolicyVersion: 'opening-provenance-policy-v1',
-} as const
+/**
+ * B4 — both bundles are explicit typed values (RN019 §9.3). The ranking bundle
+ * carries exactly the derivation key, the ordering version, the ranking-policy
+ * hash, and the B4-owned eligibility/resource state; no B5 ledger, exposure,
+ * cooldown, retirement, or template dependency is present at this slice.
+ */
+const BASE_DERIVATION_INPUT = attentionCandidateDerivationDependencyBundle({
+  snapshotLsn: A1_RANKING_SNAPSHOT_LSN,
+})
 
-const BASE_RANKING_INPUT = {
-  ...BASE_DERIVATION_INPUT,
+const BASE_RANKING_INPUT: AttentionCandidateRankingDependencyBundle = {
+  derivation: BASE_DERIVATION_INPUT,
   orderingVersion: ATTENTION_CANDIDATE_ORDERING_VERSION,
   rankingPolicyHash: 'ranking-policy-hash-v1',
-  ledgerExposurePolicyVersion: 'ledger-exposure-policy-v1',
-  templateChannelPolicyVersion: 'template-channel-policy-v1',
-  relevantLedgerInputIdentity: 'ledger-input-identity-v1',
-} as const
+  eligibilityResourceState: attentionCandidateRankingEligibilityResourceState(),
+}
 
-function rankingCacheKeyOrThrow(input: AttentionCandidateRankingCacheKeyInput): string {
+function rankingCacheKeyOrThrow(input: AttentionCandidateRankingDependencyBundle): string {
   const result = deriveAttentionCandidateRankingCacheKey(input)
   if (result.kind !== 'ok') throw new Error('expected a ranking cache key, got refusal: ' + result.reason)
   return result.rankingCacheKey

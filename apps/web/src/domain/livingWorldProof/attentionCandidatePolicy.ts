@@ -47,11 +47,23 @@
 export const ATTENTION_CANDIDATE_CANONICALIZATION_VERSION = 'attention-candidate-canonicalization-v1' as const
 
 /**
- * The versioned shape of the candidate ID itself (ADR-0013 D6) — which fields
- * are identity-affecting, and how the resulting ID string is encoded. Distinct
- * from the canonicalization version above and never collapsed into it.
+ * The versioned shape of the quest candidate ID itself (ADR-0013 D6) — which
+ * fields are identity-affecting, and how the resulting ID string is encoded.
+ * Distinct from the canonicalization version above and never collapsed into it.
+ * The B4 pattern branch has its own disjoint schema version below; this one
+ * remains exactly the committed Stage A quest identity schema so quest
+ * candidate IDs stay byte-identical.
  */
 export const ATTENTION_CANDIDATE_IDENTITY_SCHEMA_VERSION = 'attention-candidate-identity-schema-v1' as const
+
+/**
+ * B4 — the disjoint, versioned pattern candidate identity schema (plan §3.1,
+ * §6). A normalized `narrative_pattern_instance` candidate ID is minted under
+ * this schema and never under the quest schema above, and the pattern branch
+ * never invents an `openingProvenanceId` sentinel to reuse the quest schema.
+ */
+export const ATTENTION_PATTERN_CANDIDATE_IDENTITY_SCHEMA_VERSION =
+  'attention-pattern-candidate-identity-schema-v1' as const
 
 // ---------------------------------------------------------------------------
 // B2 pins — narrative-pattern instance contracts and lifecycle only
@@ -104,7 +116,7 @@ export function deriveAttentionNarrativePatternAnnotation(
  * policy, so ADR-0013 D6 forbids it from reaching candidate identity: this
  * version is deliberately not an identity input.
  */
-export const ATTENTION_CANDIDATE_ORDERING_VERSION = 'attention-candidate-ordering-v1' as const
+export const ATTENTION_CANDIDATE_ORDERING_VERSION = 'attention-candidate-ordering-v2' as const
 
 /**
  * The two cache-key schema versions (ADR-0013 D15; plan §6 "View-cache identity
@@ -114,10 +126,10 @@ export const ATTENTION_CANDIDATE_ORDERING_VERSION = 'attention-candidate-orderin
  * compared equal to one minted under this schema.
  */
 export const ATTENTION_CANDIDATE_DERIVATION_CACHE_KEY_SCHEMA_VERSION =
-  'attention-candidate-derivation-cache-key-v1' as const
+  'attention-candidate-derivation-cache-key-v2' as const
 
 export const ATTENTION_CANDIDATE_RANKING_CACHE_KEY_SCHEMA_VERSION =
-  'attention-candidate-ranking-cache-key-v1' as const
+  'attention-candidate-ranking-cache-key-v2' as const
 
 /**
  * The bounds on the one numeric field Stage A actually owns: the ranking
@@ -159,32 +171,35 @@ export function isAttentionRankingSnapshotLsnInRange(value: number): boolean {
 }
 
 /**
- * ADR-0013 D5 requires two source kinds for the complete v0 surface. Stage A
- * scopes to `quest_candidate` only; `narrative_pattern_instance` belongs to
- * Stage B and is not declared here, so no Stage A code can name it.
+ * ADR-0013 D5 requires two source kinds for the complete v0 surface. B4 adds
+ * the second family, `narrative_pattern_instance`, beside the committed
+ * `quest_candidate`. Both flow through one common candidate pipeline.
  */
-export type AttentionCandidateSourceKind = 'quest_candidate'
+export type AttentionCandidateSourceKind = 'quest_candidate' | 'narrative_pattern_instance'
 
 /**
  * ADR-0013 D5: "Normalization must never erase whether the source is
- * authoritative (`QuestCandidate`) or derived (`NarrativePatternInstance`)."
+ * authoritative (`QuestCandidate`) or derived (`NarrativePatternInstance`)." A
+ * quest candidate is authoritative; a narrative-pattern instance is derived.
  */
-export type AttentionCandidateSourceAuthority = 'authoritative'
+export type AttentionCandidateSourceAuthority = 'authoritative' | 'derived'
 
 /**
- * The versioned source-kind order — key 1 of the D14 tuple. It is declared even
- * though Stage A has exactly one kind, so the comparator consults a pinned
- * table rather than an implicit constant, and adding Stage B's kind later is a
- * visible policy edit rather than a comparator rewrite.
+ * The versioned source-kind order — key 3 of the nine-key D14 tuple (plan §7).
+ * `quest_candidate < narrative_pattern_instance` is an experiment-owned
+ * continuity default (RN019 §9.2), not a claim that quests are narratively
+ * more important; it exists to force a real source-kind tie-break. The
+ * comparator consults this pinned table rather than an implicit constant.
  */
 export const ATTENTION_CANDIDATE_SOURCE_KIND_ORDER: readonly AttentionCandidateSourceKind[] = Object.freeze([
   'quest_candidate',
+  'narrative_pattern_instance',
 ])
 
 /** Source authority per kind, preserved through normalization (ADR-0013 D5). */
 export const ATTENTION_CANDIDATE_SOURCE_AUTHORITY: Readonly<
   Record<AttentionCandidateSourceKind, AttentionCandidateSourceAuthority>
-> = Object.freeze({ quest_candidate: 'authoritative' })
+> = Object.freeze({ quest_candidate: 'authoritative', narrative_pattern_instance: 'derived' })
 
 // ---------------------------------------------------------------------------
 // A4 pins — template/channel, exposure, and ledger policy versions

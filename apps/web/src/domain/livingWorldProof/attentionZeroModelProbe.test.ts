@@ -116,7 +116,7 @@ function coldRun(probe: AttentionZeroModelProbe): ColdRunResult {
   })
   const access = readAttentionReadableQuestCandidateViews(snapshot, A1_REQUEST)
   if (access.kind !== 'ok') throw new Error('expected the A1 accessor to admit this snapshot')
-  const surface = constructAttentionReadableSurface(A1_REQUEST, access.views, Object.freeze([]))
+  const surface = constructAttentionReadableSurface(A1_REQUEST, access.views, access.openingCoordinateViews, Object.freeze([]))
   if (surface.kind !== 'ok') throw new Error('expected the A2 boundary to admit these views')
   const normalized = normalizeAttentionCandidates(surface.surface)
   if (normalized.kind !== 'ok') throw new Error('expected A3 normalization to succeed')

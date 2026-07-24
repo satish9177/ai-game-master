@@ -61,6 +61,7 @@ const STAGE_A_PROOF_MODULES = [
   'attentionNarrativePatternLifecycle.ts',
   'attentionNarrativePatternLibrary.ts',
   'attentionNarrativePatternMonitor.ts',
+  'attentionNarrativePatternResourcePolicy.ts',
   'attentionNarrativePatternScenario.ts',
   'attentionReadableBoundary.ts',
   'attentionStageAQuestOnlyGolden.ts',
@@ -170,6 +171,13 @@ const ALLOWED_IMPORT_SPECIFIERS: Record<string, readonly string[]> = {
     './attentionPatternEvidenceAccessor',
     './attentionNarrativePatternMonitor',
   ],
+  'attentionNarrativePatternResourcePolicy.ts': [
+    './canonicalSerialization',
+    './attentionPatternEvidenceContracts',
+    './attentionNarrativePatternMonitor',
+    './attentionNarrativePatternIdentity',
+    './attentionNarrativePatternContracts',
+  ],
   'attentionStageAQuestOnlyGolden.ts': [],
   'attentionCandidatePolicy.ts': [],
   'attentionCandidateIdentity.ts': ['./canonicalSerialization', './attentionCandidatePolicy'],
@@ -177,9 +185,23 @@ const ALLOWED_IMPORT_SPECIFIERS: Record<string, readonly string[]> = {
     './attentionCandidatePolicy',
     './attentionCandidateIdentity',
     './attentionReadableBoundary',
+    './attentionPatternEvidenceContracts',
+    './attentionNarrativePatternContracts',
+    './attentionNarrativePatternIdentity',
   ],
-  'attentionCandidateOrdering.ts': ['./attentionCandidatePolicy', './attentionCandidate'],
-  'attentionCandidateCacheKey.ts': ['./canonicalSerialization', './attentionCandidatePolicy'],
+  'attentionCandidateOrdering.ts': [
+    './attentionCandidatePolicy',
+    './canonicalSerialization',
+    './attentionCandidate',
+  ],
+  'attentionCandidateCacheKey.ts': [
+    './canonicalSerialization',
+    './attentionCandidatePolicy',
+    './attentionReadableBoundary',
+    './attentionPatternEvidenceContracts',
+    './attentionNarrativePatternLibrary',
+    './attentionNarrativePatternResourcePolicy',
+  ],
   'attentionRevealPackage.ts': ['./attentionCandidatePolicy', './attentionCandidate'],
   'attentionTemplate.ts': [
     './canonicalSerialization',
@@ -202,6 +224,7 @@ const ALLOWED_IMPORT_SPECIFIERS: Record<string, readonly string[]> = {
     './attentionCandidate',
     './attentionCandidateOrdering',
     './attentionCandidatePolicy',
+    './attentionNarrativePatternResourcePolicy',
     './attentionRevealPackage',
     './attentionTemplate',
     './attentionLedger',
@@ -284,6 +307,19 @@ const FORBIDDEN_BOUNDARY_PATTERNS: readonly (readonly [string, RegExp])[] = [
  */
 const VIEW_MINT_IDENTIFIER = 'mintAttentionReadableQuestCandidateView'
 const MINT_AUTHORIZED_FILES = [
+  'domain/livingWorldProof/attentionQuestCandidateAccessor.ts',
+  'domain/livingWorldProof/attentionQuestCandidateContracts.ts',
+] as const
+
+/**
+ * B4 — the quest opening-coordinate sidecar mint (RN019 §4.3). It has its own
+ * independent module-private marker, and — exactly like the legal view's mint —
+ * only the contracts module that defines it and the quest accessor that may
+ * call it are allowed to name it anywhere in the app. That is the mechanical
+ * form of "the sidecar is minted only by the existing quest accessor".
+ */
+const OPENING_COORDINATE_MINT_IDENTIFIER = 'mintAttentionReadableQuestOpeningCoordinateView'
+const OPENING_COORDINATE_MINT_AUTHORIZED_FILES = [
   'domain/livingWorldProof/attentionQuestCandidateAccessor.ts',
   'domain/livingWorldProof/attentionQuestCandidateContracts.ts',
 ] as const
@@ -596,6 +632,12 @@ function namesViewMint(source: string): boolean {
 function namesPatternViewMint(source: string): boolean {
   if (!mayContain(source, PATTERN_VIEW_MINT_IDENTIFIER)) return false
   return identifierNames(source).has(PATTERN_VIEW_MINT_IDENTIFIER)
+}
+
+/** Does this file name the sidecar mint as an identifier? */
+function namesOpeningCoordinateMint(source: string): boolean {
+  if (!mayContain(source, OPENING_COORDINATE_MINT_IDENTIFIER)) return false
+  return identifierNames(source).has(OPENING_COORDINATE_MINT_IDENTIFIER)
 }
 
 function readProofSource(fileName: string): string {
@@ -1000,8 +1042,139 @@ describe('B1 / S2 — the common A-prime constructor names no raw A-domain surfa
     }
   })
 
-  it('exposes exactly one three-parameter constructor: request, quest views, and pattern views', () => {
-    expect(constructAttentionReadableSurface.length).toBe(3)
+  it('exposes exactly one four-parameter constructor: request, quest views, quest opening coordinates, and pattern views', () => {
+    // B4 adds a parameter and a surface-schema version to the one existing
+    // constructor. It does not add a second A-prime boundary: this file's
+    // `ALLOWED_IMPORT_SPECIFIERS` admits exactly one boundary module, and the
+    // reverse scan below proves nothing outside the rig reaches it.
+    expect(constructAttentionReadableSurface.length).toBe(4)
+  })
+})
+
+describe('B4 / S2 — the quest opening-coordinate sidecar has accessor-only mint authority', () => {
+  // This assertion synchronously reads every .ts/.tsx file under apps/web/src
+  // (700+ files) to prove the sidecar mint is named nowhere outside the two
+  // authorized files. Warm reruns finish in well under 1s, but that whole-tree
+  // read was observed to occasionally exceed Vitest's default 5s per-test
+  // timeout under cold-disk/antivirus-scan conditions while dozens of sibling
+  // test files run concurrently. The explicit local timeout absorbs that
+  // one-time I/O cost without masking a real regression — the scan stays
+  // whole-source-tree and the assertion is unchanged — and does not alter the
+  // suite-wide default.
+  it('is named by the defining contracts module and the quest accessor, and by nothing else', () => {
+    const files = listSourceFiles(SRC_ROOT, '')
+      .concat(readdirSync(`${SRC_ROOT}${PROOF_DIRECTORY}/`).map((name) => `${PROOF_DIRECTORY}/${name}`))
+      .filter((file) => /\.tsx?$/.test(file))
+      // This evidence file necessarily names the mint as the subject of the assertion.
+      .filter((file) => !file.endsWith('attentionLedgerStaticClosure.test.ts'))
+
+    const namingFiles = files.filter((file) => (
+      namesOpeningCoordinateMint(readFileSync(`${SRC_ROOT}${file}`, 'utf8'))
+    ))
+
+    expect([...namingFiles].sort()).toEqual([...OPENING_COORDINATE_MINT_AUTHORIZED_FILES].sort())
+  }, 10_000)
+
+  it('keeps its nominal marker module-private and independent of the legal view marker', () => {
+    const contracts = readStrippedSource('attentionQuestCandidateContracts.ts')
+
+    expect(contracts).toMatch(/^const OPENING_COORDINATE_MINT_MARKER: unique symbol = Symbol\(/m)
+    expect(contracts).not.toMatch(/export\s+(const|declare const)\s+OPENING_COORDINATE_MINT_MARKER\b/)
+    // Two distinct symbols, so neither contract's authority check can be
+    // satisfied by the other contract's minted value.
+    expect(contracts).toMatch(/^const ACCESSOR_MINT_MARKER: unique symbol = Symbol\(/m)
+  })
+
+  it('is not named by the A-prime boundary or the candidate normalizer, which receive minted sidecars rather than making them', () => {
+    for (const fileName of ['attentionReadableBoundary.ts', 'attentionCandidate.ts', 'attentionCandidateOrdering.ts']) {
+      expect(identifierNames(readProofSource(fileName)).has(OPENING_COORDINATE_MINT_IDENTIFIER)).toBe(false)
+    }
+  })
+
+  it('is not credited to a file that only mentions it in a comment or a string', () => {
+    expect(namesOpeningCoordinateMint('// mintAttentionReadableQuestOpeningCoordinateView is not called here')).toBe(false)
+    expect(namesOpeningCoordinateMint("const note = 'mintAttentionReadableQuestOpeningCoordinateView'")).toBe(false)
+    expect(namesOpeningCoordinateMint('const s = mintAttentionReadableQuestOpeningCoordinateView(fields)')).toBe(true)
+  })
+})
+
+describe('B4 / P1 — no raw QuestCandidate reaches candidate ordering, identity, or the cache key', () => {
+  const DOWNSTREAM_MODULES = [
+    'attentionCandidate.ts',
+    'attentionCandidateIdentity.ts',
+    'attentionCandidateOrdering.ts',
+    'attentionCandidateCacheKey.ts',
+  ] as const
+
+  it.each(DOWNSTREAM_MODULES)('%s cannot name the raw quest contracts or accessor module', (fileName) => {
+    const specifiers = proofModuleSpecifiers(fileName)
+
+    // The raw `QuestCandidate`, the proof snapshot, the `open | resolved`
+    // lifecycle, and both accessor mints all live behind these two specifiers.
+    // Their absence is what proves these modules read A-prime and nothing else —
+    // including the sidecar, which they reach only as a re-export of the one
+    // common boundary.
+    expect(specifiers).not.toContain('./attentionQuestCandidateContracts')
+    expect(specifiers).not.toContain('./attentionQuestCandidateAccessor')
+  })
+
+  it('the ordering module names no provenance-derived ordering coordinate and no raw candidate surface', () => {
+    const ordering = readStrippedSource('attentionCandidateOrdering.ts')
+
+    // The corrected key 7 is the numeric `openedAtLsn` / `lastProgressLsn`. The
+    // defective provenance adapter is gone, and no textual comparison of
+    // provenance can be reintroduced without breaking one of these.
+    expect(ordering).not.toMatch(/\bderiveQuestSourceCommittedLsnCoordinate\b/)
+    expect(ordering).not.toMatch(/\bparseInt\b|\bparseFloat\b|\bNumber\s*\(/)
+    expect(ordering).toMatch(/\bopenedAtLsn\b/)
+    expect(ordering).toMatch(/\blastProgressLsn\b/)
+    // `openingProvenanceId` may not appear in the ordering module at all: it is
+    // neither an ordering coordinate nor a value this module has any use for.
+    expect(ordering).not.toMatch(/\bopeningProvenanceId\b/)
+  })
+
+  it('the canonical derivation cache key reads its dependencies from an explicit bundle, not module ambient state', () => {
+    const cacheKey = readStrippedSource('attentionCandidateCacheKey.ts')
+
+    // Both canonical key functions take their bundle as a parameter. The pinned
+    // constants are reachable only through the default-bundle factory, so a
+    // dependency a test cannot vary cannot reach the key bytes.
+    expect(cacheKey).toMatch(/export function deriveAttentionCandidateDerivationCacheKey\(\s*bundle: AttentionCandidateDerivationDependencyBundle,?\s*\)/)
+    expect(cacheKey).toMatch(/export function deriveAttentionCandidateRankingCacheKey\(\s*bundle: AttentionCandidateRankingDependencyBundle,?\s*\)/)
+  })
+})
+
+describe('B4 / P1 — the trusted trace and replay path stay singular and pattern-presentation-free', () => {
+  it('there is exactly one trace module, one replay composition seam, and one reveal-package module', () => {
+    const proofFiles = readdirSync(fileURLToPath(new URL('./', import.meta.url)))
+      .filter((name) => /\.tsx?$/.test(name) && !name.endsWith('.test.ts'))
+
+    expect(proofFiles.filter((name) => /^attentionTrace/.test(name))).toEqual(['attentionTrace.ts'])
+    expect(proofFiles.filter((name) => /^attentionReplay\.ts$/.test(name))).toEqual(['attentionReplay.ts'])
+    expect(proofFiles.filter((name) => /^attentionRevealPackage/.test(name))).toEqual(['attentionRevealPackage.ts'])
+    expect(proofFiles.filter((name) => /^attentionCandidateIdentity/.test(name))).toEqual(['attentionCandidateIdentity.ts'])
+    expect(proofFiles.filter((name) => /^attentionCandidateOrdering/.test(name))).toEqual(['attentionCandidateOrdering.ts'])
+    expect(proofFiles.filter((name) => /^attentionCandidateCacheKey/.test(name))).toEqual(['attentionCandidateCacheKey.ts'])
+    expect(proofFiles.filter((name) => /^attentionReadableBoundary/.test(name))).toEqual(['attentionReadableBoundary.ts'])
+  })
+
+  it('no stale four-key ordering narration survives in the trace or replay modules', () => {
+    for (const fileName of ['attentionTrace.ts', 'attentionReplay.ts']) {
+      const source = readProofSource(fileName)
+      expect({ fileName, stale: /four-key|four literals|four-literal/i.test(source) })
+        .toEqual({ fileName, stale: false })
+    }
+  })
+
+  it('the B4 reveal package builds no pattern branch and renders no pattern prose', () => {
+    const revealPackage = readStrippedSource('attentionRevealPackage.ts')
+
+    // B4's temporary boundary: the quest branch is byte-for-byte the committed
+    // package, and a pattern candidate receives a typed refusal. B5 replaces
+    // that refusal; B4 invents no assertion, token, or prose for it.
+    expect(revealPackage).toMatch(/'unsupported-source-family'/)
+    expect(revealPackage).not.toMatch(/\bassertion\w*\b/i)
+    expect(revealPackage).not.toMatch(/attention-pattern-reveal-package|attention-pattern-direct-evidence-template/)
   })
 })
 
