@@ -62,10 +62,19 @@
 import {
   ATTENTION_CANDIDATE_CANONICALIZATION_VERSION,
   ATTENTION_CANDIDATE_IDENTITY_SCHEMA_VERSION,
+  ATTENTION_PATTERN_CANDIDATE_IDENTITY_SCHEMA_VERSION,
   ATTENTION_TEMPLATE_VERSION,
   isAttentionRankingSnapshotLsnInRange,
 } from './attentionCandidatePolicy'
 import type { AttentionCandidate } from './attentionCandidate'
+import {
+  ATTENTION_PATTERN_DIRECT_EVIDENCE_TEMPLATE_VERSION,
+  ATTENTION_PATTERN_REVEAL_PACKAGE_SCHEMA_VERSION,
+  hasValidDirectEvidenceAssertionFields,
+} from './attentionDirectEvidenceAssertion'
+import type { AttentionDirectEvidenceAssertion } from './attentionDirectEvidenceAssertion'
+import { attentionStageBResourcePolicy } from './attentionNarrativePatternResourcePolicy'
+import type { AttentionStageBResourcePolicy } from './attentionNarrativePatternResourcePolicy'
 
 /**
  * The approved slots: the closed set of legally readable content fields a Stage A
@@ -129,12 +138,23 @@ export interface AttentionRevealSlot {
 }
 
 /** The Stage A subset, exactly as plan §7 fixes it. */
-export interface AttentionRevealPackage {
+export interface AttentionQuestRevealPackage {
   readonly templateVersion: string
   readonly candidateId: string
   readonly slots: readonly AttentionRevealSlot[]
   readonly resultTag: AttentionRevealResultTag
 }
+
+export interface AttentionPatternRevealPackage {
+  readonly packageSchemaVersion: typeof ATTENTION_PATTERN_REVEAL_PACKAGE_SCHEMA_VERSION
+  readonly templateVersion: typeof ATTENTION_PATTERN_DIRECT_EVIDENCE_TEMPLATE_VERSION
+  readonly candidateId: string
+  readonly assertions: readonly AttentionDirectEvidenceAssertion[]
+  readonly resultTag: 'presentation-ready'
+}
+
+/** One package pipeline, discriminated by its pinned branch template. */
+export type AttentionRevealPackage = AttentionQuestRevealPackage | AttentionPatternRevealPackage
 
 /** The exact own keys of a built package — exported as closure evidence. */
 export const ATTENTION_REVEAL_PACKAGE_KEYS: readonly string[] = Object.freeze([
@@ -144,8 +164,19 @@ export const ATTENTION_REVEAL_PACKAGE_KEYS: readonly string[] = Object.freeze([
   'templateVersion',
 ])
 
+export const ATTENTION_PATTERN_REVEAL_PACKAGE_KEYS: readonly string[] = Object.freeze([
+  'assertions',
+  'candidateId',
+  'packageSchemaVersion',
+  'resultTag',
+  'templateVersion',
+])
+
 export interface AttentionRevealPackageRequest {
   readonly templateVersion: string
+  readonly directEvidenceAssertions?: readonly AttentionDirectEvidenceAssertion[]
+  /** B5 — explicit pattern resource policy; defaults to the pinned singleton. */
+  readonly policy?: AttentionStageBResourcePolicy
 }
 
 /** The closed typed refusal set. Every case refuses; none approximates. */
@@ -163,6 +194,16 @@ export type AttentionRevealPackageRefusal =
   | 'missing-candidate-id'
   | 'missing-opening-provenance-id'
   | 'empty-legally-visible-slot-value'
+  | 'missing-direct-evidence-assertions'
+  | 'empty-direct-evidence-assertions'
+  | 'too-many-direct-evidence-assertions'
+  | 'duplicate-direct-evidence-assertion'
+  | 'direct-evidence-source-mismatch'
+  | 'invalid-direct-evidence-field-character'
+  | 'missing-required-direct-evidence-assertion'
+  | 'unexpected-direct-evidence-assertion'
+  | 'pattern-assertion-out-of-order'
+  | 'unsupported-direct-evidence-assertions-for-quest'
 
 export type AttentionRevealPackageResult =
   | { readonly kind: 'ok'; readonly revealPackage: AttentionRevealPackage }
@@ -197,17 +238,89 @@ export function buildAttentionRevealPackage(
   attentionCandidate: AttentionCandidate,
   request: AttentionRevealPackageRequest,
 ): AttentionRevealPackageResult {
-  // B4 dispatches the two-family candidate union: the quest branch below is
-  // byte-for-byte the committed Stage A package, and a `narrative_pattern_instance`
-  // candidate returns a typed, deterministic unsupported-family refusal. This
-  // refusal is temporary until B5 extends this same package/template pipeline
-  // with the bounded pattern direct-evidence branch; B4 invents no pattern
-  // assertion or pattern prose here (plan §10).
+  // B5's exhaustive two-family dispatch: a `narrative_pattern_instance`
+  // candidate builds the bounded direct-evidence pattern package below, and a
+  // `quest_candidate` builds byte-for-byte the committed Stage A package. Any
+  // other runtime `sourceKind` -- unreachable under the closed type but not
+  // under a forged or cast value -- refuses deterministically before any
+  // quest-specific assumption or canonicalization check runs.
+  if (!isPresent(request.templateVersion)) {
+    return { kind: 'refused', reason: 'missing-template-version' }
+  }
+  if (attentionCandidate.sourceKind === 'narrative_pattern_instance') {
+    if (request.templateVersion !== ATTENTION_PATTERN_DIRECT_EVIDENCE_TEMPLATE_VERSION) {
+      return { kind: 'refused', reason: 'unsupported-template-version' }
+    }
+    if (attentionCandidate.identitySchemaVersion !== ATTENTION_PATTERN_CANDIDATE_IDENTITY_SCHEMA_VERSION) {
+      return { kind: 'refused', reason: 'unsupported-identity-schema-version' }
+    }
+    if (!isPresent(attentionCandidate.candidateId)) return { kind: 'refused', reason: 'missing-candidate-id' }
+    if (request.directEvidenceAssertions === undefined) {
+      return { kind: 'refused', reason: 'missing-direct-evidence-assertions' }
+    }
+    if (request.directEvidenceAssertions.length === 0) {
+      return { kind: 'refused', reason: 'empty-direct-evidence-assertions' }
+    }
+    const policy = request.policy ?? attentionStageBResourcePolicy()
+    if (request.directEvidenceAssertions.length > policy.revealPackageAssertions) {
+      return { kind: 'refused', reason: 'too-many-direct-evidence-assertions' }
+    }
+    const assertionIds = new Set<string>()
+    const seenSourceKeys = new Set<string>()
+    const givenOrder: string[] = []
+    const expectedOrder = attentionCandidate.canonicalSupportingRecordIdentityTuple.map(
+      (entry) => entry[2] + '\u0000' + entry[3],
+    )
+    for (const assertion of request.directEvidenceAssertions) {
+      if (!isPresent(assertion.assertionId) || assertionIds.has(assertion.assertionId)) {
+        return { kind: 'refused', reason: 'duplicate-direct-evidence-assertion' }
+      }
+      if (!hasValidDirectEvidenceAssertionFields(assertion)) {
+        return { kind: 'refused', reason: 'invalid-direct-evidence-field-character' }
+      }
+      assertionIds.add(assertion.assertionId)
+      const sourceKey = assertion.sourceRecordId + '\u0000' + assertion.visibilityProvenanceId
+      if (seenSourceKeys.has(sourceKey)) {
+        return { kind: 'refused', reason: 'duplicate-direct-evidence-assertion' }
+      }
+      if (!expectedOrder.includes(sourceKey)) {
+        return { kind: 'refused', reason: 'direct-evidence-source-mismatch' }
+      }
+      seenSourceKeys.add(sourceKey)
+      givenOrder.push(sourceKey)
+    }
+    // Assertion order must equal the canonical supporting-record semantic-step
+    // order (RN019 section 7.2): a rankable instance supporting tuple is
+    // exactly its advancing evidence, so a legally built request length and
+    // sequence always match the tuple. A shorter, longer, or reordered
+    // sequence is refused rather than sorted or repaired.
+    if (givenOrder.length < expectedOrder.length) {
+      return { kind: 'refused', reason: 'missing-required-direct-evidence-assertion' }
+    }
+    if (givenOrder.length > expectedOrder.length) {
+      return { kind: 'refused', reason: 'unexpected-direct-evidence-assertion' }
+    }
+    if (givenOrder.some((key, index) => key !== expectedOrder[index])) {
+      return { kind: 'refused', reason: 'pattern-assertion-out-of-order' }
+    }
+    return {
+      kind: 'ok',
+      revealPackage: Object.freeze({
+        packageSchemaVersion: ATTENTION_PATTERN_REVEAL_PACKAGE_SCHEMA_VERSION,
+        templateVersion: ATTENTION_PATTERN_DIRECT_EVIDENCE_TEMPLATE_VERSION,
+        candidateId: attentionCandidate.candidateId,
+        assertions: Object.freeze(
+          request.directEvidenceAssertions.map((assertion) => Object.freeze({ ...assertion })),
+        ),
+        resultTag: 'presentation-ready',
+      }),
+    }
+  }
   if (attentionCandidate.sourceKind !== 'quest_candidate') {
     return { kind: 'refused', reason: 'unsupported-source-family' }
   }
-  if (!isPresent(request.templateVersion)) {
-    return { kind: 'refused', reason: 'missing-template-version' }
+  if (request.directEvidenceAssertions !== undefined) {
+    return { kind: 'refused', reason: 'unsupported-direct-evidence-assertions-for-quest' }
   }
   if (request.templateVersion !== ATTENTION_TEMPLATE_VERSION) {
     return { kind: 'refused', reason: 'unsupported-template-version' }

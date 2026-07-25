@@ -70,6 +70,7 @@ const STAGE_A_PROOF_MODULES = [
   'attentionCandidate.ts',
   'attentionCandidateOrdering.ts',
   'attentionCandidateCacheKey.ts',
+  'attentionDirectEvidenceAssertion.ts',
   'attentionRevealPackage.ts',
   'attentionTemplate.ts',
   'attentionLedger.ts',
@@ -201,21 +202,39 @@ const ALLOWED_IMPORT_SPECIFIERS: Record<string, readonly string[]> = {
     './attentionPatternEvidenceContracts',
     './attentionNarrativePatternLibrary',
     './attentionNarrativePatternResourcePolicy',
+    './attentionDirectEvidenceAssertion',
   ],
-  'attentionRevealPackage.ts': ['./attentionCandidatePolicy', './attentionCandidate'],
+  'attentionDirectEvidenceAssertion.ts': [
+    './canonicalSerialization',
+    './attentionCandidatePolicy',
+    './attentionNarrativePatternContracts',
+  ],
+  'attentionRevealPackage.ts': [
+    './attentionCandidatePolicy',
+    './attentionCandidate',
+    './attentionDirectEvidenceAssertion',
+    './attentionNarrativePatternResourcePolicy',
+  ],
   'attentionTemplate.ts': [
     './canonicalSerialization',
     './attentionCandidatePolicy',
     './attentionRevealPackage',
+    './attentionDirectEvidenceAssertion',
   ],
   'attentionLedger.ts': [
     './canonicalSerialization',
     './attentionCandidatePolicy',
     './attentionCandidate',
     './attentionRevealPackage',
+    './attentionDirectEvidenceAssertion',
+    './attentionNarrativePatternResourcePolicy',
   ],
   'attentionZeroModelProbe.ts': [],
-  'attentionTrace.ts': ['./canonicalSerialization', './attentionRevealPackage'],
+  'attentionTrace.ts': [
+    './canonicalSerialization',
+    './attentionCandidatePolicy',
+    './attentionRevealPackage',
+  ],
   'attentionReplayResources.ts': ['./canonicalSerialization'],
   'attentionReplay.ts': [
     './attentionQuestCandidateContracts',
@@ -231,6 +250,8 @@ const ALLOWED_IMPORT_SPECIFIERS: Record<string, readonly string[]> = {
     './attentionTrace',
     './attentionReplayResources',
     './canonicalSerialization',
+    './attentionDirectEvidenceAssertion',
+    './attentionNarrativePatternContracts',
   ],
   'attentionReplayScenario.ts': [
     './attentionQuestCandidateContracts',
@@ -1052,15 +1073,21 @@ describe('B1 / S2 — the common A-prime constructor names no raw A-domain surfa
 })
 
 describe('B4 / S2 — the quest opening-coordinate sidecar has accessor-only mint authority', () => {
-  // This assertion synchronously reads every .ts/.tsx file under apps/web/src
-  // (700+ files) to prove the sidecar mint is named nowhere outside the two
-  // authorized files. Warm reruns finish in well under 1s, but that whole-tree
-  // read was observed to occasionally exceed Vitest's default 5s per-test
-  // timeout under cold-disk/antivirus-scan conditions while dozens of sibling
-  // test files run concurrently. The explicit local timeout absorbs that
-  // one-time I/O cost without masking a real regression — the scan stays
-  // whole-source-tree and the assertion is unchanged — and does not alter the
-  // suite-wide default.
+  // Documented test-local timeout (plan §10 "Static-closure timeout handling").
+  //
+  // This assertion synchronously reads and parses every .ts/.tsx file under
+  // `apps/web/src` to prove the sidecar mint is named nowhere outside the two
+  // authorized files. Measured on this tree: 522ms when the file runs alone,
+  // but 6526ms — past Vitest's 5000ms default — when the whole repository suite
+  // runs and dozens of sibling files contend for the same disk and worker
+  // pool. The failure mode was confirmed to be wall clock only: the identical
+  // scan and the identical assertion pass in isolation, so nothing here is a
+  // scan-coverage or logic regression being papered over.
+  //
+  // The budget below therefore buys time for exactly the same complete result.
+  // It scans no less, retries nothing, skips nothing, and leaves the
+  // suite-wide default untouched; it is scoped to this one `it`, and the
+  // sibling tests in this block keep the default.
   it('is named by the defining contracts module and the quest accessor, and by nothing else', () => {
     const files = listSourceFiles(SRC_ROOT, '')
       .concat(readdirSync(`${SRC_ROOT}${PROOF_DIRECTORY}/`).map((name) => `${PROOF_DIRECTORY}/${name}`))
@@ -1166,15 +1193,32 @@ describe('B4 / P1 — the trusted trace and replay path stay singular and patter
     }
   })
 
-  it('the B4 reveal package builds no pattern branch and renders no pattern prose', () => {
+  it('the B5 reveal package has a direct-only pattern branch', () => {
     const revealPackage = readStrippedSource('attentionRevealPackage.ts')
 
-    // B4's temporary boundary: the quest branch is byte-for-byte the committed
-    // package, and a pattern candidate receives a typed refusal. B5 replaces
-    // that refusal; B4 invents no assertion, token, or prose for it.
-    expect(revealPackage).toMatch(/'unsupported-source-family'/)
-    expect(revealPackage).not.toMatch(/\bassertion\w*\b/i)
-    expect(revealPackage).not.toMatch(/attention-pattern-reveal-package|attention-pattern-direct-evidence-template/)
+    expect(revealPackage).toMatch(/ATTENTION_PATTERN_REVEAL_PACKAGE_SCHEMA_VERSION/)
+    expect(revealPackage).toMatch(/ATTENTION_PATTERN_DIRECT_EVIDENCE_TEMPLATE_VERSION/)
+    expect(revealPackage).not.toMatch(/narrativeAnnotation|patternType|motive|friend|trust/i)
+  })
+
+  it('the B5 pattern-presentation pass is one real composition that actually calls every B5 component -- not a parallel or test-only path', () => {
+    const replaySource = readStrippedSource('attentionReplay.ts')
+
+    // The single composition function must exist, and must genuinely call
+    // each B5 unit rather than re-implement or bypass it.
+    expect(replaySource).toMatch(/function runAttentionPatternPresentationPass/)
+    const passStart = replaySource.indexOf('function runAttentionPatternPresentationPass')
+    const passBody = replaySource.slice(passStart, passStart + 8000)
+    expect(passBody).toMatch(/revalidateAttentionPatternPresentation\s*\(/)
+    expect(passBody).toMatch(/buildAttentionDirectEvidenceAssertions\s*\(/)
+    expect(passBody).toMatch(/buildAttentionRevealPackage\s*\(/)
+    expect(passBody).toMatch(/renderAttentionRevealPackage\s*\(/)
+    expect(passBody).toMatch(/appendAttentionLedgerRecord\s*\(/)
+
+    // Only one such composition function exists in the module -- no second,
+    // parallel pattern-presentation pipeline.
+    const occurrences = replaySource.match(/function runAttentionPatternPresentationPass/g) ?? []
+    expect(occurrences).toHaveLength(1)
   })
 })
 
@@ -1288,6 +1332,20 @@ describe('B1 boundary rename closure', () => {
           .some((specifier) => specifier.includes(OLD_BOUNDARY_SPECIFIER))
     })
     expect(offenders).toEqual([])
+  })
+})
+
+describe('B5 — branch-specific ledger contracts remain closed', () => {
+  it('has no global v2 quest-ledger identity and exposes one disjoint pattern-record identity', () => {
+    const policy = readStrippedSource('attentionCandidatePolicy.ts')
+    const ledger = readStrippedSource('attentionLedger.ts')
+
+    expect(policy).not.toMatch(/(?:export\s+)?const\s+ATTENTION_LEDGER_POLICY_VERSION\s*=\s*['"]attention-ledger-policy-v2['"]/)
+    expect(policy).toMatch(/export\s+const\s+ATTENTION_LEDGER_POLICY_VERSION\s*=\s*['"]attention-ledger-policy-v1['"]/)
+    expect(policy).toMatch(/export\s+const\s+ATTENTION_PATTERN_PRESENTATION_LEDGER_POLICY_VERSION\s*=\s*['"]attention-pattern-presentation-ledger-policy-v1['"]/)
+    expect(ledger).toMatch(/sourceKind\s*===\s*['"]quest_candidate['"]|sourceKind:\s*['"]quest_candidate['"]/)
+    expect(ledger).toMatch(/sourceKind\s*===\s*['"]narrative_pattern_instance['"]|sourceKind:\s*['"]narrative_pattern_instance['"]/)
+    expect(ledger).toMatch(/patternPresentationLedgerPolicyVersion/)
   })
 })
 

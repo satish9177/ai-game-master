@@ -53,11 +53,17 @@
  * construction, which is D15's "a re-weighting must not invalidate cached
  * candidate derivation" and D6's identity/ranking disjointness.
  *
- * **No B5 dependency lives here.** At B4 the ranking bundle carries no exposure,
- * cooldown, retirement, ledger, presentation-history, relevant-ledger-input, or
- * template/package dependency. Those belong to B5 and are added when B5 owns the
- * behavior they key; adding one early would key every cached value to a policy
- * this slice does not implement.
+ * **B5 owns the ledger/presentation dependencies added here.** At B4 the ranking
+ * bundle carried no exposure, cooldown, retirement, ledger, presentation-history,
+ * relevant-ledger-input, or template/package dependency, because B4 did not yet
+ * implement the behavior they key. B5 adds exactly the pattern-presentation
+ * ledger policy version,
+ * exposure policy version, a digest of the relevant ledger history, the direct-
+ * evidence-assertion identity version, and the pattern package/template schema
+ * versions to `AttentionCandidateRankingEligibilityResourceState` -- the same
+ * eligibility/resource-state member the ranking bundle already carried, not a
+ * new bundle member -- and bumps the ranking cache-key schema to v3 because that
+ * is a shape change to an already-versioned key.
  *
  * The versions this rig itself owns — canonicalization, quest and pattern
  * candidate identity schema, surface schema, sidecar contract, ordering — are
@@ -82,9 +88,12 @@ import {
   ATTENTION_CANDIDATE_IDENTITY_SCHEMA_VERSION,
   ATTENTION_CANDIDATE_ORDERING_VERSION,
   ATTENTION_CANDIDATE_RANKING_CACHE_KEY_SCHEMA_VERSION,
+  ATTENTION_EXPOSURE_POLICY_VERSION,
+  ATTENTION_PATTERN_PRESENTATION_LEDGER_POLICY_VERSION,
   ATTENTION_NARRATIVE_PATTERN_IDENTITY_SCHEMA_VERSION,
   ATTENTION_NARRATIVE_PATTERN_MONITOR_RULE_VERSION,
   ATTENTION_PATTERN_CANDIDATE_IDENTITY_SCHEMA_VERSION,
+  ATTENTION_TEMPLATE_CHANNEL_POLICY_VERSION,
   isAttentionRankingSnapshotLsnInRange,
 } from './attentionCandidatePolicy'
 import {
@@ -93,6 +102,11 @@ import {
   ATTENTION_READABLE_SURFACE_SCHEMA_VERSION,
 } from './attentionReadableBoundary'
 import { ATTENTION_PATTERN_EVIDENCE_ACCESSOR_VERSION } from './attentionPatternEvidenceContracts'
+import {
+  ATTENTION_DIRECT_EVIDENCE_ASSERTION_IDENTITY_VERSION,
+  ATTENTION_PATTERN_DIRECT_EVIDENCE_TEMPLATE_VERSION,
+  ATTENTION_PATTERN_REVEAL_PACKAGE_SCHEMA_VERSION,
+} from './attentionDirectEvidenceAssertion'
 import { ATTENTION_NARRATIVE_PATTERN_LIBRARY_HASH } from './attentionNarrativePatternLibrary'
 import {
   ATTENTION_NARRATIVE_PATTERN_POLICY_HASH,
@@ -153,18 +167,30 @@ export const ATTENTION_CANDIDATE_DERIVATION_DEPENDENCY_FIELDS: readonly string[]
 ])
 
 /**
- * The B4-owned eligibility/resource state the ranking key depends on and the
+ * The eligibility/resource state the ranking key depends on and the
  * derivation key deliberately does not. It is ranking-only policy: changing it
  * moves the ranking key while leaving the derivation key, the pattern-instance
  * identity, and every candidate identity exactly where they were (ADR-0013 D6).
  *
- * It carries no exposure, cooldown, retirement, ledger, presentation-history, or
- * template coordinate — those are B5's.
+ * The first three members are B4's mixed-family ordering/retention coordinates.
+ * The remaining five are B5's: the pattern-presentation ledger and exposure
+ * policy versions, a
+ * digest of the relevant ledger history a presentation decision actually read,
+ * and the direct-evidence-assertion/pattern-package/template schema versions.
+ * None of these is a resource *value* (those already live in the resource
+ * policy, folded into `patternPolicyHash` on the derivation bundle) -- they are
+ * the *identities of the rules* a ranking/presentation decision consulted.
  */
 export interface AttentionCandidateRankingEligibilityResourceState {
   readonly mixedFamilyCandidateCap: number
   readonly retentionClassOrder: readonly string[]
   readonly rankableClasses: readonly string[]
+  readonly patternPresentationLedgerPolicyVersion: string
+  readonly exposurePolicyVersion: string
+  readonly relevantLedgerDigest: string
+  readonly directEvidenceAssertionIdentityVersion: string
+  readonly patternRevealPackageSchemaVersion: string
+  readonly patternDirectEvidenceTemplateVersion: string
 }
 
 /** RN019 §9.3's ranking dependency bundle: the derivation bundle plus exactly three ranking-only members. */
@@ -210,7 +236,14 @@ export function attentionCandidateDerivationDependencyBundle(
   })
 }
 
-/** The default B4 eligibility/resource state, read from the pinned resource policy. */
+/**
+ * The default eligibility/resource state, read from the pinned resource and
+ * ledger/presentation policy constants. `relevantLedgerDigest` has no
+ * meaningful global default -- a caller with real ledger history must supply
+ * its own digest of the relevant records so the key can actually vary with
+ * ledger content; the fallback here only names the no-history case explicitly
+ * rather than leaving the field silently absent.
+ */
 export function attentionCandidateRankingEligibilityResourceState(
   overrides: Partial<AttentionCandidateRankingEligibilityResourceState> = {},
 ): AttentionCandidateRankingEligibilityResourceState {
@@ -222,6 +255,16 @@ export function attentionCandidateRankingEligibilityResourceState(
     rankableClasses: Object.freeze([
       ...(overrides.rankableClasses ?? ['satisfied', 'active', 'stalled']),
     ]),
+    patternPresentationLedgerPolicyVersion:
+      overrides.patternPresentationLedgerPolicyVersion ?? ATTENTION_PATTERN_PRESENTATION_LEDGER_POLICY_VERSION,
+    exposurePolicyVersion: overrides.exposurePolicyVersion ?? ATTENTION_EXPOSURE_POLICY_VERSION,
+    relevantLedgerDigest: overrides.relevantLedgerDigest ?? 'attention-ranking-no-relevant-ledger-history',
+    directEvidenceAssertionIdentityVersion:
+      overrides.directEvidenceAssertionIdentityVersion ?? ATTENTION_DIRECT_EVIDENCE_ASSERTION_IDENTITY_VERSION,
+    patternRevealPackageSchemaVersion:
+      overrides.patternRevealPackageSchemaVersion ?? ATTENTION_PATTERN_REVEAL_PACKAGE_SCHEMA_VERSION,
+    patternDirectEvidenceTemplateVersion:
+      overrides.patternDirectEvidenceTemplateVersion ?? ATTENTION_PATTERN_DIRECT_EVIDENCE_TEMPLATE_VERSION,
   })
 }
 
@@ -245,7 +288,7 @@ export function attentionCandidateRankingEligibilityResourceState(
  * discipline `deriveAttentionCandidateDerivationCacheKey` and
  * `deriveAttentionCandidateRankingCacheKey` already establish.
  */
-export const ATTENTION_TRACE_CACHE_KEY_SCHEMA_VERSION = 'attention-trace-cache-key-v1' as const
+export const ATTENTION_TRACE_CACHE_KEY_SCHEMA_VERSION = 'attention-trace-cache-key-v2' as const
 
 /** The closed typed refusal set. Every case refuses; none approximates. */
 export type AttentionCandidateCacheKeyRefusal =
@@ -390,6 +433,10 @@ export function deriveAttentionCandidateDerivationCacheKey(
   }
 }
 
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === 'string' && value.trim().length > 0
+}
+
 function isEligibilityResourceState(
   value: AttentionCandidateRankingEligibilityResourceState | undefined,
 ): value is AttentionCandidateRankingEligibilityResourceState {
@@ -397,6 +444,12 @@ function isEligibilityResourceState(
   if (!Number.isSafeInteger(value.mixedFamilyCandidateCap) || value.mixedFamilyCandidateCap < 0) return false
   if (!Array.isArray(value.retentionClassOrder) || value.retentionClassOrder.length === 0) return false
   if (!Array.isArray(value.rankableClasses) || value.rankableClasses.length === 0) return false
+  if (!isNonEmptyString(value.patternPresentationLedgerPolicyVersion)) return false
+  if (!isNonEmptyString(value.exposurePolicyVersion)) return false
+  if (!isNonEmptyString(value.relevantLedgerDigest)) return false
+  if (!isNonEmptyString(value.directEvidenceAssertionIdentityVersion)) return false
+  if (!isNonEmptyString(value.patternRevealPackageSchemaVersion)) return false
+  if (!isNonEmptyString(value.patternDirectEvidenceTemplateVersion)) return false
   return true
 }
 
@@ -433,8 +486,15 @@ export function deriveAttentionCandidateRankingCacheKey(
   const canonicalInput = {
     derivationCacheKey: derivation.derivationCacheKey,
     eligibilityResourceState: {
+      directEvidenceAssertionIdentityVersion: bundle.eligibilityResourceState.directEvidenceAssertionIdentityVersion,
+      exposurePolicyVersion: bundle.eligibilityResourceState.exposurePolicyVersion,
+      patternPresentationLedgerPolicyVersion:
+        bundle.eligibilityResourceState.patternPresentationLedgerPolicyVersion,
       mixedFamilyCandidateCap: bundle.eligibilityResourceState.mixedFamilyCandidateCap,
+      patternDirectEvidenceTemplateVersion: bundle.eligibilityResourceState.patternDirectEvidenceTemplateVersion,
+      patternRevealPackageSchemaVersion: bundle.eligibilityResourceState.patternRevealPackageSchemaVersion,
       rankableClasses: [...bundle.eligibilityResourceState.rankableClasses],
+      relevantLedgerDigest: bundle.eligibilityResourceState.relevantLedgerDigest,
       retentionClassOrder: [...bundle.eligibilityResourceState.retentionClassOrder],
     },
     orderingVersion: bundle.orderingVersion,
@@ -455,6 +515,17 @@ export interface AttentionTraceCacheKeyInput {
   readonly rankingCacheKey: string
   readonly revalidationSnapshotLsn: number
   readonly replayCaseId: string
+  /** B5-only presentation cache material. Omitted only by the frozen quest v1 path. */
+  readonly presentationDependencies?: AttentionPresentationCacheDependencies
+}
+
+export interface AttentionPresentationCacheDependencies {
+  readonly templateVersion: string
+  readonly templateChannelPolicyVersion: string
+  readonly exposurePolicyVersion: string
+  readonly patternPresentationLedgerPolicyVersion: string
+  readonly resourcePolicyVersion: string
+  readonly relevantLedgerDigest: string
 }
 
 export type AttentionTraceCacheKeyRefusal =
@@ -462,6 +533,7 @@ export type AttentionTraceCacheKeyRefusal =
   | 'missing-revalidation-snapshot-lsn'
   | 'revalidation-snapshot-lsn-out-of-range'
   | 'missing-replay-case-id'
+  | 'invalid-presentation-cache-dependencies'
 
 export type AttentionTraceCacheKeyResult =
   | { readonly kind: 'ok'; readonly cacheKeySchemaVersion: string; readonly traceCacheKey: string }
@@ -485,11 +557,30 @@ export function deriveAttentionTraceCacheKey(input: AttentionTraceCacheKeyInput)
   if (!isPresent(input.replayCaseId)) {
     return { kind: 'refused', reason: 'missing-replay-case-id' }
   }
+  const presentation = input.presentationDependencies
+  if (presentation !== undefined && (
+    presentation.templateVersion !== ATTENTION_PATTERN_DIRECT_EVIDENCE_TEMPLATE_VERSION
+    || presentation.templateChannelPolicyVersion !== ATTENTION_TEMPLATE_CHANNEL_POLICY_VERSION
+    || presentation.exposurePolicyVersion !== ATTENTION_EXPOSURE_POLICY_VERSION
+    || presentation.patternPresentationLedgerPolicyVersion !== ATTENTION_PATTERN_PRESENTATION_LEDGER_POLICY_VERSION
+    || presentation.resourcePolicyVersion !== ATTENTION_STAGE_B_RESOURCE_POLICY_VERSION
+    || !isPresent(presentation.relevantLedgerDigest)
+  )) return { kind: 'refused', reason: 'invalid-presentation-cache-dependencies' }
 
   const canonicalInput = {
     rankingCacheKey: input.rankingCacheKey,
     replayCaseId: input.replayCaseId,
     revalidationSnapshotLsn: input.revalidationSnapshotLsn,
+    ...(presentation === undefined ? {} : {
+      presentationDependencies: {
+        exposurePolicyVersion: presentation.exposurePolicyVersion,
+        patternPresentationLedgerPolicyVersion: presentation.patternPresentationLedgerPolicyVersion,
+        relevantLedgerDigest: presentation.relevantLedgerDigest,
+        resourcePolicyVersion: presentation.resourcePolicyVersion,
+        templateChannelPolicyVersion: presentation.templateChannelPolicyVersion,
+        templateVersion: presentation.templateVersion,
+      },
+    }),
   }
 
   return {

@@ -22,6 +22,7 @@ import {
 import {
   runAttentionDirectorOffPass,
   runAttentionP3PairedWorldCheck,
+  runAttentionPatternPresentationPass,
   runAttentionQuestCandidatePrimePipeline,
   runAttentionQuestCandidateReplayPass,
   stableWorldReplayPassInput,
@@ -30,10 +31,12 @@ import {
   createAttentionReplayAuthoritativeResources,
   digestAttentionReplayAuthoritativeLog,
 } from './attentionReplayResources'
-import { ATTENTION_TEMPLATE_VERSION } from './attentionCandidatePolicy'
+import { ATTENTION_LEDGER_POLICY_VERSION, ATTENTION_TEMPLATE_VERSION } from './attentionCandidatePolicy'
 import { buildAttentionRevealPackage } from './attentionRevealPackage'
 import { renderAttentionRevealPackage } from './attentionTemplate'
-import { attentionLedgerFeatures } from './attentionLedger'
+import { ATTENTION_PATTERN_PRESENTATION_LEDGER_POLICY_VERSION, attentionLedgerFeatures } from './attentionLedger'
+import type { AttentionPatternCandidate } from './attentionCandidate'
+import type { NarrativePatternDirectEvidenceAssertionInput } from './attentionNarrativePatternContracts'
 import {
   assertAttentionZeroModelProbeUnused,
   createAttentionZeroModelProbe,
@@ -116,6 +119,58 @@ describe(`B1 quest-only compatibility with ${ATTENTION_STAGE_A_QUEST_ONLY_BASELI
     expect(pass.result.orderedCandidates).toHaveLength(1)
     expect(pass.result.trace.presentations).toHaveLength(1)
     expect(pass.result.ledger.records).toHaveLength(1)
+  })
+
+  it('keeps the quest branch byte-frozen when a pattern-presentation record is appended elsewhere in the same ledger', () => {
+    const world = buildAttentionReplayQuestCandidateOnlyWorld()
+    const pass = runAttentionQuestCandidateReplayPass(
+      stableWorldReplayPassInput('stage-a-golden-ledger-branches', world, EMPTY_AUTHORITATIVE_LOG_DIGEST),
+    )
+    if (pass.kind !== 'ok') throw new Error('expected quest-only replay')
+    const questCandidate = pass.result.orderedCandidates[0]
+    const questRecord = pass.result.ledger.records[0]
+    if (questCandidate === undefined || questRecord === undefined) throw new Error('expected one quest record')
+    if (questRecord.sourceKind !== 'quest_candidate') throw new Error('expected a quest ledger record')
+
+    expect(questRecord.sourceKind).toBe('quest_candidate')
+    expect(questRecord.ledgerPolicyVersion).toBe(ATTENTION_LEDGER_POLICY_VERSION)
+    expect(questRecord.recordId.startsWith(ATTENTION_LEDGER_POLICY_VERSION + ':')).toBe(true)
+    expect(canonicalSerialize(pass.result.ledger.records))
+      .toBe(ATTENTION_STAGE_A_QUEST_ONLY_GOLDEN.single.ledgerRecordsBytes)
+
+    const patternCandidate: AttentionPatternCandidate = Object.freeze({
+      sourceKind: 'narrative_pattern_instance', sourceAuthority: 'derived', sourceId: 'stage-a-compatible-pattern',
+      candidateId: 'stage-a-compatible-pattern-candidate', eligibility: 'eligible',
+      accessorContractVersion: 'attention-pattern-evidence-accessor-v1',
+      canonicalizationVersion: 'attention-candidate-canonicalization-v1',
+      identitySchemaVersion: 'attention-pattern-candidate-identity-schema-v1', rankingSnapshotLsn: 60,
+      legallyVisibleParties: Object.freeze(['a', 'b']), patternType: 'reciprocal_public_aid', patternSemanticVersion: 1,
+      canonicalBindingTuple: Object.freeze([Object.freeze(['initiator', 'a'] as const)]),
+      canonicalSupportingRecordIdentityTuple: Object.freeze([
+        Object.freeze(['aid-start', 'observable_action', 'aid-1', 'public-aid-1', 10] as const),
+      ]),
+      lastProgressLsn: 10,
+    })
+    const assertions: readonly NarrativePatternDirectEvidenceAssertionInput[] = Object.freeze([
+      Object.freeze({
+        assertionKind: 'public_aid' as const, sourceRecordId: 'aid-1', visibilityProvenanceId: 'public-aid-1',
+        actorId: 'a', targetId: 'b',
+      }),
+    ])
+    const pattern = runAttentionPatternPresentationPass({
+      orderedCandidates: [{
+        candidate: patternCandidate, revalidatedCandidate: patternCandidate, directEvidenceAssertionInputs: assertions,
+        rankingCacheKey: 'stage-a-compatible-pattern-cache', revalidationCacheKey: 'stage-a-compatible-pattern-cache',
+      }],
+      ledger: pass.result.ledger,
+      evaluationLsn: 60,
+      patternPresentationLedgerPolicyVersion: ATTENTION_PATTERN_PRESENTATION_LEDGER_POLICY_VERSION,
+    })
+    expect(pattern.presentation).not.toBeNull()
+    expect(canonicalSerialize(pattern.ledger.records.slice(0, 1)))
+      .toBe(ATTENTION_STAGE_A_QUEST_ONLY_GOLDEN.single.ledgerRecordsBytes)
+    expect(canonicalSerialize(attentionLedgerFeatures(pattern.ledger, questCandidate.candidateId)))
+      .toBe(ATTENTION_STAGE_A_QUEST_ONLY_GOLDEN.single.ledgerFeaturesBytes)
   })
 
   it('preserves two-quest view bytes, normalization, and deterministic ordering', () => {

@@ -129,7 +129,7 @@ export const ATTENTION_CANDIDATE_DERIVATION_CACHE_KEY_SCHEMA_VERSION =
   'attention-candidate-derivation-cache-key-v2' as const
 
 export const ATTENTION_CANDIDATE_RANKING_CACHE_KEY_SCHEMA_VERSION =
-  'attention-candidate-ranking-cache-key-v2' as const
+  'attention-candidate-ranking-cache-key-v3' as const
 
 /**
  * The bounds on the one numeric field Stage A actually owns: the ranking
@@ -265,3 +265,7 @@ export const ATTENTION_EXPOSURE_POLICY_VERSION = 'attention-exposure-policy-v1' 
  * that no authoritative reducer, store, migration, or event log ever sees.
  */
 export const ATTENTION_LEDGER_POLICY_VERSION = 'attention-ledger-policy-v1' as const
+
+/** The disjoint B5 pattern-presentation ledger-record contract. */
+export const ATTENTION_PATTERN_PRESENTATION_LEDGER_POLICY_VERSION =
+  'attention-pattern-presentation-ledger-policy-v1' as const

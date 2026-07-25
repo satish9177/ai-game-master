@@ -50,6 +50,7 @@
  * participates.
  */
 import { canonicalSerialize, mintHash } from './canonicalSerialization'
+import { ATTENTION_PATTERN_PRESENTATION_LEDGER_POLICY_VERSION } from './attentionCandidatePolicy'
 import type { AttentionRevealResultTag } from './attentionRevealPackage'
 
 /**
@@ -72,7 +73,7 @@ export const ATTENTION_TRACE_SCHEMA_VERSION = 'attention-trace-schema-v2' as con
 export const ATTENTION_OBSERVABLE_TRACE_SCHEMA_VERSION = 'attention-observable-trace-schema-v1' as const
 
 /** The closed ledger-outcome vocabulary the trace records, restated locally so this module needs no ledger import beyond the type it already re-exports the same values for. */
-export type AttentionTraceLedgerOutcome = AttentionRevealResultTag | 'non-engagement'
+export type AttentionTraceLedgerOutcome = AttentionRevealResultTag | 'non-engagement' | 'revalidation-failed'
 
 /** The two candidate families, restated locally so this module needs no candidate import. */
 export type AttentionTraceSourceKind = 'quest_candidate' | 'narrative_pattern_instance'
@@ -275,6 +276,58 @@ export interface AttentionTraceRevalidationEntry {
 }
 
 /**
+ * The closed B5 presentation-decision outcome vocabulary, restated locally so
+ * this module needs no `attentionLedger.ts`/`attentionReplay.ts` import beyond
+ * the values it already re-exports the same values for (matching the
+ * `AttentionTraceLedgerOutcome` convention above). It unions the identity/
+ * cache-mismatch revalidation reasons, the exact
+ * `AttentionPatternPresentationPolicyReason` refusal literals
+ * (`evaluateAttentionPatternPresentationPolicy`) the real pipeline preserves
+ * rather than collapses, and `not-attempted` for a stage a refusal at an
+ * earlier stage never reached. Every literal here must be reachable from
+ * `runAttentionPatternPresentationPass`'s real decision mapping in
+ * `attentionReplay.ts` -- none is a generic catch-all.
+ */
+export type AttentionTracePatternPresentationOutcome =
+  | 'eligible'
+  | 'not-retired'
+  | 'not-attempted'
+  | 'still-legal'
+  | 'candidate-disappeared'
+  | 'candidate-identity-mismatch'
+  | 'source-identity-mismatch'
+  | 'supporting-record-identity-mismatch'
+  | 'cache-key-mismatch'
+  | 'pattern-presentation-ledger-policy-mismatch'
+  | 'retired-exposure'
+  | 'retired-revalidation-failure'
+  | 'retired-satisfied-age'
+  | 'successful-cooldown'
+  | 'revalidation-failure-cooldown'
+  | 'density-window-full'
+  | 'malformed-ledger-history'
+
+export const ATTENTION_TRACE_PATTERN_PRESENTATION_OUTCOMES: readonly AttentionTracePatternPresentationOutcome[] =
+  Object.freeze([
+    'eligible', 'not-retired', 'not-attempted', 'still-legal', 'candidate-disappeared',
+    'candidate-identity-mismatch', 'source-identity-mismatch', 'supporting-record-identity-mismatch',
+    'cache-key-mismatch', 'pattern-presentation-ledger-policy-mismatch', 'retired-exposure',
+    'retired-revalidation-failure', 'retired-satisfied-age', 'successful-cooldown',
+    'revalidation-failure-cooldown', 'density-window-full', 'malformed-ledger-history',
+  ])
+
+/** B5 trusted-only presentation evidence; absent from the frozen observable projection. */
+export interface AttentionTracePatternPresentationDecision {
+  readonly candidateId: string
+  readonly assertionIds: readonly string[]
+  readonly revalidationOutcome: AttentionTracePatternPresentationOutcome
+  readonly exposureCooldownOutcome: AttentionTracePatternPresentationOutcome
+  readonly densityOutcome: AttentionTracePatternPresentationOutcome
+  readonly retirementOutcome: AttentionTracePatternPresentationOutcome
+  readonly ledgerAppend: 'appended' | 'not-appended'
+}
+
+/**
  * The A′-equivalence premise-check result, present only for paired-world (P3)
  * fixtures. From B4 the digests cover the complete v2 surface — all three
  * collections — and the opening-coordinate identity sets are compared
@@ -303,6 +356,8 @@ export interface AttentionTraceInput {
   readonly templateChannelPolicyVersion: string
   readonly exposurePolicyVersion: string
   readonly ledgerPolicyVersion: string
+  /** Present only for a B5 pattern-presentation decision; trusted-only. */
+  readonly patternPresentationLedgerPolicyVersion?: string
   readonly rankingSnapshotLsn: number
   readonly revalidationSnapshotLsn: number
   readonly admittedQuestCandidateSourceIds: readonly string[]
@@ -337,6 +392,7 @@ export interface AttentionTraceInput {
   readonly structuralRetention: AttentionTraceStructuralRetention
   readonly presentations: readonly AttentionTracePresentationEntry[]
   readonly revalidations: readonly AttentionTraceRevalidationEntry[]
+  readonly patternPresentationDecisions?: readonly AttentionTracePatternPresentationDecision[]
   readonly authoritativeLogDigestBefore: string
   readonly authoritativeLogDigestAfter: string
   readonly p3PremiseCheck?: AttentionTraceP3PremiseCheck
@@ -391,12 +447,15 @@ export type AttentionTraceRefusal =
   | 'missing-template-channel-policy-version'
   | 'missing-exposure-policy-version'
   | 'missing-ledger-policy-version'
+  | 'missing-pattern-presentation-ledger-policy-version'
+  | 'unsupported-pattern-presentation-ledger-policy-version'
   | 'missing-ranking-snapshot-lsn'
   | 'missing-revalidation-snapshot-lsn'
   | 'missing-authoritative-log-digest-before'
   | 'missing-authoritative-log-digest-after'
   | 'missing-structural-retention'
   | 'mixed-trace-candidate-entry'
+  | 'invalid-pattern-presentation-decision'
 
 export type AttentionTraceResult =
   | { readonly kind: 'ok'; readonly trace: AttentionTrace }
@@ -447,6 +506,36 @@ function isWellFormedCandidateEntry(entry: AttentionTraceCandidateEntry): boolea
   return false
 }
 
+/**
+ * Validates one B5 trusted pattern-presentation decision rather than accepting
+ * an arbitrary bare-string outcome by spread. Every outcome field must be a
+ * member of the closed vocabulary, `assertionIds` must be an array of
+ * non-blank strings, and `ledgerAppend` must be exactly `'appended'` or
+ * `'not-appended'` -- an appended decision with zero assertion ids is also
+ * refused, since a successful pattern presentation always grounds at least one
+ * direct-evidence assertion.
+ */
+function isWellFormedPatternPresentationDecision(
+  decision: AttentionTracePatternPresentationDecision,
+): boolean {
+  if (typeof decision !== 'object' || decision === null) return false
+  if (!isPresent(decision.candidateId)) return false
+  if (!Array.isArray(decision.assertionIds)) return false
+  if (decision.assertionIds.some((id) => !isPresent(id))) return false
+  const outcomes = [
+    decision.revalidationOutcome,
+    decision.exposureCooldownOutcome,
+    decision.densityOutcome,
+    decision.retirementOutcome,
+  ]
+  if (outcomes.some((outcome) => !(ATTENTION_TRACE_PATTERN_PRESENTATION_OUTCOMES as readonly string[]).includes(outcome))) {
+    return false
+  }
+  if (decision.ledgerAppend !== 'appended' && decision.ledgerAppend !== 'not-appended') return false
+  if (decision.ledgerAppend === 'appended' && decision.assertionIds.length === 0) return false
+  return true
+}
+
 function playerObservableSubtrace(input: AttentionTraceInput): AttentionTracePlayerObservableSubtrace {
   return Object.freeze({
     rankingSnapshotLsn: input.rankingSnapshotLsn,
@@ -485,6 +574,15 @@ export function buildAttentionTrace(input: AttentionTraceInput): AttentionTraceR
   }
   if (!isPresent(input.exposurePolicyVersion)) return { kind: 'refused', reason: 'missing-exposure-policy-version' }
   if (!isPresent(input.ledgerPolicyVersion)) return { kind: 'refused', reason: 'missing-ledger-policy-version' }
+  if (
+    input.patternPresentationDecisions !== undefined
+    && input.patternPresentationDecisions.length > 0
+    && !isPresent(input.patternPresentationLedgerPolicyVersion)
+  ) return { kind: 'refused', reason: 'missing-pattern-presentation-ledger-policy-version' }
+  if (
+    input.patternPresentationLedgerPolicyVersion !== undefined
+    && input.patternPresentationLedgerPolicyVersion !== ATTENTION_PATTERN_PRESENTATION_LEDGER_POLICY_VERSION
+  ) return { kind: 'refused', reason: 'unsupported-pattern-presentation-ledger-policy-version' }
   if (typeof input.rankingSnapshotLsn !== 'number') return { kind: 'refused', reason: 'missing-ranking-snapshot-lsn' }
   if (typeof input.revalidationSnapshotLsn !== 'number') {
     return { kind: 'refused', reason: 'missing-revalidation-snapshot-lsn' }
@@ -500,6 +598,12 @@ export function buildAttentionTrace(input: AttentionTraceInput): AttentionTraceR
   }
   if (!input.orderedAttentionCandidates.every(isWellFormedCandidateEntry)) {
     return { kind: 'refused', reason: 'mixed-trace-candidate-entry' }
+  }
+  if (
+    input.patternPresentationDecisions !== undefined
+    && !input.patternPresentationDecisions.every(isWellFormedPatternPresentationDecision)
+  ) {
+    return { kind: 'refused', reason: 'invalid-pattern-presentation-decision' }
   }
 
   const withoutIdentity = {

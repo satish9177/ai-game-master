@@ -63,13 +63,19 @@ import {
   ATTENTION_CANDIDATE_CANONICALIZATION_VERSION,
   ATTENTION_EXPOSURE_POLICY_VERSION,
   ATTENTION_LEDGER_POLICY_VERSION,
+  ATTENTION_PATTERN_PRESENTATION_LEDGER_POLICY_VERSION,
   ATTENTION_TEMPLATE_CHANNEL_POLICY_VERSION,
   ATTENTION_TEMPLATE_VERSION,
   isAttentionRankingSnapshotLsnInRange,
 } from './attentionCandidatePolicy'
-import type { AttentionCandidateSourceKind } from './attentionCandidatePolicy'
 import type { AttentionCandidate } from './attentionCandidate'
 import type { AttentionRevealResultTag } from './attentionRevealPackage'
+import { ATTENTION_PATTERN_DIRECT_EVIDENCE_TEMPLATE_VERSION } from './attentionDirectEvidenceAssertion'
+import {
+  ATTENTION_STAGE_B_RESOURCE_POLICY_VERSION,
+  attentionStageBResourcePolicy,
+} from './attentionNarrativePatternResourcePolicy'
+import type { AttentionStageBResourcePolicy } from './attentionNarrativePatternResourcePolicy'
 
 /**
  * The closed outcome vocabulary: the three presentation results (plan §7) plus
@@ -77,7 +83,10 @@ import type { AttentionRevealResultTag } from './attentionRevealPackage'
  * distinct from a rendering failure. Reusing `AttentionRevealResultTag` keeps one
  * presentation vocabulary rather than a second copy that could drift from it.
  */
-export type AttentionLedgerOutcome = AttentionRevealResultTag | 'non-engagement'
+export type AttentionLedgerOutcome = AttentionRevealResultTag | 'non-engagement' | 'revalidation-failed'
+
+/** B5's disjoint pattern-presentation record contract; never a quest sentinel. */
+export { ATTENTION_PATTERN_PRESENTATION_LEDGER_POLICY_VERSION } from './attentionCandidatePolicy'
 
 /** The outcomes that count as an exposure — a reveal actually rendered. */
 const PRESENTED_OUTCOMES: readonly AttentionLedgerOutcome[] = Object.freeze([
@@ -90,9 +99,8 @@ function outcomeCarriesOutput(outcome: AttentionLedgerOutcome): boolean {
   return PRESENTED_OUTCOMES.includes(outcome)
 }
 
-/** One immutable ledger record. The field set is closed. */
-export interface AttentionLedgerRecord {
-  readonly ledgerPolicyVersion: string
+/** The common, non-branch record coordinates. */
+interface AttentionLedgerRecordBase {
   readonly exposurePolicyVersion: string
   readonly templateChannelPolicyVersion: string
   readonly canonicalizationVersion: string
@@ -100,13 +108,33 @@ export interface AttentionLedgerRecord {
   readonly templateVersion: string
   readonly sequence: number
   readonly recordId: string
-  readonly sourceKind: AttentionCandidateSourceKind
   readonly sourceId: string
   readonly candidateId: string
   readonly rankingSnapshotLsn: number
   readonly outcome: AttentionLedgerOutcome
   readonly renderedOutputIdentity?: string
 }
+
+/** The committed, byte-frozen Stage A quest record branch. */
+export type AttentionQuestLedgerRecord = AttentionLedgerRecordBase & {
+  readonly sourceKind: 'quest_candidate'
+  readonly ledgerPolicyVersion: typeof ATTENTION_LEDGER_POLICY_VERSION
+}
+
+/** The disjoint B5 pattern-presentation record branch. */
+export type AttentionPatternPresentationLedgerRecord = AttentionLedgerRecordBase & {
+  readonly sourceKind: 'narrative_pattern_instance'
+  readonly patternPresentationLedgerPolicyVersion: typeof ATTENTION_PATTERN_PRESENTATION_LEDGER_POLICY_VERSION
+  /** Committed presentation coordinate; never wall time. */
+  readonly presentationLsn: number
+  readonly resourcePolicyVersion: typeof ATTENTION_STAGE_B_RESOURCE_POLICY_VERSION
+}
+
+/** One immutable, source-kind-discriminated ledger record. */
+export type AttentionLedgerRecord = AttentionQuestLedgerRecord | AttentionPatternPresentationLedgerRecord
+
+type AttentionLedgerRecordFields = Omit<AttentionQuestLedgerRecord, 'recordId'>
+  | Omit<AttentionPatternPresentationLedgerRecord, 'recordId'>
 
 /** The exact own keys of a record, less the optional one — closure evidence. */
 export const ATTENTION_LEDGER_RECORD_KEYS: readonly string[] = Object.freeze([
@@ -118,6 +146,25 @@ export const ATTENTION_LEDGER_RECORD_KEYS: readonly string[] = Object.freeze([
   'outcome',
   'rankingSnapshotLsn',
   'recordId',
+  'sequence',
+  'sourceId',
+  'sourceKind',
+  'templateChannelPolicyVersion',
+  'templateVersion',
+])
+
+/** B5-only keys for the pattern branch; quest bytes keep the list above exactly. */
+export const ATTENTION_PATTERN_PRESENTATION_LEDGER_RECORD_KEYS: readonly string[] = Object.freeze([
+  'accessorContractVersion',
+  'candidateId',
+  'canonicalizationVersion',
+  'exposurePolicyVersion',
+  'outcome',
+  'patternPresentationLedgerPolicyVersion',
+  'presentationLsn',
+  'rankingSnapshotLsn',
+  'recordId',
+  'resourcePolicyVersion',
   'sequence',
   'sourceId',
   'sourceKind',
@@ -142,6 +189,9 @@ export interface AttentionLedgerAppendInput {
   readonly templateVersion: string
   readonly outcome: AttentionLedgerOutcome
   readonly renderedOutputIdentity?: string
+  readonly patternPresentationLedgerPolicyVersion?: string
+  readonly presentationLsn?: number
+  readonly resourcePolicyVersion?: string
 }
 
 /** The closed typed refusal set. Every case refuses; none approximates. */
@@ -165,6 +215,14 @@ export type AttentionLedgerRefusal =
   | 'missing-rendered-output-identity'
   | 'unexpected-rendered-output-identity'
   | 'duplicate-record-identity'
+  | 'missing-pattern-presentation-lsn'
+  | 'pattern-presentation-lsn-out-of-range'
+  | 'missing-pattern-presentation-ledger-policy-version'
+  | 'unsupported-pattern-presentation-ledger-policy-version'
+  | 'missing-resource-policy-version'
+  | 'unsupported-resource-policy-version'
+  | 'mixed-ledger-record-branch'
+  | 'unsupported-ledger-record-source-kind'
 
 export type AttentionLedgerCreateResult =
   | { readonly kind: 'ok'; readonly ledger: AttentionLedger }
@@ -199,10 +257,33 @@ const SUPPORTED_OUTCOMES: readonly AttentionLedgerOutcome[] = Object.freeze([
   'presentation-fallback',
   'presentation-failed',
   'non-engagement',
+  'revalidation-failed',
 ])
 
 function isPresent(value: unknown): value is string {
   return typeof value === 'string' && value.trim().length > 0
+}
+
+function hasOwn(value: object, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(value, key)
+}
+
+function isQuestLedgerRecord(record: AttentionLedgerRecord): record is AttentionQuestLedgerRecord {
+  return record.sourceKind === 'quest_candidate'
+    && record.ledgerPolicyVersion === ATTENTION_LEDGER_POLICY_VERSION
+    && !hasOwn(record, 'patternPresentationLedgerPolicyVersion')
+    && !hasOwn(record, 'presentationLsn')
+    && !hasOwn(record, 'resourcePolicyVersion')
+}
+
+function isPatternPresentationLedgerRecord(
+  record: AttentionLedgerRecord,
+): record is AttentionPatternPresentationLedgerRecord {
+  return record.sourceKind === 'narrative_pattern_instance'
+    && record.patternPresentationLedgerPolicyVersion === ATTENTION_PATTERN_PRESENTATION_LEDGER_POLICY_VERSION
+    && isAttentionRankingSnapshotLsnInRange(record.presentationLsn)
+    && record.resourcePolicyVersion === ATTENTION_STAGE_B_RESOURCE_POLICY_VERSION
+    && !hasOwn(record, 'ledgerPolicyVersion')
 }
 
 /**
@@ -236,8 +317,11 @@ export function createAttentionLedger(request: AttentionLedgerRequest): Attentio
  * makes "deterministic record identity and order" a single property rather than
  * two that could disagree.
  */
-function ledgerRecordIdentity(fields: Omit<AttentionLedgerRecord, 'recordId'>): string {
-  return ATTENTION_LEDGER_POLICY_VERSION + ':' + mintHash(canonicalSerialize(fields))
+function ledgerRecordIdentity(fields: AttentionLedgerRecordFields): string {
+  const prefix = fields.sourceKind === 'quest_candidate'
+    ? fields.ledgerPolicyVersion
+    : fields.patternPresentationLedgerPolicyVersion
+  return prefix + ':' + mintHash(canonicalSerialize(fields))
 }
 
 /**
@@ -279,11 +363,18 @@ export function appendAttentionLedgerRecord(
   if (!isPresent(input.templateVersion)) {
     return { kind: 'refused', reason: 'missing-template-version' }
   }
-  if (input.templateVersion !== ATTENTION_TEMPLATE_VERSION) {
+  const expectedTemplateVersion = input.attentionCandidate.sourceKind === 'narrative_pattern_instance'
+    ? ATTENTION_PATTERN_DIRECT_EVIDENCE_TEMPLATE_VERSION
+    : ATTENTION_TEMPLATE_VERSION
+  if (input.templateVersion !== expectedTemplateVersion) {
     return { kind: 'refused', reason: 'unsupported-template-version' }
   }
 
   const attentionCandidate = input.attentionCandidate
+  if (
+    attentionCandidate.sourceKind !== 'quest_candidate'
+    && attentionCandidate.sourceKind !== 'narrative_pattern_instance'
+  ) return { kind: 'refused', reason: 'unsupported-ledger-record-source-kind' }
   if (!isPresent(attentionCandidate.canonicalizationVersion)) {
     return { kind: 'refused', reason: 'missing-canonicalization-version' }
   }
@@ -320,15 +411,44 @@ export function appendAttentionLedgerRecord(
     return { kind: 'refused', reason: 'unexpected-rendered-output-identity' }
   }
 
-  const fields: Omit<AttentionLedgerRecord, 'recordId'> = {
-    ledgerPolicyVersion: ledger.ledgerPolicyVersion,
+  const isPatternRecord = attentionCandidate.sourceKind === 'narrative_pattern_instance'
+  if (isPatternRecord) {
+    if (hasOwn(input as unknown as object, 'ledgerPolicyVersion')) {
+      return { kind: 'refused', reason: 'mixed-ledger-record-branch' }
+    }
+    if (!isPresent(input.patternPresentationLedgerPolicyVersion)) {
+      return { kind: 'refused', reason: 'missing-pattern-presentation-ledger-policy-version' }
+    }
+    if (input.patternPresentationLedgerPolicyVersion !== ATTENTION_PATTERN_PRESENTATION_LEDGER_POLICY_VERSION) {
+      return { kind: 'refused', reason: 'unsupported-pattern-presentation-ledger-policy-version' }
+    }
+    if (typeof input.presentationLsn !== 'number') {
+      return { kind: 'refused', reason: 'missing-pattern-presentation-lsn' }
+    }
+    if (!isAttentionRankingSnapshotLsnInRange(input.presentationLsn)) {
+      return { kind: 'refused', reason: 'pattern-presentation-lsn-out-of-range' }
+    }
+    if (!isPresent(input.resourcePolicyVersion)) {
+      return { kind: 'refused', reason: 'missing-resource-policy-version' }
+    }
+    if (input.resourcePolicyVersion !== ATTENTION_STAGE_B_RESOURCE_POLICY_VERSION) {
+      return { kind: 'refused', reason: 'unsupported-resource-policy-version' }
+    }
+  } else if (
+    input.patternPresentationLedgerPolicyVersion !== undefined
+    || input.presentationLsn !== undefined
+    || input.resourcePolicyVersion !== undefined
+  ) {
+    return { kind: 'refused', reason: 'mixed-ledger-record-branch' }
+  }
+
+  const commonFields: Omit<AttentionLedgerRecordBase, 'recordId'> = {
     exposurePolicyVersion: input.exposurePolicyVersion,
     templateChannelPolicyVersion: input.templateChannelPolicyVersion,
     canonicalizationVersion: attentionCandidate.canonicalizationVersion,
     accessorContractVersion: attentionCandidate.accessorContractVersion,
     templateVersion: input.templateVersion,
     sequence: ledger.records.length,
-    sourceKind: attentionCandidate.sourceKind,
     sourceId: attentionCandidate.sourceId,
     candidateId: attentionCandidate.candidateId,
     rankingSnapshotLsn: attentionCandidate.rankingSnapshotLsn,
@@ -337,6 +457,19 @@ export function appendAttentionLedgerRecord(
       ? { renderedOutputIdentity: input.renderedOutputIdentity }
       : {}),
   }
+  const fields: AttentionLedgerRecordFields = isPatternRecord
+    ? {
+        ...commonFields,
+        sourceKind: 'narrative_pattern_instance',
+        patternPresentationLedgerPolicyVersion: ATTENTION_PATTERN_PRESENTATION_LEDGER_POLICY_VERSION,
+        presentationLsn: input.presentationLsn!,
+        resourcePolicyVersion: ATTENTION_STAGE_B_RESOURCE_POLICY_VERSION,
+      }
+    : {
+        ...commonFields,
+        sourceKind: 'quest_candidate',
+        ledgerPolicyVersion: ATTENTION_LEDGER_POLICY_VERSION,
+      }
   const recordId = ledgerRecordIdentity(fields)
 
   // The reused proof hash is documented as not collision-resistant, so a repeated
@@ -360,6 +493,105 @@ export function appendAttentionLedgerRecord(
   }
 }
 
+export type AttentionPatternPresentationPolicyReason =
+  | 'eligible'
+  | 'retired-exposure'
+  | 'retired-revalidation-failure'
+  | 'retired-satisfied-age'
+  | 'successful-cooldown'
+  | 'revalidation-failure-cooldown'
+  | 'density-window-full'
+  | 'malformed-ledger-history'
+
+export interface AttentionPatternPresentationPolicyDecision {
+  readonly eligible: boolean
+  readonly reason: AttentionPatternPresentationPolicyReason
+  readonly successfulExposureCount: number
+  readonly consecutiveRevalidationFailureCount: number
+  readonly successfulPresentationsInWindow: number
+}
+
+/**
+ * B5's only ledger-policy read.  It derives all cooldown, density, and
+ * retirement decisions from immutable committed LSN coordinates, receiving its
+ * numeric bounds through an explicit policy object rather than reading ambient
+ * module state (RN019 §9.3's "a dependency a test cannot vary is a dependency
+ * the suite cannot prove participates"). Ordering the relevant records by
+ * `(presentationLsn, recordId)` makes reverse input history observationally
+ * identical; no wall-clock or approximate scan is involved.
+ *
+ * The density window is the pattern-only, ledger-wide successful-presentation
+ * count (RN019 §8.2): it is never restricted to one candidate id, and it never
+ * substitutes a quest `rankingSnapshotLsn` for a missing pattern
+ * `presentationLsn` — a quest record can never enter this window at all.
+ */
+export function evaluateAttentionPatternPresentationPolicy(input: {
+  readonly ledger: AttentionLedger
+  readonly candidateId: string
+  readonly evaluationLsn: number
+  readonly satisfiedCompletionLsn?: number
+  readonly policy?: AttentionStageBResourcePolicy
+}): AttentionPatternPresentationPolicyDecision {
+  const policy = input.policy ?? attentionStageBResourcePolicy()
+  const deny = (reason: AttentionPatternPresentationPolicyReason, successes: number, failures: number, window: number) =>
+    Object.freeze({ eligible: false, reason, successfulExposureCount: successes, consecutiveRevalidationFailureCount: failures, successfulPresentationsInWindow: window })
+  if (!isAttentionRankingSnapshotLsnInRange(input.evaluationLsn) || !isPresent(input.candidateId)) {
+    return deny('malformed-ledger-history', 0, 0, 0)
+  }
+  if (new Set(input.ledger.records.map((record) => record.recordId)).size !== input.ledger.records.length) {
+    return deny('malformed-ledger-history', 0, 0, 0)
+  }
+  if (!input.ledger.records.every((record) => isQuestLedgerRecord(record) || isPatternPresentationLedgerRecord(record))) {
+    return deny('malformed-ledger-history', 0, 0, 0)
+  }
+  const allPatternRecords = input.ledger.records.filter(isPatternPresentationLedgerRecord)
+
+  const relevant = allPatternRecords.filter((record) => record.candidateId === input.candidateId)
+  const ordered = [...relevant].sort((left, right) => (
+    left.presentationLsn! - right.presentationLsn!
+    || (left.recordId < right.recordId ? -1 : left.recordId > right.recordId ? 1 : 0)
+  ))
+  const successful = ordered.filter((record) => outcomeCarriesOutput(record.outcome))
+  let consecutiveFailures = 0
+  for (const record of ordered) {
+    if (outcomeCarriesOutput(record.outcome)) consecutiveFailures = 0
+    else if (record.outcome === 'revalidation-failed') consecutiveFailures += 1
+  }
+  // Global, pattern-only, ledger-wide density: not scoped to `candidateId`.
+  const window = allPatternRecords.filter((record) => (
+    outcomeCarriesOutput(record.outcome)
+    && input.evaluationLsn >= record.presentationLsn!
+    && input.evaluationLsn - record.presentationLsn! <= 15
+  )).length
+  if (input.satisfiedCompletionLsn !== undefined && input.evaluationLsn - input.satisfiedCompletionLsn >= policy.satisfiedPatternRetirementLsns) {
+    return deny('retired-satisfied-age', successful.length, consecutiveFailures, window)
+  }
+  if (successful.length >= policy.maxSuccessfulExposuresPerCandidateId) {
+    return deny('retired-exposure', successful.length, consecutiveFailures, window)
+  }
+  if (consecutiveFailures >= policy.consecutiveRevalidationFailuresBeforeRetirement) {
+    return deny('retired-revalidation-failure', successful.length, consecutiveFailures, window)
+  }
+  const lastSuccessful = successful.at(-1)
+  if (lastSuccessful !== undefined && input.evaluationLsn - lastSuccessful.presentationLsn! < policy.successfulPresentationCooldownLsns) {
+    return deny('successful-cooldown', successful.length, consecutiveFailures, window)
+  }
+  const lastFailure = [...ordered].reverse().find((record) => record.outcome === 'revalidation-failed')
+  if (lastFailure !== undefined && input.evaluationLsn - lastFailure.presentationLsn! < policy.revalidationFailureCooldownLsns) {
+    return deny('revalidation-failure-cooldown', successful.length, consecutiveFailures, window)
+  }
+  if (window >= policy.successfulPresentationsInWindow) {
+    return deny('density-window-full', successful.length, consecutiveFailures, window)
+  }
+  return Object.freeze({
+    eligible: true,
+    reason: 'eligible',
+    successfulExposureCount: successful.length,
+    consecutiveRevalidationFailureCount: consecutiveFailures,
+    successfulPresentationsInWindow: window,
+  })
+}
+
 /**
  * The one sanctioned read of ledger history: the closed, declared feature set for
  * one candidate identity (D13/D17; replay spec L1). Every value is a count or a
@@ -375,7 +607,9 @@ export function attentionLedgerFeatures(
   ledger: AttentionLedger,
   candidateId: string,
 ): AttentionLedgerFeatures {
-  const forCandidate = ledger.records.filter((record) => record.candidateId === candidateId)
+  const forCandidate = ledger.records.filter((record) => (
+    isQuestLedgerRecord(record) && record.candidateId === candidateId
+  ))
   const presented = forCandidate.filter((record) => outcomeCarriesOutput(record.outcome))
   const lastPresented = presented[presented.length - 1]
 

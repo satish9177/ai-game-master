@@ -60,6 +60,11 @@
  */
 import { canonicalSerialize, mintHash } from './canonicalSerialization'
 import { ATTENTION_TEMPLATE_VERSION } from './attentionCandidatePolicy'
+import {
+  ATTENTION_PATTERN_DIRECT_EVIDENCE_TEMPLATE_VERSION,
+  ATTENTION_PATTERN_REVEAL_PACKAGE_SCHEMA_VERSION,
+  isValidDirectEvidenceFieldValue,
+} from './attentionDirectEvidenceAssertion'
 import { ATTENTION_REVEAL_SLOT_ORDER } from './attentionRevealPackage'
 import type {
   AttentionRevealPackage,
@@ -103,6 +108,10 @@ export type AttentionTemplateRefusal =
   | 'template-slot-out-of-order'
   | 'missing-template-slot-value'
   | 'missing-required-template-slot'
+  | 'unsupported-pattern-package-schema'
+  | 'missing-pattern-assertion'
+  | 'malformed-pattern-assertion'
+  | 'duplicate-pattern-assertion'
 
 export type AttentionTemplateResult =
   | {
@@ -121,6 +130,62 @@ function isPresent(value: unknown): value is string {
 
 function isKnownSlotId(slotId: string): slotId is AttentionRevealSlotId {
   return ATTENTION_REVEAL_SLOT_ORDER.includes(slotId as AttentionRevealSlotId)
+}
+
+/**
+ * The final gate at the actual point of slash-delimited interpolation. A
+ * value that reaches here has already been checked by the assertion builder
+ * and the package builder, but this renderer never trusts an upstream package
+ * it did not build itself: a forged package handed directly to this function
+ * must still refuse rather than let a value containing a separator or control
+ * character forge apparent extra lines or fields (RN019 direct-only
+ * presentation legality).
+ */
+function isValidRenderedField(value: unknown): value is string {
+  return isPresent(value) && isValidDirectEvidenceFieldValue(value)
+}
+
+function hasExactKeys(value: object, keys: readonly string[]): boolean {
+  const actual = Object.keys(value).sort()
+  return actual.length === keys.length && actual.every((key, index) => key === [...keys].sort()[index])
+}
+
+function assertionLine(assertion: Extract<AttentionRevealPackage, { readonly assertions: readonly unknown[] }>['assertions'][number]):
+  string | AttentionTemplateRefusal {
+  if (!isPresent(assertion.assertionId) || !isPresent(assertion.sourceRecordId) || !isPresent(assertion.visibilityProvenanceId)) {
+    return 'malformed-pattern-assertion'
+  }
+  switch (assertion.assertionKind) {
+    case 'public_aid':
+      return assertion.token === 'public aid'
+        && hasExactKeys(assertion, ['assertionId', 'assertionKind', 'sourceRecordId', 'visibilityProvenanceId', 'token', 'actorId', 'targetId'])
+        && isValidRenderedField(assertion.actorId) && isValidRenderedField(assertion.targetId)
+        ? `${assertion.token}/${assertion.actorId}/${assertion.targetId}`
+        : 'malformed-pattern-assertion'
+    case 'public_harm_severity':
+      return assertion.token === 'public harm severity'
+        && hasExactKeys(assertion, ['assertionId', 'assertionKind', 'sourceRecordId', 'visibilityProvenanceId', 'token', 'actorId', 'targetId', 'publicSeverityBand'])
+        && isValidRenderedField(assertion.actorId) && isValidRenderedField(assertion.targetId)
+        && ['minor', 'moderate', 'major'].includes(assertion.publicSeverityBand)
+        ? `${assertion.token}/${assertion.actorId}/${assertion.targetId}/${assertion.publicSeverityBand}`
+        : 'malformed-pattern-assertion'
+    case 'public_commitment':
+      return assertion.token === 'public commitment'
+        && hasExactKeys(assertion, ['assertionId', 'assertionKind', 'sourceRecordId', 'visibilityProvenanceId', 'token', 'speakerId', 'recipientId', 'commitmentKey'])
+        && isValidRenderedField(assertion.speakerId) && isValidRenderedField(assertion.recipientId)
+        && isValidRenderedField(assertion.commitmentKey)
+        ? `${assertion.token}/${assertion.speakerId}/${assertion.recipientId}/${assertion.commitmentKey}`
+        : 'malformed-pattern-assertion'
+    case 'public_fulfillment_record':
+      return assertion.token === 'public fulfillment record'
+        && hasExactKeys(assertion, ['assertionId', 'assertionKind', 'sourceRecordId', 'visibilityProvenanceId', 'token', 'actorId', 'targetId', 'commitmentKey'])
+        && isValidRenderedField(assertion.actorId) && isValidRenderedField(assertion.targetId)
+        && isValidRenderedField(assertion.commitmentKey)
+        ? `${assertion.token}/${assertion.actorId}/${assertion.targetId}/${assertion.commitmentKey}`
+        : 'malformed-pattern-assertion'
+    default:
+      return 'malformed-pattern-assertion'
+  }
 }
 
 /**
@@ -163,6 +228,48 @@ export function renderAttentionRevealPackage(
 ): AttentionTemplateResult {
   if (!isPresent(request.templateVersion)) {
     return { kind: 'refused', reason: 'missing-template-version' }
+  }
+  if ('assertions' in revealPackage) {
+    if (request.templateVersion !== ATTENTION_PATTERN_DIRECT_EVIDENCE_TEMPLATE_VERSION) {
+      return { kind: 'refused', reason: 'unsupported-template-version' }
+    }
+    if (revealPackage.templateVersion !== request.templateVersion) {
+      return { kind: 'refused', reason: 'template-version-mismatch' }
+    }
+    if (revealPackage.packageSchemaVersion !== ATTENTION_PATTERN_REVEAL_PACKAGE_SCHEMA_VERSION) {
+      return { kind: 'refused', reason: 'unsupported-pattern-package-schema' }
+    }
+    if (revealPackage.resultTag !== 'presentation-ready' || !isPresent(revealPackage.candidateId)) {
+      return { kind: 'refused', reason: 'unrenderable-result-tag' }
+    }
+    if (revealPackage.assertions.length === 0) return { kind: 'refused', reason: 'missing-pattern-assertion' }
+    const assertionIds = new Set<string>()
+    const sourceIds = new Set<string>()
+    const lines: string[] = []
+    for (const assertion of revealPackage.assertions) {
+      if (assertionIds.has(assertion.assertionId) || sourceIds.has(assertion.sourceRecordId)) {
+        return { kind: 'refused', reason: 'duplicate-pattern-assertion' }
+      }
+      assertionIds.add(assertion.assertionId)
+      sourceIds.add(assertion.sourceRecordId)
+      const line = assertionLine(assertion)
+      if (line === 'malformed-pattern-assertion') return { kind: 'refused', reason: line }
+      lines.push(line)
+    }
+    const frozenLines = Object.freeze(lines)
+    return {
+      kind: 'ok',
+      templateVersion: request.templateVersion,
+      resultTag: revealPackage.resultTag,
+      lines: frozenLines,
+      output: frozenLines.join('\n'),
+      outputIdentity: templateOutputIdentity(
+        request.templateVersion,
+        revealPackage.resultTag,
+        revealPackage.candidateId,
+        frozenLines,
+      ),
+    }
   }
   if (request.templateVersion !== ATTENTION_TEMPLATE_VERSION) {
     return { kind: 'refused', reason: 'unsupported-template-version' }

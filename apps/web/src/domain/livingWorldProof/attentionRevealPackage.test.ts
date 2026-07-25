@@ -15,16 +15,25 @@ import { A1_RANKING_SNAPSHOT_LSN } from './attentionQuestCandidateScenario'
 import {
   ATTENTION_CANDIDATE_CANONICALIZATION_VERSION,
   ATTENTION_CANDIDATE_IDENTITY_SCHEMA_VERSION,
+  ATTENTION_LEDGER_POLICY_VERSION,
   ATTENTION_TEMPLATE_VERSION,
 } from './attentionCandidatePolicy'
 import { normalizeAttentionCandidates } from './attentionCandidate'
-import type { AttentionCandidate, AttentionQuestCandidate } from './attentionCandidate'
+import type { AttentionCandidate, AttentionPatternCandidate, AttentionQuestCandidate } from './attentionCandidate'
 import { orderAttentionCandidates } from './attentionCandidateOrdering'
 import {
+  type AttentionQuestRevealPackage,
+  ATTENTION_PATTERN_REVEAL_PACKAGE_KEYS,
   ATTENTION_REVEAL_PACKAGE_KEYS,
   ATTENTION_REVEAL_SLOT_ORDER,
   buildAttentionRevealPackage,
 } from './attentionRevealPackage'
+import {
+  ATTENTION_PATTERN_DIRECT_EVIDENCE_TEMPLATE_VERSION,
+  buildAttentionDirectEvidenceAssertions,
+} from './attentionDirectEvidenceAssertion'
+import { ATTENTION_PATTERN_PRESENTATION_LEDGER_POLICY_VERSION, createAttentionLedger } from './attentionLedger'
+import { runAttentionPatternPresentationPass } from './attentionReplay'
 
 /**
  * A4 — the Stage A `RevealPackage` subset.
@@ -116,9 +125,11 @@ const MINIMALLY_POPULATED = createProofQuestCandidate({
   secretOpeningDetail: 'sealed-detail',
 })
 
-function buildOrThrow(attentionCandidate: AttentionCandidate) {
+function buildOrThrow(attentionCandidate: AttentionCandidate): AttentionQuestRevealPackage {
+  if (attentionCandidate.sourceKind !== 'quest_candidate') throw new Error('expected quest candidate')
   const result = buildAttentionRevealPackage(attentionCandidate, TEMPLATE_REQUEST)
   if (result.kind !== 'ok') throw new Error('expected a package, got refusal: ' + result.reason)
+  if ('assertions' in result.revealPackage) throw new Error('expected quest package')
   return result.revealPackage
 }
 
@@ -316,10 +327,12 @@ describe('B4 — the reveal package dispatches the two-family candidate union', 
     lastProgressLsn: 12,
   })
 
-  it('refuses a narrative_pattern_instance candidate with a typed unsupported-family result and emits no pattern-visible bytes', () => {
-    const result = buildAttentionRevealPackage(PATTERN_CANDIDATE, TEMPLATE_REQUEST)
+  it('refuses a pattern candidate without its direct-record assertion tuple', () => {
+    const result = buildAttentionRevealPackage(PATTERN_CANDIDATE, {
+      templateVersion: ATTENTION_PATTERN_DIRECT_EVIDENCE_TEMPLATE_VERSION,
+    })
 
-    expect(result).toEqual({ kind: 'refused', reason: 'unsupported-source-family' })
+    expect(result).toEqual({ kind: 'refused', reason: 'missing-direct-evidence-assertions' })
   })
 
   it('still builds the committed quest package byte-for-byte for a quest candidate', () => {
@@ -330,6 +343,73 @@ describe('B4 — the reveal package dispatches the two-family candidate union', 
     expect([...ATTENTION_REVEAL_PACKAGE_KEYS].sort())
       .toEqual([...Object.keys(questPackage.revealPackage)].sort())
     expect(questPackage.revealPackage.templateVersion).toBe(ATTENTION_TEMPLATE_VERSION)
+  })
+
+  it('B5 -- a built pattern package has exactly the pinned own-key set', () => {
+    const assertions = buildAttentionDirectEvidenceAssertions([
+      { assertionKind: 'public_aid', sourceRecordId: 'rec-1', visibilityProvenanceId: 'public-rec-1', actorId: 'ally-a', targetId: 'ally-b' },
+      { assertionKind: 'public_aid', sourceRecordId: 'rec-2', visibilityProvenanceId: 'public-rec-2', actorId: 'ally-b', targetId: 'ally-a' },
+    ])
+    if (assertions.kind !== 'ok') throw new Error('expected assertions')
+    const patternPackage = buildAttentionRevealPackage(PATTERN_CANDIDATE, {
+      templateVersion: ATTENTION_PATTERN_DIRECT_EVIDENCE_TEMPLATE_VERSION,
+      directEvidenceAssertions: assertions.assertions,
+    })
+    expect(patternPackage.kind).toBe('ok')
+    if (patternPackage.kind !== 'ok') throw new Error('expected a pattern package')
+    expect([...ATTENTION_PATTERN_REVEAL_PACKAGE_KEYS].sort())
+      .toEqual([...Object.keys(patternPackage.revealPackage)].sort())
+  })
+
+  it('B5 -- refuses a quest candidate request carrying pattern-only directEvidenceAssertions', () => {
+    const assertions = buildAttentionDirectEvidenceAssertions([
+      { assertionKind: 'public_aid', sourceRecordId: 'rec-1', visibilityProvenanceId: 'public-rec-1', actorId: 'a', targetId: 'b' },
+    ])
+    if (assertions.kind !== 'ok') throw new Error('expected assertions')
+    const result = buildAttentionRevealPackage(onlyCandidate(FULLY_POPULATED), {
+      ...TEMPLATE_REQUEST,
+      directEvidenceAssertions: assertions.assertions,
+    })
+    expect(result).toEqual({ kind: 'refused', reason: 'unsupported-direct-evidence-assertions-for-quest' })
+  })
+
+  it('B5 -- refuses a runtime candidate whose sourceKind is neither supported value, before any quest-specific check', () => {
+    // A forged/cast value, not something the closed AttentionCandidate union
+    // can express: the guard this proves exists specifically for a value that
+    // bypassed the type system, not for a legally constructed candidate.
+    const forged = { ...onlyCandidate(FULLY_POPULATED), sourceKind: 'forged_source_kind' } as unknown as AttentionCandidate
+
+    const result = buildAttentionRevealPackage(forged, TEMPLATE_REQUEST)
+
+    expect(result).toEqual({ kind: 'refused', reason: 'unsupported-source-family' })
+  })
+
+  it('B5 -- an unsupported sourceKind refuses through the real pattern-presentation pipeline with no render or ledger append', () => {
+    const forgedPattern = { ...PATTERN_CANDIDATE, sourceKind: 'forged_source_kind' } as unknown as AttentionPatternCandidate
+    const created = createAttentionLedger({ ledgerPolicyVersion: ATTENTION_LEDGER_POLICY_VERSION })
+    if (created.kind !== 'ok') throw new Error('expected an empty ledger')
+
+    const pass = runAttentionPatternPresentationPass({
+      orderedCandidates: [{
+        candidate: forgedPattern,
+        revalidatedCandidate: forgedPattern,
+        directEvidenceAssertionInputs: [
+          { assertionKind: 'public_aid', sourceRecordId: 'rec-1', visibilityProvenanceId: 'public-rec-1', actorId: 'ally-a', targetId: 'ally-b' },
+          { assertionKind: 'public_aid', sourceRecordId: 'rec-2', visibilityProvenanceId: 'public-rec-2', actorId: 'ally-b', targetId: 'ally-a' },
+        ],
+        rankingCacheKey: 'forged-cache',
+        revalidationCacheKey: 'forged-cache',
+      }],
+      ledger: created.ledger,
+      evaluationLsn: A1_RANKING_SNAPSHOT_LSN,
+      patternPresentationLedgerPolicyVersion: ATTENTION_PATTERN_PRESENTATION_LEDGER_POLICY_VERSION,
+    })
+
+    expect(pass.presentation).toBeNull()
+    expect(pass.attempts[0]).toMatchObject({ outcome: 'package-refused', refusalDetail: 'unsupported-source-family' })
+    expect(pass.decisions[0]?.ledgerAppend).toBe('not-appended')
+    expect(pass.ledger.records).toHaveLength(0)
+    expect(pass.ledger).toBe(created.ledger)
   })
 })
 

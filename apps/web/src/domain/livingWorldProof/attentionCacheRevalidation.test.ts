@@ -287,3 +287,43 @@ describe('A5 — end-to-end two-clock revalidation through a complete replay pas
     expect(runs[0]).toBe(runs[1])
   })
 })
+
+describe('B5 -- ledger/exposure/assertion/package/template dependencies propagate end-to-end through the trace key', () => {
+  const rankingCacheKey = rankingCacheKeyOrThrow(BASE_RANKING_INPUT)
+  const baseTraceKey = deriveAttentionTraceCacheKey({
+    rankingCacheKey,
+    revalidationSnapshotLsn: A5_REVALIDATION_SNAPSHOT_LSN,
+    replayCaseId: 'b5-cache-propagation',
+  })
+  if (baseTraceKey.kind !== 'ok') throw new Error('expected a trace cache key')
+
+  it.each([
+    ['patternPresentationLedgerPolicyVersion', 'fixture-pattern-presentation-ledger-policy-v9'],
+    ['exposurePolicyVersion', 'fixture-exposure-policy-v9'],
+    ['relevantLedgerDigest', 'fixture-relevant-ledger-digest'],
+    ['directEvidenceAssertionIdentityVersion', 'fixture-assertion-identity-v9'],
+    ['patternRevealPackageSchemaVersion', 'fixture-pattern-package-v9'],
+    ['patternDirectEvidenceTemplateVersion', 'fixture-pattern-template-v9'],
+  ] as const)('varying %s changes the ranking key, and therefore the trace key, without moving the derivation key', (field, value) => {
+    const variedRankingInput: AttentionCandidateRankingDependencyBundle = {
+      ...BASE_RANKING_INPUT,
+      eligibilityResourceState: attentionCandidateRankingEligibilityResourceState({ [field]: value }),
+    }
+    const variedRankingKey = rankingCacheKeyOrThrow(variedRankingInput)
+    expect(variedRankingKey).not.toBe(rankingCacheKey)
+
+    const variedTraceKey = deriveAttentionTraceCacheKey({
+      rankingCacheKey: variedRankingKey,
+      revalidationSnapshotLsn: A5_REVALIDATION_SNAPSHOT_LSN,
+      replayCaseId: 'b5-cache-propagation',
+    })
+    if (variedTraceKey.kind !== 'ok') throw new Error('expected a varied trace cache key')
+    expect(variedTraceKey.traceCacheKey).not.toBe(baseTraceKey.traceCacheKey)
+
+    const derivationResult = deriveAttentionCandidateDerivationCacheKey(BASE_DERIVATION_INPUT)
+    if (derivationResult.kind !== 'ok') throw new Error('expected a derivation cache key')
+    const variedDerivation = deriveAttentionCandidateRankingCacheKey(variedRankingInput)
+    if (variedDerivation.kind !== 'ok') throw new Error('expected a varied ranking result')
+    expect(variedDerivation.derivationCacheKey).toBe(derivationResult.derivationCacheKey)
+  })
+})

@@ -90,11 +90,20 @@ export interface AttentionStageBResourcePolicy {
   readonly revealPackageAssertions: number
   readonly presentationsPerEvaluation: number
   readonly successfulPresentationsInWindow: number
+  /** B5 (RN019 §8.4) — committed-LSN cooldown after a successful presentation. */
+  readonly successfulPresentationCooldownLsns: number
+  /** B5 (RN019 §8.4) — successful exposures per exact candidate id before retirement. */
+  readonly maxSuccessfulExposuresPerCandidateId: number
+  /** B5 (RN019 §8.4) — committed-LSN cooldown after a revalidation failure. */
+  readonly revalidationFailureCooldownLsns: number
+  /** B5 (RN019 §8.4) — consecutive revalidation failures before permanent retirement. */
+  readonly consecutiveRevalidationFailuresBeforeRetirement: number
+  /** B5 (RN019 §8.4) — LSNs after completion before satisfied-pattern retirement. */
+  readonly satisfiedPatternRetirementLsns: number
   readonly retentionClassOrder: readonly NarrativePatternRetentionClass[]
 }
 
-const POLICY: AttentionStageBResourcePolicy = Object.freeze({
-  resourcePolicyVersion: ATTENTION_STAGE_B_RESOURCE_POLICY_VERSION,
+const DEFAULT_POLICY_VALUES: Omit<AttentionStageBResourcePolicy, 'resourcePolicyVersion' | 'retentionClassOrder'> = {
   newestAdmittedEvidenceViews: 32,
   reconstructedInstancesPerPatternType: 6,
   activeStalledPartialsPerPatternType: 4,
@@ -106,6 +115,16 @@ const POLICY: AttentionStageBResourcePolicy = Object.freeze({
   revealPackageAssertions: 4,
   presentationsPerEvaluation: 1,
   successfulPresentationsInWindow: 4,
+  successfulPresentationCooldownLsns: 4,
+  maxSuccessfulExposuresPerCandidateId: 2,
+  revalidationFailureCooldownLsns: 2,
+  consecutiveRevalidationFailuresBeforeRetirement: 2,
+  satisfiedPatternRetirementLsns: 8,
+}
+
+const POLICY: AttentionStageBResourcePolicy = Object.freeze({
+  resourcePolicyVersion: ATTENTION_STAGE_B_RESOURCE_POLICY_VERSION,
+  ...DEFAULT_POLICY_VALUES,
   retentionClassOrder: NARRATIVE_PATTERN_RETENTION_CLASS_ORDER,
 })
 
@@ -116,6 +135,32 @@ const POLICY: AttentionStageBResourcePolicy = Object.freeze({
  */
 export function attentionStageBResourcePolicy(): AttentionStageBResourcePolicy {
   return POLICY
+}
+
+export interface AttentionStageBResourcePolicyWithHash {
+  readonly policy: AttentionStageBResourcePolicy
+  readonly policyHash: string
+}
+
+/**
+ * A test-only constructor for an explicit policy variant (RN019 §8.3's
+ * "separately versioned immutable test-policy value of zero" requirement).
+ * `resourcePolicyVersion` never moves — it identifies the pinned schema shape,
+ * not a specific value combination — so no override may touch it; a numeric
+ * override instead changes `policyHash`, which is the visible identity a value
+ * edit is required to move (module docstring above). Ordinary call sites never
+ * need this: they read the singleton `attentionStageBResourcePolicy()`.
+ */
+export function buildAttentionStageBResourcePolicy(
+  overrides: Partial<Omit<AttentionStageBResourcePolicy, 'resourcePolicyVersion' | 'retentionClassOrder'>> = {},
+): AttentionStageBResourcePolicyWithHash {
+  const policy: AttentionStageBResourcePolicy = Object.freeze({
+    resourcePolicyVersion: ATTENTION_STAGE_B_RESOURCE_POLICY_VERSION,
+    ...DEFAULT_POLICY_VALUES,
+    ...overrides,
+    retentionClassOrder: NARRATIVE_PATTERN_RETENTION_CLASS_ORDER,
+  })
+  return Object.freeze({ policy, policyHash: mintHash(canonicalSerialize(policy)) })
 }
 
 /**

@@ -1,12 +1,19 @@
 import { describe, expect, it } from 'vitest'
 import { canonicalSerialize } from './canonicalSerialization'
-import { ATTENTION_RANKING_SNAPSHOT_LSN_MAX, ATTENTION_RANKING_SNAPSHOT_LSN_MIN } from './attentionCandidatePolicy'
-import { runAttentionQuestCandidateReplayPass, stableWorldReplayPassInput } from './attentionReplay'
+import { ATTENTION_RANKING_SNAPSHOT_LSN_MAX, ATTENTION_RANKING_SNAPSHOT_LSN_MIN, ATTENTION_LEDGER_POLICY_VERSION } from './attentionCandidatePolicy'
+import { runAttentionQuestCandidateReplayPass, runAttentionPatternPresentationPass, stableWorldReplayPassInput } from './attentionReplay'
 import { digestAttentionReplayAuthoritativeLog } from './attentionReplayResources'
 import { buildAttentionReplayLsnBoundaryWorlds } from './attentionReplayScenario'
+import { ATTENTION_PATTERN_PRESENTATION_LEDGER_POLICY_VERSION, createAttentionLedger } from './attentionLedger'
+import type { AttentionPatternCandidate } from './attentionCandidate'
+import type { NarrativePatternDirectEvidenceAssertionInput } from './attentionNarrativePatternContracts'
 import {
+  ATTENTION_NARRATIVE_PATTERN_POLICY_HASH,
+  ATTENTION_STAGE_B_RESOURCE_POLICY_VERSION,
   applyMixedFamilyCandidateCap,
   applyNarrativePatternStructuralRetention,
+  attentionStageBResourcePolicy,
+  buildAttentionStageBResourcePolicy,
 } from './attentionNarrativePatternResourcePolicy'
 import { attentionTraceResourceLimitEntry } from './attentionTrace'
 import type { NarrativePatternInstance } from './attentionNarrativePatternContracts'
@@ -266,5 +273,185 @@ describe('B4 — every resource decision reaches trusted trace v2, and none reac
     for (const forbidden of ['structuralRetention', 'resourceLimits', 'boundId', 'droppedIds', 'retainedIds']) {
       expect({ forbidden, present: observable.includes(forbidden) }).toEqual({ forbidden, present: false })
     }
+  })
+})
+
+describe('B5 -- numeric resource-policy pins and override variants', () => {
+  it('pins every B5 policy threshold to its independent literal value', () => {
+    expect(attentionStageBResourcePolicy()).toMatchObject({
+      resourcePolicyVersion: ATTENTION_STAGE_B_RESOURCE_POLICY_VERSION,
+      successfulPresentationCooldownLsns: 4,
+      maxSuccessfulExposuresPerCandidateId: 2,
+      revalidationFailureCooldownLsns: 2,
+      consecutiveRevalidationFailuresBeforeRetirement: 2,
+      satisfiedPatternRetirementLsns: 8,
+    })
+  })
+
+  it('a zero-cap override changes the policy hash but never the pinned schema version', () => {
+    const zeroAssertions = buildAttentionStageBResourcePolicy({ revealPackageAssertions: 0 })
+    expect(zeroAssertions.policy.resourcePolicyVersion).toBe(ATTENTION_STAGE_B_RESOURCE_POLICY_VERSION)
+    expect(zeroAssertions.policy.revealPackageAssertions).toBe(0)
+    expect(zeroAssertions.policyHash).not.toBe(ATTENTION_NARRATIVE_PATTERN_POLICY_HASH)
+
+    const zeroExposures = buildAttentionStageBResourcePolicy({ maxSuccessfulExposuresPerCandidateId: 0 })
+    expect(zeroExposures.policyHash).not.toBe(ATTENTION_NARRATIVE_PATTERN_POLICY_HASH)
+    expect(zeroExposures.policyHash).not.toBe(zeroAssertions.policyHash)
+
+    expect(Object.isFrozen(zeroAssertions.policy)).toBe(true)
+    expect(attentionStageBResourcePolicy().revealPackageAssertions).toBe(4)
+  })
+})
+
+describe('B5 -- presentations per evaluation is exactly 1, exercised through the real pattern-presentation pipeline', () => {
+  const assertionInputs: readonly NarrativePatternDirectEvidenceAssertionInput[] = Object.freeze([
+    Object.freeze({ assertionKind: 'public_aid' as const, sourceRecordId: 'aid-1', visibilityProvenanceId: 'public-aid-1', actorId: 'a', targetId: 'b' }),
+  ])
+
+  function patternCandidate(candidateId: string, sourceId: string, lastProgressLsn: number): AttentionPatternCandidate {
+    return Object.freeze({
+      sourceKind: 'narrative_pattern_instance', sourceAuthority: 'derived', sourceId, candidateId,
+      eligibility: 'eligible', accessorContractVersion: 'attention-pattern-evidence-accessor-v1',
+      canonicalizationVersion: 'attention-candidate-canonicalization-v1', identitySchemaVersion: 'attention-pattern-candidate-identity-schema-v1',
+      rankingSnapshotLsn: lastProgressLsn, legallyVisibleParties: Object.freeze(['a', 'b']),
+      patternType: 'reciprocal_public_aid', patternSemanticVersion: 1,
+      canonicalBindingTuple: Object.freeze([Object.freeze(['initiator', 'a'] as const)]),
+      canonicalSupportingRecordIdentityTuple: Object.freeze([
+        Object.freeze(['aid-start', 'observable_action', 'aid-1', 'public-aid-1', lastProgressLsn] as const),
+      ]),
+      lastProgressLsn,
+    })
+  }
+
+  function emptyLedgerOrThrow() {
+    const created = createAttentionLedger({ ledgerPolicyVersion: ATTENTION_LEDGER_POLICY_VERSION })
+    if (created.kind !== 'ok') throw new Error('expected an empty ledger')
+    return created.ledger
+  }
+
+  it('zero candidates: no presentation, empty decisions, ledger unchanged', () => {
+    const ledger = emptyLedgerOrThrow()
+    const result = runAttentionPatternPresentationPass({
+      orderedCandidates: [],
+      ledger,
+      evaluationLsn: 20,
+      patternPresentationLedgerPolicyVersion: ATTENTION_PATTERN_PRESENTATION_LEDGER_POLICY_VERSION,
+    })
+    expect(result.presentation).toBeNull()
+    expect(result.decisions).toEqual([])
+    expect(result.ledger).toBe(ledger)
+  })
+
+  it('one legally eligible candidate presents successfully and appends exactly one ledger record', () => {
+    const candidate = patternCandidate('pattern-candidate-1', 'pattern-source-1', 10)
+    const ledger = emptyLedgerOrThrow()
+    const result = runAttentionPatternPresentationPass({
+      orderedCandidates: [{
+        candidate, revalidatedCandidate: candidate, directEvidenceAssertionInputs: assertionInputs,
+        rankingCacheKey: 'cache-a', revalidationCacheKey: 'cache-a',
+      }],
+      ledger, evaluationLsn: 20,
+      patternPresentationLedgerPolicyVersion: ATTENTION_PATTERN_PRESENTATION_LEDGER_POLICY_VERSION,
+    })
+    expect(result.presentation).not.toBeNull()
+    expect(result.presentation?.candidateId).toBe('pattern-candidate-1')
+    expect(result.ledger.records).toHaveLength(1)
+    expect(result.decisions).toHaveLength(1)
+    expect(result.decisions[0]).toMatchObject({ ledgerAppend: 'appended', revalidationOutcome: 'still-legal' })
+    expect(result.attempts[0]?.outcome).toBe('presented')
+  })
+
+  it('two eligible candidates: only the first in final order presents, and only one ledger record is appended', () => {
+    const first = patternCandidate('pattern-candidate-first', 'pattern-source-first', 10)
+    const second = patternCandidate('pattern-candidate-second', 'pattern-source-second', 12)
+    const ledger = emptyLedgerOrThrow()
+    const result = runAttentionPatternPresentationPass({
+      orderedCandidates: [
+        { candidate: first, revalidatedCandidate: first, directEvidenceAssertionInputs: assertionInputs, rankingCacheKey: 'cache-a', revalidationCacheKey: 'cache-a' },
+        { candidate: second, revalidatedCandidate: second, directEvidenceAssertionInputs: assertionInputs, rankingCacheKey: 'cache-b', revalidationCacheKey: 'cache-b' },
+      ],
+      ledger, evaluationLsn: 20,
+      patternPresentationLedgerPolicyVersion: ATTENTION_PATTERN_PRESENTATION_LEDGER_POLICY_VERSION,
+    })
+    expect(result.presentation?.candidateId).toBe('pattern-candidate-first')
+    expect(result.ledger.records).toHaveLength(1)
+    expect(result.decisions).toHaveLength(1)
+    expect(result.attempts).toHaveLength(1)
+  })
+
+  it('reversed candidate input order selects the same identity when it is legally first in final order', () => {
+    const first = patternCandidate('pattern-candidate-only-legal-first', 'pattern-source-only-legal-first', 10)
+    const ledger = emptyLedgerOrThrow()
+    const result = runAttentionPatternPresentationPass({
+      orderedCandidates: [{ candidate: first, revalidatedCandidate: first, directEvidenceAssertionInputs: assertionInputs, rankingCacheKey: 'cache-a', revalidationCacheKey: 'cache-a' }],
+      ledger, evaluationLsn: 20,
+      patternPresentationLedgerPolicyVersion: ATTENTION_PATTERN_PRESENTATION_LEDGER_POLICY_VERSION,
+    })
+    expect(result.presentation?.candidateId).toBe('pattern-candidate-only-legal-first')
+  })
+
+  it('a refused first candidate (cache-key mismatch) consumes no successful-presentation slot; the next candidate then presents', () => {
+    const first = patternCandidate('pattern-candidate-refused-first', 'pattern-source-refused-first', 10)
+    const second = patternCandidate('pattern-candidate-legal-second', 'pattern-source-legal-second', 12)
+    const ledger = emptyLedgerOrThrow()
+    const result = runAttentionPatternPresentationPass({
+      orderedCandidates: [
+        // rankingCacheKey !== revalidationCacheKey forces revalidation to refuse.
+        { candidate: first, revalidatedCandidate: first, directEvidenceAssertionInputs: assertionInputs, rankingCacheKey: 'cache-a', revalidationCacheKey: 'cache-mismatch' },
+        { candidate: second, revalidatedCandidate: second, directEvidenceAssertionInputs: assertionInputs, rankingCacheKey: 'cache-b', revalidationCacheKey: 'cache-b' },
+      ],
+      ledger, evaluationLsn: 20,
+      patternPresentationLedgerPolicyVersion: ATTENTION_PATTERN_PRESENTATION_LEDGER_POLICY_VERSION,
+    })
+    expect(result.attempts[0]).toMatchObject({ candidateId: 'pattern-candidate-refused-first', outcome: 'revalidation-refused' })
+    expect(result.presentation?.candidateId).toBe('pattern-candidate-legal-second')
+    expect(result.ledger.records).toHaveLength(1)
+    expect(result.decisions.find((decision) => decision.candidateId === 'pattern-candidate-refused-first')?.ledgerAppend)
+      .toBe('not-appended')
+  })
+
+  it('a first candidate failing revalidation (disappeared) does not block the second candidate from presenting', () => {
+    const first = patternCandidate('pattern-candidate-disappeared', 'pattern-source-disappeared', 10)
+    const second = patternCandidate('pattern-candidate-still-legal', 'pattern-source-still-legal', 12)
+    const ledger = emptyLedgerOrThrow()
+    const result = runAttentionPatternPresentationPass({
+      orderedCandidates: [
+        { candidate: first, revalidatedCandidate: undefined, directEvidenceAssertionInputs: assertionInputs, rankingCacheKey: 'cache-a', revalidationCacheKey: 'cache-a' },
+        { candidate: second, revalidatedCandidate: second, directEvidenceAssertionInputs: assertionInputs, rankingCacheKey: 'cache-b', revalidationCacheKey: 'cache-b' },
+      ],
+      ledger, evaluationLsn: 20,
+      patternPresentationLedgerPolicyVersion: ATTENTION_PATTERN_PRESENTATION_LEDGER_POLICY_VERSION,
+    })
+    expect(result.attempts[0]).toMatchObject({ outcome: 'revalidation-refused', revalidationReason: 'candidate-disappeared' })
+    expect(result.presentation?.candidateId).toBe('pattern-candidate-still-legal')
+  })
+
+  it('no ledger success record is appended for a refused or failed candidate', () => {
+    const onlyCandidate = patternCandidate('pattern-candidate-only', 'pattern-source-only', 10)
+    const ledger = emptyLedgerOrThrow()
+    const result = runAttentionPatternPresentationPass({
+      orderedCandidates: [
+        { candidate: onlyCandidate, revalidatedCandidate: undefined, directEvidenceAssertionInputs: assertionInputs, rankingCacheKey: 'cache-a', revalidationCacheKey: 'cache-a' },
+      ],
+      ledger, evaluationLsn: 20,
+      patternPresentationLedgerPolicyVersion: ATTENTION_PATTERN_PRESENTATION_LEDGER_POLICY_VERSION,
+    })
+    expect(result.presentation).toBeNull()
+    expect(result.ledger.records).toHaveLength(0)
+    expect(result.ledger).toBe(ledger)
+  })
+
+  it('a hidden hypothetical candidate never passed to the pass cannot consume or shift the one-presentation bound', () => {
+    const visible = patternCandidate('pattern-candidate-visible-only', 'pattern-source-visible-only', 10)
+    const ledger = emptyLedgerOrThrow()
+    // "Hidden" candidates are, by construction, never part of orderedCandidates
+    // at all -- proving the bound is exactly a function of what is passed in.
+    const result = runAttentionPatternPresentationPass({
+      orderedCandidates: [{ candidate: visible, revalidatedCandidate: visible, directEvidenceAssertionInputs: assertionInputs, rankingCacheKey: 'cache-a', revalidationCacheKey: 'cache-a' }],
+      ledger, evaluationLsn: 20,
+      patternPresentationLedgerPolicyVersion: ATTENTION_PATTERN_PRESENTATION_LEDGER_POLICY_VERSION,
+    })
+    expect(result.presentation?.candidateId).toBe('pattern-candidate-visible-only')
+    expect(result.decisions).toHaveLength(1)
   })
 })

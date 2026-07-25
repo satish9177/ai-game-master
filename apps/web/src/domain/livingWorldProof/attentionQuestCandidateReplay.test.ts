@@ -4,9 +4,14 @@ import { A1_RANKING_SNAPSHOT_LSN } from './attentionQuestCandidateScenario'
 import {
   canonicalAttentionObservableTraceBytes,
   canonicalAttentionTraceBytes,
+  runAttentionPatternPresentationPass,
   runAttentionQuestCandidateReplayPass,
   stableWorldReplayPassInput,
 } from './attentionReplay'
+import { ATTENTION_LEDGER_POLICY_VERSION } from './attentionCandidatePolicy'
+import { ATTENTION_PATTERN_PRESENTATION_LEDGER_POLICY_VERSION } from './attentionLedger'
+import type { AttentionPatternCandidate } from './attentionCandidate'
+import type { NarrativePatternDirectEvidenceAssertionInput } from './attentionNarrativePatternContracts'
 import { ATTENTION_STAGE_A_QUEST_ONLY_GOLDEN } from './attentionStageAQuestOnlyGolden'
 import { digestAttentionReplayAuthoritativeLog } from './attentionReplayResources'
 import {
@@ -54,6 +59,50 @@ describe('A5 — the complete trace is byte-identical across repeated cold runs'
     const runs = [0, 1, 2].map(() => canonicalAttentionTraceBytes(runOnce().trace))
 
     expect(new Set(runs).size).toBe(1)
+  })
+
+  it('replays the frozen quest branch and the disjoint pattern-presentation branch byte-for-byte independently', () => {
+    const patternCandidate: AttentionPatternCandidate = Object.freeze({
+      sourceKind: 'narrative_pattern_instance', sourceAuthority: 'derived', sourceId: 'replay-pattern-source',
+      candidateId: 'replay-pattern-candidate', eligibility: 'eligible',
+      accessorContractVersion: 'attention-pattern-evidence-accessor-v1',
+      canonicalizationVersion: 'attention-candidate-canonicalization-v1',
+      identitySchemaVersion: 'attention-pattern-candidate-identity-schema-v1', rankingSnapshotLsn: 60,
+      legallyVisibleParties: Object.freeze(['a', 'b']), patternType: 'reciprocal_public_aid', patternSemanticVersion: 1,
+      canonicalBindingTuple: Object.freeze([Object.freeze(['initiator', 'a'] as const)]),
+      canonicalSupportingRecordIdentityTuple: Object.freeze([
+        Object.freeze(['aid-start', 'observable_action', 'aid-1', 'public-aid-1', 10] as const),
+      ]),
+      lastProgressLsn: 10,
+    })
+    const assertions: readonly NarrativePatternDirectEvidenceAssertionInput[] = Object.freeze([
+      Object.freeze({
+        assertionKind: 'public_aid' as const, sourceRecordId: 'aid-1', visibilityProvenanceId: 'public-aid-1',
+        actorId: 'a', targetId: 'b',
+      }),
+    ])
+    const runs = [0, 1].map(() => {
+      const quest = runOnce()
+      const pattern = runAttentionPatternPresentationPass({
+        orderedCandidates: [{
+          candidate: patternCandidate, revalidatedCandidate: patternCandidate, directEvidenceAssertionInputs: assertions,
+          rankingCacheKey: 'replay-pattern-cache', revalidationCacheKey: 'replay-pattern-cache',
+        }],
+        ledger: quest.ledger,
+        evaluationLsn: 60,
+        patternPresentationLedgerPolicyVersion: ATTENTION_PATTERN_PRESENTATION_LEDGER_POLICY_VERSION,
+      })
+      if (pattern.presentation === null) throw new Error('expected a pattern presentation')
+      return pattern.ledger
+    })
+    const [first, second] = runs
+    if (first === undefined || second === undefined) throw new Error('expected two replay runs')
+
+    expect(canonicalSerialize(first.records.slice(0, 1)))
+      .toBe(ATTENTION_STAGE_A_QUEST_ONLY_GOLDEN.single.ledgerRecordsBytes)
+    expect(first.records[0]?.recordId.startsWith(ATTENTION_LEDGER_POLICY_VERSION + ':')).toBe(true)
+    expect(canonicalSerialize(first.records.slice(1))).toBe(canonicalSerialize(second.records.slice(1)))
+    expect(first.records[1]?.recordId.startsWith('attention-pattern-presentation-ledger-policy-v1:')).toBe(true)
   })
 
   it('carries an explicit schema version and a canonical, versioned identity', () => {

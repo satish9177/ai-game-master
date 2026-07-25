@@ -16,7 +16,7 @@ import { ATTENTION_TEMPLATE_VERSION } from './attentionCandidatePolicy'
 import { normalizeAttentionCandidates } from './attentionCandidate'
 import type { AttentionCandidate } from './attentionCandidate'
 import { buildAttentionRevealPackage } from './attentionRevealPackage'
-import type { AttentionRevealPackage, AttentionRevealSlotId } from './attentionRevealPackage'
+import type { AttentionQuestRevealPackage, AttentionRevealSlotId } from './attentionRevealPackage'
 import {
   ATTENTION_TEMPLATE_SLOT_LABELS,
   renderAttentionRevealPackage,
@@ -69,9 +69,10 @@ function normalizedCandidate(candidate: QuestCandidate): AttentionCandidate {
   return only
 }
 
-function packageFor(candidate: QuestCandidate): AttentionRevealPackage {
+function packageFor(candidate: QuestCandidate): AttentionQuestRevealPackage {
   const result = buildAttentionRevealPackage(normalizedCandidate(candidate), TEMPLATE_REQUEST)
   if (result.kind !== 'ok') throw new Error('expected a package, got refusal: ' + result.reason)
+  if ('assertions' in result.revealPackage) throw new Error('expected quest package')
   return result.revealPackage
 }
 
@@ -99,7 +100,7 @@ const MINIMALLY_POPULATED = createProofQuestCandidate({
   secretOpeningDetail: 'sealed-detail',
 })
 
-function renderOrThrow(revealPackage: AttentionRevealPackage) {
+function renderOrThrow(revealPackage: AttentionQuestRevealPackage) {
   const result = renderAttentionRevealPackage(revealPackage, TEMPLATE_REQUEST)
   if (result.kind !== 'ok') throw new Error('expected rendered output, got refusal: ' + result.reason)
   return result
@@ -199,7 +200,7 @@ describe('A4 — the template version participates in output identity', () => {
 describe('A4 — an unrenderable package refuses and changes nothing', () => {
   const revealPackage = packageFor(FULLY_POPULATED)
 
-  function withSlots(slots: AttentionRevealPackage['slots']): AttentionRevealPackage {
+  function withSlots(slots: AttentionQuestRevealPackage['slots']): AttentionQuestRevealPackage {
     return { ...revealPackage, slots }
   }
 
@@ -218,7 +219,7 @@ describe('A4 — an unrenderable package refuses and changes nothing', () => {
   // genuinely built package. `buildAttentionRevealPackage` cannot emit any of
   // them; the refusals exist so the renderer never repairs a package it did not
   // approve, whatever a later slice hands it.
-  const malformed: [string, AttentionRevealPackage, string][] = [
+  const malformed: [string, AttentionQuestRevealPackage, string][] = [
     ['a package tagged as already failed', { ...revealPackage, resultTag: 'presentation-failed' }, 'unrenderable-result-tag'],
     ['a blank candidate id', { ...revealPackage, candidateId: '  ' }, 'missing-candidate-id'],
     [

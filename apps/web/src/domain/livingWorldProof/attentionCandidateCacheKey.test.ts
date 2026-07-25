@@ -18,7 +18,14 @@ import {
   attentionCandidateRankingEligibilityResourceState,
   deriveAttentionCandidateDerivationCacheKey,
   deriveAttentionCandidateRankingCacheKey,
+  deriveAttentionTraceCacheKey,
 } from './attentionCandidateCacheKey'
+import {
+  ATTENTION_EXPOSURE_POLICY_VERSION,
+  ATTENTION_TEMPLATE_CHANNEL_POLICY_VERSION,
+} from './attentionCandidatePolicy'
+import { ATTENTION_PATTERN_DIRECT_EVIDENCE_TEMPLATE_VERSION } from './attentionDirectEvidenceAssertion'
+import { ATTENTION_PATTERN_PRESENTATION_LEDGER_POLICY_VERSION } from './attentionLedger'
 import type {
   AttentionCandidateDerivationDependencyBundle,
   AttentionCandidateRankingDependencyBundle,
@@ -210,11 +217,14 @@ describe('B4 / RN019 §9.3 — the derivation bundle is the closed thirteen-fiel
     expect(Object.isFrozen(derivation())).toBe(true)
   })
 
-  it('bumps the derivation and ranking key schemas to their explicit v2 strings', () => {
+  it('bumps the derivation and ranking key schemas to their explicit versioned strings', () => {
     expect(ATTENTION_CANDIDATE_DERIVATION_CACHE_KEY_SCHEMA_VERSION)
       .toBe('attention-candidate-derivation-cache-key-v2')
+    // B5 adds new ledger/presentation members to the ranking-only eligibility
+    // state (never to the derivation bundle), a shape change bumping ranking
+    // alone to v3 while derivation stays v2.
     expect(ATTENTION_CANDIDATE_RANKING_CACHE_KEY_SCHEMA_VERSION)
-      .toBe('attention-candidate-ranking-cache-key-v2')
+      .toBe('attention-candidate-ranking-cache-key-v3')
   })
 
   it('has a variation case for every declared field, so none is unwitnessed', () => {
@@ -294,6 +304,54 @@ describe('B4 / K2 — every ranking-only dependency moves only the ranking key',
         }),
       },
     ],
+    [
+      'eligibilityResourceState.patternPresentationLedgerPolicyVersion',
+      {
+        eligibilityResourceState: attentionCandidateRankingEligibilityResourceState({
+          patternPresentationLedgerPolicyVersion: 'fixture-pattern-presentation-ledger-policy-v9',
+        }),
+      },
+    ],
+    [
+      'eligibilityResourceState.exposurePolicyVersion',
+      {
+        eligibilityResourceState: attentionCandidateRankingEligibilityResourceState({
+          exposurePolicyVersion: 'fixture-exposure-policy-v9',
+        }),
+      },
+    ],
+    [
+      'eligibilityResourceState.relevantLedgerDigest',
+      {
+        eligibilityResourceState: attentionCandidateRankingEligibilityResourceState({
+          relevantLedgerDigest: 'fixture-relevant-ledger-digest',
+        }),
+      },
+    ],
+    [
+      'eligibilityResourceState.directEvidenceAssertionIdentityVersion',
+      {
+        eligibilityResourceState: attentionCandidateRankingEligibilityResourceState({
+          directEvidenceAssertionIdentityVersion: 'fixture-assertion-identity-v9',
+        }),
+      },
+    ],
+    [
+      'eligibilityResourceState.patternRevealPackageSchemaVersion',
+      {
+        eligibilityResourceState: attentionCandidateRankingEligibilityResourceState({
+          patternRevealPackageSchemaVersion: 'fixture-pattern-package-v9',
+        }),
+      },
+    ],
+    [
+      'eligibilityResourceState.patternDirectEvidenceTemplateVersion',
+      {
+        eligibilityResourceState: attentionCandidateRankingEligibilityResourceState({
+          patternDirectEvidenceTemplateVersion: 'fixture-pattern-template-v9',
+        }),
+      },
+    ],
   ]
 
   it.each(RANKING_ONLY_VARIATIONS)(
@@ -317,23 +375,56 @@ describe('B4 / K2 — every ranking-only dependency moves only the ranking key',
     }
   })
 
-  it('carries no B5-only exposure, cooldown, retirement, ledger, or template dependency', () => {
+  it('B5 -- carries the ledger/exposure/assertion/package/template dependencies on the ranking-only eligibility state, never on the top-level bundle or the derivation key', () => {
     const bundle = ranking()
 
+    // The bundle's own top-level shape is unchanged: B5's additions live
+    // inside `eligibilityResourceState`, which already belonged to the
+    // ranking-only bundle at B4 -- no new top-level bundle member was added.
     expect(Object.keys(bundle).sort())
       .toEqual(['derivation', 'eligibilityResourceState', 'orderingVersion', 'rankingPolicyHash'])
-    const bytes = canonicalSerialize(bundle).toLowerCase()
-    for (const forbidden of [
-      'exposure',
-      'cooldown',
-      'retirement',
-      'ledger',
-      'template',
-      'presentation',
-      'relevantledgerinputidentity',
-    ]) {
-      expect({ forbidden, present: bytes.includes(forbidden) }).toEqual({ forbidden, present: false })
+    expect(Object.keys(bundle.eligibilityResourceState).sort()).toEqual([
+      'directEvidenceAssertionIdentityVersion',
+      'exposurePolicyVersion',
+      'mixedFamilyCandidateCap',
+      'patternDirectEvidenceTemplateVersion',
+      'patternPresentationLedgerPolicyVersion',
+      'patternRevealPackageSchemaVersion',
+      'rankableClasses',
+      'relevantLedgerDigest',
+      'retentionClassOrder',
+    ])
+
+    const result = rankingKeysOrThrow(ranking())
+    expect(result.derivationCacheKey).toBe(baseline.derivationCacheKey)
+
+    // Each B5 dependency independently moves the ranking key, never the
+    // derivation key, and identity is untouched by every one of them.
+    for (const [, override] of RANKING_ONLY_VARIATIONS) {
+      const varied = rankingKeysOrThrow(ranking(override))
+      expect(varied.derivationCacheKey).toBe(baseline.derivationCacheKey)
+      expect(computeAttentionCandidateIdentity({
+        sourceKind: 'quest_candidate',
+        sourceId: 'quest-public-open',
+        openingProvenanceId: 'consequence-public-37',
+      })).toBe(PINNED_CANDIDATE_IDENTITY)
     }
+  })
+
+  it.each([
+    'patternPresentationLedgerPolicyVersion',
+    'exposurePolicyVersion',
+    'relevantLedgerDigest',
+    'directEvidenceAssertionIdentityVersion',
+    'patternRevealPackageSchemaVersion',
+    'patternDirectEvidenceTemplateVersion',
+  ] as const)('refuses a missing B5 eligibility-state field %s rather than approximating', (field) => {
+    const withMissingField = { ...attentionCandidateRankingEligibilityResourceState() }
+    delete (withMissingField as Record<string, unknown>)[field]
+    const result = deriveAttentionCandidateRankingCacheKey(
+      ranking({ eligibilityResourceState: withMissingField as never }),
+    )
+    expect(result).toEqual({ kind: 'refused', reason: 'missing-eligibility-resource-state' })
   })
 
   it('refuses an unsupported ordering version rather than reinterpreting a v1 key as v2', () => {
@@ -484,5 +575,32 @@ describe('A3 / D15 — the two keys are versioned, distinct, deterministic, and 
     rankingKeysOrThrow(ranking({ derivation: bundle }))
 
     expect(canonicalSerialize(bundle)).toBe(before)
+  })
+})
+
+describe('B5 — presentation cache dependencies', () => {
+  const presentation = (digest: string) => ({
+    templateVersion: ATTENTION_PATTERN_DIRECT_EVIDENCE_TEMPLATE_VERSION,
+    templateChannelPolicyVersion: ATTENTION_TEMPLATE_CHANNEL_POLICY_VERSION,
+    exposurePolicyVersion: ATTENTION_EXPOSURE_POLICY_VERSION,
+    patternPresentationLedgerPolicyVersion: ATTENTION_PATTERN_PRESENTATION_LEDGER_POLICY_VERSION,
+    resourcePolicyVersion: ATTENTION_STAGE_B_RESOURCE_POLICY_VERSION,
+    relevantLedgerDigest: digest,
+  })
+
+  it('invalidates the trace/presentation cache on relevant ledger history only', () => {
+    const left = deriveAttentionTraceCacheKey({ rankingCacheKey: 'ranking', revalidationSnapshotLsn: 20, replayCaseId: 'b5', presentationDependencies: presentation('ledger-a') })
+    const right = deriveAttentionTraceCacheKey({ rankingCacheKey: 'ranking', revalidationSnapshotLsn: 20, replayCaseId: 'b5', presentationDependencies: presentation('ledger-b') })
+    expect(left.kind).toBe('ok')
+    expect(right.kind).toBe('ok')
+    if (left.kind !== 'ok' || right.kind !== 'ok') throw new Error('expected cache keys')
+    expect(left.traceCacheKey).not.toBe(right.traceCacheKey)
+  })
+
+  it('refuses unsupported B5 template cache material rather than reusing a partial key', () => {
+    expect(deriveAttentionTraceCacheKey({
+      rankingCacheKey: 'ranking', revalidationSnapshotLsn: 20, replayCaseId: 'b5',
+      presentationDependencies: { ...presentation('ledger'), templateVersion: 'untrusted-template' },
+    })).toEqual({ kind: 'refused', reason: 'invalid-presentation-cache-dependencies' })
   })
 })
