@@ -1,11 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import { canonicalSerialize } from './canonicalSerialization'
-import { runAttentionDirectorOnPass, stableWorldReplayPassInput } from './attentionReplay'
+import { runAttentionDirectorOnPass, runAttentionMixedFamilyEvaluation, stableWorldReplayPassInput } from './attentionReplay'
+import { ATTENTION_LEDGER_POLICY_VERSION } from './attentionCandidatePolicy'
+import { createAttentionLedger } from './attentionLedger'
 import { createAttentionReplayAuthoritativeResources, digestAttentionReplayAuthoritativeLog } from './attentionReplayResources'
 import {
   A5_AUTHORITATIVE_COMMAND_IDS,
   A5_AUTHORITATIVE_WALL_CLOCK_INPUTS,
   A5_RNG_SEED,
+  buildB6PatternOnlyEvaluationInput,
   buildAttentionReplayQuestCandidateOnlyWorld,
 } from './attentionReplayScenario'
 import { buildAttentionQuestCandidateHiddenPairScenario } from './attentionQuestCandidateScenario'
@@ -36,6 +39,15 @@ import { buildAttentionQuestCandidateHiddenPairScenario } from './attentionQuest
 const NO_AUTHORITATIVE_LOG_DIGEST = digestAttentionReplayAuthoritativeLog({ commits: [] })
 
 describe('A5 — the attention trace is unaffected by execution order relative to the authoritative pass', () => {
+  it('B6 pattern-only cold replay preserves trusted arbitration, ledger, and trace bytes', () => {
+    const firstLedger = createAttentionLedger({ ledgerPolicyVersion: ATTENTION_LEDGER_POLICY_VERSION })
+    const secondLedger = createAttentionLedger({ ledgerPolicyVersion: ATTENTION_LEDGER_POLICY_VERSION })
+    if (firstLedger.kind !== 'ok' || secondLedger.kind !== 'ok') throw new Error('expected ledgers')
+    const first = runAttentionMixedFamilyEvaluation(buildB6PatternOnlyEvaluationInput('b6-cold', firstLedger.ledger))
+    const second = runAttentionMixedFamilyEvaluation(buildB6PatternOnlyEvaluationInput('b6-cold', secondLedger.ledger))
+    expect(first).toEqual(second)
+  })
+
   it('running attention before vs after the authoritative commits yields a byte-identical trace', () => {
     const world = buildAttentionReplayQuestCandidateOnlyWorld()
 

@@ -215,3 +215,26 @@ export function runNarrativePatternMonitor(
     evaluationSnapshotLsn,
   })
 }
+
+/**
+ * B6's canonical two-record pattern fixture, minted only through the A′
+ * accessor. Passing distinct record ids mints the independent
+ * revalidation-coordinate counterpart of the same fixture.
+ *
+ * This module stays **fixture-only** at B6 (plan §11.7): it owns accessor-minted
+ * evidence records and views at both coordinates and nothing else. It performs
+ * no A′ surface construction, no candidate normalization, no replay
+ * orchestration, and no ledger or trace work, and it gains **no** new import
+ * specifier — the normalized pattern `candidateId`s the replay scenario needs
+ * come from `deriveAttentionPatternPrimeCandidates` in `attentionReplay.ts`,
+ * the one authorized home for that chain.
+ */
+export function buildB6ReciprocalAidPatternViews(
+  firstRecordId = 'b6-aid-a-b',
+  secondRecordId = 'b6-aid-b-a',
+): readonly AttentionReadablePatternEvidenceView[] {
+  return mintPatternEvidenceViews([
+    aidRecord(firstRecordId, 10, 'a', 'b'),
+    aidRecord(secondRecordId, 12, 'b', 'a'),
+  ])
+}

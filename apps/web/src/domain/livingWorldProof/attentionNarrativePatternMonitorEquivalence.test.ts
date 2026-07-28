@@ -14,6 +14,10 @@ import {
   mintPatternEvidenceViews,
 } from './attentionNarrativePatternScenario'
 import { reconstructNarrativePatternInstances } from './attentionNarrativePatternMonitor'
+import { ATTENTION_LEDGER_POLICY_VERSION } from './attentionCandidatePolicy'
+import { createAttentionLedger } from './attentionLedger'
+import { runAttentionMixedFamilyEvaluation } from './attentionReplay'
+import { buildB6PatternOnlyEvaluationInput } from './attentionReplayScenario'
 
 function bytes(records: readonly ProofPatternEvidenceRecordInput[], snapshot: number): string {
   const result = reconstructNarrativePatternInstances({
@@ -36,6 +40,15 @@ const MIXED: readonly ProofPatternEvidenceRecordInput[] = [
 ]
 
 describe('B3 monitor — determinism and equivalence', () => {
+  it('B6 reconstructs the same pattern instance at derivation and revalidation coordinates when their A-prime inputs match', () => {
+    const ledger = createAttentionLedger({ ledgerPolicyVersion: ATTENTION_LEDGER_POLICY_VERSION })
+    if (ledger.kind !== 'ok') throw new Error('expected ledger')
+    const result = runAttentionMixedFamilyEvaluation(buildB6PatternOnlyEvaluationInput('b6-monitor-equivalence', ledger.ledger))
+    expect(result.kind).toBe('ok')
+    if (result.kind !== 'ok') throw new Error('expected evaluation')
+    expect(result.result.arbitrationAttempts[0]?.outcome).toBe('presented')
+  })
+
   it('is byte-identical on repeated cold reconstruction', () => {
     expect(bytes(MIXED, 20)).toEqual(bytes(MIXED, 20))
   })

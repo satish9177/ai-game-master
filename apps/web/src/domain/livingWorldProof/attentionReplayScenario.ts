@@ -42,13 +42,23 @@ import {
   ATTENTION_RANKING_SNAPSHOT_LSN_MIN,
 } from './attentionCandidatePolicy'
 import type { QuestCandidate } from './attentionQuestCandidateContracts'
-import { runAttentionQuestCandidatePrimePipeline } from './attentionReplay'
-import type { AttentionQuestCandidateWorldInput } from './attentionReplay'
+import {
+  deriveAttentionPatternPrimeCandidates,
+  runAttentionQuestCandidatePrimePipeline,
+} from './attentionReplay'
+import type {
+  AttentionMixedFamilyEvaluationInput,
+  AttentionMixedPatternPresentationInput,
+  AttentionQuestCandidateWorldInput,
+} from './attentionReplay'
 import type { AttentionReplayWallClockInput } from './attentionReplayResources'
 import {
   A1_RANKING_SNAPSHOT_LSN,
   buildAttentionQuestCandidateTwoVisibleCandidates,
 } from './attentionQuestCandidateScenario'
+import { buildB6ReciprocalAidPatternViews } from './attentionNarrativePatternScenario'
+import type { AttentionReadablePatternEvidenceView } from './attentionPatternEvidenceContracts'
+import { digestAttentionReplayAuthoritativeLog } from './attentionReplayResources'
 
 /** A stable seed for every P2 fixture's authoritative RNG stream. */
 export const A5_RNG_SEED = 7
@@ -197,4 +207,192 @@ export function buildAttentionReplayLsnBoundaryWorlds() {
   }
 
   return Object.freeze({ worldAtMin, worldAtMax, worldOverMax, worldNegativeRequest })
+}
+
+/**
+ * B6 — the one mixed-family fixture builder. Every B6 world is described by the
+ * two family-owned derivation collections (quest candidates and accessor-minted
+ * pattern-evidence views) plus their independently supplied revalidation-coordinate
+ * counterparts (RN019 §9.4.2, plan §11.3 inputs 2-5). Nothing here fabricates a
+ * candidate: the normalized pattern `candidateId`s and their direct-evidence
+ * assertion inputs come from `deriveAttentionPatternPrimeCandidates`, reached
+ * through this module's pre-existing `./attentionReplay` import, so they are
+ * produced by exactly the committed chain the evaluator re-runs.
+ *
+ * This module owns only the **scenario-supplied** remainder of §11.3 input 7 —
+ * the two opaque cache keys and any satisfied completion coordinate — attached
+ * below onto the returned normalized `candidateId`s. See
+ * `B6MixedEvaluationFixtureOptions.patternCacheKeyPairing` for why attaching
+ * those needs no cache-key import and mints no cache identity.
+ */
+export interface B6MixedEvaluationFixtureOptions {
+  readonly replayCaseId: string
+  readonly ledger: AttentionMixedFamilyEvaluationInput['ledger']
+  /** Quest candidates admitted at the ranking coordinate. Default: none. */
+  readonly questCandidates?: readonly QuestCandidate[]
+  /** Quest candidates admitted at the revalidation coordinate. Default: the ranking set. */
+  readonly revalidationQuestCandidates?: readonly QuestCandidate[]
+  /** Accessor-minted pattern evidence at the ranking coordinate. Default: none. */
+  readonly patternEvidenceViews?: readonly AttentionReadablePatternEvidenceView[]
+  /** Accessor-minted pattern evidence at the revalidation coordinate. Default: the ranking set. */
+  readonly revalidationPatternEvidenceViews?: readonly AttentionReadablePatternEvidenceView[]
+  /**
+   * Snapshot insertion order for the **quest** collections. It deliberately
+   * does not reverse the pattern-evidence collections: an accessor-minted
+   * `AttentionReadablePatternEvidenceView` list is canonically ordered by
+   * `(commitLsn, recordId)` by contract (RN019 §4.1), so a reversed view list
+   * is not a legal A′ input at all. Pattern-side insertion-order independence
+   * is proved one layer earlier, by minting from a reversed *record* list and
+   * comparing the resulting view bytes.
+   */
+  readonly order?: 'authored' | 'reversed'
+  /**
+   * The revalidation coordinate (RN019 §9.4's second clock). It defaults to the
+   * ranking coordinate; setting it later makes the two clocks genuinely differ,
+   * so the evaluator must reconstruct pattern candidates independently there
+   * rather than reuse a derivation-time object.
+   */
+  readonly revalidationSnapshotLsn?: number
+  /**
+   * The LSN the revalidation snapshot is *minted* at. It defaults to the
+   * revalidation coordinate; setting it to a different value makes the committed
+   * quest accessor refuse `ranking-snapshot-lsn-mismatch` at the revalidation
+   * coordinate, which is RN019 §9.4.2's quest-accessor-refusal lever.
+   */
+  readonly revalidationSnapshotMintedAtLsn?: number
+  /** Per-candidate satisfied completion coordinates, keyed by pattern candidate ID. */
+  readonly satisfiedCompletionLsnByCandidateId?: Readonly<Record<string, number>>
+  /**
+   * How this fixture pairs input 7's two **opaque, scenario-supplied** cache-key
+   * strings (plan §11.7). `revalidateAttentionPatternPresentation` consumes them
+   * through a single equality comparison, so:
+   *
+   *  - `'matched'` (the default) supplies an equal pair — a valid
+   *    cache/revalidation pairing, and revalidation proceeds;
+   *  - `'mismatched'` supplies a deliberately unequal pair — the existing
+   *    `cache-key-mismatch` refusal lever of §11.2C row 2.
+   *
+   * Nothing in the committed contract requires these strings to come from
+   * `deriveAttentionCandidateRankingCacheKey`, and this module deliberately does
+   * not call it: §11.4's "already-derived keys" means values the caller already
+   * supplied. Attaching them adds no cache-key algorithm, format, identity,
+   * schema, version, or field, and the real derivation evidence stays where it
+   * is committed, in `attentionCacheRevalidation.test.ts`.
+   */
+  readonly patternCacheKeyPairing?: 'matched' | 'mismatched'
+}
+
+export interface B6MixedEvaluationFixture {
+  readonly input: AttentionMixedFamilyEvaluationInput
+  /** The pattern candidate IDs the real derivation chain produces, in normalizer order. */
+  readonly patternCandidateIds: readonly string[]
+}
+
+/** The general B6 mixed-family fixture. Quest-only, pattern-only, and empty worlds are its degenerate cases. */
+export function buildB6MixedEvaluationFixture(
+  options: B6MixedEvaluationFixtureOptions,
+): B6MixedEvaluationFixture {
+  const order = options.order ?? 'authored'
+  const orderedOf = <T,>(values: readonly T[]): readonly T[] => (
+    order === 'authored' ? Object.freeze([...values]) : Object.freeze([...values].reverse())
+  )
+  const questCandidates = orderedOf(options.questCandidates ?? [])
+  const revalidationQuestCandidates = orderedOf(options.revalidationQuestCandidates ?? options.questCandidates ?? [])
+  const patternEvidenceViews = Object.freeze([...(options.patternEvidenceViews ?? [])])
+  const revalidationPatternEvidenceViews = Object.freeze([
+    ...(options.revalidationPatternEvidenceViews ?? options.patternEvidenceViews ?? []),
+  ])
+  const snapshot = createProofQuestCandidateSnapshot({
+    accessorContractVersion: ATTENTION_QUEST_CANDIDATE_ACCESSOR_VERSION,
+    snapshotLsn: A1_RANKING_SNAPSHOT_LSN,
+    candidates: questCandidates,
+  })
+  const revalidationSnapshotLsn = options.revalidationSnapshotLsn ?? A1_RANKING_SNAPSHOT_LSN
+  const revalidationSnapshot = createProofQuestCandidateSnapshot({
+    accessorContractVersion: ATTENTION_QUEST_CANDIDATE_ACCESSOR_VERSION,
+    snapshotLsn: options.revalidationSnapshotMintedAtLsn ?? revalidationSnapshotLsn,
+    candidates: revalidationQuestCandidates,
+  })
+  // §11.3 — the normalized pattern-prime material comes from the one pure
+  // derivation function, reached through this module's pre-existing
+  // `./attentionReplay` import. This module therefore needs no monitor,
+  // retention, A′-boundary, or normalizer specifier of its own.
+  const derived = deriveAttentionPatternPrimeCandidates({
+    patternEvidenceViews,
+    accessorContractVersion: ATTENTION_QUEST_CANDIDATE_ACCESSOR_VERSION,
+    evaluationSnapshotLsn: A1_RANKING_SNAPSHOT_LSN,
+  })
+  if (derived.kind !== 'ok') {
+    throw new Error(`B6 fixture pattern-prime derivation refused at ${derived.stage}: ${derived.reason}`)
+  }
+  // §11.7 — the scenario-owned remainder of input 7, attached outside the pure
+  // derivation. Both cache keys are opaque scenario strings: equal for a valid
+  // pairing, deliberately unequal for the `cache-key-mismatch` lever.
+  const satisfiedCompletionLsnByCandidateId = options.satisfiedCompletionLsnByCandidateId ?? {}
+  const mismatchCacheKeys = (options.patternCacheKeyPairing ?? 'matched') === 'mismatched'
+  const patternPresentationInputs: readonly AttentionMixedPatternPresentationInput[] = Object.freeze(
+    derived.candidates.map((candidate, index) => {
+      const satisfiedCompletionLsn = satisfiedCompletionLsnByCandidateId[candidate.candidateId]
+      return Object.freeze({
+        candidateId: candidate.candidateId,
+        directEvidenceAssertionInputs: candidate.directEvidenceAssertionInputs,
+        rankingCacheKey: `b6-pattern-ranking-cache-${index}`,
+        revalidationCacheKey: mismatchCacheKeys
+          ? `b6-pattern-revalidation-cache-mismatched-${index}`
+          : `b6-pattern-ranking-cache-${index}`,
+        ...(satisfiedCompletionLsn === undefined ? {} : { satisfiedCompletionLsn }),
+      })
+    }),
+  )
+  const digest = digestAttentionReplayAuthoritativeLog({ commits: [] })
+  return Object.freeze({
+    patternCandidateIds: Object.freeze(patternPresentationInputs.map((entry) => entry.candidateId)),
+    input: Object.freeze({
+      replayCaseId: options.replayCaseId,
+      snapshot,
+      request: Object.freeze({
+        accessorContractVersion: ATTENTION_QUEST_CANDIDATE_ACCESSOR_VERSION,
+        rankingSnapshotLsn: A1_RANKING_SNAPSHOT_LSN,
+      }),
+      patternEvidenceViews,
+      revalidationSnapshot,
+      revalidationSnapshotLsn,
+      revalidationPatternEvidenceViews,
+      ledger: options.ledger,
+      patternPresentationInputs,
+      patternPresentationLedgerPolicyVersion: 'attention-pattern-presentation-ledger-policy-v1',
+      authoritativeLogDigestBefore: digest,
+      authoritativeLogDigestAfter: digest,
+    }),
+  })
+}
+
+/** A real accessor-minted pattern-only B6 input, reusable by replay/P2/P3 evidence. */
+export function buildB6PatternOnlyEvaluationInput(
+  replayCaseId: string,
+  ledger: AttentionMixedFamilyEvaluationInput['ledger'],
+): AttentionMixedFamilyEvaluationInput {
+  return buildB6MixedEvaluationFixture({
+    replayCaseId,
+    ledger,
+    patternEvidenceViews: buildB6ReciprocalAidPatternViews(),
+  }).input
+}
+
+/**
+ * The B6 quest candidate that reproduces `ATTENTION_STAGE_A_QUEST_ONLY_GOLDEN.single`
+ * — the single-candidate case where the Stage A harness and the Stage B evaluator
+ * agree (plan §11.6 item 12). It is the same authored candidate
+ * `buildAttentionReplayQuestCandidateOnlyWorld` admits.
+ */
+export function buildB6StageASingleQuestCandidate(): QuestCandidate {
+  return createProofQuestCandidate({
+    id: 'quest-p2-only',
+    type: 'reputation_repair',
+    status: 'open',
+    openedAtLsn: 30,
+    openingProvenance: { visibility: 'public', provenanceId: 'consequence-public-30' },
+    legallyVisibleParties: ['player'],
+    legallyVisiblePublicStakes: 'restore-public-trust',
+  })
 }

@@ -1,9 +1,15 @@
 import { describe, expect, it } from 'vitest'
 import { canonicalSerialize } from './canonicalSerialization'
 import { ATTENTION_RANKING_SNAPSHOT_LSN_MAX, ATTENTION_RANKING_SNAPSHOT_LSN_MIN, ATTENTION_LEDGER_POLICY_VERSION } from './attentionCandidatePolicy'
-import { runAttentionQuestCandidateReplayPass, runAttentionPatternPresentationPass, stableWorldReplayPassInput } from './attentionReplay'
+import { runAttentionMixedFamilyEvaluation, runAttentionQuestCandidateReplayPass, runAttentionPatternPresentationPass, stableWorldReplayPassInput } from './attentionReplay'
 import { digestAttentionReplayAuthoritativeLog } from './attentionReplayResources'
-import { buildAttentionReplayLsnBoundaryWorlds } from './attentionReplayScenario'
+import {
+  buildB6MixedEvaluationFixture,
+  buildB6PatternOnlyEvaluationInput,
+  buildB6StageASingleQuestCandidate,
+  buildAttentionReplayLsnBoundaryWorlds,
+} from './attentionReplayScenario'
+import { buildB6ReciprocalAidPatternViews } from './attentionNarrativePatternScenario'
 import { ATTENTION_PATTERN_PRESENTATION_LEDGER_POLICY_VERSION, createAttentionLedger } from './attentionLedger'
 import type { AttentionPatternCandidate } from './attentionCandidate'
 import type { NarrativePatternDirectEvidenceAssertionInput } from './attentionNarrativePatternContracts'
@@ -304,6 +310,88 @@ describe('B5 -- numeric resource-policy pins and override variants', () => {
 })
 
 describe('B5 -- presentations per evaluation is exactly 1, exercised through the real pattern-presentation pipeline', () => {
+  /**
+   * B6 / RN019 §8.2.1 B — `presentationsPerEvaluation` is load-bearing at the
+   * mixed evaluator: the shared success budget is the versioned numeric policy
+   * value, never a literal or a boolean at the call site. The two cases below
+   * vary only that one field through the committed test-policy constructor, so
+   * a hard-coded `1` (or a boolean slot) fails the zero case outright.
+   *
+   * The fixture is genuinely mixed — one legal quest and one legal pattern —
+   * so the budget is exercised across a family boundary, not inside one family.
+   */
+  function mixedBudgetFixture(replayCaseId: string) {
+    const ledger = createAttentionLedger({ ledgerPolicyVersion: ATTENTION_LEDGER_POLICY_VERSION })
+    if (ledger.kind !== 'ok') throw new Error('expected ledger')
+    return buildB6MixedEvaluationFixture({
+      replayCaseId,
+      ledger: ledger.ledger,
+      questCandidates: [buildB6StageASingleQuestCandidate()],
+      patternEvidenceViews: buildB6ReciprocalAidPatternViews(),
+    })
+  }
+
+  it('B6 attempts nothing and appends nothing when presentationsPerEvaluation is the configured zero', () => {
+    const fixture = mixedBudgetFixture('b6-presentation-budget-zero')
+    const zero = buildAttentionStageBResourcePolicy({ presentationsPerEvaluation: 0 })
+    expect(zero.policy.presentationsPerEvaluation).toBe(0)
+
+    const result = runAttentionMixedFamilyEvaluation({ ...fixture.input, policy: zero.policy })
+    expect(result.kind).toBe('ok')
+    if (result.kind !== 'ok') throw new Error('expected evaluation')
+
+    // No presentation, no successful append, no winner, slot unconsumed.
+    expect(result.result.presentation).toBeNull()
+    expect(result.result.ledger).toBe(fixture.input.ledger)
+    expect(result.result.ledger.records).toHaveLength(0)
+    expect(result.result.trace.mixedFamilyArbitration?.winnerCandidateId).toBeNull()
+    expect(result.result.trace.mixedFamilyArbitration?.winnerSourceKind).toBeNull()
+    expect(result.result.trace.mixedFamilyArbitration?.presentationSlotConsumed).toBe(false)
+    expect(result.result.trace.mixedFamilyArbitration?.successfulPresentationCount).toBe(0)
+
+    // Truthful trace: both families were retained and ranked, and every one of
+    // them is recorded `not-attempted` — never as a refusal it did not receive.
+    expect(result.result.retainedCandidates.map((candidate) => candidate.sourceKind))
+      .toEqual(['quest_candidate', 'narrative_pattern_instance'])
+    expect(result.result.arbitrationAttempts.map((attempt) => attempt.outcome))
+      .toEqual(['not-attempted', 'not-attempted'])
+    expect(result.result.arbitrationAttempts.every((attempt) => (
+      attempt.refusalReason === null && attempt.ledgerAppend === 'not-appended' && !attempt.continued
+    ))).toBe(true)
+    expect(result.result.trace.presentations).toEqual([])
+  })
+
+  it('B6 keeps normal family-blind one-success behaviour when presentationsPerEvaluation is the committed 1', () => {
+    const fixture = mixedBudgetFixture('b6-presentation-budget-one')
+    const one = buildAttentionStageBResourcePolicy({ presentationsPerEvaluation: 1 })
+    expect(one.policy.presentationsPerEvaluation).toBe(1)
+    expect(attentionStageBResourcePolicy().presentationsPerEvaluation).toBe(1)
+
+    const result = runAttentionMixedFamilyEvaluation({ ...fixture.input, policy: one.policy })
+    expect(result.kind).toBe('ok')
+    if (result.kind !== 'ok') throw new Error('expected evaluation')
+
+    // RN019 §9.2.1: the quest ranks first and takes the shared slot; the pattern
+    // is never attempted. Exactly one record, on the quest's own branch.
+    expect(result.result.arbitrationAttempts.map((attempt) => attempt.outcome))
+      .toEqual(['presented', 'not-attempted'])
+    expect(result.result.trace.mixedFamilyArbitration?.winnerSourceKind).toBe('quest_candidate')
+    expect(result.result.trace.mixedFamilyArbitration?.successfulPresentationCount).toBe(1)
+    expect(result.result.trace.mixedFamilyArbitration?.presentationSlotConsumed).toBe(true)
+    expect(result.result.ledger.records).toHaveLength(1)
+    expect(result.result.ledger.records[0]?.sourceKind).toBe('quest_candidate')
+  })
+
+  it('B6 consumes the same versioned presentation limit as one shared mixed-family slot', () => {
+    const ledger = createAttentionLedger({ ledgerPolicyVersion: ATTENTION_LEDGER_POLICY_VERSION })
+    if (ledger.kind !== 'ok') throw new Error('expected ledger')
+    const result = runAttentionMixedFamilyEvaluation(buildB6PatternOnlyEvaluationInput('b6-resource-slot', ledger.ledger))
+    expect(result.kind).toBe('ok')
+    if (result.kind !== 'ok') throw new Error('expected evaluation')
+    expect(result.result.trace.mixedFamilyArbitration?.successfulPresentationCount).toBe(1)
+    expect(result.result.ledger.records).toHaveLength(1)
+  })
+
   const assertionInputs: readonly NarrativePatternDirectEvidenceAssertionInput[] = Object.freeze([
     Object.freeze({ assertionKind: 'public_aid' as const, sourceRecordId: 'aid-1', visibilityProvenanceId: 'public-aid-1', actorId: 'a', targetId: 'b' }),
   ])

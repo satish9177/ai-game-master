@@ -129,6 +129,10 @@ import {
   buildAttentionDirectEvidenceAssertions,
 } from './attentionDirectEvidenceAssertion'
 import type { NarrativePatternDirectEvidenceAssertionInput } from './attentionNarrativePatternContracts'
+import type { AttentionReadablePatternEvidenceView } from './attentionPatternEvidenceContracts'
+import { reconstructNarrativePatternInstances } from './attentionNarrativePatternMonitor'
+import { applyNarrativePatternStructuralRetention } from './attentionNarrativePatternResourcePolicy'
+import type { NarrativePatternInstance } from './attentionNarrativePatternContracts'
 import {
   commitAttentionReplayAuthoritativeCommand,
   digestAttentionReplayAuthoritativeLog,
@@ -396,6 +400,180 @@ export interface AttentionPatternPresentationPassResult {
  * with the pinned constant -- so a caller presenting under a stale ledger
  * identity refuses here exactly as it would at the revalidation boundary.
  */
+export interface AttentionPatternPresentationAttemptExecution {
+  readonly ledger: AttentionLedger
+  readonly attempt: AttentionPatternPresentationAttemptResult
+  readonly decision: AttentionTracePatternPresentationDecision
+  readonly presentation: AttentionTracePresentationEntry | null
+}
+
+/** One B5 pattern candidate only; loops, selection slots, traces, and ledger creation remain caller-owned. */
+export function attemptAttentionPatternPresentation(input: {
+  readonly entry: AttentionPatternPresentationPassCandidateInput
+  readonly ledger: AttentionLedger
+  readonly evaluationLsn: number
+  readonly patternPresentationLedgerPolicyVersion: string
+  readonly policy: AttentionStageBResourcePolicy
+}): AttentionPatternPresentationAttemptExecution {
+    const entry = input.entry
+    const revalidation = revalidateAttentionPatternPresentation({
+      selectedCandidate: entry.candidate,
+      revalidatedCandidate: entry.revalidatedCandidate,
+      rankingCacheKey: entry.rankingCacheKey,
+      revalidationCacheKey: entry.revalidationCacheKey,
+      // Verbatim: a stale supplied identity must reach revalidation as-is.
+      patternPresentationLedgerPolicyVersion: input.patternPresentationLedgerPolicyVersion,
+      ledger: input.ledger,
+      evaluationLsn: input.evaluationLsn,
+      policy: input.policy,
+      ...(entry.satisfiedCompletionLsn === undefined ? {} : { satisfiedCompletionLsn: entry.satisfiedCompletionLsn }),
+    })
+    if (!revalidation.ok) {
+      const attempt = Object.freeze({
+        candidateId: entry.candidate.candidateId,
+        outcome: 'revalidation-refused',
+        revalidationReason: revalidation.reason,
+        assertionIds: Object.freeze([]),
+        refusalDetail: revalidation.reason,
+      } as const)
+      const decision = Object.freeze({
+        candidateId: entry.candidate.candidateId,
+        assertionIds: Object.freeze([]),
+        ...patternPresentationRefusalTraceOutcomes(revalidation.reason),
+        ledgerAppend: 'not-appended',
+      } as const)
+      return Object.freeze({ ledger: input.ledger, attempt, decision, presentation: null })
+    }
+
+    const assertions = buildAttentionDirectEvidenceAssertions(entry.directEvidenceAssertionInputs)
+    if (assertions.kind !== 'ok') {
+      const attempt = Object.freeze({
+        candidateId: entry.candidate.candidateId,
+        outcome: 'assertion-build-refused',
+        revalidationReason: revalidation.reason,
+        assertionIds: Object.freeze([]),
+        refusalDetail: assertions.reason,
+      } as const)
+      const decision = Object.freeze({
+        candidateId: entry.candidate.candidateId,
+        assertionIds: Object.freeze([]),
+        ...REVALIDATED_ELIGIBLE_TRACE_OUTCOMES,
+        ledgerAppend: 'not-appended',
+      } as const)
+      return Object.freeze({ ledger: input.ledger, attempt, decision, presentation: null })
+    }
+
+    const built = buildAttentionRevealPackage(entry.candidate, {
+      templateVersion: ATTENTION_PATTERN_DIRECT_EVIDENCE_TEMPLATE_VERSION,
+      directEvidenceAssertions: assertions.assertions,
+      policy: input.policy,
+    })
+    if (built.kind !== 'ok') {
+      const assertionIds = Object.freeze(assertions.assertions.map((assertion) => assertion.assertionId))
+      const attempt = Object.freeze({
+        candidateId: entry.candidate.candidateId,
+        outcome: 'package-refused',
+        revalidationReason: revalidation.reason,
+        assertionIds,
+        refusalDetail: built.reason,
+      } as const)
+      const decision = Object.freeze({
+        candidateId: entry.candidate.candidateId,
+        assertionIds,
+        ...REVALIDATED_ELIGIBLE_TRACE_OUTCOMES,
+        ledgerAppend: 'not-appended',
+      } as const)
+      return Object.freeze({ ledger: input.ledger, attempt, decision, presentation: null })
+    }
+
+    const rendered = renderAttentionRevealPackage(built.revealPackage, {
+      templateVersion: ATTENTION_PATTERN_DIRECT_EVIDENCE_TEMPLATE_VERSION,
+    })
+    if (rendered.kind !== 'ok') {
+      const assertionIds = Object.freeze(assertions.assertions.map((assertion) => assertion.assertionId))
+      const attempt = Object.freeze({
+        candidateId: entry.candidate.candidateId,
+        outcome: 'render-refused',
+        revalidationReason: revalidation.reason,
+        assertionIds,
+        refusalDetail: rendered.reason,
+      } as const)
+      const decision = Object.freeze({
+        candidateId: entry.candidate.candidateId,
+        assertionIds,
+        ...REVALIDATED_ELIGIBLE_TRACE_OUTCOMES,
+        ledgerAppend: 'not-appended',
+      } as const)
+      return Object.freeze({ ledger: input.ledger, attempt, decision, presentation: null })
+    }
+
+    const appended = appendAttentionLedgerRecord(input.ledger, {
+      attentionCandidate: entry.candidate,
+      exposurePolicyVersion: ATTENTION_EXPOSURE_POLICY_VERSION,
+      templateChannelPolicyVersion: ATTENTION_TEMPLATE_CHANNEL_POLICY_VERSION,
+      templateVersion: ATTENTION_PATTERN_DIRECT_EVIDENCE_TEMPLATE_VERSION,
+      outcome: rendered.resultTag,
+      renderedOutputIdentity: rendered.outputIdentity,
+      patternPresentationLedgerPolicyVersion: ATTENTION_PATTERN_PRESENTATION_LEDGER_POLICY_VERSION,
+      presentationLsn: input.evaluationLsn,
+      resourcePolicyVersion: ATTENTION_STAGE_B_RESOURCE_POLICY_VERSION,
+    })
+    if (appended.kind !== 'ok') {
+      const assertionIds = Object.freeze(assertions.assertions.map((assertion) => assertion.assertionId))
+      const attempt = Object.freeze({
+        candidateId: entry.candidate.candidateId,
+        outcome: 'ledger-append-refused',
+        revalidationReason: revalidation.reason,
+        assertionIds,
+        refusalDetail: appended.reason,
+      } as const)
+      const decision = Object.freeze({
+        candidateId: entry.candidate.candidateId,
+        assertionIds,
+        ...REVALIDATED_ELIGIBLE_TRACE_OUTCOMES,
+        ledgerAppend: 'not-appended',
+      } as const)
+      return Object.freeze({ ledger: input.ledger, attempt, decision, presentation: null })
+    }
+
+    const assertionIds = Object.freeze(assertions.assertions.map((assertion) => assertion.assertionId))
+    const attempt = Object.freeze({
+      candidateId: entry.candidate.candidateId,
+      outcome: 'presented',
+      revalidationReason: revalidation.reason,
+      assertionIds,
+      refusalDetail: null,
+    } as const)
+    // The presentation that just appended is itself one more successful
+    // exposure: retirement is derived from the post-append count, not the
+    // pre-presentation `revalidation.policyDecision` count, so the exposure
+    // that crosses the threshold is the one that reports retirement -- never
+    // a hard-coded `'not-retired'` on the append that actually retires it
+    // (RN019 SS8.4: "the second successful exposure retires ... immediately
+    // after the ledger append").
+    const postAppendExposureCount = revalidation.policyDecision.successfulExposureCount + 1
+    const retirementOutcome: AttentionTracePatternPresentationOutcome =
+      postAppendExposureCount >= input.policy.maxSuccessfulExposuresPerCandidateId ? 'retired-exposure' : 'not-retired'
+    const decision = Object.freeze({
+      candidateId: entry.candidate.candidateId,
+      assertionIds,
+      revalidationOutcome: 'still-legal',
+      exposureCooldownOutcome: 'eligible',
+      densityOutcome: 'eligible',
+      retirementOutcome,
+      ledgerAppend: 'appended',
+    } as const)
+    const presentation = Object.freeze({
+      candidateId: entry.candidate.candidateId,
+      resultTag: rendered.resultTag,
+      output: rendered.output,
+      outputIdentity: rendered.outputIdentity,
+      ledgerOutcome: appended.record.outcome,
+      ledgerRecordId: appended.record.recordId,
+    })
+    return Object.freeze({ ledger: appended.ledger, attempt, decision, presentation })
+}
+
 export function runAttentionPatternPresentationPass(input: {
   readonly orderedCandidates: readonly AttentionPatternPresentationPassCandidateInput[]
   readonly ledger: AttentionLedger
@@ -409,163 +587,19 @@ export function runAttentionPatternPresentationPass(input: {
   const attempts: AttentionPatternPresentationAttemptResult[] = []
   const decisions: AttentionTracePatternPresentationDecision[] = []
   let presentation: AttentionTracePresentationEntry | null = null
-
   for (const entry of input.orderedCandidates) {
     if (presentation !== null) break
-
-    const revalidation = revalidateAttentionPatternPresentation({
-      selectedCandidate: entry.candidate,
-      revalidatedCandidate: entry.revalidatedCandidate,
-      rankingCacheKey: entry.rankingCacheKey,
-      revalidationCacheKey: entry.revalidationCacheKey,
-      // Verbatim: a stale supplied identity must reach revalidation as-is.
-      patternPresentationLedgerPolicyVersion: input.patternPresentationLedgerPolicyVersion,
+    const result = attemptAttentionPatternPresentation({
+      entry,
       ledger,
       evaluationLsn: input.evaluationLsn,
-      policy,
-      ...(entry.satisfiedCompletionLsn === undefined ? {} : { satisfiedCompletionLsn: entry.satisfiedCompletionLsn }),
-    })
-    if (!revalidation.ok) {
-      attempts.push(Object.freeze({
-        candidateId: entry.candidate.candidateId,
-        outcome: 'revalidation-refused',
-        revalidationReason: revalidation.reason,
-        assertionIds: Object.freeze([]),
-        refusalDetail: revalidation.reason,
-      }))
-      decisions.push(Object.freeze({
-        candidateId: entry.candidate.candidateId,
-        assertionIds: Object.freeze([]),
-        ...patternPresentationRefusalTraceOutcomes(revalidation.reason),
-        ledgerAppend: 'not-appended',
-      }))
-      continue
-    }
-
-    const assertions = buildAttentionDirectEvidenceAssertions(entry.directEvidenceAssertionInputs)
-    if (assertions.kind !== 'ok') {
-      attempts.push(Object.freeze({
-        candidateId: entry.candidate.candidateId,
-        outcome: 'assertion-build-refused',
-        revalidationReason: revalidation.reason,
-        assertionIds: Object.freeze([]),
-        refusalDetail: assertions.reason,
-      }))
-      decisions.push(Object.freeze({
-        candidateId: entry.candidate.candidateId,
-        assertionIds: Object.freeze([]),
-        ...REVALIDATED_ELIGIBLE_TRACE_OUTCOMES,
-        ledgerAppend: 'not-appended',
-      }))
-      continue
-    }
-
-    const built = buildAttentionRevealPackage(entry.candidate, {
-      templateVersion: ATTENTION_PATTERN_DIRECT_EVIDENCE_TEMPLATE_VERSION,
-      directEvidenceAssertions: assertions.assertions,
+      patternPresentationLedgerPolicyVersion: input.patternPresentationLedgerPolicyVersion,
       policy,
     })
-    if (built.kind !== 'ok') {
-      attempts.push(Object.freeze({
-        candidateId: entry.candidate.candidateId,
-        outcome: 'package-refused',
-        revalidationReason: revalidation.reason,
-        assertionIds: Object.freeze(assertions.assertions.map((assertion) => assertion.assertionId)),
-        refusalDetail: built.reason,
-      }))
-      decisions.push(Object.freeze({
-        candidateId: entry.candidate.candidateId,
-        assertionIds: Object.freeze(assertions.assertions.map((assertion) => assertion.assertionId)),
-        ...REVALIDATED_ELIGIBLE_TRACE_OUTCOMES,
-        ledgerAppend: 'not-appended',
-      }))
-      continue
-    }
-
-    const rendered = renderAttentionRevealPackage(built.revealPackage, {
-      templateVersion: ATTENTION_PATTERN_DIRECT_EVIDENCE_TEMPLATE_VERSION,
-    })
-    if (rendered.kind !== 'ok') {
-      attempts.push(Object.freeze({
-        candidateId: entry.candidate.candidateId,
-        outcome: 'render-refused',
-        revalidationReason: revalidation.reason,
-        assertionIds: Object.freeze(assertions.assertions.map((assertion) => assertion.assertionId)),
-        refusalDetail: rendered.reason,
-      }))
-      decisions.push(Object.freeze({
-        candidateId: entry.candidate.candidateId,
-        assertionIds: Object.freeze(assertions.assertions.map((assertion) => assertion.assertionId)),
-        ...REVALIDATED_ELIGIBLE_TRACE_OUTCOMES,
-        ledgerAppend: 'not-appended',
-      }))
-      continue
-    }
-
-    const appended = appendAttentionLedgerRecord(ledger, {
-      attentionCandidate: entry.candidate,
-      exposurePolicyVersion: ATTENTION_EXPOSURE_POLICY_VERSION,
-      templateChannelPolicyVersion: ATTENTION_TEMPLATE_CHANNEL_POLICY_VERSION,
-      templateVersion: ATTENTION_PATTERN_DIRECT_EVIDENCE_TEMPLATE_VERSION,
-      outcome: rendered.resultTag,
-      renderedOutputIdentity: rendered.outputIdentity,
-      patternPresentationLedgerPolicyVersion: ATTENTION_PATTERN_PRESENTATION_LEDGER_POLICY_VERSION,
-      presentationLsn: input.evaluationLsn,
-      resourcePolicyVersion: ATTENTION_STAGE_B_RESOURCE_POLICY_VERSION,
-    })
-    if (appended.kind !== 'ok') {
-      attempts.push(Object.freeze({
-        candidateId: entry.candidate.candidateId,
-        outcome: 'ledger-append-refused',
-        revalidationReason: revalidation.reason,
-        assertionIds: Object.freeze(assertions.assertions.map((assertion) => assertion.assertionId)),
-        refusalDetail: appended.reason,
-      }))
-      decisions.push(Object.freeze({
-        candidateId: entry.candidate.candidateId,
-        assertionIds: Object.freeze(assertions.assertions.map((assertion) => assertion.assertionId)),
-        ...REVALIDATED_ELIGIBLE_TRACE_OUTCOMES,
-        ledgerAppend: 'not-appended',
-      }))
-      continue
-    }
-
-    ledger = appended.ledger
-    const assertionIds = Object.freeze(assertions.assertions.map((assertion) => assertion.assertionId))
-    attempts.push(Object.freeze({
-      candidateId: entry.candidate.candidateId,
-      outcome: 'presented',
-      revalidationReason: revalidation.reason,
-      assertionIds,
-      refusalDetail: null,
-    }))
-    // The presentation that just appended is itself one more successful
-    // exposure: retirement is derived from the post-append count, not the
-    // pre-presentation `revalidation.policyDecision` count, so the exposure
-    // that crosses the threshold is the one that reports retirement -- never
-    // a hard-coded `'not-retired'` on the append that actually retires it
-    // (RN019 SS8.4: "the second successful exposure retires ... immediately
-    // after the ledger append").
-    const postAppendExposureCount = revalidation.policyDecision.successfulExposureCount + 1
-    const retirementOutcome: AttentionTracePatternPresentationOutcome =
-      postAppendExposureCount >= policy.maxSuccessfulExposuresPerCandidateId ? 'retired-exposure' : 'not-retired'
-    decisions.push(Object.freeze({
-      candidateId: entry.candidate.candidateId,
-      assertionIds,
-      revalidationOutcome: 'still-legal',
-      exposureCooldownOutcome: 'eligible',
-      densityOutcome: 'eligible',
-      retirementOutcome,
-      ledgerAppend: 'appended',
-    }))
-    presentation = Object.freeze({
-      candidateId: entry.candidate.candidateId,
-      resultTag: rendered.resultTag,
-      output: rendered.output,
-      outputIdentity: rendered.outputIdentity,
-      ledgerOutcome: appended.record.outcome,
-      ledgerRecordId: appended.record.recordId,
-    })
+    ledger = result.ledger
+    attempts.push(result.attempt)
+    decisions.push(result.decision)
+    presentation = result.presentation
   }
 
   return Object.freeze({
@@ -759,6 +793,40 @@ export type AttentionQuestCandidateReplayPassOutcome =
   | { readonly kind: 'ok'; readonly result: AttentionQuestCandidateReplayPassResult }
   | { readonly kind: 'refused'; readonly refusal: AttentionQuestCandidateReplayPassRefusal }
 
+/** One Stage A quest candidate only; callers retain ownership of loops and ledger lifecycle. */
+export function attemptAttentionQuestPresentation(input: {
+  readonly candidate: Extract<AttentionCandidate, { readonly sourceKind: 'quest_candidate' }>
+  readonly ledger: AttentionLedger
+}):
+  | { readonly kind: 'ok'; readonly ledger: AttentionLedger; readonly presentation: AttentionTracePresentationEntry }
+  | { readonly kind: 'refused'; readonly stage: 'package' | 'template' | 'ledger'; readonly candidateId: string; readonly reason: string } {
+  const built = buildAttentionRevealPackage(input.candidate, { templateVersion: ATTENTION_TEMPLATE_VERSION })
+  if (built.kind !== 'ok') return { kind: 'refused', stage: 'package', candidateId: input.candidate.candidateId, reason: built.reason }
+  const rendered = renderAttentionRevealPackage(built.revealPackage, { templateVersion: ATTENTION_TEMPLATE_VERSION })
+  if (rendered.kind !== 'ok') return { kind: 'refused', stage: 'template', candidateId: input.candidate.candidateId, reason: rendered.reason }
+  const appended = appendAttentionLedgerRecord(input.ledger, {
+    attentionCandidate: input.candidate,
+    exposurePolicyVersion: ATTENTION_EXPOSURE_POLICY_VERSION,
+    templateChannelPolicyVersion: ATTENTION_TEMPLATE_CHANNEL_POLICY_VERSION,
+    templateVersion: ATTENTION_TEMPLATE_VERSION,
+    outcome: rendered.resultTag,
+    renderedOutputIdentity: rendered.outputIdentity,
+  })
+  if (appended.kind !== 'ok') return { kind: 'refused', stage: 'ledger', candidateId: input.candidate.candidateId, reason: appended.reason }
+  return Object.freeze({
+    kind: 'ok' as const,
+    ledger: appended.ledger,
+    presentation: Object.freeze({
+      candidateId: input.candidate.candidateId,
+      resultTag: rendered.resultTag,
+      output: rendered.output,
+      outputIdentity: rendered.outputIdentity,
+      ledgerOutcome: appended.record.outcome,
+      ledgerRecordId: appended.record.recordId,
+    }),
+  })
+}
+
 /**
  * The complete Stage A pipeline for one world: A1 accessor, A2 boundary, A3
  * normalization and total order, revalidation at the presentation-time
@@ -845,36 +913,16 @@ export function runAttentionQuestCandidateReplayPass(
       continue
     }
 
-    const built = buildAttentionRevealPackage(candidate, { templateVersion: ATTENTION_TEMPLATE_VERSION })
-    if (built.kind !== 'ok') {
-      return { kind: 'refused', refusal: { stage: 'package', candidateId: candidate.candidateId, reason: built.reason } }
-    }
-    const rendered = renderAttentionRevealPackage(built.revealPackage, { templateVersion: ATTENTION_TEMPLATE_VERSION })
-    if (rendered.kind !== 'ok') {
-      return { kind: 'refused', refusal: { stage: 'template', candidateId: candidate.candidateId, reason: rendered.reason } }
-    }
+    // This Stage A harness constructs a surface with no pattern views; retain
+    // the narrowing explicitly so its extracted helper stays quest-only.
+    if (candidate.sourceKind !== 'quest_candidate') continue
 
-    const appended = appendAttentionLedgerRecord(ledger, {
-      attentionCandidate: candidate,
-      exposurePolicyVersion: ATTENTION_EXPOSURE_POLICY_VERSION,
-      templateChannelPolicyVersion: ATTENTION_TEMPLATE_CHANNEL_POLICY_VERSION,
-      templateVersion: ATTENTION_TEMPLATE_VERSION,
-      outcome: rendered.resultTag,
-      renderedOutputIdentity: rendered.outputIdentity,
-    })
-    if (appended.kind !== 'ok') {
-      return { kind: 'refused', refusal: { stage: 'ledger', candidateId: candidate.candidateId, reason: appended.reason } }
+    const attempted = attemptAttentionQuestPresentation({ candidate, ledger })
+    if (attempted.kind !== 'ok') {
+      return { kind: 'refused', refusal: { stage: attempted.stage, candidateId: attempted.candidateId, reason: attempted.reason } }
     }
-    ledger = appended.ledger
-
-    presentations.push(Object.freeze({
-      candidateId: candidate.candidateId,
-      resultTag: rendered.resultTag,
-      output: rendered.output,
-      outputIdentity: rendered.outputIdentity,
-      ledgerOutcome: appended.record.outcome,
-      ledgerRecordId: appended.record.recordId,
-    }))
+    ledger = attempted.ledger
+    presentations.push(attempted.presentation)
   }
 
   const trace = buildAttentionTrace({
@@ -939,6 +987,389 @@ export function stableWorldReplayPassInput(
     authoritativeLogDigestBefore: authoritativeLogDigest,
     authoritativeLogDigestAfter: authoritativeLogDigest,
   })
+}
+
+// ---------------------------------------------------------------------------
+// B6 pattern-prime derivation: the one pure normalized-pattern-id producer
+// ---------------------------------------------------------------------------
+
+/*
+ * One normalized pattern candidate paired with the direct-evidence assertion
+ * inputs of the retained instance it was normalized from -- the pattern-prime
+ * half of plan section 11.3 input 7. The caller attaches the remaining
+ * per-candidate scenario values (both opaque cache keys, and any satisfied
+ * completion coordinate) onto these candidate ids; this type holds neither.
+ *
+ * Comments in this module are deliberately written without backtick code spans:
+ * attentionLedgerStaticClosure.test.ts scans this file with a token scanner that
+ * mis-pairs backticks after a template literal, so backticked prose can leak
+ * into what that scan reads as code.
+ */
+export interface AttentionPatternPrimeCandidate {
+  readonly candidateId: string
+  readonly directEvidenceAssertionInputs: readonly NarrativePatternDirectEvidenceAssertionInput[]
+}
+
+export type AttentionPatternPrimeDerivationOutcome =
+  | { readonly kind: 'ok'; readonly candidates: readonly AttentionPatternPrimeCandidate[] }
+  | {
+      readonly kind: 'refused'
+      readonly stage: 'boundary' | 'monitor' | 'normalization' | 'association'
+      readonly reason: string
+    }
+
+/*
+ * B6 / plan section 11.3 -- the one PURE pattern-prime derivation function.
+ *
+ * It exists because input 7 is keyed by the normalized pattern candidate id only
+ * the one common normalizer can mint, while inputs 3 and 5 are accessor-minted
+ * evidence views that carry no such identity, and the closed section 11.7
+ * allowlist gives no scenario module a path to the chain that bridges them. It
+ * lives in this module because this is the only authorized module that already
+ * holds every remaining dependency the chain needs at the committed baseline.
+ *
+ * It runs the committed section 11.2A steps 3-7 in EXACTLY that order:
+ *
+ *  1. the one common A-prime surface construction, over the accessor-minted
+ *     evidence views;
+ *  2. reconstruction over the surface's re-emitted accepted evidence views --
+ *     never over the raw input list;
+ *  3. committed structural retention;
+ *  4. the one common candidate normalization;
+ *  5. association of each normalized pattern candidate id with the retained
+ *     instance's existing direct-evidence assertion inputs.
+ *
+ * STEP 1 PRECEDES STEP 2 FOR A LOAD-BEARING REASON. The A-prime boundary is what
+ * validates accessor-mint, the evidence view contract version, record id
+ * uniqueness, and the canonical commit-lsn/record-id evidence ordering, and only
+ * then re-emits the accepted list. Reconstructing from the raw, unvalidated
+ * input list instead would let this derivation succeed on input the evaluator's
+ * own A-prime construction refuses -- so it would refuse at a different step,
+ * under a different reason, than the evaluator does over the same views.
+ *
+ * IT IS NOT A SECOND ORCHESTRATION SEAM. It attempts no candidate, holds no
+ * success slot, decides no continuation, touches no ledger, owns no ordering or
+ * cap, assembles no trace, reaches no generative seam, and mints no identity of
+ * any kind -- including neither of input 7's two cache keys. The mixed-family
+ * evaluator remains the sole mixed-family orchestration seam and still runs
+ * steps 3-7 itself over its own mixed inputs rather than delegating any part of
+ * an evaluation here.
+ *
+ * WHY A PATTERN-ONLY SURFACE YIELDS THE EVALUATOR'S IDS. The committed pattern
+ * identity construction in attentionCandidate.ts derives a pattern candidate id
+ * from four instance-local values alone: the source id, the pattern semantic
+ * version, the canonical binding tuple, and the canonical supporting-record
+ * identity tuple. The mixed surface's extra quest views, its opening-coordinate
+ * sidecars, and the ranking snapshot lsn do not participate in pattern candidate
+ * identity, so pattern identity is independent of mixed-family membership. That
+ * equality is proven, not assumed -- see attentionLedgerStaticClosure.test.ts
+ * and attentionMixedCandidateReplay.test.ts.
+ */
+export function deriveAttentionPatternPrimeCandidates(input: {
+  readonly patternEvidenceViews: readonly AttentionReadablePatternEvidenceView[]
+  readonly accessorContractVersion: string
+  readonly evaluationSnapshotLsn: number
+}): AttentionPatternPrimeDerivationOutcome {
+  // Step 1 -- the one common A-prime boundary, before any reconstruction.
+  const surface = constructAttentionReadableSurface(
+    commonSurfaceRequest({
+      accessorContractVersion: input.accessorContractVersion,
+      rankingSnapshotLsn: input.evaluationSnapshotLsn,
+    }),
+    Object.freeze([]),
+    Object.freeze([]),
+    input.patternEvidenceViews,
+  )
+  if (surface.kind !== 'ok') return { kind: 'refused', stage: 'boundary', reason: surface.reason }
+
+  // Step 2 -- reconstruction over the accepted views the boundary re-emitted,
+  // never over the raw, unvalidated input list.
+  const monitored = reconstructNarrativePatternInstances({
+    patternEvidenceViews: surface.surface.patternEvidenceViews,
+    evaluationSnapshotLsn: input.evaluationSnapshotLsn,
+  })
+  if (monitored.kind !== 'ok') return { kind: 'refused', stage: 'monitor', reason: monitored.reason }
+
+  // Steps 3 and 4 -- committed structural retention, then common normalization.
+  const retention = applyNarrativePatternStructuralRetention(monitored.instances)
+  const normalized = normalizeAttentionCandidates(surface.surface, retention.retainedRankableInstances)
+  if (normalized.kind !== 'ok') return { kind: 'refused', stage: 'normalization', reason: normalized.reason }
+
+  // Step 5 -- the one bounded, pure association pass section 11.3 permits. It
+  // reads two already-computed collections and emits one pairing: it attempts no
+  // candidate, consumes no presentation slot, and decides no continuation.
+  const assertionInputsByPatternInstanceId = new Map(
+    retention.retainedRankableInstances.map(
+      (instance) => [instance.patternInstanceId, instance.directEvidenceAssertionInputs] as const,
+    ),
+  )
+  const derived: AttentionPatternPrimeCandidate[] = []
+  for (const normalizedCandidate of normalized.attentionCandidates) {
+    if (normalizedCandidate.sourceKind !== 'narrative_pattern_instance') continue
+    const directEvidenceAssertionInputs = assertionInputsByPatternInstanceId.get(normalizedCandidate.sourceId)
+    if (directEvidenceAssertionInputs === undefined) {
+      return { kind: 'refused', stage: 'association', reason: 'missing-retained-pattern-instance' }
+    }
+    derived.push(Object.freeze({ candidateId: normalizedCandidate.candidateId, directEvidenceAssertionInputs }))
+  }
+  return { kind: 'ok', candidates: Object.freeze(derived) }
+}
+
+// ---------------------------------------------------------------------------
+// B6 mixed-family evaluation: one order, one cap, one shared success slot
+// ---------------------------------------------------------------------------
+
+export interface AttentionMixedPatternPresentationInput {
+  readonly candidateId: string
+  readonly directEvidenceAssertionInputs: readonly NarrativePatternDirectEvidenceAssertionInput[]
+  readonly rankingCacheKey: string
+  readonly revalidationCacheKey: string
+  readonly satisfiedCompletionLsn?: number
+}
+
+export interface AttentionMixedFamilyEvaluationInput {
+  readonly replayCaseId: string
+  readonly snapshot: ProofQuestCandidateSnapshot
+  readonly request: { readonly accessorContractVersion: string; readonly rankingSnapshotLsn: number }
+  readonly patternEvidenceViews: readonly AttentionReadablePatternEvidenceView[]
+  readonly revalidationSnapshot: ProofQuestCandidateSnapshot
+  readonly revalidationSnapshotLsn: number
+  readonly revalidationPatternEvidenceViews: readonly AttentionReadablePatternEvidenceView[]
+  readonly ledger: AttentionLedger
+  readonly patternPresentationInputs: readonly AttentionMixedPatternPresentationInput[]
+  readonly patternPresentationLedgerPolicyVersion: string
+  readonly authoritativeLogDigestBefore: string
+  readonly authoritativeLogDigestAfter: string
+  readonly p3PremiseCheck?: AttentionTraceP3PremiseCheck
+  readonly policy?: AttentionStageBResourcePolicy
+}
+
+export type AttentionMixedFamilyEvaluationRefusal =
+  | { readonly stage: 'accessor' | 'boundary' | 'monitor' | 'normalization' | 'ordering' | 'trace'; readonly reason: string }
+  | { readonly stage: 'package' | 'template' | 'ledger'; readonly candidateId: string; readonly reason: string }
+  | { readonly stage: 'pattern-input'; readonly candidateId: string; readonly reason: 'missing-pattern-presentation-input' }
+
+export interface AttentionMixedFamilyArbitrationAttempt {
+  readonly candidateId: string
+  readonly sourceKind: 'quest_candidate' | 'narrative_pattern_instance'
+  readonly rankPosition: number
+  readonly outcome: 'presented' | 'revalidation-refused' | 'assertion-build-refused' | 'package-refused' | 'render-refused' | 'ledger-append-refused' | 'not-attempted'
+  readonly refusalReason: string | null
+  readonly continued: boolean
+  readonly ledgerAppend: 'appended' | 'not-appended'
+}
+
+export interface AttentionMixedFamilyEvaluationResult {
+  readonly trace: AttentionTrace
+  readonly ledger: AttentionLedger
+  readonly surface: AttentionReadableSurface
+  readonly orderedCandidates: readonly AttentionCandidate[]
+  readonly retainedCandidates: readonly AttentionCandidate[]
+  readonly arbitrationAttempts: readonly AttentionMixedFamilyArbitrationAttempt[]
+  readonly presentation: AttentionTracePresentationEntry | null
+}
+
+export type AttentionMixedFamilyEvaluationOutcome =
+  | { readonly kind: 'ok'; readonly result: AttentionMixedFamilyEvaluationResult }
+  | { readonly kind: 'refused'; readonly refusal: AttentionMixedFamilyEvaluationRefusal }
+
+function reconstructRetainedPatterns(
+  views: readonly AttentionReadablePatternEvidenceView[],
+  evaluationSnapshotLsn: number,
+):
+  | { readonly kind: 'ok'; readonly instances: readonly NarrativePatternInstance[]; readonly retention: ReturnType<typeof applyNarrativePatternStructuralRetention> }
+  | { readonly kind: 'refused'; readonly reason: string } {
+  const monitored = reconstructNarrativePatternInstances({ patternEvidenceViews: views, evaluationSnapshotLsn })
+  if (monitored.kind !== 'ok') return { kind: 'refused', reason: monitored.reason }
+  return { kind: 'ok', instances: monitored.instances, retention: applyNarrativePatternStructuralRetention(monitored.instances) }
+}
+
+/**
+ * The sole B6 mixed-family orchestration seam. It consumes caller-owned history,
+ * reconstructs patterns at both coordinates, and stops after exactly one append.
+ */
+export function runAttentionMixedFamilyEvaluation(
+  input: AttentionMixedFamilyEvaluationInput,
+): AttentionMixedFamilyEvaluationOutcome {
+  const policy = input.policy ?? attentionStageBResourcePolicy()
+  const access = readAttentionReadableQuestCandidateViews(input.snapshot, input.request)
+  if (access.kind !== 'ok') return { kind: 'refused', refusal: { stage: 'accessor', reason: access.reason } }
+  const surface = constructAttentionReadableSurface(
+    commonSurfaceRequest(input.request), access.views, access.openingCoordinateViews, input.patternEvidenceViews,
+  )
+  if (surface.kind !== 'ok') return { kind: 'refused', refusal: { stage: 'boundary', reason: surface.reason } }
+  // Plan section 11.2A step 5 -- reconstruction consumes the accepted views the
+  // A-prime boundary re-emitted, never the raw input list, at both coordinates.
+  const derivedPatterns = reconstructRetainedPatterns(surface.surface.patternEvidenceViews, input.request.rankingSnapshotLsn)
+  if (derivedPatterns.kind !== 'ok') return { kind: 'refused', refusal: { stage: 'monitor', reason: derivedPatterns.reason } }
+  const normalized = normalizeAttentionCandidates(surface.surface, derivedPatterns.retention.retainedRankableInstances)
+  if (normalized.kind !== 'ok') return { kind: 'refused', refusal: { stage: 'normalization', reason: normalized.reason } }
+  const ordered = orderAttentionCandidates(normalized.attentionCandidates)
+  if (ordered.kind !== 'ok') return { kind: 'refused', refusal: { stage: 'ordering', reason: ordered.reason } }
+  const capped = applyMixedFamilyCandidateCap(ordered.orderedCandidates)
+  const retainedCandidates = capped.retainedCandidates
+
+  const revalidationAccess = readAttentionReadableQuestCandidateViews(input.revalidationSnapshot, {
+    accessorContractVersion: input.request.accessorContractVersion,
+    rankingSnapshotLsn: input.revalidationSnapshotLsn,
+  })
+  // RN019 section 9.4.2 -- the revalidation-coordinate PATTERN chain, run in the
+  // committed plan section 11.2A order: the A-prime boundary FIRST, then
+  // reconstruction over the surface's re-emitted accepted views, then structural
+  // retention, then the exact-candidateId index. The raw input list reaches the
+  // boundary and nothing else, so no later step consumes unvalidated views.
+  //
+  // FAMILY ISOLATION. Every refusal along this chain means the same thing --
+  // pattern revalidation material is unavailable at the revalidation coordinate
+  // -- and RN019 section 9.4.2 assigns exactly that to row 2 of the closed
+  // continuation table: each reached pattern candidate refuses through the
+  // committed revalidation function, nothing is appended, the shared success
+  // slot stays unconsumed, and QUEST CANDIDATES ARE UNTOUCHED. It is not an
+  // evaluation-level refusal: only the quest construction rows 7-9 fail the
+  // whole evaluation closed, and this is not one of them. The refusal is
+  // therefore handled by omission -- the lookup simply stays empty, which is the
+  // same "absent material" state an empty revalidation view list produces -- so
+  // no new pattern refusal literal is exposed and the committed
+  // candidate-disappeared result is what each pattern candidate receives.
+  const revalidationPatternById = new Map<string, AttentionPatternCandidate>()
+  const revalidatedPatternSurface = constructAttentionReadableSurface(
+    commonSurfaceRequest({ accessorContractVersion: input.request.accessorContractVersion, rankingSnapshotLsn: input.revalidationSnapshotLsn }),
+    Object.freeze([]), Object.freeze([]), input.revalidationPatternEvidenceViews,
+  )
+  if (revalidatedPatternSurface.kind === 'ok') {
+    const revalidatedPatterns = reconstructRetainedPatterns(
+      revalidatedPatternSurface.surface.patternEvidenceViews, input.revalidationSnapshotLsn,
+    )
+    if (revalidatedPatterns.kind === 'ok') {
+      const revalidatedPatternCandidates = normalizeAttentionCandidates(
+        revalidatedPatternSurface.surface, revalidatedPatterns.retention.retainedRankableInstances,
+      )
+      if (revalidatedPatternCandidates.kind === 'ok') {
+        for (const candidate of revalidatedPatternCandidates.attentionCandidates) {
+          if (candidate.sourceKind === 'narrative_pattern_instance') revalidationPatternById.set(candidate.candidateId, candidate)
+        }
+      }
+    }
+  }
+  const presentationInputByCandidateId = new Map(input.patternPresentationInputs.map((entry) => [entry.candidateId, entry] as const))
+  const admittedQuestIds = revalidationAccess.kind === 'ok'
+    ? new Set(revalidationAccess.views.map((view) => view.candidateId))
+    : null
+
+  let ledger = input.ledger
+  let presentation: AttentionTracePresentationEntry | null = null
+  const presentations: AttentionTracePresentationEntry[] = []
+  const revalidations: AttentionTraceRevalidationEntry[] = []
+  const attempts: AttentionMixedFamilyArbitrationAttempt[] = []
+  const patternDecisions: AttentionTracePatternPresentationDecision[] = []
+
+  // RN019 §8.2/§8.2.1 B: the shared, family-blind success budget is the
+  // versioned policy value, never a literal at this call site. B6 makes the
+  // already-committed `presentationsPerEvaluation` load-bearing and adds no
+  // constant of its own. A configured budget of zero deterministically attempts
+  // nothing: every candidate is recorded `not-attempted`, no ledger record is
+  // appended, and the slot stays unconsumed (RN019 §8.3's zero-cap rule).
+  const maxSuccessfulPresentations = policy.presentationsPerEvaluation
+  let successfulPresentations = 0
+
+  for (let rankPosition = 0; rankPosition < retainedCandidates.length; rankPosition += 1) {
+    const candidate = retainedCandidates[rankPosition]!
+    if (successfulPresentations >= maxSuccessfulPresentations) {
+      attempts.push(Object.freeze({ candidateId: candidate.candidateId, sourceKind: candidate.sourceKind, rankPosition,
+        outcome: 'not-attempted', refusalReason: null, continued: false, ledgerAppend: 'not-appended' }))
+      continue
+    }
+    if (candidate.sourceKind === 'quest_candidate') {
+      const outcome = admittedQuestIds === null
+        ? 'stale-snapshot' as const
+        : admittedQuestIds.has(candidate.sourceId) ? 'still-legal' as const : 'candidate-disappeared' as const
+      revalidations.push(Object.freeze({ candidateId: candidate.candidateId, outcome }))
+      if (outcome !== 'still-legal') {
+        attempts.push(Object.freeze({ candidateId: candidate.candidateId, sourceKind: candidate.sourceKind, rankPosition,
+          outcome: 'revalidation-refused', refusalReason: outcome, continued: true, ledgerAppend: 'not-appended' }))
+        continue
+      }
+      const attempted = attemptAttentionQuestPresentation({ candidate, ledger })
+      if (attempted.kind !== 'ok') {
+        // RN019 §9.4.1 rows 7-9: a quest construction fault is a structural
+        // fault, not an ordinary candidate outcome. The whole evaluation fails
+        // closed and its output is the stage-tagged refusal verbatim, so no
+        // arbitration attempt record is built here -- constructing one that the
+        // refusal branch cannot carry would be discarded, unreadable evidence.
+        return { kind: 'refused', refusal: { stage: attempted.stage, candidateId: attempted.candidateId, reason: attempted.reason } }
+      }
+      ledger = attempted.ledger
+      presentation = attempted.presentation
+      presentations.push(attempted.presentation)
+      successfulPresentations += 1
+      attempts.push(Object.freeze({ candidateId: candidate.candidateId, sourceKind: candidate.sourceKind, rankPosition,
+        outcome: 'presented', refusalReason: null, continued: false, ledgerAppend: 'appended' }))
+      continue
+    }
+
+    const patternInput = presentationInputByCandidateId.get(candidate.candidateId)
+    if (patternInput === undefined) {
+      return { kind: 'refused', refusal: { stage: 'pattern-input', candidateId: candidate.candidateId, reason: 'missing-pattern-presentation-input' } }
+    }
+    const attempt = attemptAttentionPatternPresentation({
+      // Exact candidateId lookup, never a sibling. An empty or missing entry is
+      // the committed candidate-disappeared path (RN019 section 9.4.1 row 2).
+      entry: Object.freeze({ candidate, revalidatedCandidate: revalidationPatternById.get(candidate.candidateId),
+        directEvidenceAssertionInputs: patternInput.directEvidenceAssertionInputs, rankingCacheKey: patternInput.rankingCacheKey,
+        revalidationCacheKey: patternInput.revalidationCacheKey,
+        ...(patternInput.satisfiedCompletionLsn === undefined ? {} : { satisfiedCompletionLsn: patternInput.satisfiedCompletionLsn }) }),
+      ledger, evaluationLsn: input.revalidationSnapshotLsn,
+      patternPresentationLedgerPolicyVersion: input.patternPresentationLedgerPolicyVersion, policy,
+    })
+    ledger = attempt.ledger
+    patternDecisions.push(attempt.decision)
+    const outcome = attempt.attempt.outcome
+    const arbitrationOutcome = outcome === 'presented' ? 'presented' : outcome
+    attempts.push(Object.freeze({ candidateId: candidate.candidateId, sourceKind: candidate.sourceKind, rankPosition,
+      outcome: arbitrationOutcome, refusalReason: attempt.attempt.refusalDetail,
+      continued: outcome !== 'presented', ledgerAppend: attempt.decision.ledgerAppend }))
+    if (attempt.presentation !== null) {
+      presentation = attempt.presentation
+      presentations.push(attempt.presentation)
+      successfulPresentations += 1
+    }
+  }
+
+  const resourceLimits: AttentionTraceResourceLimitEntry[] = derivedPatterns.retention.resourceTrace.map((entry) => attentionTraceResourceLimitEntry({
+    boundId: entry.boundId, patternType: entry.patternType, configuredValue: entry.configuredValue, observedValue: entry.observedValue,
+    retainedIds: entry.retainedIdentities, droppedIds: entry.droppedIdentities,
+  }))
+  if (capped.resourceTrace !== null) resourceLimits.push(attentionTraceResourceLimitEntry({
+    boundId: capped.resourceTrace.boundId, patternType: capped.resourceTrace.patternType, configuredValue: capped.resourceTrace.configuredValue,
+    observedValue: capped.resourceTrace.observedValue, retainedIds: capped.resourceTrace.retainedIdentities, droppedIds: capped.resourceTrace.droppedIdentities,
+  }))
+  const trace = buildAttentionTrace({
+    replayCaseId: input.replayCaseId, accessorContractVersion: input.request.accessorContractVersion,
+    canonicalizationVersion: ATTENTION_CANDIDATE_CANONICALIZATION_VERSION, identitySchemaVersion: ATTENTION_CANDIDATE_IDENTITY_SCHEMA_VERSION,
+    orderingVersion: ATTENTION_CANDIDATE_ORDERING_VERSION, derivationCacheKeySchemaVersion: ATTENTION_CANDIDATE_DERIVATION_CACHE_KEY_SCHEMA_VERSION,
+    rankingCacheKeySchemaVersion: ATTENTION_CANDIDATE_RANKING_CACHE_KEY_SCHEMA_VERSION, templateVersion: ATTENTION_TEMPLATE_VERSION,
+    templateChannelPolicyVersion: ATTENTION_TEMPLATE_CHANNEL_POLICY_VERSION, exposurePolicyVersion: ATTENTION_EXPOSURE_POLICY_VERSION,
+    ledgerPolicyVersion: ATTENTION_LEDGER_POLICY_VERSION, patternPresentationLedgerPolicyVersion: input.patternPresentationLedgerPolicyVersion,
+    rankingSnapshotLsn: input.request.rankingSnapshotLsn, revalidationSnapshotLsn: input.revalidationSnapshotLsn,
+    admittedQuestCandidateSourceIds: attentionPrimeViewIdentities(surface.surface).questCandidateViewIdentities,
+    orderedAttentionCandidates: Object.freeze(retainedCandidates.map(toTraceCandidateEntry)), orderingTrace: toOrderingTrace(ordered.comparisons),
+    structuralRetention: Object.freeze({ retainedPatternInstanceIds: Object.freeze(derivedPatterns.retention.retainedInstances.map((instance) => instance.patternInstanceId)),
+      droppedPatternInstanceIds: derivedPatterns.retention.droppedInstanceIds,
+      mixedFamilyRetainedCandidateIds: Object.freeze(retainedCandidates.map((candidate) => candidate.candidateId)),
+      mixedFamilyDroppedCandidateIds: Object.freeze(ordered.orderedCandidates.filter((candidate) => !retainedCandidates.includes(candidate)).map((candidate) => candidate.candidateId)),
+      resourceLimits: Object.freeze(resourceLimits) }),
+    presentations: Object.freeze(presentations), revalidations: Object.freeze(revalidations),
+    ...(patternDecisions.length === 0 ? {} : { patternPresentationDecisions: Object.freeze(patternDecisions) }),
+    authoritativeLogDigestBefore: input.authoritativeLogDigestBefore, authoritativeLogDigestAfter: input.authoritativeLogDigestAfter,
+    mixedFamilyArbitration: Object.freeze({ rankedCandidateIds: Object.freeze(retainedCandidates.map((candidate) => candidate.candidateId)),
+      attempts: Object.freeze(attempts), winnerCandidateId: presentation?.candidateId ?? null,
+      winnerSourceKind: presentation === null ? null : retainedCandidates.find((candidate) => candidate.candidateId === presentation.candidateId)!.sourceKind,
+      presentationSlotConsumed: successfulPresentations > 0, successfulPresentationCount: successfulPresentations }),
+    ...(input.p3PremiseCheck === undefined ? {} : { p3PremiseCheck: input.p3PremiseCheck }),
+  })
+  if (trace.kind !== 'ok') return { kind: 'refused', refusal: { stage: 'trace', reason: trace.reason } }
+  return { kind: 'ok', result: Object.freeze({ trace: trace.trace, ledger, surface: surface.surface,
+    orderedCandidates: ordered.orderedCandidates, retainedCandidates, arbitrationAttempts: Object.freeze(attempts), presentation }) }
 }
 
 // ---------------------------------------------------------------------------
@@ -1042,6 +1473,8 @@ export function runAttentionDirectorOffPass(
 
 export interface AttentionDirectorOnInput {
   readonly replayPassInput: AttentionQuestCandidateReplayPassInput
+  /** B6 P2 uses the real mixed evaluator; omitted preserves the Stage A driver. */
+  readonly mixedFamilyEvaluationInput?: AttentionMixedFamilyEvaluationInput
   readonly initialAuthoritativeResources: AttentionReplayAuthoritativeResources
   readonly commandIds: readonly string[]
   readonly wallClockInputs: readonly AttentionReplayWallClockInput[]
@@ -1056,7 +1489,7 @@ export interface AttentionDirectorOnInput {
 }
 
 export interface AttentionDirectorOnResult {
-  readonly attention: AttentionQuestCandidateReplayPassOutcome
+  readonly attention: AttentionQuestCandidateReplayPassOutcome | AttentionMixedFamilyEvaluationOutcome
   readonly authoritativeResources: AttentionReplayAuthoritativeResources
   readonly authoritativeDigest: string
 }
@@ -1081,15 +1514,19 @@ export function runAttentionDirectorOnPass(input: AttentionDirectorOnInput): Att
     return resources
   }
 
-  let attention: AttentionQuestCandidateReplayPassOutcome
+  let attention: AttentionQuestCandidateReplayPassOutcome | AttentionMixedFamilyEvaluationOutcome
   let finalResources: AttentionReplayAuthoritativeResources
 
   if (input.runAttentionFirst === true) {
-    attention = runAttentionQuestCandidateReplayPass(input.replayPassInput)
+    attention = input.mixedFamilyEvaluationInput === undefined
+      ? runAttentionQuestCandidateReplayPass(input.replayPassInput)
+      : runAttentionMixedFamilyEvaluation(input.mixedFamilyEvaluationInput)
     finalResources = runAuthoritative()
   } else {
     finalResources = runAuthoritative()
-    attention = runAttentionQuestCandidateReplayPass(input.replayPassInput)
+    attention = input.mixedFamilyEvaluationInput === undefined
+      ? runAttentionQuestCandidateReplayPass(input.replayPassInput)
+      : runAttentionMixedFamilyEvaluation(input.mixedFamilyEvaluationInput)
   }
 
   return {

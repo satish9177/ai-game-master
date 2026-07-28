@@ -10,6 +10,10 @@ import type { AttentionReadablePatternEvidenceView } from './attentionPatternEvi
 import type { ProofPatternEvidenceRecordInput } from './attentionPatternEvidenceContracts'
 import { reconstructNarrativePatternInstances } from './attentionNarrativePatternMonitor'
 import type { NarrativePatternInstance } from './attentionNarrativePatternContracts'
+import { ATTENTION_LEDGER_POLICY_VERSION } from './attentionCandidatePolicy'
+import { createAttentionLedger } from './attentionLedger'
+import { runAttentionMixedFamilyEvaluation } from './attentionReplay'
+import { buildB6PatternOnlyEvaluationInput } from './attentionReplayScenario'
 
 const RECORDS: readonly ProofPatternEvidenceRecordInput[] = [
   aidRecord('a1', 10, 'A', 'B'),
@@ -25,6 +29,17 @@ function viewById(views: readonly AttentionReadablePatternEvidenceView[], id: st
 }
 
 describe('B3 monitor — projection preservation (M20-M29)', () => {
+  it('B6 mixed evaluation consumes accessor views without writing back into them', () => {
+    const ledger = createAttentionLedger({ ledgerPolicyVersion: ATTENTION_LEDGER_POLICY_VERSION })
+    if (ledger.kind !== 'ok') throw new Error('expected ledger')
+    const input = buildB6PatternOnlyEvaluationInput('b6-projection', ledger.ledger)
+    const before = input.patternEvidenceViews.map((view) => view.recordId)
+    const result = runAttentionMixedFamilyEvaluation(input)
+    expect(result.kind).toBe('ok')
+    expect(input.patternEvidenceViews.map((view) => view.recordId)).toEqual(before)
+    expect(Object.isFrozen(input.patternEvidenceViews)).toBe(true)
+  })
+
   const views = mintPatternEvidenceViews(RECORDS)
 
   function reconstruct(): readonly NarrativePatternInstance[] {

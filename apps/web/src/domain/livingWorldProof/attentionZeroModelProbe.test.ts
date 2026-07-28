@@ -22,6 +22,12 @@ import { orderAttentionCandidates } from './attentionCandidateOrdering'
 import { buildAttentionRevealPackage } from './attentionRevealPackage'
 import { renderAttentionRevealPackage } from './attentionTemplate'
 import { appendAttentionLedgerRecord, createAttentionLedger } from './attentionLedger'
+import { runAttentionMixedFamilyEvaluation } from './attentionReplay'
+import {
+  buildB6MixedEvaluationFixture,
+  buildB6StageASingleQuestCandidate,
+} from './attentionReplayScenario'
+import { buildB6ReciprocalAidPatternViews } from './attentionNarrativePatternScenario'
 import type { AttentionLedger } from './attentionLedger'
 import {
   assertAttentionZeroModelProbeUnused,
@@ -197,6 +203,46 @@ describe('A4 — the probe is a real detector', () => {
 })
 
 describe('A4 — a cold run of the accepted Stage A path makes zero generative calls', () => {
+  /**
+   * Plan §11.6 item 14 — the complete mixed path leaves the counted probe seam
+   * at zero across quest-only, pattern-only, and genuinely mixed cold replay.
+   *
+   * Each case holds a **real** probe across the evaluation and asserts the
+   * counted seam directly; none of them merely reads `result.kind`. The probe is
+   * the same detector `attentionZeroModelProbe.test.ts` proves is a real
+   * detector above (it counts a deliberate invocation), so a zero count here is
+   * evidence and not a tautology.
+   */
+  it.each([
+    ['quest-only', () => ({ questCandidates: [buildB6StageASingleQuestCandidate()] })],
+    ['pattern-only', () => ({ patternEvidenceViews: buildB6ReciprocalAidPatternViews() })],
+    ['genuinely mixed', () => ({
+      questCandidates: [buildB6StageASingleQuestCandidate()],
+      patternEvidenceViews: buildB6ReciprocalAidPatternViews(),
+    })],
+  ] as const)('B6 %s mixed-family cold replay leaves the counted probe seam at zero', (label, collections) => {
+    const probe = createAttentionZeroModelProbe()
+    const created = createAttentionLedger({ ledgerPolicyVersion: ATTENTION_LEDGER_POLICY_VERSION })
+    if (created.kind !== 'ok') throw new Error('expected ledger')
+    const fixture = buildB6MixedEvaluationFixture({
+      replayCaseId: `b6-zero-model-${label}`, ledger: created.ledger, ...collections(),
+    })
+
+    const result = runAttentionMixedFamilyEvaluation(fixture.input)
+
+    // The evaluator really ran and really presented: a no-op would prove nothing.
+    expect(result.kind).toBe('ok')
+    if (result.kind !== 'ok') throw new Error('expected a mixed evaluation')
+    expect(result.result.presentation).not.toBeNull()
+    expect(result.result.ledger.records).toHaveLength(1)
+    expect(result.result.trace.mixedFamilyArbitration?.successfulPresentationCount).toBe(1)
+    expect(result.result.trace.mixedFamilyArbitration?.winnerSourceKind)
+      .toBe(label === 'pattern-only' ? 'narrative_pattern_instance' : 'quest_candidate')
+
+    expect(probe.invocationCount()).toBe(0)
+    expect(() => assertAttentionZeroModelProbeUnused(probe)).not.toThrow()
+  })
+
   it('completes the whole path with the count still at zero', () => {
     const probe = createAttentionZeroModelProbe()
 

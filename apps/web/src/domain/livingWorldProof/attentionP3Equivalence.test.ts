@@ -8,7 +8,34 @@ import {
   buildAttentionQuestCandidateWorld,
 } from './attentionQuestCandidateScenario'
 import type { AttentionQuestCandidatePairedWorld } from './attentionQuestCandidateScenario'
-import { runAttentionP3PairedWorldCheck } from './attentionReplay'
+import {
+  attentionPrimeSurfaceDigest,
+  attentionPrimeViewIdentities,
+  runAttentionMixedFamilyEvaluation,
+  runAttentionP3PairedWorldCheck,
+} from './attentionReplay'
+import { ATTENTION_LEDGER_POLICY_VERSION } from './attentionCandidatePolicy'
+import { createAttentionLedger } from './attentionLedger'
+import { buildB6MixedEvaluationFixture, buildB6PatternOnlyEvaluationInput } from './attentionReplayScenario'
+import {
+  A1_RANKING_SNAPSHOT_LSN,
+  buildAttentionQuestCandidateTwoVisibleCandidates,
+} from './attentionQuestCandidateScenario'
+import {
+  ATTENTION_QUEST_CANDIDATE_ACCESSOR_VERSION,
+  createProofQuestCandidateSnapshot,
+} from './attentionQuestCandidateContracts'
+import { readAttentionReadableQuestCandidateViews } from './attentionQuestCandidateAccessor'
+import {
+  ATTENTION_READABLE_SURFACE_SCHEMA_VERSION,
+  constructAttentionReadableSurface,
+} from './attentionReadableBoundary'
+import type { AttentionReadableSurface } from './attentionReadableBoundary'
+import { aidRecord, harmRecord, mintPatternEvidenceViews } from './attentionNarrativePatternScenario'
+import type {
+  AttentionReadablePatternEvidenceView,
+  ProofPatternEvidenceRecordInput,
+} from './attentionPatternEvidenceContracts'
 
 /**
  * A5 — P3: A′-equivalent world pairs, including the mandatory hidden
@@ -237,6 +264,341 @@ describe('A5 / P3 — a non-equivalent pair fails as malformed, never reaching a
  * so a premise oracle blind to it would let a real observable difference pass.
  */
 describe('B4 / P3 — readable-surface equality compares the sidecar collection too', () => {
+  it('B6 preserves an explicitly supplied equivalent P3 premise in the trusted trace only', () => {
+    const ledger = createAttentionLedger({ ledgerPolicyVersion: ATTENTION_LEDGER_POLICY_VERSION })
+    if (ledger.kind !== 'ok') throw new Error('expected ledger')
+    const input = buildB6PatternOnlyEvaluationInput('b6-p3', ledger.ledger)
+    const result = runAttentionMixedFamilyEvaluation({
+      ...input,
+      p3PremiseCheck: Object.freeze({
+        leftAPrimeDigest: 'same', rightAPrimeDigest: 'same', leftViewIdentities: Object.freeze([]),
+        rightViewIdentities: Object.freeze([]), leftOpeningCoordinateIdentities: Object.freeze([]),
+        rightOpeningCoordinateIdentities: Object.freeze([]), equivalent: true,
+      }),
+    })
+    expect(result.kind).toBe('ok')
+    if (result.kind !== 'ok') throw new Error('expected evaluation')
+    expect(result.result.trace.p3PremiseCheck?.equivalent).toBe(true)
+    expect(result.result.trace.playerObservable).not.toHaveProperty('p3PremiseCheck')
+  })
+})
+
+/**
+ * B6 / P3 — the complete **mixed-family** paired-world proof (RN019 §10.3, plan
+ * §11.3, §11.6). It is built here, not by generalizing the frozen quest-only
+ * `runAttentionP3PairedWorldCheck`, which stays untouched and quest-only.
+ *
+ * The mandatory legal fixture is exactly RN019 §10.3's: two visible quest views
+ * and three visible rankable pattern candidates in **both** worlds, so five
+ * candidates genuinely compete for the global mixed-family cap of four and one
+ * is really displaced by the final two-family order. World A additionally holds
+ * private records that would form a high-retention `public_conflict_escalation`
+ * match if they were ever illegally admitted; World B holds none.
+ */
+describe('B6 / P3 — mixed-family readable-surface equivalence over both candidate families', () => {
+  const P3_RANKING_LSN = A1_RANKING_SNAPSHOT_LSN
+
+  /** Six public aid records — three reciprocal pairs, so three rankable instances. */
+  const VISIBLE_PATTERN_RECORDS: readonly ProofPatternEvidenceRecordInput[] = Object.freeze([
+    aidRecord('p3-aid-a-b', 10, 'a', 'b'), aidRecord('p3-aid-b-a', 11, 'b', 'a'),
+    aidRecord('p3-aid-c-d', 12, 'c', 'd'), aidRecord('p3-aid-d-c', 13, 'd', 'c'),
+    aidRecord('p3-aid-e-f', 14, 'e', 'f'), aidRecord('p3-aid-f-e', 15, 'f', 'e'),
+  ])
+
+  /**
+   * World A's private material: a complete three-step escalation that would be a
+   * high-retention `public_conflict_escalation` match if admitted. Declared
+   * `private`, so the B1 accessor mints no view for it and it never enters A′.
+   */
+  const HIDDEN_ESCALATION_RECORDS: readonly ProofPatternEvidenceRecordInput[] = Object.freeze([
+    Object.freeze({ ...harmRecord('p3-hidden-harm-1', 16, 'g', 'h', 'minor'), visibilityProvenance: Object.freeze({ visibility: 'private' as const }) }),
+    Object.freeze({ ...harmRecord('p3-hidden-harm-2', 17, 'h', 'g', 'moderate'), visibilityProvenance: Object.freeze({ visibility: 'private' as const }) }),
+    Object.freeze({ ...harmRecord('p3-hidden-harm-3', 18, 'g', 'h', 'major'), visibilityProvenance: Object.freeze({ visibility: 'private' as const }) }),
+  ])
+
+  /**
+   * A second private set, used only by the post-premise bypass control below.
+   * Like the escalation set it is `private`, so the B1 accessor mints no view
+   * for it and it is absent from both worlds' A′ — the legal pairing and the
+   * hidden-authority control are entirely unaffected by its presence.
+   *
+   * Its coordinates are pinned so that, IF a forbidden adapter ever forced it
+   * past the accessor, the resulting instance would order ahead of the visible
+   * aid bindings (`A0`/`B0` precede `a`/`c`/`e` in UTF-16 code units) and
+   * complete at LSN 20, making it `satisfied` and therefore rankable.
+   */
+  const HIDDEN_FORGEABLE_AID_RECORDS: readonly ProofPatternEvidenceRecordInput[] = Object.freeze([
+    Object.freeze({ ...aidRecord('p3-hidden-aid-1', 19, 'A0', 'B0'), visibilityProvenance: Object.freeze({ visibility: 'private' as const }) }),
+    Object.freeze({ ...aidRecord('p3-hidden-aid-2', 20, 'B0', 'A0'), visibilityProvenance: Object.freeze({ visibility: 'private' as const }) }),
+  ])
+
+  function questPairWorld() {
+    const { first, second } = buildAttentionQuestCandidateTwoVisibleCandidates()
+    return Object.freeze({
+      snapshot: createProofQuestCandidateSnapshot({
+        accessorContractVersion: ATTENTION_QUEST_CANDIDATE_ACCESSOR_VERSION,
+        snapshotLsn: P3_RANKING_LSN,
+        candidates: [first, second],
+      }),
+      request: Object.freeze({
+        accessorContractVersion: ATTENTION_QUEST_CANDIDATE_ACCESSOR_VERSION,
+        rankingSnapshotLsn: P3_RANKING_LSN,
+      }),
+    })
+  }
+
+  /** Independently construct one world's complete A′ surface, all three collections. */
+  function constructAPrimeSurface(patternViews: readonly AttentionReadablePatternEvidenceView[]) {
+    const world = questPairWorld()
+    const access = readAttentionReadableQuestCandidateViews(world.snapshot, world.request)
+    if (access.kind !== 'ok') throw new Error('expected the quest accessor to admit both candidates')
+    const surface = constructAttentionReadableSurface({
+      surfaceSchemaVersion: ATTENTION_READABLE_SURFACE_SCHEMA_VERSION,
+      accessorContractVersion: world.request.accessorContractVersion,
+      rankingSnapshotLsn: world.request.rankingSnapshotLsn,
+    }, access.views, access.openingCoordinateViews, patternViews)
+    if (surface.kind !== 'ok') throw new Error('expected a legal A-prime surface: ' + surface.reason)
+    return surface.surface
+  }
+
+  /**
+   * The premise, derived only from independently computed digests and view
+   * identities of the two real surfaces. Nothing is taken from an evaluation.
+   */
+  function derivePremise(left: AttentionReadableSurface, right: AttentionReadableSurface) {
+    const leftDigest = attentionPrimeSurfaceDigest(left)
+    const rightDigest = attentionPrimeSurfaceDigest(right)
+    const leftIdentities = attentionPrimeViewIdentities(left)
+    const rightIdentities = attentionPrimeViewIdentities(right)
+    const leftViewIdentities = Object.freeze([
+      ...leftIdentities.questCandidateViewIdentities, ...leftIdentities.patternEvidenceViewIdentities,
+    ])
+    const rightViewIdentities = Object.freeze([
+      ...rightIdentities.questCandidateViewIdentities, ...rightIdentities.patternEvidenceViewIdentities,
+    ])
+    return Object.freeze({
+      leftAPrimeDigest: leftDigest,
+      rightAPrimeDigest: rightDigest,
+      leftViewIdentities,
+      rightViewIdentities,
+      leftOpeningCoordinateIdentities: leftIdentities.questOpeningCoordinateViewIdentities,
+      rightOpeningCoordinateIdentities: rightIdentities.questOpeningCoordinateViewIdentities,
+      equivalent: leftDigest === rightDigest
+        && canonicalSerialize(leftViewIdentities) === canonicalSerialize(rightViewIdentities)
+        && canonicalSerialize(leftIdentities.questOpeningCoordinateViewIdentities)
+          === canonicalSerialize(rightIdentities.questOpeningCoordinateViewIdentities),
+    })
+  }
+
+  function evaluateWorld(
+    replayCaseId: string,
+    patternViews: readonly AttentionReadablePatternEvidenceView[],
+    premise: ReturnType<typeof derivePremise>,
+  ) {
+    const ledger = createAttentionLedger({ ledgerPolicyVersion: ATTENTION_LEDGER_POLICY_VERSION })
+    if (ledger.kind !== 'ok') throw new Error('expected ledger')
+    const { first, second } = buildAttentionQuestCandidateTwoVisibleCandidates()
+    const fixture = buildB6MixedEvaluationFixture({
+      replayCaseId, ledger: ledger.ledger,
+      questCandidates: [first, second],
+      patternEvidenceViews: patternViews,
+    })
+    const result = runAttentionMixedFamilyEvaluation({ ...fixture.input, p3PremiseCheck: premise })
+    if (result.kind !== 'ok') throw new Error('expected a mixed P3 evaluation')
+    return result.result
+  }
+
+  it('the legal paired worlds pass the independently derived premise and produce byte-identical observable traces', () => {
+    // Both worlds' A′ surfaces are constructed independently, from their own
+    // accessor reads, before any evaluation runs.
+    const visibleViews = mintPatternEvidenceViews(VISIBLE_PATTERN_RECORDS)
+    const worldAViews = mintPatternEvidenceViews([...VISIBLE_PATTERN_RECORDS, ...HIDDEN_ESCALATION_RECORDS])
+    const worldBViews = visibleViews
+
+    // The hidden records mint no view at all: A′ is identical on both sides.
+    expect(worldAViews).toHaveLength(VISIBLE_PATTERN_RECORDS.length)
+    expect(canonicalSerialize(worldAViews)).toBe(canonicalSerialize(worldBViews))
+
+    const surfaceA = constructAPrimeSurface(worldAViews)
+    const surfaceB = constructAPrimeSurface(worldBViews)
+    expect(surfaceA.questCandidateViews).toHaveLength(2)
+    expect(surfaceA.patternEvidenceViews).toHaveLength(6)
+
+    const premise = derivePremise(surfaceA, surfaceB)
+    expect(premise.leftAPrimeDigest).toBe(attentionPrimeSurfaceDigest(surfaceA))
+    expect(premise.rightAPrimeDigest).toBe(attentionPrimeSurfaceDigest(surfaceB))
+    expect(premise.equivalent).toBe(true)
+
+    const resultA = evaluateWorld('b6-p3-world-a', worldAViews, premise)
+    const resultB = evaluateWorld('b6-p3-world-a', worldBViews, premise)
+
+    // Five visible candidates genuinely compete for the cap of four, and exactly
+    // one is displaced by the final two-family total order.
+    expect(resultA.orderedCandidates).toHaveLength(5)
+    expect(resultA.retainedCandidates).toHaveLength(4)
+    expect(resultA.retainedCandidates.map((candidate) => candidate.sourceKind))
+      .toEqual(['quest_candidate', 'quest_candidate', 'narrative_pattern_instance', 'narrative_pattern_instance'])
+    expect(resultA.trace.structuralRetention.mixedFamilyDroppedCandidateIds).toHaveLength(1)
+
+    // The complete player-observable comparison, plus the winner/arbitration
+    // outputs RN019 §11.2 item 15 requires.
+    expect(canonicalSerialize(resultB.trace.playerObservable)).toBe(canonicalSerialize(resultA.trace.playerObservable))
+    expect(resultB.trace.mixedFamilyArbitration?.winnerCandidateId)
+      .toBe(resultA.trace.mixedFamilyArbitration?.winnerCandidateId)
+    expect(resultB.trace.mixedFamilyArbitration?.winnerSourceKind)
+      .toBe(resultA.trace.mixedFamilyArbitration?.winnerSourceKind)
+    expect(canonicalSerialize(resultB.arbitrationAttempts)).toBe(canonicalSerialize(resultA.arbitrationAttempts))
+    expect(canonicalSerialize(resultB.ledger)).toBe(canonicalSerialize(resultA.ledger))
+    // The premise is trusted-only and never reaches the player projection.
+    expect(resultA.trace.playerObservable).not.toHaveProperty('p3PremiseCheck')
+  })
+
+  it('Control A — illegally admitting the hidden evidence before the premise makes the A′ bytes and identities differ, and stops there', () => {
+    // A test-only illegal adapter: it re-declares World A's private records as
+    // public purely to force them past the accessor. It exists only inside this
+    // fixture and is not importable by, or reachable from, the real pipeline.
+    const illegallyAdmitted = HIDDEN_ESCALATION_RECORDS.map((record) => Object.freeze({
+      ...record, visibilityProvenance: Object.freeze({ visibility: 'public' as const, provenanceId: `illegal-${record.recordId}` }),
+    }))
+    const surfaceA = constructAPrimeSurface(mintPatternEvidenceViews([...VISIBLE_PATTERN_RECORDS, ...illegallyAdmitted]))
+    const surfaceB = constructAPrimeSurface(mintPatternEvidenceViews(VISIBLE_PATTERN_RECORDS))
+
+    const premise = derivePremise(surfaceA, surfaceB)
+    // Both oracles fire: the canonical digest and the view identities differ.
+    expect(premise.leftAPrimeDigest).not.toBe(premise.rightAPrimeDigest)
+    expect(canonicalSerialize(premise.leftViewIdentities)).not.toBe(canonicalSerialize(premise.rightViewIdentities))
+    expect(premise.equivalent).toBe(false)
+
+    // Mandatory early stop: no downstream candidate, resource, or observable
+    // comparison is attempted for a pair whose premise failed.
+    expect(surfaceA.patternEvidenceViews.length).toBeGreaterThan(surfaceB.patternEvidenceViews.length)
+  })
+
+  it('Control B — a hidden authoritative difference outside A′ alters no permitted observable result and consumes no budget', () => {
+    const worldAViews = mintPatternEvidenceViews([...VISIBLE_PATTERN_RECORDS, ...HIDDEN_ESCALATION_RECORDS])
+    const worldBViews = mintPatternEvidenceViews(VISIBLE_PATTERN_RECORDS)
+    const premise = derivePremise(constructAPrimeSurface(worldAViews), constructAPrimeSurface(worldBViews))
+    expect(premise.equivalent).toBe(true)
+
+    const withHidden = evaluateWorld('b6-p3-control-b', worldAViews, premise)
+    const withoutHidden = evaluateWorld('b6-p3-control-b', worldBViews, premise)
+
+    // The hidden potential pattern consumes no monitor, structural-retention,
+    // candidate, ordering, or presentation budget whatsoever.
+    expect(canonicalSerialize(withHidden.trace.structuralRetention))
+      .toBe(canonicalSerialize(withoutHidden.trace.structuralRetention))
+    expect(withHidden.orderedCandidates).toHaveLength(withoutHidden.orderedCandidates.length)
+    expect(canonicalSerialize(withHidden.retainedCandidates.map((candidate) => candidate.candidateId)))
+      .toBe(canonicalSerialize(withoutHidden.retainedCandidates.map((candidate) => candidate.candidateId)))
+    // No `public_conflict_escalation` instance was ever reconstructed.
+    expect(withHidden.retainedCandidates.every((candidate) => (
+      candidate.sourceKind !== 'narrative_pattern_instance' || candidate.patternType === 'reciprocal_public_aid'
+    ))).toBe(true)
+
+    // And the permitted observable result is unchanged, byte for byte.
+    expect(canonicalSerialize(withHidden.trace.playerObservable))
+      .toBe(canonicalSerialize(withoutHidden.trace.playerObservable))
+    expect(withHidden.trace.mixedFamilyArbitration?.winnerCandidateId)
+      .toBe(withoutHidden.trace.mixedFamilyArbitration?.winnerCandidateId)
+  })
+
+  /**
+   * Control B (post-premise construction bypass) — RN019 §10.3 Control B and
+   * §11.3 negative control 10, the committed plan's §11.7 form.
+   *
+   * This is the **downstream** oracle, and it is deliberately separate from
+   * Control A so displacement is never claimed from a fixture that correctly
+   * stops at a premise mismatch. The order is exactly RN019 §10.3's:
+   *
+   *   1. independently construct both legal A′ surfaces and verify the premise
+   *      genuinely passes on their real canonical bytes;
+   *   2. only then, a test-only forbidden adapter injects forged hidden-derived
+   *      rankable material into ONE side's evaluation;
+   *   3. the forged material survives structural retention, competes at the
+   *      mixed cap of 4, and displaces an otherwise-retained visible candidate;
+   *   4. the complete canonical player-observable trace comparison FAILS.
+   *
+   * The adapter is a local closure inside this fixture. It is not exported, not
+   * importable by the real monitor pipeline, and adds no production hook: it
+   * only re-labels World A's private records as public and hands the resulting
+   * views to the evaluator after the premise has already been fixed. Nothing
+   * about candidate identity, ordering, retention, or the cap is modified — the
+   * whole point is that the *unmodified* downstream machinery is what detects
+   * the injected candidate.
+   */
+  it('Control B (post-premise construction bypass) — forged hidden-derived material displaces a retained candidate and breaks observable equality', () => {
+    // (1) The premise is computed on the two REAL, legal A′ surfaces and passes.
+    const legalAViews = mintPatternEvidenceViews([...VISIBLE_PATTERN_RECORDS, ...HIDDEN_ESCALATION_RECORDS])
+    const legalBViews = mintPatternEvidenceViews(VISIBLE_PATTERN_RECORDS)
+    const premise = derivePremise(constructAPrimeSurface(legalAViews), constructAPrimeSurface(legalBViews))
+    expect(premise.equivalent).toBe(true)
+    expect(premise.leftAPrimeDigest).toBe(premise.rightAPrimeDigest)
+
+    // (2) Test-only forbidden adapter, applied strictly AFTER the premise above.
+    //     Local to this fixture; nothing exports or re-imports it. It re-labels
+    //     World A's private records as public — the forged escalation, plus a
+    //     forged reciprocal-aid pair whose ordering coordinates are deliberately
+    //     PINNED so it competes at the cap (RN019 §10.3 Control B step 4).
+    //
+    //     Why the aid pair is the displacing one: ordering key 5 serializes the
+    //     canonical binding tuple, and every `aid-*` role code sorts before every
+    //     `harm-*` one, so a forged escalation can never reach the two pattern
+    //     slots left under the cap of 4. The forged aid pair binds `A0`/`B0`,
+    //     whose UTF-16 code units precede the visible `a`/`c`/`e` bindings, so it
+    //     orders ahead of them. It completes at LSN 20 (satisfied, and therefore
+    //     rankable regardless of the 41 evaluation coordinate).
+    const forbiddenPostPremiseAdapter = (): readonly AttentionReadablePatternEvidenceView[] => (
+      mintPatternEvidenceViews([
+        ...VISIBLE_PATTERN_RECORDS,
+        ...[...HIDDEN_ESCALATION_RECORDS, ...HIDDEN_FORGEABLE_AID_RECORDS].map((record) => Object.freeze({
+          ...record,
+          visibilityProvenance: Object.freeze({
+            visibility: 'public' as const, provenanceId: `forged-${record.recordId}`,
+          }),
+        })),
+      ])
+    )
+
+    const forgedAViews = forbiddenPostPremiseAdapter()
+    // The forged views really are extra material the legal surface never had.
+    expect(forgedAViews.length).toBeGreaterThan(legalAViews.length)
+
+    const injected = evaluateWorld('b6-p3-control-b-bypass', forgedAViews, premise)
+    const legal = evaluateWorld('b6-p3-control-b-bypass', legalBViews, premise)
+
+    // (3) It survived structural retention: forged instances are in the injected
+    //     world's reconstructed set and in no legal one.
+    const forgedInstanceIds = injected.trace.structuralRetention.retainedPatternInstanceIds
+      .filter((id) => !legal.trace.structuralRetention.retainedPatternInstanceIds.includes(id))
+    expect(forgedInstanceIds.length).toBeGreaterThan(0)
+
+    // It competed at the cap of 4 and DISPLACED an otherwise-retained visible
+    // candidate. The cap still admitted exactly four, and a forged candidate is
+    // among them while a previously retained legal candidate is not.
+    expect(injected.retainedCandidates).toHaveLength(4)
+    expect(legal.retainedCandidates).toHaveLength(4)
+    const legalRetainedIds = legal.retainedCandidates.map((candidate) => candidate.candidateId)
+    const injectedRetainedIds = injected.retainedCandidates.map((candidate) => candidate.candidateId)
+    const forgedRetained = injectedRetainedIds.filter((id) => !legalRetainedIds.includes(id))
+    const displaced = legalRetainedIds.filter((id) => !injectedRetainedIds.includes(id))
+    expect(forgedRetained.length).toBeGreaterThan(0)
+    expect(displaced.length).toBeGreaterThan(0)
+    // The displaced candidate was dropped by the post-order cap, not by identity.
+    expect(injected.trace.structuralRetention.mixedFamilyDroppedCandidateIds)
+      .toEqual(expect.arrayContaining(displaced))
+    expect(injected.trace.structuralRetention.mixedFamilyDroppedCandidateIds.length)
+      .toBeGreaterThan(legal.trace.structuralRetention.mixedFamilyDroppedCandidateIds.length)
+
+    // (4) The complete canonical player-observable trace comparison FAILS, so
+    //     this pair cannot be claimed P3-equivalent despite its passing premise.
+    expect(canonicalSerialize(injected.trace.playerObservable))
+      .not.toBe(canonicalSerialize(legal.trace.playerObservable))
+    // The premise alone would have accepted the pair -- which is exactly why the
+    // downstream observable oracle is mandatory and not redundant.
+    expect(injected.trace.p3PremiseCheck?.equivalent).toBe(true)
+    expect(legal.trace.p3PremiseCheck?.equivalent).toBe(true)
+  })
+
   function worldWithOpeningLsn(openedAtLsn: number): AttentionQuestCandidatePairedWorld {
     return buildAttentionQuestCandidateWorld([
       createProofQuestCandidate({

@@ -4,6 +4,8 @@ import {
   runAttentionDirectorOnPass,
   stableWorldReplayPassInput,
 } from './attentionReplay'
+import { ATTENTION_LEDGER_POLICY_VERSION } from './attentionCandidatePolicy'
+import { createAttentionLedger } from './attentionLedger'
 import {
   createAttentionReplayAuthoritativeResources,
   createAttentionReplayReducerCache,
@@ -18,8 +20,13 @@ import {
   A5_AUTHORITATIVE_COMMAND_IDS,
   A5_AUTHORITATIVE_WALL_CLOCK_INPUTS,
   A5_RNG_SEED,
+  buildB6MixedEvaluationFixture,
+  buildB6PatternOnlyEvaluationInput,
+  buildB6StageASingleQuestCandidate,
   buildAttentionReplayQuestCandidateOnlyWorld,
 } from './attentionReplayScenario'
+import { buildB6ReciprocalAidPatternViews } from './attentionNarrativePatternScenario'
+import { canonicalSerialize } from './canonicalSerialization'
 import { buildAttentionQuestCandidateHiddenPairScenario } from './attentionQuestCandidateScenario'
 
 /**
@@ -66,6 +73,101 @@ function replayPassInput(caseId: string) {
 }
 
 describe('A5 / P2-1 — quest-candidate-only load: director-off vs director-on authoritative logs are byte-identical', () => {
+  /**
+   * B6 / RN019 §10.2, plan §11.6 — the **genuinely mixed** P2 director-on pass.
+   *
+   * The fixture carries a legal quest candidate *and* a legal pattern candidate,
+   * so the director-on run performs real pattern reconstruction, structural
+   * retention, two-family normalization, the nine-key order, the mixed cap, real
+   * arbitration, a real package/render, a real ledger append, and a real trace.
+   * It is not a no-op or a pattern-only substitute, and the assertions below
+   * prove that before comparing the authoritative logs.
+   */
+  function buildMixedP2Fixture(replayCaseId: string) {
+    const ledger = createAttentionLedger({ ledgerPolicyVersion: ATTENTION_LEDGER_POLICY_VERSION })
+    if (ledger.kind !== 'ok') throw new Error('expected ledger')
+    return buildB6MixedEvaluationFixture({
+      replayCaseId, ledger: ledger.ledger,
+      questCandidates: [buildB6StageASingleQuestCandidate()],
+      patternEvidenceViews: buildB6ReciprocalAidPatternViews(),
+    })
+  }
+
+  it('B6 genuinely mixed director-on: real two-family work, and the authoritative log is byte-identical to director-off', () => {
+    const fixture = buildMixedP2Fixture('b6-p2-mixed')
+    const world = buildAttentionReplayQuestCandidateOnlyWorld()
+    const off = runAttentionDirectorOffPass(
+      freshAuthoritativeResources(), A5_AUTHORITATIVE_COMMAND_IDS, A5_AUTHORITATIVE_WALL_CLOCK_INPUTS,
+    )
+    const on = runAttentionDirectorOnPass({
+      replayPassInput: stableWorldReplayPassInput('b6-p2-mixed-stage-a-control', world, NO_AUTHORITATIVE_LOG_DIGEST),
+      mixedFamilyEvaluationInput: fixture.input,
+      initialAuthoritativeResources: freshAuthoritativeResources(),
+      commandIds: A5_AUTHORITATIVE_COMMAND_IDS,
+      wallClockInputs: A5_AUTHORITATIVE_WALL_CLOCK_INPUTS,
+    })
+
+    expect(on.attention.kind).toBe('ok')
+    if (on.attention.kind !== 'ok' || !('retainedCandidates' in on.attention.result)) {
+      throw new Error('expected the mixed evaluator to have run')
+    }
+    // The director-on load is genuinely mixed and genuinely did the work.
+    expect(on.attention.result.retainedCandidates.map((candidate) => candidate.sourceKind))
+      .toEqual(['quest_candidate', 'narrative_pattern_instance'])
+    expect(on.attention.result.trace.structuralRetention.retainedPatternInstanceIds.length).toBeGreaterThan(0)
+    expect(on.attention.result.ledger.records).toHaveLength(1)
+    expect(on.attention.result.presentation).not.toBeNull()
+
+    // The exact P2 contract: byte-identical complete authoritative committed logs.
+    expect(on.authoritativeDigest).toBe(off.digest)
+    expect(canonicalSerialize(on.authoritativeResources.log)).toBe(canonicalSerialize(off.resources.log))
+    // No authority write: the attention pass appended nothing to the log, and
+    // the shared RNG/ID/scheduler/cache/clock state is exactly the off run's.
+    expect(canonicalSerialize(on.authoritativeResources)).toBe(canonicalSerialize(off.resources))
+  })
+
+  it('B6 mixed director-on introduces no family-dependent hidden difference in the authoritative log', () => {
+    const off = runAttentionDirectorOffPass(
+      freshAuthoritativeResources(), A5_AUTHORITATIVE_COMMAND_IDS, A5_AUTHORITATIVE_WALL_CLOCK_INPUTS,
+    )
+    const world = buildAttentionReplayQuestCandidateOnlyWorld()
+    const runWith = (replayCaseId: string, input: Parameters<typeof runAttentionDirectorOnPass>[0]['mixedFamilyEvaluationInput']) => (
+      runAttentionDirectorOnPass({
+        replayPassInput: stableWorldReplayPassInput(replayCaseId, world, NO_AUTHORITATIVE_LOG_DIGEST),
+        ...(input === undefined ? {} : { mixedFamilyEvaluationInput: input }),
+        initialAuthoritativeResources: freshAuthoritativeResources(),
+        commandIds: A5_AUTHORITATIVE_COMMAND_IDS,
+        wallClockInputs: A5_AUTHORITATIVE_WALL_CLOCK_INPUTS,
+      })
+    )
+
+    // Quest-only, pattern-only, and genuinely mixed loads all leave the same
+    // authoritative bytes -- so nothing in the log depends on which family ran.
+    const questOnly = runWith('b6-p2-family-quest', buildB6MixedEvaluationFixture({
+      replayCaseId: 'b6-p2-family-quest',
+      ledger: (() => { const l = createAttentionLedger({ ledgerPolicyVersion: ATTENTION_LEDGER_POLICY_VERSION }); if (l.kind !== 'ok') throw new Error('expected ledger'); return l.ledger })(),
+      questCandidates: [buildB6StageASingleQuestCandidate()],
+    }).input)
+    const patternOnly = runWith('b6-p2-family-pattern', buildB6PatternOnlyEvaluationInput(
+      'b6-p2-family-pattern',
+      (() => { const l = createAttentionLedger({ ledgerPolicyVersion: ATTENTION_LEDGER_POLICY_VERSION }); if (l.kind !== 'ok') throw new Error('expected ledger'); return l.ledger })(),
+    ))
+    const mixed = runWith('b6-p2-family-mixed', buildMixedP2Fixture('b6-p2-family-mixed').input)
+
+    for (const run of [questOnly, patternOnly, mixed]) {
+      expect(run.attention.kind).toBe('ok')
+      expect(run.authoritativeDigest).toBe(off.digest)
+      expect(canonicalSerialize(run.authoritativeResources.log)).toBe(canonicalSerialize(off.resources.log))
+    }
+    // And no reconstruction distortion: the mixed run's own pattern
+    // reconstruction matches the pattern-only run's, family competition
+    // notwithstanding.
+    if (mixed.attention.kind !== 'ok' || !('retainedCandidates' in mixed.attention.result)) throw new Error('expected mixed result')
+    if (patternOnly.attention.kind !== 'ok' || !('retainedCandidates' in patternOnly.attention.result)) throw new Error('expected pattern result')
+    expect(canonicalSerialize(mixed.attention.result.trace.structuralRetention.retainedPatternInstanceIds))
+      .toBe(canonicalSerialize(patternOnly.attention.result.trace.structuralRetention.retainedPatternInstanceIds))
+  })
+
   it('produces byte-identical authoritative logs whether or not attention runs', () => {
     const off = runAttentionDirectorOffPass(
       freshAuthoritativeResources(),

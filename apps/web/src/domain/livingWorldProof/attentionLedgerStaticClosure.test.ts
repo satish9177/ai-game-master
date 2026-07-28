@@ -167,6 +167,11 @@ const ALLOWED_IMPORT_SPECIFIERS: Record<string, readonly string[]> = {
     './attentionNarrativePatternLibrary',
     './attentionNarrativePatternLifecycle',
   ],
+  // B6 leaves this entry exactly as committed at 9aa77e8e: the module stays
+  // fixture-only and gains no specifier. The A-prime boundary -> reconstruction
+  // -> retention -> normalizer chain lives in `attentionReplay.ts`, the one
+  // authorized module that already holds every dependency it needs (plan §11.3,
+  // §11.7).
   'attentionNarrativePatternScenario.ts': [
     './attentionPatternEvidenceContracts',
     './attentionPatternEvidenceAccessor',
@@ -252,10 +257,14 @@ const ALLOWED_IMPORT_SPECIFIERS: Record<string, readonly string[]> = {
     './canonicalSerialization',
     './attentionDirectEvidenceAssertion',
     './attentionNarrativePatternContracts',
+    './attentionPatternEvidenceContracts',
+    './attentionNarrativePatternMonitor',
   ],
   'attentionReplayScenario.ts': [
     './attentionQuestCandidateContracts',
     './attentionCandidatePolicy',
+    './attentionNarrativePatternScenario',
+    './attentionPatternEvidenceContracts',
     './attentionReplay',
     './attentionReplayResources',
     './attentionQuestCandidateScenario',
@@ -1201,24 +1210,549 @@ describe('B4 / P1 — the trusted trace and replay path stay singular and patter
     expect(revealPackage).not.toMatch(/narrativeAnnotation|patternType|motive|friend|trust/i)
   })
 
-  it('the B5 pattern-presentation pass is one real composition that actually calls every B5 component -- not a parallel or test-only path', () => {
+  it('the B5 pattern helper is the only one-candidate composition and the B6 evaluator is the sole mixed-family seam', () => {
     const replaySource = readStrippedSource('attentionReplay.ts')
 
-    // The single composition function must exist, and must genuinely call
-    // each B5 unit rather than re-implement or bypass it.
+    // The B5 wrapper delegates its one-candidate work to the extracted helper;
+    // the helper owns each family-specific operation and no loop/cap/trace.
     expect(replaySource).toMatch(/function runAttentionPatternPresentationPass/)
-    const passStart = replaySource.indexOf('function runAttentionPatternPresentationPass')
-    const passBody = replaySource.slice(passStart, passStart + 8000)
-    expect(passBody).toMatch(/revalidateAttentionPatternPresentation\s*\(/)
-    expect(passBody).toMatch(/buildAttentionDirectEvidenceAssertions\s*\(/)
-    expect(passBody).toMatch(/buildAttentionRevealPackage\s*\(/)
-    expect(passBody).toMatch(/renderAttentionRevealPackage\s*\(/)
-    expect(passBody).toMatch(/appendAttentionLedgerRecord\s*\(/)
+    expect(replaySource).toMatch(/function attemptAttentionPatternPresentation/)
+    const helperStart = replaySource.indexOf('function attemptAttentionPatternPresentation')
+    const helperBody = replaySource.slice(helperStart, helperStart + 8000)
+    expect(helperBody).toMatch(/revalidateAttentionPatternPresentation\s*\(/)
+    expect(helperBody).toMatch(/buildAttentionDirectEvidenceAssertions\s*\(/)
+    expect(helperBody).toMatch(/buildAttentionRevealPackage\s*\(/)
+    expect(helperBody).toMatch(/renderAttentionRevealPackage\s*\(/)
+    expect(helperBody).toMatch(/appendAttentionLedgerRecord\s*\(/)
+    expect(replaySource.match(/function runAttentionMixedFamilyEvaluation/g) ?? []).toHaveLength(1)
+    expect(replaySource.match(/applyMixedFamilyCandidateCap\s*\(/g) ?? []).toHaveLength(2)
+  })
 
-    // Only one such composition function exists in the module -- no second,
-    // parallel pattern-presentation pipeline.
-    const occurrences = replaySource.match(/function runAttentionPatternPresentationPass/g) ?? []
-    expect(occurrences).toHaveLength(1)
+  /**
+   * B6 / plan §11.6 item 15, §12 — the complete static-closure obligation for the
+   * one mixed-family orchestration seam and the two per-family attempt helpers.
+   *
+   * The assertion is deliberately "exactly one **mixed-family orchestration
+   * seam**", never "exactly one function capable of presenting": `attentionReplay.ts`
+   * exports five functions that drive or perform a presentation (plan §12's
+   * table), and the latter assertion would be false by construction.
+   */
+  describe('B6 / P1 — one mixed-family orchestration seam, two non-seam attempt helpers', () => {
+    const replaySource = readStrippedSource('attentionReplay.ts')
+
+    /**
+     * The one pure pattern-prime derivation's name, held as a value rather than
+     * written as a literal in the assertions below. `readStrippedSource` leaves
+     * comment text in place, so a scanner that spelled the symbol out would match
+     * its own prose and, worse, report itself as a second declaring module.
+     */
+    const DERIVATION_NAME = 'deriveAttentionPatternPrimeCandidates'
+
+    /** The committed §11.2A steps 3-7 chain, in its authorized order. */
+    const CHAIN_STEPS = [
+      'constructAttentionReadableSurface',
+      'reconstructNarrativePatternInstances',
+      'applyNarrativePatternStructuralRetention',
+      'normalizeAttentionCandidates',
+    ] as const
+
+    /** The source of one exported function, up to the start of the next top-level one. */
+    function functionBody(name: string): string {
+      const start = replaySource.indexOf(`export function ${name}`)
+      expect({ name, found: start >= 0 }).toEqual({ name, found: true })
+      const after = replaySource.slice(start + 1)
+      const nextTop = after.search(/\n(?:export )?(?:function|interface|type|const) /)
+      return nextTop < 0 ? after : after.slice(0, nextTop)
+    }
+
+    /** The same, for a module-private (non-exported) top-level function. */
+    function privateFunctionBody(name: string): string {
+      const start = replaySource.indexOf(`\nfunction ${name}`)
+      expect({ name, found: start >= 0 }).toEqual({ name, found: true })
+      const after = replaySource.slice(start + 1)
+      const nextTop = after.search(/\n(?:export )?(?:function|interface|type|const) /)
+      return nextTop < 0 ? after : after.slice(0, nextTop)
+    }
+
+    it.each(['attemptAttentionQuestPresentation', 'attemptAttentionPatternPresentation'] as const)(
+      '%s exists exactly once, attempts one candidate, and owns no loop, ledger creation, ordering, cap, or success slot',
+      (helper) => {
+        // Exists exactly once -- no second, parallel per-family attempt body.
+        expect(replaySource.match(new RegExp(`function ${helper}\\b`, 'g')) ?? []).toHaveLength(1)
+
+        const body = functionBody(helper)
+        // Attempts exactly one candidate: no candidate loop of any form.
+        expect(body).not.toMatch(/\bfor\s*\(/)
+        expect(body).not.toMatch(/\bwhile\s*\(/)
+        expect(body).not.toMatch(/\.forEach\s*\(/)
+        expect(body).not.toMatch(/\.map\s*\(\s*\(?\s*candidate/)
+        // No ledger creation: it threads the caller's ledger and never mints one.
+        expect(body).not.toMatch(/createAttentionLedger\s*\(/)
+        // No ordering and no cap.
+        expect(body).not.toMatch(/orderAttentionCandidates\s*\(/)
+        expect(body).not.toMatch(/applyMixedFamilyCandidateCap\s*\(/)
+        expect(body).not.toMatch(/mixedFamilyCandidatesAfterOrdering/)
+        // No success-slot state, and no trace assembly.
+        expect(body).not.toMatch(/successfulPresentations|slotConsumed|presentationsPerEvaluation/)
+        expect(body).not.toMatch(/buildAttentionTrace\s*\(/)
+        // It does use the existing append route.
+        expect(body).toMatch(/appendAttentionLedgerRecord\s*\(/)
+      },
+    )
+
+    it('runAttentionP3PairedWorldCheck still delegates only to the frozen quest-only pass', () => {
+      const body = functionBody('runAttentionP3PairedWorldCheck')
+      expect(body).toMatch(/runAttentionQuestCandidateReplayPass\s*\(/)
+      expect(body).not.toMatch(/runAttentionMixedFamilyEvaluation\s*\(/)
+      expect(body).not.toMatch(/attemptAttentionPatternPresentation\s*\(/)
+      expect(body).not.toMatch(/reconstructNarrativePatternInstances\s*\(/)
+    })
+
+    it('exactly one mixed-family orchestration seam and exactly one mixed candidate loop exist', () => {
+      // One seam, declared once and exported once.
+      expect(replaySource.match(/function runAttentionMixedFamilyEvaluation\b/g) ?? []).toHaveLength(1)
+      // Its single candidate loop over the capped retained sequence.
+      const seam = functionBody('runAttentionMixedFamilyEvaluation')
+      const candidateLoops = seam.match(/for\s*\(let rankPosition = 0; rankPosition < retainedCandidates\.length/g) ?? []
+      expect(candidateLoops).toHaveLength(1)
+      // No *second* loop walks the ordered or capped candidate sequence. The
+      // seam's only other loop builds the revalidation-coordinate lookup map,
+      // which iterates freshly normalized revalidation candidates, not the
+      // ranked sequence being arbitrated.
+      expect(seam.match(/for\s*\([^)]*\bof\s+(?:retainedCandidates|ordered\.orderedCandidates)\b/g) ?? []).toHaveLength(0)
+      expect(seam.match(/\bfor\s*\(/g) ?? []).toHaveLength(2)
+      expect(seam).toMatch(/for \(const candidate of revalidatedPatternCandidates\.attentionCandidates\)/)
+      // No second family-priority rule anywhere in the module.
+      expect(replaySource).not.toMatch(/fairness|roundRobin|round_robin|rotation|familyQuota|antiStarvation|scoreWeight/i)
+    })
+
+    /**
+     * B6 / RN019 §9.4.2 and plan §11.2A — the mixed evaluator's
+     * **revalidation-coordinate** pattern chain. Two properties are structural,
+     * not incidental, and neither is expressed as a line number:
+     *
+     *  1. the A′ boundary runs BEFORE reconstruction, and reconstruction consumes
+     *     the boundary's re-emitted accepted views, never the raw input list;
+     *  2. a refusal anywhere in that chain is handled by omission -- it never
+     *     produces an evaluation-level return, and it never gates the quest
+     *     branch, because only the quest construction rows 7-9 fail closed.
+     */
+    it('the revalidation-coordinate pattern chain is boundary -> reconstruction -> retention, and its refusal never fails the evaluation', () => {
+      const seam = functionBody('runAttentionMixedFamilyEvaluation')
+
+      // (1) The raw revalidation input list reaches the A′ boundary and nothing
+      //     else, so no later step can consume unvalidated views.
+      const rawUses = seam.match(/input\.revalidationPatternEvidenceViews/g) ?? []
+      expect(rawUses).toHaveLength(1)
+      const boundaryCall = seam.indexOf('const revalidatedPatternSurface = constructAttentionReadableSurface(')
+      expect(boundaryCall).toBeGreaterThanOrEqual(0)
+      // That single raw use sits inside the boundary call, not after it.
+      const rawUseAt = seam.indexOf('input.revalidationPatternEvidenceViews')
+      expect(rawUseAt).toBeGreaterThan(boundaryCall)
+
+      // (2) Boundary strictly before reconstruction, and reconstruction consumes
+      //     the accepted surface views.
+      const reconstructAt = seam.indexOf('reconstructRetainedPatterns(\n      revalidatedPatternSurface.surface.patternEvidenceViews')
+      expect(reconstructAt).toBeGreaterThan(boundaryCall)
+      expect(seam).toMatch(
+        /reconstructRetainedPatterns\(\s*revalidatedPatternSurface\.surface\.patternEvidenceViews/,
+      )
+
+      // (3) Retention follows reconstruction (proven inside the committed helper).
+      const helperBody = privateFunctionBody('reconstructRetainedPatterns')
+      expect(helperBody.indexOf('reconstructNarrativePatternInstances('))
+        .toBeLessThan(helperBody.indexOf('applyNarrativePatternStructuralRetention('))
+
+      // (4) The chain is entered on boundary SUCCESS; there is no
+      //     `!== 'ok'` refusal branch for it at all.
+      expect(seam).toMatch(/if \(revalidatedPatternSurface\.kind === 'ok'\)/)
+      expect(seam).not.toMatch(/revalidatedPatternSurface\.kind !== 'ok'/)
+
+      // (5) No evaluation-level return occurs anywhere between the revalidation
+      //     boundary call and the arbitration loop -- so a refusing revalidation
+      //     A′ construction cannot fail the evaluation closed.
+      const loopAt = seam.indexOf('for (let rankPosition = 0;')
+      expect(loopAt).toBeGreaterThan(boundaryCall)
+      const betweenBoundaryAndLoop = seam.slice(boundaryCall, loopAt)
+      expect(betweenBoundaryAndLoop).not.toMatch(/return\s*\{/)
+
+      // (6) The quest branch is not gated by pattern revalidation material: its
+      //     body names none of the revalidation-pattern bindings.
+      const questBranchAt = seam.indexOf("if (candidate.sourceKind === 'quest_candidate')")
+      const patternBranchAt = seam.indexOf('const patternInput = presentationInputByCandidateId.get(')
+      expect(questBranchAt).toBeGreaterThan(loopAt)
+      expect(patternBranchAt).toBeGreaterThan(questBranchAt)
+      const questBranch = seam.slice(questBranchAt, patternBranchAt)
+      for (const binding of ['revalidatedPatternSurface', 'revalidationPatternById', 'revalidatedPatternCandidates']) {
+        expect({ binding, namedInQuestBranch: questBranch.includes(binding) })
+          .toEqual({ binding, namedInQuestBranch: false })
+      }
+
+      // (7) The exact-candidateId lookup is unconditional: an absent entry is the
+      //     committed candidate-disappeared path, never a sibling substitution.
+      expect(seam).toMatch(/revalidatedCandidate: revalidationPatternById\.get\(candidate\.candidateId\)/)
+    })
+
+    it('presentationsPerEvaluation is read by the mixed evaluator and by no attempt helper', () => {
+      const seam = functionBody('runAttentionMixedFamilyEvaluation')
+      expect(seam).toMatch(/policy\.presentationsPerEvaluation/)
+      // The budget is the policy value, never a literal comparison at this call site.
+      expect(seam).not.toMatch(/successfulPresentations\s*>=\s*1\b/)
+      // It is the mixed evaluator's own read. No attempt helper and neither
+      // family-specific pass reads it, so the shared budget is owned in exactly
+      // one place. (The two helper bodies are asserted free of it above.)
+      expect(functionBody('runAttentionPatternPresentationPass')).not.toMatch(/policy\.presentationsPerEvaluation/)
+      expect(functionBody('runAttentionQuestCandidateReplayPass')).not.toMatch(/policy\.presentationsPerEvaluation/)
+      expect(replaySource.match(/policy\.presentationsPerEvaluation/g) ?? []).toHaveLength(1)
+    })
+
+    /**
+     * B6 / plan §11.7 — `attentionReplayScenario.ts`'s import boundary is exactly
+     * the authorized one. It reaches the pattern-prime derivation through its
+     * pre-existing `./attentionReplay` dependency, so the four derivation modules
+     * that chain touches are never imported here directly.
+     */
+    describe('B6 / P1 — the replay scenario module delegates pattern derivation instead of importing it', () => {
+      const FORBIDDEN_FOR_REPLAY_SCENARIO = [
+        './attentionCandidate',
+        './attentionReadableBoundary',
+        './attentionNarrativePatternMonitor',
+        './attentionNarrativePatternResourcePolicy',
+      ] as const
+
+      it.each(FORBIDDEN_FOR_REPLAY_SCENARIO)('attentionReplayScenario.ts has no direct import from %s', (specifier) => {
+        expect(proofModuleSpecifiers('attentionReplayScenario.ts')).not.toContain(specifier)
+        // Nor does its allowlist admit one, so the boundary is not merely a
+        // current-source fact that a later edit could quietly widen.
+        expect(ALLOWED_IMPORT_SPECIFIERS['attentionReplayScenario.ts'] ?? []).not.toContain(specifier)
+      })
+
+      it('it consumes the pattern-prime derivation through ./attentionReplay and names no chain step of its own', () => {
+        const source = readStrippedSource('attentionReplayScenario.ts')
+        // The call exists, exactly once, and the binding is imported from the
+        // pre-existing `./attentionReplay` specifier -- not from a chain module.
+        expect(source.match(new RegExp(`${DERIVATION_NAME}\\s*\\(`, 'g')) ?? []).toHaveLength(1)
+        const importBlock = source.slice(0, source.indexOf('export const'))
+        expect(importBlock).toMatch(
+          new RegExp(`import\\s*\\{[^}]*\\b${DERIVATION_NAME}\\b[^}]*\\}\\s*from\\s*'\\./attentionReplay'`, 's'),
+        )
+        // It defines no derivation of its own and reimplements no chain step.
+        expect(source).not.toMatch(new RegExp(`function ${DERIVATION_NAME}\\b`))
+        for (const step of CHAIN_STEPS) {
+          expect({ step, named: source.includes(step) }).toEqual({ step, named: false })
+        }
+      })
+
+      it('its only new B6 scenario dependency is ./attentionNarrativePatternScenario', () => {
+        const specifiers = proofModuleSpecifiers('attentionReplayScenario.ts')
+        expect(specifiers).toContain('./attentionNarrativePatternScenario')
+        // The committed Stage A set plus exactly the two authorized B6 additions.
+        expect([...new Set(specifiers)].sort()).toEqual([
+          './attentionCandidatePolicy',
+          './attentionNarrativePatternScenario',
+          './attentionPatternEvidenceContracts',
+          './attentionQuestCandidateContracts',
+          './attentionQuestCandidateScenario',
+          './attentionReplay',
+          './attentionReplayResources',
+        ])
+      })
+
+      it('./attentionPatternEvidenceContracts is retained type-only', () => {
+        const source = readStrippedSource('attentionReplayScenario.ts')
+        const importLines = source.split('\n').filter((line) => line.includes('./attentionPatternEvidenceContracts'))
+        expect(importLines).toHaveLength(1)
+        expect(importLines[0]).toMatch(/^import type /)
+        // No value binding from that module survives into emitted code.
+        expect(source).not.toMatch(/import\s+\{[^}]*\}\s+from\s+'\.\/attentionPatternEvidenceContracts'/)
+      })
+
+      it('no equivalent indirect bypass was introduced: no dynamic import, require, or indirect module lookup', () => {
+        const source = readStrippedSource('attentionReplayScenario.ts')
+        expect(source).not.toMatch(/\bimport\s*\(/)
+        expect(source).not.toMatch(/\brequire\s*\(/)
+        expect(source).not.toMatch(/\beval\s*\(/)
+        expect(source).not.toMatch(/createRequire|module\.constructor|Function\s*\(/)
+        // The derivation is delegated, not re-implemented: none of the four
+        // owned entry points is named anywhere in this module.
+        for (const owned of [
+          'normalizeAttentionCandidates', 'constructAttentionReadableSurface',
+          'reconstructNarrativePatternInstances', 'applyNarrativePatternStructuralRetention',
+        ]) {
+          expect({ owned, named: source.includes(owned) }).toEqual({ owned, named: false })
+        }
+      })
+
+      it('the pattern scenario module stays fixture-only and its allowlist entry is unchanged from 9aa77e8e', () => {
+        const owner = readStrippedSource('attentionNarrativePatternScenario.ts')
+
+        // It defines no derivation function and reimplements no chain step. The
+        // pre-existing monitor convenience wrapper is the one committed
+        // exception, so the monitor call is expected exactly where it was.
+        expect(owner).not.toMatch(new RegExp(`function ${DERIVATION_NAME}\\b`))
+        expect(owner).not.toMatch(new RegExp(`${DERIVATION_NAME}\\s*\\(`))
+        expect(owner).not.toMatch(/buildB6PatternPresentationInputs\s*[(:]/)
+        for (const forbidden of [
+          'applyNarrativePatternStructuralRetention',
+          'constructAttentionReadableSurface',
+          'normalizeAttentionCandidates',
+        ]) {
+          expect({ forbidden, named: owner.includes(forbidden) }).toEqual({ forbidden, named: false })
+        }
+        // No A-prime surface, ledger, trace, or replay orchestration work.
+        expect(owner).not.toMatch(/createAttentionLedger|appendAttentionLedgerRecord|buildAttentionTrace/)
+        expect(owner).not.toMatch(/runAttentionMixedFamilyEvaluation|rankingCacheKey|revalidationCacheKey/)
+
+        // Its allowlist entry is byte-for-byte the committed 9aa77e8e set: B6
+        // grants this module no specifier at all.
+        expect(ALLOWED_IMPORT_SPECIFIERS['attentionNarrativePatternScenario.ts']).toEqual([
+          './attentionPatternEvidenceContracts',
+          './attentionPatternEvidenceAccessor',
+          './attentionNarrativePatternMonitor',
+        ])
+        expect([...new Set(proofModuleSpecifiers('attentionNarrativePatternScenario.ts'))].sort()).toEqual([
+          './attentionNarrativePatternMonitor',
+          './attentionPatternEvidenceAccessor',
+          './attentionPatternEvidenceContracts',
+        ])
+      })
+
+      it('no proof module outside attentionReplay.ts reproduces the derivation chain', () => {
+        // `attentionReplay.ts` is the one legal home: the evaluator runs these
+        // committed steps itself, and the pure derivation runs them once more
+        // over pattern-only input by design (plan §11.3).
+        const duplicatingModules = STAGE_A_PROOF_MODULES.filter((fileName) => (
+          fileName !== 'attentionReplay.ts'
+          && CHAIN_STEPS.every((step) => readStrippedSource(fileName).includes(`${step}(`))
+        ))
+        expect(duplicatingModules).toEqual([])
+      })
+    })
+
+    /**
+     * B6 / plan §11.3 and §11.6 item 15 — the one **pure** pattern-prime
+     * derivation function: where it lives, that there is exactly one of it, that
+     * it runs the committed §11.2A steps 3-7 in order, and that it is not a
+     * second orchestration seam.
+     *
+     * The "no candidate-evaluation loop" obligation is asserted here through the
+     * *evaluation-specific* markers, deliberately **not** through the two attempt
+     * helpers' blanket "no `for`/`while`/`forEach`" rule: §11.3 authorizes one
+     * bounded pure map/indexing pass for the `candidateId` ->
+     * `directEvidenceAssertionInputs` association, and that pass is legal and
+     * expected. Reusing the helpers' rule verbatim here would reject it.
+     */
+    describe('B6 / P1 — exactly one pure pattern-prime derivation function, in attentionReplay.ts', () => {
+      const DERIVATION = DERIVATION_NAME
+
+      it('exactly one such function exists, and it is declared in attentionReplay.ts', () => {
+        // Every proof-directory file, tests included, except this scanner: it is
+        // the module doing the reading and necessarily names the symbol it looks
+        // for, so including it would make the scan report itself.
+        const proofFiles = readdirSync(fileURLToPath(new URL('./', import.meta.url)))
+          .filter((name) => /\.tsx?$/.test(name) && name !== 'attentionLedgerStaticClosure.test.ts')
+        const declaringFiles = proofFiles.filter((name) => (
+          new RegExp(`function ${DERIVATION}\\b`).test(readStrippedSource(name))
+        ))
+        expect(declaringFiles).toEqual(['attentionReplay.ts'])
+
+        // Exactly one declaration inside that module, exported once.
+        expect(replaySource.match(new RegExp(`function ${DERIVATION}\\b`, 'g')) ?? []).toHaveLength(1)
+        expect(replaySource).toMatch(new RegExp(`export function ${DERIVATION}\\(`))
+
+        // No second pattern-prime derivation under another name. The pattern
+        // half of the chain has exactly two call sites in this module: this
+        // derivation, and the committed `reconstructRetainedPatterns` helper the
+        // mixed evaluator runs at both of its coordinates.
+        for (const step of ['reconstructNarrativePatternInstances', 'applyNarrativePatternStructuralRetention']) {
+          expect({ step, callSites: (replaySource.match(new RegExp(`${step}\\s*\\(`, 'g')) ?? []).length })
+            .toEqual({ step, callSites: 2 })
+        }
+        const derivationBody = functionBody(DERIVATION)
+        const outsideDerivation = replaySource.replace(derivationBody, '')
+        for (const step of ['reconstructNarrativePatternInstances', 'applyNarrativePatternStructuralRetention']) {
+          expect({ step, callSites: (outsideDerivation.match(new RegExp(`${step}\\s*\\(`, 'g')) ?? []).length })
+            .toEqual({ step, callSites: 1 })
+        }
+        expect(outsideDerivation).toMatch(/function reconstructRetainedPatterns/)
+      })
+
+      it('it runs the committed §11.2A steps 3-7 in exactly that order, A-prime construction first', () => {
+        const body = functionBody(DERIVATION)
+        const at = (step: string) => {
+          const index = body.indexOf(`${step}(`)
+          expect({ step, found: index >= 0 }).toEqual({ step, found: true })
+          return index
+        }
+        // 1 boundary -> 2 reconstruction -> 3 retention -> 4 normalization.
+        expect(at('constructAttentionReadableSurface')).toBeLessThan(at('reconstructNarrativePatternInstances'))
+        expect(at('reconstructNarrativePatternInstances')).toBeLessThan(at('applyNarrativePatternStructuralRetention'))
+        expect(at('applyNarrativePatternStructuralRetention')).toBeLessThan(at('normalizeAttentionCandidates'))
+        // Each committed step is invoked exactly once, and none is reimplemented.
+        for (const step of CHAIN_STEPS) {
+          expect({ step, calls: (body.match(new RegExp(`${step}\\s*\\(`, 'g')) ?? []).length })
+            .toEqual({ step, calls: 1 })
+        }
+        for (const step of CHAIN_STEPS) {
+          expect({ step, redefined: new RegExp(`function ${step}\\b`).test(body) }).toEqual({ step, redefined: false })
+        }
+      })
+
+      it('reconstruction consumes surface.patternEvidenceViews, never the raw input view list', () => {
+        const body = functionBody(DERIVATION)
+        // The reconstruction argument is the boundary's re-emitted accepted list.
+        expect(body).toMatch(/patternEvidenceViews:\s*surface\.surface\.patternEvidenceViews/)
+        // The raw list is passed to the A-prime boundary and nowhere else, so a
+        // refusal the boundary owns can never be reached at a later step.
+        expect(body.match(/input\.patternEvidenceViews/g) ?? []).toHaveLength(1)
+        expect(body).not.toMatch(/patternEvidenceViews:\s*input\.patternEvidenceViews/)
+      })
+
+      it('the one bounded association pass is present and is not a candidate-evaluation or arbitration loop', () => {
+        const body = functionBody(DERIVATION)
+
+        // Present: the permitted map/indexing pass that pairs each normalized
+        // pattern candidateId with its existing directEvidenceAssertionInputs.
+        expect(body).toMatch(/new Map\(/)
+        expect(body).toMatch(/directEvidenceAssertionInputs/)
+
+        // Not an evaluation: none of the markers that make a body an evaluation
+        // or arbitration loop appears. This is what "no candidate-evaluation
+        // loop" means at this boundary (§11.6 item 15).
+        expect(body).not.toMatch(/attemptAttentionPatternPresentation\s*\(/)
+        expect(body).not.toMatch(/attemptAttentionQuestPresentation\s*\(/)
+        expect(body).not.toMatch(/revalidateAttentionPatternPresentation\s*\(/)
+        expect(body).not.toMatch(/evaluateAttentionPatternPresentationPolicy\s*\(/)
+        expect(body).not.toMatch(/successfulPresentations|presentationSlotConsumed|slotConsumed/)
+        expect(body).not.toMatch(/presentationsPerEvaluation/)
+        expect(body).not.toMatch(/\bcontinued\b|arbitrationAttempts|rankPosition/)
+      })
+
+      it('it creates no ledger, ordering, cap, presentation, trace, or cache identity, and calls no provider', () => {
+        const body = functionBody(DERIVATION)
+
+        // No ledger container and no append.
+        expect(body).not.toMatch(/createAttentionLedger\s*\(/)
+        expect(body).not.toMatch(/appendAttentionLedgerRecord\s*\(/)
+        // No mixed ordering and no cap.
+        expect(body).not.toMatch(/orderAttentionCandidates\s*\(/)
+        expect(body).not.toMatch(/applyMixedFamilyCandidateCap\s*\(/)
+        expect(body).not.toMatch(/mixedFamilyCandidatesAfterOrdering/)
+        // No presentation and no trace assembly.
+        expect(body).not.toMatch(/buildAttentionRevealPackage\s*\(/)
+        expect(body).not.toMatch(/renderAttentionRevealPackage\s*\(/)
+        expect(body).not.toMatch(/buildAttentionTrace\s*\(/)
+        // No cache-key derivation and no cache-key value construction (§11.7).
+        expect(body).not.toMatch(/deriveAttentionCandidateRankingCacheKey/)
+        expect(body).not.toMatch(/rankingCacheKey/)
+        expect(body).not.toMatch(/revalidationCacheKey/)
+        // Pure: no clock, RNG, I/O, provider/model call, or mutable module state.
+        expect(body).not.toMatch(/Date\.|Date\s*\(|performance\.now|Math\.random/)
+        expect(body).not.toMatch(/\bfetch\s*\(|readFileSync|writeFileSync|process\./)
+        expect(body).not.toMatch(/provider|generateText|complete\s*\(|model/i)
+        // It writes no authority or NPC-cognition state.
+        expect(body).not.toMatch(/authoritative|npcCognition|worldState|commitEvent/i)
+      })
+
+      it('it is not a second orchestration seam: the sole-seam contract is unweakened', () => {
+        // The derivation is not the mixed evaluator, and the mixed evaluator does
+        // not delegate any part of an evaluation to it -- it still runs steps 3-7
+        // itself over its own mixed inputs.
+        expect(replaySource.match(/function runAttentionMixedFamilyEvaluation\b/g) ?? []).toHaveLength(1)
+        const seam = functionBody('runAttentionMixedFamilyEvaluation')
+        expect(seam).not.toMatch(new RegExp(`${DERIVATION}\\s*\\(`))
+
+        // The seam runs the committed chain itself. Two steps appear directly in
+        // its body; the other two are run by the committed, module-private
+        // `reconstructRetainedPatterns` helper. Each is asserted against its own
+        // owner -- deliberately NOT with a blanket "or the helper is mentioned"
+        // alternative, which would be satisfied for every step at once and so
+        // would assert nothing about any individual step.
+        for (const step of ['constructAttentionReadableSurface', 'normalizeAttentionCandidates'] as const) {
+          expect({ step, ranDirectlyBySeam: new RegExp(`${step}\\s*\\(`).test(seam) })
+            .toEqual({ step, ranDirectlyBySeam: true })
+        }
+        expect(seam).toMatch(/reconstructRetainedPatterns\s*\(/)
+        const helperBody = privateFunctionBody('reconstructRetainedPatterns')
+        for (const step of ['reconstructNarrativePatternInstances', 'applyNarrativePatternStructuralRetention'] as const) {
+          expect({ step, ranByHelper: new RegExp(`${step}\\s*\\(`).test(helperBody) })
+            .toEqual({ step, ranByHelper: true })
+        }
+        // Retention follows reconstruction inside that helper, never precedes it.
+        expect(helperBody.indexOf('reconstructNarrativePatternInstances('))
+          .toBeLessThan(helperBody.indexOf('applyNarrativePatternStructuralRetention('))
+        // And the derivation drives no seam of its own.
+        const body = functionBody(DERIVATION)
+        expect(body).not.toMatch(/runAttentionMixedFamilyEvaluation\s*\(/)
+        expect(body).not.toMatch(/runAttentionPatternPresentationPass\s*\(/)
+        expect(body).not.toMatch(/runAttentionQuestCandidateReplayPass\s*\(/)
+      })
+
+      it('the closed import allowlist grew by exactly the four authorized B6 additions', () => {
+        // The committed 9aa77e8e entries for the three modules B6 touches.
+        const COMMITTED_AT_BASELINE: Record<string, readonly string[]> = {
+          'attentionReplay.ts': [
+            './attentionQuestCandidateContracts', './attentionQuestCandidateAccessor',
+            './attentionReadableBoundary', './attentionCandidate', './attentionCandidateOrdering',
+            './attentionCandidatePolicy', './attentionRevealPackage', './attentionTemplate',
+            './attentionLedger', './attentionTrace', './attentionReplayResources',
+            './attentionNarrativePatternResourcePolicy', './canonicalSerialization',
+            './attentionDirectEvidenceAssertion', './attentionNarrativePatternContracts',
+          ],
+          'attentionReplayScenario.ts': [
+            './attentionQuestCandidateContracts', './attentionCandidatePolicy',
+            './attentionReplay', './attentionReplayResources', './attentionQuestCandidateScenario',
+          ],
+          'attentionNarrativePatternScenario.ts': [
+            './attentionPatternEvidenceContracts', './attentionPatternEvidenceAccessor',
+            './attentionNarrativePatternMonitor',
+          ],
+        }
+        const additions = Object.entries(COMMITTED_AT_BASELINE).flatMap(([fileName, committed]) => (
+          (ALLOWED_IMPORT_SPECIFIERS[fileName] ?? [])
+            .filter((specifier) => !committed.includes(specifier))
+            .map((specifier) => `${fileName} -> ${specifier}`)
+        ))
+        expect(additions.sort()).toEqual([
+          'attentionReplay.ts -> ./attentionNarrativePatternMonitor',
+          'attentionReplay.ts -> ./attentionPatternEvidenceContracts',
+          'attentionReplayScenario.ts -> ./attentionNarrativePatternScenario',
+          'attentionReplayScenario.ts -> ./attentionPatternEvidenceContracts',
+        ])
+        // No entry lost a committed specifier either.
+        for (const [fileName, committed] of Object.entries(COMMITTED_AT_BASELINE)) {
+          expect({ fileName, missing: committed.filter((s) => !(ALLOWED_IMPORT_SPECIFIERS[fileName] ?? []).includes(s)) })
+            .toEqual({ fileName, missing: [] })
+        }
+        // No barrel, dynamic import, require, eval, or indirect module lookup
+        // was introduced in the derivation's own module.
+        expect(replaySource).not.toMatch(/\bimport\s*\(/)
+        expect(replaySource).not.toMatch(/\brequire\s*\(/)
+        expect(replaySource).not.toMatch(/\beval\s*\(/)
+        expect(replaySource).not.toMatch(/createRequire|module\.constructor/)
+      })
+    })
+
+    it('applyMixedFamilyCandidateCap remains the only cap enforcement route, and the separate ranking dependency read remains', () => {
+      // The evaluator invokes the committed cap function and neither reads the
+      // numeric policy field directly nor reimplements the slice.
+      const seam = functionBody('runAttentionMixedFamilyEvaluation')
+      expect(seam).toMatch(/applyMixedFamilyCandidateCap\s*\(/)
+      expect(seam).not.toMatch(/mixedFamilyCandidatesAfterOrdering/)
+      expect(seam).not.toMatch(/\.slice\s*\(\s*0\s*,/)
+      // Only the committed cap function enforces the cap.
+      const capOwner = readStrippedSource('attentionNarrativePatternResourcePolicy.ts')
+      expect(capOwner).toMatch(/function applyMixedFamilyCandidateCap/)
+      expect(replaySource).not.toMatch(/function applyMixedFamilyCandidateCap/)
+
+      // RN019 §9.3's declared ranking dependency read is a *second legitimate*
+      // read of the same value. This suite deliberately does NOT assert one
+      // repository-wide reader: that claim is false at the committed baseline
+      // and would force deleting a required dependency (plan §11.5, §11.6 item 15).
+      const rankingState = readStrippedSource('attentionCandidateCacheKey.ts')
+      expect(rankingState).toMatch(/attentionCandidateRankingEligibilityResourceState/)
+      expect(rankingState).toMatch(/mixedFamilyCandidatesAfterOrdering/)
+    })
   })
 })
 

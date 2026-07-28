@@ -327,6 +327,35 @@ export interface AttentionTracePatternPresentationDecision {
   readonly ledgerAppend: 'appended' | 'not-appended'
 }
 
+/** B6 trusted-only evidence produced by the mixed evaluator; it is never projected to players. */
+export type AttentionTraceMixedFamilyArbitrationOutcome =
+  | 'presented'
+  | 'revalidation-refused'
+  | 'assertion-build-refused'
+  | 'package-refused'
+  | 'render-refused'
+  | 'ledger-append-refused'
+  | 'not-attempted'
+
+export interface AttentionTraceMixedFamilyArbitrationAttempt {
+  readonly candidateId: string
+  readonly sourceKind: AttentionTraceSourceKind
+  readonly rankPosition: number
+  readonly outcome: AttentionTraceMixedFamilyArbitrationOutcome
+  readonly refusalReason: string | null
+  readonly continued: boolean
+  readonly ledgerAppend: 'appended' | 'not-appended'
+}
+
+export interface AttentionTraceMixedFamilyArbitration {
+  readonly rankedCandidateIds: readonly string[]
+  readonly attempts: readonly AttentionTraceMixedFamilyArbitrationAttempt[]
+  readonly winnerCandidateId: string | null
+  readonly winnerSourceKind: AttentionTraceSourceKind | null
+  readonly presentationSlotConsumed: boolean
+  readonly successfulPresentationCount: number
+}
+
 /**
  * The A′-equivalence premise-check result, present only for paired-world (P3)
  * fixtures. From B4 the digests cover the complete v2 surface — all three
@@ -393,6 +422,8 @@ export interface AttentionTraceInput {
   readonly presentations: readonly AttentionTracePresentationEntry[]
   readonly revalidations: readonly AttentionTraceRevalidationEntry[]
   readonly patternPresentationDecisions?: readonly AttentionTracePatternPresentationDecision[]
+  /** Optional B6 trusted-only mixed-evaluator evidence. */
+  readonly mixedFamilyArbitration?: AttentionTraceMixedFamilyArbitration
   readonly authoritativeLogDigestBefore: string
   readonly authoritativeLogDigestAfter: string
   readonly p3PremiseCheck?: AttentionTraceP3PremiseCheck
@@ -456,6 +487,7 @@ export type AttentionTraceRefusal =
   | 'missing-structural-retention'
   | 'mixed-trace-candidate-entry'
   | 'invalid-pattern-presentation-decision'
+  | 'invalid-mixed-family-arbitration'
 
 export type AttentionTraceResult =
   | { readonly kind: 'ok'; readonly trace: AttentionTrace }
@@ -536,6 +568,39 @@ function isWellFormedPatternPresentationDecision(
   return true
 }
 
+function isWellFormedMixedFamilyArbitration(
+  arbitration: AttentionTraceMixedFamilyArbitration,
+  presentations: readonly AttentionTracePresentationEntry[],
+): boolean {
+  if (typeof arbitration !== 'object' || arbitration === null) return false
+  if (!Array.isArray(arbitration.rankedCandidateIds) || !Array.isArray(arbitration.attempts)) return false
+  if (arbitration.rankedCandidateIds.some((id) => !isPresent(id))) return false
+  if (arbitration.successfulPresentationCount !== 0 && arbitration.successfulPresentationCount !== 1) return false
+  const presented = arbitration.attempts.filter((attempt) => attempt.outcome === 'presented')
+  if (presented.length !== arbitration.successfulPresentationCount) return false
+  if (presentations.length !== arbitration.successfulPresentationCount) return false
+  if (arbitration.presentationSlotConsumed !== (arbitration.successfulPresentationCount === 1)) return false
+  if ((arbitration.winnerCandidateId === null) !== (arbitration.successfulPresentationCount === 0)) return false
+  if ((arbitration.winnerSourceKind === null) !== (arbitration.successfulPresentationCount === 0)) return false
+  let winnerPosition = -1
+  for (const attempt of arbitration.attempts) {
+    if (!isPresent(attempt.candidateId)) return false
+    if (attempt.sourceKind !== 'quest_candidate' && attempt.sourceKind !== 'narrative_pattern_instance') return false
+    if (!Number.isSafeInteger(attempt.rankPosition) || attempt.rankPosition < 0) return false
+    if (arbitration.rankedCandidateIds[attempt.rankPosition] !== attempt.candidateId) return false
+    if (attempt.ledgerAppend !== 'appended' && attempt.ledgerAppend !== 'not-appended') return false
+    if (attempt.outcome === 'presented') {
+      if (attempt.refusalReason !== null || attempt.ledgerAppend !== 'appended' || attempt.continued) return false
+      winnerPosition = attempt.rankPosition
+      if (attempt.candidateId !== arbitration.winnerCandidateId || attempt.sourceKind !== arbitration.winnerSourceKind) return false
+    } else if (attempt.ledgerAppend !== 'not-appended') return false
+  }
+  if (winnerPosition >= 0 && arbitration.attempts.some((attempt) => (
+    attempt.rankPosition > winnerPosition && attempt.outcome !== 'not-attempted'
+  ))) return false
+  return true
+}
+
 function playerObservableSubtrace(input: AttentionTraceInput): AttentionTracePlayerObservableSubtrace {
   return Object.freeze({
     rankingSnapshotLsn: input.rankingSnapshotLsn,
@@ -605,6 +670,10 @@ export function buildAttentionTrace(input: AttentionTraceInput): AttentionTraceR
   ) {
     return { kind: 'refused', reason: 'invalid-pattern-presentation-decision' }
   }
+  if (
+    input.mixedFamilyArbitration !== undefined
+    && !isWellFormedMixedFamilyArbitration(input.mixedFamilyArbitration, input.presentations)
+  ) return { kind: 'refused', reason: 'invalid-mixed-family-arbitration' }
 
   const withoutIdentity = {
     ...input,
