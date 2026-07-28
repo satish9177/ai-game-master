@@ -1351,12 +1351,18 @@ describe('B4 / P1 — the trusted trace and replay path stay singular and patter
       expect(rawUseAt).toBeGreaterThan(boundaryCall)
 
       // (2) Boundary strictly before reconstruction, and reconstruction consumes
-      //     the accepted surface views.
-      const reconstructAt = seam.indexOf('reconstructRetainedPatterns(\n      revalidatedPatternSurface.surface.patternEvidenceViews')
+      //     the accepted surface views. Located structurally rather than by an
+      //     exact source literal: `\s*` spans the intervening line break under
+      //     both LF and CRLF, so this holds on any fresh checkout as well as in
+      //     an already-materialised tree (the repository sets core.autocrlf=true
+      //     and carries no .gitattributes, so a clean checkout of
+      //     attentionReplay.ts is CRLF; a hard-coded "\n" here silently matched
+      //     nothing and reported -1).
+      const reconstructionConsumesAcceptedViews =
+        /reconstructRetainedPatterns\(\s*revalidatedPatternSurface\.surface\.patternEvidenceViews/
+      const reconstructAt = seam.search(reconstructionConsumesAcceptedViews)
+      expect(seam).toMatch(reconstructionConsumesAcceptedViews)
       expect(reconstructAt).toBeGreaterThan(boundaryCall)
-      expect(seam).toMatch(
-        /reconstructRetainedPatterns\(\s*revalidatedPatternSurface\.surface\.patternEvidenceViews/,
-      )
 
       // (3) Retention follows reconstruction (proven inside the committed helper).
       const helperBody = privateFunctionBody('reconstructRetainedPatterns')
