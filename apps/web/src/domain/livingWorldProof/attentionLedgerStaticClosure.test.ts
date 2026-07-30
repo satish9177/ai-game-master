@@ -84,6 +84,7 @@ const STAGE_A_PROOF_MODULES = [
   'attentionInferenceProvenance.ts',
   'attentionAggregateLegitimacy.ts',
   'attentionInferenceScenario.ts',
+  'attentionPrivateStateScenario.ts',
 ] as const
 
 /**
@@ -299,6 +300,7 @@ const ALLOWED_IMPORT_SPECIFIERS: Record<string, readonly string[]> = {
     './attentionInferenceProvenance',
   ],
   'attentionInferenceScenario.ts': ['./attentionDirectEvidenceAssertion'],
+  'attentionPrivateStateScenario.ts': [],
 }
 
 /**

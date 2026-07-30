@@ -36,6 +36,11 @@ import type {
   AttentionReadablePatternEvidenceView,
   ProofPatternEvidenceRecordInput,
 } from './attentionPatternEvidenceContracts'
+import {
+  privateBelief,
+  privateIntentionCommitment,
+  unobservedTruthEvent,
+} from './attentionPrivateStateScenario'
 
 /**
  * A5 — P3: A′-equivalent world pairs, including the mandatory hidden
@@ -451,6 +456,33 @@ describe('B6 / P3 — mixed-family readable-surface equivalence over both candid
     expect(canonicalSerialize(resultB.ledger)).toBe(canonicalSerialize(resultA.ledger))
     // The premise is trusted-only and never reaches the player projection.
     expect(resultA.trace.playerObservable).not.toHaveProperty('p3PremiseCheck')
+  })
+
+  const C8_PRIVATE_STATE_PAIRS = Object.freeze([
+    ['P3-1 private Belief', privateBelief({ holderId: 'a', proposition: 'private-belief-a', confidence: 2 }), privateBelief({ holderId: 'a', proposition: 'private-belief-b', confidence: 9 })],
+    ['P3-2 private IntentionCommitment', privateIntentionCommitment({ holderId: 'b', goal: 'private-goal-a', commitmentState: 'formed' }), privateIntentionCommitment({ holderId: 'b', goal: 'private-goal-b', commitmentState: 'abandoned' })],
+    ['P3-3 unobserved TruthEvent', unobservedTruthEvent({ eventKind: 'private-event-a', participantIds: ['a', 'b'], observationRecord: null }), unobservedTruthEvent({ eventKind: 'private-event-b', participantIds: ['b', 'c'], observationRecord: null })],
+  ] as const)
+
+  it.each(C8_PRIVATE_STATE_PAIRS)('%s differs only outside A-prime and keeps the observable trace byte-identical', (_label, privateLeft, privateRight) => {
+    expect(canonicalSerialize(privateLeft)).not.toBe(canonicalSerialize(privateRight))
+    const visibleViews = mintPatternEvidenceViews(VISIBLE_PATTERN_RECORDS)
+    const premise = derivePremise(constructAPrimeSurface(visibleViews), constructAPrimeSurface(visibleViews))
+    expect(premise.equivalent).toBe(true)
+    const left = evaluateWorld('c8-typed-private-p3', visibleViews, premise)
+    const right = evaluateWorld('c8-typed-private-p3', visibleViews, premise)
+    expect(canonicalSerialize(left.trace.playerObservable)).toBe(canonicalSerialize(right.trace.playerObservable))
+  })
+
+  it.each(C8_PRIVATE_STATE_PAIRS)('%s premise-boundary control rejects an illegal private-to-public adapter before comparison', (label) => {
+    const legalViews = mintPatternEvidenceViews(VISIBLE_PATTERN_RECORDS)
+    const illegallyAdmitted = mintPatternEvidenceViews([
+      ...VISIBLE_PATTERN_RECORDS,
+      aidRecord(`c8-illegal-${label}`, 31, 'private-a', 'private-b'),
+    ])
+    const premise = derivePremise(constructAPrimeSurface(illegallyAdmitted), constructAPrimeSurface(legalViews))
+    expect(premise.equivalent).toBe(false)
+    expect(premise.leftAPrimeDigest).not.toBe(premise.rightAPrimeDigest)
   })
 
   it('Control A — illegally admitting the hidden evidence before the premise makes the A′ bytes and identities differ, and stops there', () => {
