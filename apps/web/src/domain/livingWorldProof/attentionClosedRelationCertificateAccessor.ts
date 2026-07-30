@@ -13,6 +13,12 @@ import { isAttentionReadablePatternEvidenceViewFromAccessor } from './attentionP
 
 const MARKER: unique symbol = Symbol('attentionClosedRelationCertificate.accessorMint')
 const MINTED = new WeakSet<object>()
+/**
+ * The certificate exposes identities only.  The matching predicate is evaluated
+ * through this accessor-owned resource, never from a caller claim or an ambient
+ * store read.
+ */
+const CERTIFIED_ADMITTED_RECORDS = new WeakMap<object, readonly AttentionReadablePatternEvidenceView[]>()
 
 export type AttentionClosedRelationCertificateRefusal =
   | 'absence_relation_not_closed'
@@ -35,21 +41,43 @@ export function readAttentionReadableClosedRelationCertificate(input: {
   readonly patternEvidenceViews: readonly AttentionReadablePatternEvidenceView[]
 }): AttentionClosedRelationCertificateResult {
   if (!Number.isSafeInteger(input.snapshotLsn) || !Number.isSafeInteger(input.fromLsn) || !Number.isSafeInteger(input.toLsn)
-    || input.snapshotLsn < 0 || input.fromLsn < 0 || input.toLsn < input.fromLsn) {
+    || input.snapshotLsn < 0 || input.fromLsn < 0 || input.toLsn < input.fromLsn || input.toLsn > input.snapshotLsn) {
     return { kind: 'refused', reason: 'absence_window_incomplete' }
   }
-  if (!Array.isArray(input.patternEvidenceViews) || input.patternEvidenceViews.length > ATTENTION_ABSENCE_INTERVAL_MAX_RECORDS) {
+  if (!Array.isArray(input.patternEvidenceViews)) {
     return { kind: 'refused', reason: 'absence_relation_not_closed' }
   }
   if (!input.patternEvidenceViews.every(isAttentionReadablePatternEvidenceViewFromAccessor)) {
     return { kind: 'refused', reason: 'absence_completeness_certificate_missing' }
   }
-  const admitted = input.patternEvidenceViews.filter(isAid)
+  const completeAdmitted = input.patternEvidenceViews.slice()
+    .sort((left, right) => left.commitLsn - right.commitLsn || (left.recordId < right.recordId ? -1 : left.recordId > right.recordId ? 1 : 0))
+  if (new Set(completeAdmitted.map((view) => view.recordId)).size !== completeAdmitted.length
+    || completeAdmitted.some((view) => view.commitLsn > input.snapshotLsn)) {
+    return { kind: 'refused', reason: 'absence_relation_not_closed' }
+  }
+  const dropped = completeAdmitted.slice(0, Math.max(0, completeAdmitted.length - ATTENTION_ABSENCE_INTERVAL_MAX_RECORDS))
+  // A requested interval that reaches any discarded predecessor is not fully
+  // enumerable under the fixed newest-32 admission policy.
+  if (dropped.some((view) => view.commitLsn >= input.fromLsn)) {
+    return { kind: 'refused', reason: 'absence_window_incomplete' }
+  }
+  const admittedWindow = completeAdmitted.slice(-ATTENTION_ABSENCE_INTERVAL_MAX_RECORDS)
+  // Pattern A-prime inputs may already be the accessor's newest-32 suffix.  If
+  // that full suffix begins after the requested lower bound, the omitted prefix
+  // is unknowable here and absence must not be inferred from its nonappearance.
+  if (admittedWindow.length === ATTENTION_ABSENCE_INTERVAL_MAX_RECORDS
+    && admittedWindow[0]!.commitLsn > input.fromLsn) {
+    return { kind: 'refused', reason: 'absence_window_incomplete' }
+  }
+  const admitted = admittedWindow.filter(isAid)
     .filter((view) => view.commitLsn >= input.fromLsn && view.commitLsn <= input.toLsn)
     .slice()
     .sort((left, right) => left.recordId < right.recordId ? -1 : left.recordId > right.recordId ? 1 : 0)
   const ids = admitted.map((view) => view.recordId)
-  const ticks = admitted.map((view) => view.worldTimeTick)
+  const ticks = admittedWindow
+    .filter((view) => view.commitLsn >= input.fromLsn && view.commitLsn <= input.toLsn)
+    .map((view) => view.worldTimeTick)
   const admittedRecordDigest = mintHash(canonicalSerialize(ids))
   const fields = {
     certificateContractVersion: ATTENTION_CLOSED_RELATION_CERTIFICATE_ACCESSOR_VERSION,
@@ -69,6 +97,7 @@ export function readAttentionReadableClosedRelationCertificate(input: {
   const certificate = { ...fields, certificateId } as AttentionReadableClosedRelationCertificateView
   Object.defineProperty(certificate, MARKER, { value: true, enumerable: false })
   MINTED.add(certificate)
+  CERTIFIED_ADMITTED_RECORDS.set(certificate, Object.freeze(admitted))
   return { kind: 'ok', certificate: Object.freeze(certificate) }
 }
 
@@ -77,4 +106,16 @@ export function isAttentionReadableClosedRelationCertificateFromAccessor(
 ): value is AttentionReadableClosedRelationCertificateView {
   return typeof value === 'object' && value !== null && MINTED.has(value)
     && Object.getOwnPropertyDescriptor(value, MARKER)?.value === true
+}
+
+/**
+ * Read the complete, already-admitted relation members named by a certificate.
+ * This resource seam deliberately returns `undefined` for every copied,
+ * forged, malformed, or foreign certificate.
+ */
+export function readAttentionCertifiedClosedRelationRecords(
+  certificate: AttentionReadableClosedRelationCertificateView,
+): readonly AttentionReadablePatternEvidenceView[] | undefined {
+  if (!isAttentionReadableClosedRelationCertificateFromAccessor(certificate)) return undefined
+  return CERTIFIED_ADMITTED_RECORDS.get(certificate)
 }

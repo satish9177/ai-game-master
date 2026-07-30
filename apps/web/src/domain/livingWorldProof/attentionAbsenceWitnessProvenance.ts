@@ -7,6 +7,10 @@ import {
   isStructurallyValidAttentionReadableClosedRelationCertificateView,
 } from './attentionClosedRelationCertificateContracts'
 import type { AttentionReadableClosedRelationCertificateView } from './attentionClosedRelationCertificateContracts'
+import {
+  isAttentionReadableClosedRelationCertificateFromAccessor,
+  readAttentionCertifiedClosedRelationRecords,
+} from './attentionClosedRelationCertificateAccessor'
 import { NO_RECORDED_PUBLIC_AID_BETWEEN_V1 } from './attentionAbsencePredicateLibrary'
 
 export type AbsenceWitnessPolicyRef = 'absence-witness-disabled-v0' | 'absence-witness-c2-v1'
@@ -53,18 +57,18 @@ export function buildAttentionAbsenceWitnessProvenance(input: {
   readonly certificate: AttentionReadableClosedRelationCertificateView | undefined
   readonly entityA: string
   readonly entityB: string
-  /** Predicate evaluation is supplied from admitted relation traversal only. */
-  readonly matchingRecordExists?: boolean
 }): AttentionAbsenceWitnessBuildResult {
   if (input.policyRef !== 'absence-witness-c2-v1') return { kind: 'refused', reason: 'absence_completeness_certificate_missing' }
   if (input.certificate === undefined) return { kind: 'refused', reason: 'absence_completeness_certificate_missing' }
   if (!isStructurallyValidAttentionReadableClosedRelationCertificateView(input.certificate)) {
     return { kind: 'refused', reason: 'absence_certificate_not_structural' }
   }
+  if (!isAttentionReadableClosedRelationCertificateFromAccessor(input.certificate)) {
+    return { kind: 'refused', reason: 'absence_certificate_not_structural' }
+  }
   if (!present(input.entityA) || !present(input.entityB) || input.entityA === input.entityB) {
     return { kind: 'refused', reason: 'absence_certificate_not_structural' }
   }
-  if (input.matchingRecordExists === true) return { kind: 'refused', reason: 'absence_match_exists' }
   const boundEntities = input.entityA < input.entityB ? [input.entityA, input.entityB] as const : [input.entityB, input.entityA] as const
   if (input.certificate.closedRelationId !== ATTENTION_CLOSED_RELATION_ID
     || input.certificate.relationSemanticVersion !== ATTENTION_CLOSED_RELATION_SEMANTIC_VERSION) {
@@ -73,6 +77,22 @@ export function buildAttentionAbsenceWitnessProvenance(input: {
   if (input.certificate.completenessPolicyHash !== ATTENTION_ABSENCE_COMPLETENESS_POLICY_HASH) {
     return { kind: 'refused', reason: 'absence_completeness_certificate_missing' }
   }
+  const admitted = readAttentionCertifiedClosedRelationRecords(input.certificate)
+  if (admitted === undefined) return { kind: 'refused', reason: 'absence_certificate_not_structural' }
+  const actualIds = admitted.map((view) => view.recordId).slice().sort()
+  if (canonicalSerialize(actualIds) !== canonicalSerialize(input.certificate.admittedRecordIds)
+    || mintHash(canonicalSerialize(actualIds)) !== input.certificate.admittedRecordDigest) {
+    return { kind: 'refused', reason: 'absence_certificate_not_structural' }
+  }
+  const matching = admitted.some((view) => (
+    view.recordKind === 'observable_action'
+    && view.actionCode === 'aid'
+    && view.commitLsn >= input.certificate.fromLsn
+    && view.commitLsn <= input.certificate.toLsn
+    && ((view.actorId === boundEntities[0] && view.targetId === boundEntities[1])
+      || (view.actorId === boundEntities[1] && view.targetId === boundEntities[0]))
+  ))
+  if (matching) return { kind: 'refused', reason: 'absence_match_exists' }
   const predicateContentHash = mintHash(canonicalSerialize(NO_RECORDED_PUBLIC_AID_BETWEEN_V1))
   const provenance: AttentionAbsenceWitnessProvenance = Object.freeze({
     kind: 'absence_witness', predicateId: NO_RECORDED_PUBLIC_AID_BETWEEN_V1.predicateId,
