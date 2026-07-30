@@ -72,6 +72,8 @@ import {
 import type { AttentionCandidateSourceKind } from './attentionCandidatePolicy'
 import { canonicalSerialize } from './canonicalSerialization'
 import type { AttentionCandidate } from './attentionCandidate'
+import { resolveAttentionScoreComponents } from './attentionScorePolicy'
+import type { AttentionCandidateScoreComponents, AttentionDeclaredScoreFeatures, ScorePolicyRef } from './attentionScorePolicy'
 
 export type AttentionCandidateOrderingKey =
   | 'eligibility'
@@ -91,7 +93,13 @@ export const ATTENTION_QUEST_EMPTY_TUPLE_BYTES = canonicalSerialize(Object.freez
 /** The fixed deterministic proof score for every candidate (RN019 §9.2). */
 export const ATTENTION_CANDIDATE_PROOF_SCORE = 0
 
-export type AttentionCandidateOrderingRefusal = 'ordering-tie-not-total'
+export type AttentionCandidateOrderingRefusal =
+  | 'ordering-tie-not-total'
+  | 'missing-score-feature-input'
+  | 'duplicate-score-feature-input'
+  | 'unknown-score-feature-input'
+  | 'invalid-score-feature-input'
+  | 'unsupported-score-policy'
 
 /** One adjacent-pair comparison from the ordered sequence, for trace evidence. */
 export interface AttentionCandidateOrderingComparison {
@@ -109,6 +117,8 @@ export type AttentionCandidateOrderingResult =
       readonly orderingVersion: string
       readonly orderedCandidates: readonly AttentionCandidate[]
       readonly comparisons: readonly AttentionCandidateOrderingComparison[]
+      /** Present only for an activated C9 score policy; never derived from candidate state. */
+      readonly scoreComponents?: readonly AttentionCandidateScoreComponents[]
     }
   | { readonly kind: 'refused'; readonly reason: AttentionCandidateOrderingRefusal }
 
@@ -271,19 +281,54 @@ export function resolveAttentionCandidateOrderingKey(
  */
 export function orderAttentionCandidates(
   attentionCandidates: readonly AttentionCandidate[],
+  scoreInput?: {
+    readonly policyRef: ScorePolicyRef
+    readonly declaredFeatures: readonly AttentionDeclaredScoreFeatures[]
+  },
 ): AttentionCandidateOrderingResult {
-  const orderedCandidates = [...attentionCandidates].sort(compareAttentionCandidates)
+  const resolvedScores = scoreInput === undefined
+    ? undefined
+    : resolveAttentionScoreComponents({
+      candidateIds: attentionCandidates.map((candidate) => candidate.candidateId),
+      policyRef: scoreInput.policyRef,
+      declaredFeatures: scoreInput.declaredFeatures,
+    })
+  if (resolvedScores !== undefined && resolvedScores.kind === 'refused') return resolvedScores
+  const scoreOf = (candidate: AttentionCandidate): number => (
+    resolvedScores === undefined
+      ? ATTENTION_CANDIDATE_PROOF_SCORE
+      : resolvedScores.componentsByCandidateId.get(candidate.candidateId)!.proofScore
+  )
+  const scoreComponents = Object.freeze(attentionCandidates.map((candidate) => {
+    const resolved = resolvedScores === undefined
+      ? { publicStakesBand: 0, worldTimeRecencyBand: 0, proofScore: ATTENTION_CANDIDATE_PROOF_SCORE }
+      : resolvedScores.componentsByCandidateId.get(candidate.candidateId)!
+    return Object.freeze({ candidateId: candidate.candidateId, ...resolved })
+  }).sort((left, right) => left.candidateId < right.candidateId ? -1 : left.candidateId > right.candidateId ? 1 : 0))
+  const compare = (left: AttentionCandidate, right: AttentionCandidate): number => {
+    const eligibility = (left.eligibility === 'eligible' ? 0 : 1) - (right.eligibility === 'eligible' ? 0 : 1)
+    if (eligibility !== 0) return eligibility
+    const score = scoreOf(right) - scoreOf(left)
+    return score !== 0 ? score : compareAttentionCandidates(left, right)
+  }
+  const orderedCandidates = [...attentionCandidates].sort(compare)
 
   const comparisons: AttentionCandidateOrderingComparison[] = []
   for (let index = 0; index < orderedCandidates.length - 1; index += 1) {
     const left = orderedCandidates[index]!
     const right = orderedCandidates[index + 1]!
-    const decidingKey = resolveAttentionCandidateOrderingKey(left, right)
+    const decidingKey = left.eligibility !== right.eligibility
+      ? 'eligibility'
+      : scoreOf(left) !== scoreOf(right)
+        ? 'proof-score'
+        : resolveAttentionCandidateOrderingKey(left, right)
     if (decidingKey === null) {
       return { kind: 'refused', reason: 'ordering-tie-not-total' }
     }
     const cutoff = ATTENTION_CANDIDATE_ORDERING_KEYS.indexOf(decidingKey)
-    const valueOf = ORDERING_KEY_RULES[cutoff]![2]
+    const valueOf = decidingKey === 'proof-score'
+      ? (candidate: AttentionCandidate) => String(scoreOf(candidate))
+      : ORDERING_KEY_RULES[cutoff]![2]
     comparisons.push(Object.freeze({
       leftCandidateId: left.candidateId,
       rightCandidateId: right.candidateId,
@@ -299,5 +344,6 @@ export function orderAttentionCandidates(
     orderingVersion: ATTENTION_CANDIDATE_ORDERING_VERSION,
     orderedCandidates: Object.freeze(orderedCandidates),
     comparisons: Object.freeze(comparisons),
+    ...(resolvedScores === undefined ? {} : { scoreComponents }),
   }
 }

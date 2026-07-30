@@ -45,6 +45,7 @@ import {
 import { computeAttentionCandidateIdentity } from './attentionCandidateIdentity'
 import { ATTENTION_INFERENCE_PROVENANCE_POLICY } from './attentionInferenceProvenancePolicy'
 import { ATTENTION_AGGREGATION_RULE_LIBRARY_VERSION_HASH } from './attentionInferenceRuleLibrary'
+import { resolveAttentionScoreComponents } from './attentionScorePolicy'
 
 /**
  * A3 + B4 — the two separately-keyed cache identities, built from the explicit
@@ -235,11 +236,11 @@ describe('B4 / RN019 §9.3 — the derivation bundle is the closed thirteen-fiel
   it('bumps the derivation and ranking key schemas to their explicit versioned strings', () => {
     expect(ATTENTION_CANDIDATE_DERIVATION_CACHE_KEY_SCHEMA_VERSION)
       .toBe('attention-candidate-derivation-cache-key-v3')
-    // B5 adds new ledger/presentation members to the ranking-only eligibility
-    // state (never to the derivation bundle), a shape change bumping ranking
-    // alone to v3 while derivation stays v2.
+    // C9 adds only declared ranking features to the ranking-only eligibility
+    // state (never to the derivation bundle), so ranking alone transitions v3
+    // to v4 while derivation remains v3.
     expect(ATTENTION_CANDIDATE_RANKING_CACHE_KEY_SCHEMA_VERSION)
-      .toBe('attention-candidate-ranking-cache-key-v3')
+      .toBe('attention-candidate-ranking-cache-key-v4')
   })
 
   it('has a variation case for every declared field, so none is unwitnessed', () => {
@@ -399,6 +400,7 @@ describe('B4 / K2 — every ranking-only dependency moves only the ranking key',
     expect(Object.keys(bundle).sort())
       .toEqual(['derivation', 'eligibilityResourceState', 'orderingVersion', 'rankingPolicyHash'])
     expect(Object.keys(bundle.eligibilityResourceState).sort()).toEqual([
+      'declaredScoreFeatures',
       'directEvidenceAssertionIdentityVersion',
       'exposurePolicyVersion',
       'mixedFamilyCandidateCap',
@@ -408,6 +410,7 @@ describe('B4 / K2 — every ranking-only dependency moves only the ranking key',
       'rankableClasses',
       'relevantLedgerDigest',
       'retentionClassOrder',
+      'scorePolicyRef',
     ])
 
     const result = rankingKeysOrThrow(ranking())
@@ -440,6 +443,85 @@ describe('B4 / K2 — every ranking-only dependency moves only the ranking key',
       ranking({ eligibilityResourceState: withMissingField as never }),
     )
     expect(result).toEqual({ kind: 'refused', reason: 'missing-eligibility-resource-state' })
+  })
+
+  it('moves only the ranking key when either declared C9 band moves', () => {
+    const c9 = (publicStakesBand: number, worldTimeRecencyBand: number) => ranking({
+      eligibilityResourceState: attentionCandidateRankingEligibilityResourceState({
+        scorePolicyRef: 'score-discriminating-c9-v1',
+        declaredScoreFeatures: [{ candidateId: 'c9-candidate', publicStakesBand, worldTimeRecencyBand }],
+      }),
+    })
+    const baselineC9 = rankingKeysOrThrow(c9(1, 1))
+    const stakesChanged = rankingKeysOrThrow(c9(2, 1))
+    const recencyChanged = rankingKeysOrThrow(c9(1, 2))
+
+    expect(stakesChanged.rankingCacheKey).not.toBe(baselineC9.rankingCacheKey)
+    expect(recencyChanged.rankingCacheKey).not.toBe(baselineC9.rankingCacheKey)
+    expect(stakesChanged.derivationCacheKey).toBe(baselineC9.derivationCacheKey)
+    expect(recencyChanged.derivationCacheKey).toBe(baselineC9.derivationCacheKey)
+    expect(computeAttentionCandidateIdentity({
+      sourceKind: 'quest_candidate', sourceId: 'quest-public-open', openingProvenanceId: 'consequence-public-37',
+    })).toBe(PINNED_CANDIDATE_IDENTITY)
+  })
+
+  it('canonicalizes declared feature entry order by candidate identity before keying', () => {
+    const forward = rankingKeysOrThrow(ranking({
+      eligibilityResourceState: attentionCandidateRankingEligibilityResourceState({
+        scorePolicyRef: 'score-discriminating-c9-v1',
+        declaredScoreFeatures: [
+          { candidateId: 'candidate-a', publicStakesBand: 0, worldTimeRecencyBand: 1 },
+          { candidateId: 'candidate-b', publicStakesBand: 2, worldTimeRecencyBand: 3 },
+        ],
+      }),
+    }))
+    const reversed = rankingKeysOrThrow(ranking({
+      eligibilityResourceState: attentionCandidateRankingEligibilityResourceState({
+        scorePolicyRef: 'score-discriminating-c9-v1',
+        declaredScoreFeatures: [
+          { candidateId: 'candidate-b', publicStakesBand: 2, worldTimeRecencyBand: 3 },
+          { candidateId: 'candidate-a', publicStakesBand: 0, worldTimeRecencyBand: 1 },
+        ],
+      }),
+    }))
+    expect(reversed.rankingCacheKey).toBe(forward.rankingCacheKey)
+  })
+
+  it('C9 ranking-input sensitivity changes exactly one declared band, not a P3 world pair', () => {
+    const scoreOf = (publicStakesBand: number) => {
+      const result = resolveAttentionScoreComponents({
+        candidateIds: ['c9-candidate'], policyRef: 'score-discriminating-c9-v1',
+        declaredFeatures: [{ candidateId: 'c9-candidate', publicStakesBand, worldTimeRecencyBand: 1 }],
+      })
+      if (result.kind !== 'ok') throw new Error(result.reason)
+      return result.componentsByCandidateId.get('c9-candidate')!.proofScore
+    }
+    const baselineC9 = rankingKeysOrThrow(ranking({
+      eligibilityResourceState: attentionCandidateRankingEligibilityResourceState({
+        scorePolicyRef: 'score-discriminating-c9-v1',
+        declaredScoreFeatures: [{ candidateId: 'c9-candidate', publicStakesBand: 1, worldTimeRecencyBand: 1 }],
+      }),
+    }))
+    const changedC9 = rankingKeysOrThrow(ranking({
+      eligibilityResourceState: attentionCandidateRankingEligibilityResourceState({
+        scorePolicyRef: 'score-discriminating-c9-v1',
+        declaredScoreFeatures: [{ candidateId: 'c9-candidate', publicStakesBand: 2, worldTimeRecencyBand: 1 }],
+      }),
+    }))
+
+    expect(scoreOf(2)).toBe(scoreOf(1) + 3)
+    expect(changedC9.rankingCacheKey).not.toBe(baselineC9.rankingCacheKey)
+    expect(changedC9.derivationCacheKey).toBe(baselineC9.derivationCacheKey)
+  })
+
+  it.each([
+    { scorePolicyRef: 'score-discriminating-c9-v1', declaredScoreFeatures: [{ candidateId: 'x', publicStakesBand: 3, worldTimeRecencyBand: 0 }] },
+    { scorePolicyRef: 'score-discriminating-c9-v1', declaredScoreFeatures: [{ candidateId: 'x', publicStakesBand: 0, worldTimeRecencyBand: 1.5 }] },
+    { scorePolicyRef: 'score-discriminating-c9-v1', declaredScoreFeatures: [{ candidateId: 'x', publicStakesBand: 0, worldTimeRecencyBand: 0 }, { candidateId: 'x', publicStakesBand: 1, worldTimeRecencyBand: 1 }] },
+  ])('refuses malformed C9 ranking-resource score input rather than keying it', (overrides) => {
+    expect(deriveAttentionCandidateRankingCacheKey(ranking({
+      eligibilityResourceState: attentionCandidateRankingEligibilityResourceState(overrides),
+    }))).toEqual({ kind: 'refused', reason: 'missing-eligibility-resource-state' })
   })
 
   it('refuses an unsupported ordering version rather than reinterpreting a v1 key as v2', () => {

@@ -71,6 +71,7 @@ import { normalizeAttentionCandidates } from './attentionCandidate'
 import type { AttentionCandidate } from './attentionCandidate'
 import type { AttentionPatternCandidate } from './attentionCandidate'
 import {
+  ATTENTION_CANDIDATE_PROOF_SCORE,
   attentionCandidateOrderingKeyValue,
   orderAttentionCandidates,
 } from './attentionCandidateOrdering'
@@ -131,6 +132,7 @@ import {
 import { evaluateAttentionAggregateLegitimacy } from './attentionAggregateLegitimacy'
 import type { AggregateLegitimacyPolicyRef, AttentionAggregateSource } from './attentionAggregateLegitimacy'
 import { PUBLIC_AID_LINK_EXTENSION_V1 } from './attentionInferenceRuleLibrary'
+import type { AttentionDeclaredScoreFeatures, ScorePolicyRef } from './attentionScorePolicy'
 import type { NarrativePatternDirectEvidenceAssertionInput } from './attentionNarrativePatternContracts'
 import type { AttentionReadablePatternEvidenceView } from './attentionPatternEvidenceContracts'
 import { reconstructNarrativePatternInstances } from './attentionNarrativePatternMonitor'
@@ -756,10 +758,13 @@ function toOrderingTrace(
  * sequence. Trusted trace v2 records the complete tuple per candidate, not only
  * the key that happened to decide an adjacent comparison.
  */
-function orderingKeyValuesOf(candidate: AttentionCandidate): readonly AttentionTraceOrderingKeyValue[] {
+function orderingKeyValuesOf(
+  candidate: AttentionCandidate,
+  proofScore = ATTENTION_CANDIDATE_PROOF_SCORE,
+): readonly AttentionTraceOrderingKeyValue[] {
   return Object.freeze(ATTENTION_TRACE_ORDERING_KEYS.map((key) => Object.freeze({
     key,
-    value: attentionCandidateOrderingKeyValue(candidate, key),
+    value: key === 'proof-score' ? String(proofScore) : attentionCandidateOrderingKeyValue(candidate, key),
   })))
 }
 
@@ -772,8 +777,8 @@ function orderingKeyValuesOf(candidate: AttentionCandidate): readonly AttentionT
  * written into a pattern-named one — the union is the mechanism, not a
  * convention.
  */
-function toTraceCandidateEntry(candidate: AttentionCandidate): AttentionTraceCandidateEntry {
-  const orderingKeyValues = orderingKeyValuesOf(candidate)
+function toTraceCandidateEntry(candidate: AttentionCandidate, proofScore = ATTENTION_CANDIDATE_PROOF_SCORE): AttentionTraceCandidateEntry {
+  const orderingKeyValues = orderingKeyValuesOf(candidate, proofScore)
   if (candidate.sourceKind === 'quest_candidate') {
     return Object.freeze({
       sourceKind: 'quest_candidate' as const,
@@ -1177,6 +1182,8 @@ export interface AttentionMixedFamilyEvaluationInput {
   readonly patternPresentationLedgerPolicyVersion: string
   /** C1 activation is explicit; callers must choose disabled or the registered C1 policy. */
   readonly aggregateLegitimacyPolicyRef: AggregateLegitimacyPolicyRef
+  /** C9 ranking-only declared inputs; omitted only by pre-C9 compatibility paths. */
+  readonly scorePolicy?: { readonly policyRef: ScorePolicyRef; readonly declaredFeatures: readonly AttentionDeclaredScoreFeatures[] }
   readonly authoritativeLogDigestBefore: string
   readonly authoritativeLogDigestAfter: string
   readonly p3PremiseCheck?: AttentionTraceP3PremiseCheck
@@ -1243,8 +1250,9 @@ export function runAttentionMixedFamilyEvaluation(
   if (derivedPatterns.kind !== 'ok') return { kind: 'refused', refusal: { stage: 'monitor', reason: derivedPatterns.reason } }
   const normalized = normalizeAttentionCandidates(surface.surface, derivedPatterns.retention.retainedRankableInstances)
   if (normalized.kind !== 'ok') return { kind: 'refused', refusal: { stage: 'normalization', reason: normalized.reason } }
-  const ordered = orderAttentionCandidates(normalized.attentionCandidates)
+  const ordered = orderAttentionCandidates(normalized.attentionCandidates, input.scorePolicy)
   if (ordered.kind !== 'ok') return { kind: 'refused', refusal: { stage: 'ordering', reason: ordered.reason } }
+  const proofScoreByCandidateId = new Map((ordered.scoreComponents ?? []).map((component) => [component.candidateId, component.proofScore]))
   const capped = applyMixedFamilyCandidateCap(ordered.orderedCandidates)
   const retainedCandidates = capped.retainedCandidates
 
@@ -1393,7 +1401,9 @@ export function runAttentionMixedFamilyEvaluation(
     ledgerPolicyVersion: ATTENTION_LEDGER_POLICY_VERSION, patternPresentationLedgerPolicyVersion: input.patternPresentationLedgerPolicyVersion,
     rankingSnapshotLsn: input.request.rankingSnapshotLsn, revalidationSnapshotLsn: input.revalidationSnapshotLsn,
     admittedQuestCandidateSourceIds: attentionPrimeViewIdentities(surface.surface).questCandidateViewIdentities,
-    orderedAttentionCandidates: Object.freeze(retainedCandidates.map(toTraceCandidateEntry)), orderingTrace: toOrderingTrace(ordered.comparisons),
+    orderedAttentionCandidates: Object.freeze(retainedCandidates.map((candidate) => (
+      toTraceCandidateEntry(candidate, proofScoreByCandidateId.get(candidate.candidateId))
+    ))), orderingTrace: toOrderingTrace(ordered.comparisons),
     structuralRetention: Object.freeze({ retainedPatternInstanceIds: Object.freeze(derivedPatterns.retention.retainedInstances.map((instance) => instance.patternInstanceId)),
       droppedPatternInstanceIds: derivedPatterns.retention.droppedInstanceIds,
       mixedFamilyRetainedCandidateIds: Object.freeze(retainedCandidates.map((candidate) => candidate.candidateId)),
@@ -1407,6 +1417,17 @@ export function runAttentionMixedFamilyEvaluation(
       winnerSourceKind: presentation === null ? null : retainedCandidates.find((candidate) => candidate.candidateId === presentation.candidateId)!.sourceKind,
       presentationSlotConsumed: successfulPresentations > 0, successfulPresentationCount: successfulPresentations }),
     ...(input.p3PremiseCheck === undefined ? {} : { p3PremiseCheck: input.p3PremiseCheck }),
+    ...(input.scorePolicy === undefined ? {} : { scorePolicyEvidence: Object.freeze({
+      policyRef: input.scorePolicy.policyRef,
+      declaredFeatures: Object.freeze(ordered.scoreComponents!
+        .slice()
+        .sort((left, right) => left.candidateId < right.candidateId ? -1 : left.candidateId > right.candidateId ? 1 : 0)
+        .map((component) => Object.freeze({
+          candidateId: component.candidateId,
+          publicStakesBand: component.publicStakesBand,
+          worldTimeRecencyBand: component.worldTimeRecencyBand,
+        }))),
+    }) }),
   })
   if (trace.kind !== 'ok') return { kind: 'refused', refusal: { stage: 'trace', reason: trace.reason } }
   return { kind: 'ok', result: Object.freeze({ trace: trace.trace, ledger, surface: surface.surface,

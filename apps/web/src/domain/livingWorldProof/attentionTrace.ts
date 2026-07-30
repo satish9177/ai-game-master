@@ -373,6 +373,16 @@ export interface AttentionTraceP3PremiseCheck {
   readonly equivalent: boolean
 }
 
+/** C9 trusted-only reproducibility evidence; absent for every disabled legacy pass. */
+export interface AttentionTraceScorePolicyEvidence {
+  readonly policyRef: 'score-constant-zero-v0' | 'score-discriminating-c9-v1'
+  readonly declaredFeatures: readonly {
+    readonly candidateId: string
+    readonly publicStakesBand: number
+    readonly worldTimeRecencyBand: number
+  }[]
+}
+
 export interface AttentionTraceInput {
   readonly replayCaseId: string
   readonly accessorContractVersion: string
@@ -427,6 +437,7 @@ export interface AttentionTraceInput {
   readonly authoritativeLogDigestBefore: string
   readonly authoritativeLogDigestAfter: string
   readonly p3PremiseCheck?: AttentionTraceP3PremiseCheck
+  readonly scorePolicyEvidence?: AttentionTraceScorePolicyEvidence
 }
 
 /**

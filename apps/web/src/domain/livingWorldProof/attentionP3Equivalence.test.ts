@@ -32,6 +32,7 @@ import {
 } from './attentionReadableBoundary'
 import type { AttentionReadableSurface } from './attentionReadableBoundary'
 import { aidRecord, harmRecord, mintPatternEvidenceViews } from './attentionNarrativePatternScenario'
+import { computeAttentionCandidateIdentity } from './attentionCandidateIdentity'
 import type {
   AttentionReadablePatternEvidenceView,
   ProofPatternEvidenceRecordInput,
@@ -399,6 +400,7 @@ describe('B6 / P3 — mixed-family readable-surface equivalence over both candid
     replayCaseId: string,
     patternViews: readonly AttentionReadablePatternEvidenceView[],
     premise: ReturnType<typeof derivePremise>,
+    withC9DeclaredFeatures = false,
   ) {
     const ledger = createAttentionLedger({ ledgerPolicyVersion: ATTENTION_LEDGER_POLICY_VERSION })
     if (ledger.kind !== 'ok') throw new Error('expected ledger')
@@ -408,8 +410,28 @@ describe('B6 / P3 — mixed-family readable-surface equivalence over both candid
       questCandidates: [first, second],
       patternEvidenceViews: patternViews,
     })
-    const result = runAttentionMixedFamilyEvaluation({ ...fixture.input, p3PremiseCheck: premise })
-    if (result.kind !== 'ok') throw new Error('expected a mixed P3 evaluation')
+    const questCandidateId = (candidate: typeof first) => {
+      if (!('provenanceId' in candidate.openingProvenance)) throw new Error('expected public quest provenance')
+      return computeAttentionCandidateIdentity({
+        sourceKind: 'quest_candidate', sourceId: candidate.id,
+        openingProvenanceId: candidate.openingProvenance.provenanceId,
+      })
+    }
+    const declaredFeatures = [
+      { candidateId: questCandidateId(first), publicStakesBand: 1, worldTimeRecencyBand: 1 },
+      { candidateId: questCandidateId(second), publicStakesBand: 1, worldTimeRecencyBand: 1 },
+      ...fixture.input.patternPresentationInputs.map((entry) => ({
+        candidateId: entry.candidateId, publicStakesBand: 1, worldTimeRecencyBand: 1,
+      })),
+    ]
+    const result = runAttentionMixedFamilyEvaluation({
+      ...fixture.input,
+      p3PremiseCheck: premise,
+      ...(withC9DeclaredFeatures ? {
+        scorePolicy: { policyRef: 'score-discriminating-c9-v1' as const, declaredFeatures },
+      } : {}),
+    })
+    if (result.kind !== 'ok') throw new Error(`expected a mixed P3 evaluation: ${result.refusal.stage}:${result.refusal.reason}`)
     return result.result
   }
 
@@ -472,6 +494,22 @@ describe('B6 / P3 — mixed-family readable-surface equivalence over both candid
     const left = evaluateWorld('c8-typed-private-p3', visibleViews, premise)
     const right = evaluateWorld('c8-typed-private-p3', visibleViews, premise)
     expect(canonicalSerialize(left.trace.playerObservable)).toBe(canonicalSerialize(right.trace.playerObservable))
+  })
+
+  it('C9 P3 pair keeps byte-identical declared features and scores while private state changes', () => {
+    const privateLeft = privateBelief({ holderId: 'a', proposition: 'private-left', confidence: 1 })
+    const privateRight = privateBelief({ holderId: 'a', proposition: 'private-right', confidence: 9 })
+    expect(canonicalSerialize(privateLeft)).not.toBe(canonicalSerialize(privateRight))
+
+    const visibleViews = mintPatternEvidenceViews(VISIBLE_PATTERN_RECORDS)
+    const premise = derivePremise(constructAPrimeSurface(visibleViews), constructAPrimeSurface(visibleViews))
+    expect(premise.equivalent).toBe(true)
+    const left = evaluateWorld('c9-p3-declared-features', visibleViews, premise, true)
+    const right = evaluateWorld('c9-p3-declared-features', visibleViews, premise, true)
+
+    expect(canonicalSerialize(left.trace.scorePolicyEvidence)).toBe(canonicalSerialize(right.trace.scorePolicyEvidence))
+    expect(canonicalSerialize(left.trace.orderedAttentionCandidates.map((entry) => entry.orderingKeyValues[1])))
+      .toBe(canonicalSerialize(right.trace.orderedAttentionCandidates.map((entry) => entry.orderingKeyValues[1])))
   })
 
   it.each(C8_PRIVATE_STATE_PAIRS)('%s premise-boundary control rejects an illegal private-to-public adapter before comparison', (label) => {

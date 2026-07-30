@@ -85,6 +85,7 @@ const STAGE_A_PROOF_MODULES = [
   'attentionAggregateLegitimacy.ts',
   'attentionInferenceScenario.ts',
   'attentionPrivateStateScenario.ts',
+  'attentionScorePolicy.ts',
 ] as const
 
 /**
@@ -205,6 +206,7 @@ const ALLOWED_IMPORT_SPECIFIERS: Record<string, readonly string[]> = {
     './attentionCandidatePolicy',
     './canonicalSerialization',
     './attentionCandidate',
+    './attentionScorePolicy',
   ],
   'attentionCandidateCacheKey.ts': [
     './canonicalSerialization',
@@ -217,6 +219,7 @@ const ALLOWED_IMPORT_SPECIFIERS: Record<string, readonly string[]> = {
     './attentionInferenceProvenancePolicy',
     './attentionInferenceRuleLibrary',
     './attentionAggregateLegitimacy',
+    './attentionScorePolicy',
   ],
   'attentionDirectEvidenceAssertion.ts': [
     './canonicalSerialization',
@@ -275,6 +278,7 @@ const ALLOWED_IMPORT_SPECIFIERS: Record<string, readonly string[]> = {
     './attentionNarrativePatternMonitor',
     './attentionAggregateLegitimacy',
     './attentionInferenceRuleLibrary',
+    './attentionScorePolicy',
   ],
   'attentionReplayScenario.ts': [
     './attentionQuestCandidateContracts',
@@ -301,6 +305,7 @@ const ALLOWED_IMPORT_SPECIFIERS: Record<string, readonly string[]> = {
   ],
   'attentionInferenceScenario.ts': ['./attentionDirectEvidenceAssertion'],
   'attentionPrivateStateScenario.ts': [],
+  'attentionScorePolicy.ts': ['./canonicalSerialization'],
 }
 
 /**
@@ -1764,6 +1769,7 @@ describe('B4 / P1 — the trusted trace and replay path stay singular and patter
           'attentionReplay.ts -> ./attentionInferenceRuleLibrary',
           'attentionReplay.ts -> ./attentionNarrativePatternMonitor',
           'attentionReplay.ts -> ./attentionPatternEvidenceContracts',
+          'attentionReplay.ts -> ./attentionScorePolicy',
           'attentionReplayScenario.ts -> ./attentionNarrativePatternScenario',
           'attentionReplayScenario.ts -> ./attentionPatternEvidenceContracts',
         ])

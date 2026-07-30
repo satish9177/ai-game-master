@@ -116,6 +116,7 @@ import {
 import { ATTENTION_INFERENCE_PROVENANCE_POLICY } from './attentionInferenceProvenancePolicy'
 import { ATTENTION_AGGREGATION_RULE_LIBRARY_VERSION_HASH } from './attentionInferenceRuleLibrary'
 import type { AggregateLegitimacyPolicyRef } from './attentionAggregateLegitimacy'
+import type { AttentionDeclaredScoreFeatures, ScorePolicyRef } from './attentionScorePolicy'
 
 /**
  * RN019 §9.3's closed derivation dependency bundle: exactly these thirteen
@@ -200,6 +201,8 @@ export interface AttentionCandidateRankingEligibilityResourceState {
   readonly directEvidenceAssertionIdentityVersion: string
   readonly patternRevealPackageSchemaVersion: string
   readonly patternDirectEvidenceTemplateVersion: string
+  readonly scorePolicyRef: ScorePolicyRef
+  readonly declaredScoreFeatures: readonly AttentionDeclaredScoreFeatures[]
 }
 
 /** RN019 §9.3's ranking dependency bundle: the derivation bundle plus exactly three ranking-only members. */
@@ -280,6 +283,9 @@ export function attentionCandidateRankingEligibilityResourceState(
       overrides.patternRevealPackageSchemaVersion ?? ATTENTION_PATTERN_REVEAL_PACKAGE_SCHEMA_VERSION,
     patternDirectEvidenceTemplateVersion:
       overrides.patternDirectEvidenceTemplateVersion ?? ATTENTION_PATTERN_DIRECT_EVIDENCE_TEMPLATE_VERSION,
+    scorePolicyRef: overrides.scorePolicyRef ?? 'score-constant-zero-v0',
+    declaredScoreFeatures: Object.freeze([...(overrides.declaredScoreFeatures ?? [])]
+      .sort((left, right) => left.candidateId < right.candidateId ? -1 : left.candidateId > right.candidateId ? 1 : 0)),
   })
 }
 
@@ -472,6 +478,22 @@ function isNonEmptyString(value: unknown): value is string {
   return typeof value === 'string' && value.trim().length > 0
 }
 
+function isDeclaredScoreFeature(value: unknown): value is AttentionDeclaredScoreFeatures {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false
+  const feature = value as Record<string, unknown>
+  return Object.keys(feature).length === 3
+    && typeof feature.candidateId === 'string'
+    && feature.candidateId.trim().length > 0
+    && typeof feature.publicStakesBand === 'number'
+    && Number.isInteger(feature.publicStakesBand)
+    && feature.publicStakesBand >= 0
+    && feature.publicStakesBand <= 2
+    && typeof feature.worldTimeRecencyBand === 'number'
+    && Number.isInteger(feature.worldTimeRecencyBand)
+    && feature.worldTimeRecencyBand >= 0
+    && feature.worldTimeRecencyBand <= 3
+}
+
 function isEligibilityResourceState(
   value: AttentionCandidateRankingEligibilityResourceState | undefined,
 ): value is AttentionCandidateRankingEligibilityResourceState {
@@ -485,6 +507,10 @@ function isEligibilityResourceState(
   if (!isNonEmptyString(value.directEvidenceAssertionIdentityVersion)) return false
   if (!isNonEmptyString(value.patternRevealPackageSchemaVersion)) return false
   if (!isNonEmptyString(value.patternDirectEvidenceTemplateVersion)) return false
+  if (value.scorePolicyRef !== 'score-constant-zero-v0' && value.scorePolicyRef !== 'score-discriminating-c9-v1') return false
+  if (!Array.isArray(value.declaredScoreFeatures)) return false
+  if (!value.declaredScoreFeatures.every(isDeclaredScoreFeature)) return false
+  if (new Set(value.declaredScoreFeatures.map((feature) => feature.candidateId)).size !== value.declaredScoreFeatures.length) return false
   return true
 }
 
@@ -531,6 +557,14 @@ export function deriveAttentionCandidateRankingCacheKey(
       rankableClasses: [...bundle.eligibilityResourceState.rankableClasses],
       relevantLedgerDigest: bundle.eligibilityResourceState.relevantLedgerDigest,
       retentionClassOrder: [...bundle.eligibilityResourceState.retentionClassOrder],
+      scorePolicyRef: bundle.eligibilityResourceState.scorePolicyRef,
+      declaredScoreFeatures: [...bundle.eligibilityResourceState.declaredScoreFeatures]
+        .sort((left, right) => left.candidateId < right.candidateId ? -1 : left.candidateId > right.candidateId ? 1 : 0)
+        .map((feature) => ({
+          candidateId: feature.candidateId,
+          publicStakesBand: feature.publicStakesBand,
+          worldTimeRecencyBand: feature.worldTimeRecencyBand,
+        })),
     },
     orderingVersion: bundle.orderingVersion,
     rankingPolicyHash: bundle.rankingPolicyHash,
