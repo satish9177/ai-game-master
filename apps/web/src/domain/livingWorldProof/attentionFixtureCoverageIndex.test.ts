@@ -25,7 +25,7 @@ function mapIds(
 
 const fixtureCoverageIndex: readonly FixtureMapping[] = [
   ...mapIds(['S1'], 'attentionLedgerStaticClosure.test.ts', 'a Stage A module reaching an authoritative path is caught whatever the quote style'),
-  ...mapIds(['S2'], 'attentionLedgerStaticClosure.test.ts', 'covers exactly every attention-prefixed, non-test proof module on disk'),
+  ...mapIds(['S2'], 'attentionLedgerStaticClosure.test.ts', 'covers every attention-prefixed module plus the closed validator boundary on disk'),
 
   ...mapIds(['P2-1'], 'attentionP2Noninterference.test.ts', 'produces byte-identical authoritative logs whether or not attention runs'),
   ...mapIds(['P2-2'], 'attentionP2Noninterference.test.ts', 'B6 genuinely mixed director-on: real two-family work, and the authoritative log is byte-identical to director-off'),
@@ -34,6 +34,9 @@ const fixtureCoverageIndex: readonly FixtureMapping[] = [
   ...mapIds(['P2-N1'], 'attentionP2Noninterference.test.ts', 'P2-N1 — a shared authoritative RNG stream causes the authoritative log to diverge'),
   ...mapIds(['P2-N2'], 'attentionP2Noninterference.test.ts', 'P2-N2 — a shared authoritative ID/sequence allocator causes the authoritative log to diverge'),
   ...mapIds(['P2-N3'], 'attentionP2Noninterference.test.ts', 'P2-N3 — a shared authoritative scheduler resource causes the authoritative log to diverge'),
+  ...mapIds(['P2-N6', 'P2-N7'], 'attentionP2DiegeticCommit.test.ts', 'P2-N6/P2-N7 rejects invalid or unavailable delivery without a commit or resource mutation'),
+  ...mapIds(['P2-N8', 'P2-N9'], 'attentionP2DiegeticCommit.test.ts', 'P2-N8/P2-N9 treats advisory candidate identity as non-authoritative and rejects ambiguous authoritative payloads'),
+  ...mapIds(['P2-PC1'], 'attentionP2DiegeticCommit.test.ts', 'P2-PC1 preserves the validator-owned command sequence and communication digest through the single authoritative route'),
 
   ...mapIds(['P3-1', 'P3-2', 'P3-3'], 'attentionP3Equivalence.test.ts', 'the legal paired worlds pass the independently derived premise and produce byte-identical observable traces'),
   ...mapIds(['P3-4'], 'attentionP3Equivalence.test.ts', 'Control B — a hidden authoritative difference outside A′ alters no permitted observable result and consumes no budget'),
@@ -83,7 +86,8 @@ const fixtureCoverageIndex: readonly FixtureMapping[] = [
   ...mapIds(['R1', 'R2', 'R3'], 'attentionDirectEvidenceAssertion.test.ts', 'uses the four closed direct-record kinds in monitor order with stable identities'),
   ...mapIds(['R4'], 'attentionDirectEvidenceAssertion.test.ts', 'reproduces the original one-record-forges-two-lines exploit and confirms it now refuses end to end'),
   ...mapIds(['R5'], 'attentionClosedRelationCertificateContracts.test.ts', 'accepts only an accessor-minted, bounded, canonical certificate'),
-  ...mapIds(['R6', 'R7', 'R8', 'R9', 'R10'], 'attentionAbsenceWitnessProvenance.test.ts', 'is canonical and refuses absent or forged certificates'),
+  ...mapIds(['R6'], 'attentionAbsenceWitnessProvenance.test.ts', 'is canonical and refuses absent or forged certificates'),
+  ...mapIds(['R7', 'R8', 'R9', 'R10'], 'attentionAbsenceWitnessProvenance.test.ts', 'refuses an incomplete lookback, malformed certificate, and text-shaped non-certificate without treating a failed text search as absence'),
   ...mapIds(['R11'], 'attentionAggregateLegitimacy.test.ts', 'builds the closed reciprocal conclusion from two opposite direct public-aid sources'),
   ...mapIds(['R12', 'R13', 'R15', 'R16'], 'attentionRevealerLegality.test.ts', 'discharges R12/R13/R15/R16 without reading private state'),
   ...mapIds(['R14'], 'attentionAggregateLegitimacyReplay.test.ts', 'routes the normalized extension aggregate through the same evaluator without a synthetic aggregate record id'),
@@ -137,7 +141,7 @@ const fixtureCoverageIndex: readonly FixtureMapping[] = [
 
 const expectedFixtureIds = [
   'S1', 'S2',
-  ...range('P2-', 1, 4), 'P2-N1', 'P2-N2', 'P2-N3',
+  ...range('P2-', 1, 4), 'P2-N1', 'P2-N2', 'P2-N3', 'P2-N6', 'P2-N7', 'P2-N8', 'P2-N9', 'P2-PC1',
   ...range('P3-', 1, 5),
   ...range('Q', 1, 9),
   ...range('D', 1, 12),
@@ -159,7 +163,7 @@ describe('attention fixture coverage index', () => {
 
     const canonicalIds = fixtureCoverageIndex.map(({ canonicalId }) => canonicalId)
     expect(canonicalIds.filter((id) => id === 'P3-5')).toHaveLength(2)
-    expect(new Set(canonicalIds).size).toBe(147)
+    expect(new Set(canonicalIds).size).toBe(152)
 
     for (const { id, canonicalId, file, testTitle } of fixtureCoverageIndex) {
       const source = readFileSync(`${here}${file}`, 'utf8')

@@ -103,6 +103,8 @@ const STAGE_A_PROOF_MODULES = [
   'attentionDiegeticRevealProposal.ts',
   'attentionDiegeticDelivery.ts',
   'attentionDiagnosticPartition.ts',
+  'communicationValidatorContracts.ts',
+  'communicationValidator.ts',
 ] as const
 
 /**
@@ -318,11 +320,14 @@ const ALLOWED_IMPORT_SPECIFIERS: Record<string, readonly string[]> = {
     './attentionPatternEvidenceContracts',
     './attentionNarrativePatternMonitor',
     './attentionAggregateLegitimacy',
+    './attentionDiegeticAggregateLegitimacy',
+    './attentionRevealerLegality',
     './attentionInferenceRuleLibrary',
     './attentionScorePolicy',
     './attentionClosedRelationCertificateAccessor',
     './attentionClosedRelationCertificateContracts',
     './attentionEligibilityVerdict',
+    './attentionRecipientScope',
     './attentionRevealScope',
     './attentionDiegeticDelivery',
     './attentionDiegeticRevealProposal',
@@ -360,7 +365,7 @@ const ALLOWED_IMPORT_SPECIFIERS: Record<string, readonly string[]> = {
   ],
   'attentionAbsencePredicateLibrary.ts': ['./canonicalSerialization', './attentionClosedRelationCertificateContracts'],
   'attentionAbsenceWitnessProvenance.ts': [
-    './canonicalSerialization', './attentionClosedRelationCertificateContracts', './attentionAbsencePredicateLibrary',
+    './canonicalSerialization', './attentionClosedRelationCertificateContracts', './attentionClosedRelationCertificateAccessor', './attentionAbsencePredicateLibrary',
   ],
   'attentionAbsenceScenario.ts': ['./attentionClosedRelationCertificateAccessor', './attentionPatternEvidenceContracts'],
   'attentionCommunicationAuthorityContracts.ts': ['./canonicalSerialization'],
@@ -378,7 +383,7 @@ const ALLOWED_IMPORT_SPECIFIERS: Record<string, readonly string[]> = {
   'attentionRecipientScope.ts': ['./attentionChannelRegistry'],
   'attentionRevealScope.ts': ['./canonicalSerialization', './attentionRecipientScope'],
   'attentionEligibilityVerdict.ts': ['./attentionRecipientScope', './attentionRevealerLegality'],
-  'attentionDiegeticRevealProposal.ts': [],
+  'attentionDiegeticRevealProposal.ts': ['./attentionRecipientScope', './attentionRevealScope'],
   'attentionDiegeticDelivery.ts': [
     './attentionReplayResources',
     './communicationValidator',
@@ -386,6 +391,10 @@ const ALLOWED_IMPORT_SPECIFIERS: Record<string, readonly string[]> = {
     './attentionDiegeticRevealProposal',
   ],
   'attentionDiagnosticPartition.ts': [],
+  'communicationValidatorContracts.ts': ['./attentionReplayResources', './attentionRecipientScope', './attentionRevealScope'],
+  'communicationValidator.ts': [
+    './canonicalSerialization', './attentionReplayResources', './communicationValidatorContracts', './attentionDiegeticRevealProposal',
+  ],
 }
 
 /**
@@ -750,7 +759,7 @@ function exportedMintAuthorityRisks(fileName: string, source: string): readonly 
  * so each is named here for the same reason.
  */
 const ATTENTION_MODULE_SPECIFIER =
-  /attention(QuestCandidate|PatternEvidence|NarrativePattern|ReadableBoundary|StageAQuestOnlyGolden|Candidate|Ledger|RevealPackage|Template|ZeroModelProbe|Trace|Replay)/
+  /(?:attention(QuestCandidate|PatternEvidence|NarrativePattern|ReadableBoundary|StageAQuestOnlyGolden|Candidate|Ledger|RevealPackage|Template|ZeroModelProbe|Trace|Replay)|communicationValidator)/
 
 /**
  * Sound pre-filter for the whole-tree scans. Every token's text is a substring
@@ -1089,9 +1098,9 @@ describe('A2 / P1 — Stage A proof modules import a closed Stage A allowlist on
     expect([...STAGE_A_PROOF_MODULES].sort()).toEqual(Object.keys(ALLOWED_IMPORT_SPECIFIERS).sort())
   })
 
-  it('covers exactly every attention-prefixed, non-test proof module on disk', () => {
+  it('covers every attention-prefixed module plus the closed validator boundary on disk', () => {
     const discovered = readdirSync(fileURLToPath(new URL('./', import.meta.url)))
-      .filter((name) => /^attention.*\.tsx?$/.test(name))
+      .filter((name) => /^(?:attention.*|communicationValidator.*)\.tsx?$/.test(name))
       .filter((name) => !/\.test\.tsx?$/.test(name))
       .sort()
     expect(discovered).toEqual([...STAGE_A_PROOF_MODULES].sort())
@@ -1347,7 +1356,7 @@ describe('B4 / P1 — the trusted trace and replay path stay singular and patter
     expect(replaySource).toMatch(/function runAttentionPatternPresentationPass/)
     expect(replaySource).toMatch(/function attemptAttentionPatternPresentation/)
     const helperStart = replaySource.indexOf('function attemptAttentionPatternPresentation')
-    const helperBody = replaySource.slice(helperStart, helperStart + 8000)
+    const helperBody = replaySource.slice(helperStart, helperStart + 16_000)
     expect(helperBody).toMatch(/revalidateAttentionPatternPresentation\s*\(/)
     expect(helperBody).toMatch(/buildAttentionDirectEvidenceAssertions\s*\(/)
     expect(helperBody).toMatch(/buildAttentionRevealPackage\s*\(/)
@@ -1852,13 +1861,16 @@ describe('B4 / P1 — the trusted trace and replay path stay singular and patter
           'attentionReplay.ts -> ./attentionAggregateLegitimacy',
           'attentionReplay.ts -> ./attentionClosedRelationCertificateAccessor',
           'attentionReplay.ts -> ./attentionClosedRelationCertificateContracts',
+          'attentionReplay.ts -> ./attentionDiegeticAggregateLegitimacy',
           'attentionReplay.ts -> ./attentionDiegeticDelivery',
           'attentionReplay.ts -> ./attentionDiegeticRevealProposal',
           'attentionReplay.ts -> ./attentionEligibilityVerdict',
           'attentionReplay.ts -> ./attentionInferenceRuleLibrary',
           'attentionReplay.ts -> ./attentionNarrativePatternMonitor',
           'attentionReplay.ts -> ./attentionPatternEvidenceContracts',
+          'attentionReplay.ts -> ./attentionRecipientScope',
           'attentionReplay.ts -> ./attentionRevealScope',
+          'attentionReplay.ts -> ./attentionRevealerLegality',
           'attentionReplay.ts -> ./attentionScorePolicy',
           'attentionReplay.ts -> ./communicationValidatorContracts',
           'attentionReplayScenario.ts -> ./attentionNarrativePatternScenario',
