@@ -361,6 +361,8 @@ export function buildB6MixedEvaluationFixture(
       ledger: options.ledger,
       patternPresentationInputs,
       patternPresentationLedgerPolicyVersion: 'attention-pattern-presentation-ledger-policy-v1',
+      // C1 is deliberately dormant for every pre-C1 fixture; activation is never ambient.
+      aggregateLegitimacyPolicyRef: 'aggregate-legitimacy-disabled-v0',
       authoritativeLogDigestBefore: digest,
       authoritativeLogDigestAfter: digest,
     }),

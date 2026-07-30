@@ -75,6 +75,9 @@ import {
 import type { AttentionDirectEvidenceAssertion } from './attentionDirectEvidenceAssertion'
 import { attentionStageBResourcePolicy } from './attentionNarrativePatternResourcePolicy'
 import type { AttentionStageBResourcePolicy } from './attentionNarrativePatternResourcePolicy'
+import type { AttentionAggregateAssertion } from './attentionAggregateLegitimacy'
+import { validateAttentionInferenceProvenance } from './attentionInferenceProvenance'
+import { ATTENTION_INFERENCE_PROVENANCE_POLICY } from './attentionInferenceProvenancePolicy'
 
 /**
  * The approved slots: the closed set of legally readable content fields a Stage A
@@ -149,7 +152,7 @@ export interface AttentionPatternRevealPackage {
   readonly packageSchemaVersion: typeof ATTENTION_PATTERN_REVEAL_PACKAGE_SCHEMA_VERSION
   readonly templateVersion: typeof ATTENTION_PATTERN_DIRECT_EVIDENCE_TEMPLATE_VERSION
   readonly candidateId: string
-  readonly assertions: readonly AttentionDirectEvidenceAssertion[]
+  readonly assertions: readonly (AttentionDirectEvidenceAssertion | AttentionAggregateAssertion)[]
   readonly resultTag: 'presentation-ready'
 }
 
@@ -175,6 +178,8 @@ export const ATTENTION_PATTERN_REVEAL_PACKAGE_KEYS: readonly string[] = Object.f
 export interface AttentionRevealPackageRequest {
   readonly templateVersion: string
   readonly directEvidenceAssertions?: readonly AttentionDirectEvidenceAssertion[]
+  /** C1's licensed aggregate root. It is additive only when explicitly supplied. */
+  readonly aggregateAssertion?: AttentionAggregateAssertion
   /** B5 — explicit pattern resource policy; defaults to the pinned singleton. */
   readonly policy?: AttentionStageBResourcePolicy
 }
@@ -203,6 +208,7 @@ export type AttentionRevealPackageRefusal =
   | 'missing-required-direct-evidence-assertion'
   | 'unexpected-direct-evidence-assertion'
   | 'pattern-assertion-out-of-order'
+  | 'invalid-aggregate-assertion'
   | 'unsupported-direct-evidence-assertions-for-quest'
 
 export type AttentionRevealPackageResult =
@@ -211,6 +217,12 @@ export type AttentionRevealPackageResult =
 
 function isPresent(value: unknown): value is string {
   return typeof value === 'string' && value.trim().length > 0
+}
+
+function hasExactKeys(value: object, keys: readonly string[]): boolean {
+  const actual = Object.keys(value).sort()
+  const expected = [...keys].sort()
+  return actual.length === expected.length && actual.every((key, index) => key === expected[index])
 }
 
 function slot(slotId: AttentionRevealSlotId, values: readonly string[]): AttentionRevealSlot {
@@ -262,7 +274,8 @@ export function buildAttentionRevealPackage(
       return { kind: 'refused', reason: 'empty-direct-evidence-assertions' }
     }
     const policy = request.policy ?? attentionStageBResourcePolicy()
-    if (request.directEvidenceAssertions.length > policy.revealPackageAssertions) {
+    const assertionCount = request.directEvidenceAssertions.length + (request.aggregateAssertion === undefined ? 0 : 1)
+    if (assertionCount > policy.revealPackageAssertions) {
       return { kind: 'refused', reason: 'too-many-direct-evidence-assertions' }
     }
     const assertionIds = new Set<string>()
@@ -303,15 +316,40 @@ export function buildAttentionRevealPackage(
     if (givenOrder.some((key, index) => key !== expectedOrder[index])) {
       return { kind: 'refused', reason: 'pattern-assertion-out-of-order' }
     }
+    if (request.aggregateAssertion !== undefined) {
+      const aggregate = request.aggregateAssertion
+      if (
+        !hasExactKeys(aggregate, [
+          'assertionId', 'assertionKind', 'participants', 'provenance',
+          'ruleContentHash', 'ruleId', 'ruleSemanticVersion', 'token',
+        ])
+        || aggregate.assertionKind !== 'aggregate'
+        || !isPresent(aggregate.assertionId)
+        || !isPresent(aggregate.ruleId)
+        || !isPresent(aggregate.ruleSemanticVersion)
+        || !isPresent(aggregate.ruleContentHash)
+        || !Array.isArray(aggregate.participants)
+        || aggregate.participants.length < 2
+        || aggregate.participants.some((participant) => !isPresent(participant))
+        || new Set(aggregate.participants).size !== aggregate.participants.length
+        || aggregate.provenance.assertionId !== aggregate.assertionId
+        || aggregate.provenance.ruleId !== aggregate.ruleId
+        || aggregate.provenance.ruleSemanticVersion !== aggregate.ruleSemanticVersion
+        || aggregate.provenance.ruleContentHash !== aggregate.ruleContentHash
+        || aggregate.provenance.token !== aggregate.token
+        || validateAttentionInferenceProvenance(aggregate.provenance, ATTENTION_INFERENCE_PROVENANCE_POLICY).kind !== 'ok'
+      ) return { kind: 'refused', reason: 'invalid-aggregate-assertion' }
+    }
     return {
       kind: 'ok',
       revealPackage: Object.freeze({
         packageSchemaVersion: ATTENTION_PATTERN_REVEAL_PACKAGE_SCHEMA_VERSION,
         templateVersion: ATTENTION_PATTERN_DIRECT_EVIDENCE_TEMPLATE_VERSION,
         candidateId: attentionCandidate.candidateId,
-        assertions: Object.freeze(
-          request.directEvidenceAssertions.map((assertion) => Object.freeze({ ...assertion })),
-        ),
+        assertions: Object.freeze([
+          ...request.directEvidenceAssertions.map((assertion) => Object.freeze({ ...assertion })),
+          ...(request.aggregateAssertion === undefined ? [] : [Object.freeze({ ...request.aggregateAssertion })]),
+        ]),
         resultTag: 'presentation-ready',
       }),
     }

@@ -91,6 +91,7 @@ describe('A5 — the complete trace is byte-identical across repeated cold runs'
         ledger: quest.ledger,
         evaluationLsn: 60,
         patternPresentationLedgerPolicyVersion: ATTENTION_PATTERN_PRESENTATION_LEDGER_POLICY_VERSION,
+        aggregateLegitimacyPolicyRef: 'aggregate-legitimacy-disabled-v0',
       })
       if (pattern.presentation === null) throw new Error('expected a pattern presentation')
       return pattern.ledger

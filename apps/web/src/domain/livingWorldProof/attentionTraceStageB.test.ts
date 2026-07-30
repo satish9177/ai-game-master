@@ -126,6 +126,7 @@ describe('B5 — trusted pattern presentation trace', () => {
       ledger: created.ledger,
       evaluationLsn: 20,
       patternPresentationLedgerPolicyVersion: ATTENTION_PATTERN_PRESENTATION_LEDGER_POLICY_VERSION,
+      aggregateLegitimacyPolicyRef: 'aggregate-legitimacy-disabled-v0',
     })
     expect(pass.presentation).not.toBeNull()
 
@@ -173,6 +174,7 @@ describe('B5 — trusted pattern presentation trace', () => {
         }],
         ledger, evaluationLsn,
         patternPresentationLedgerPolicyVersion: ATTENTION_PATTERN_PRESENTATION_LEDGER_POLICY_VERSION,
+        aggregateLegitimacyPolicyRef: 'aggregate-legitimacy-disabled-v0',
       })
       if (pass.presentation === null) throw new Error('expected a real presentation to build ledger history')
       return pass.ledger
@@ -200,6 +202,7 @@ describe('B5 — trusted pattern presentation trace', () => {
         orderedCandidates: [{ candidate, revalidatedCandidate: candidate, directEvidenceAssertionInputs: assertionInputs, rankingCacheKey: 'cache-exposure', revalidationCacheKey: 'cache-exposure' }],
         ledger, evaluationLsn,
         patternPresentationLedgerPolicyVersion: ATTENTION_PATTERN_PRESENTATION_LEDGER_POLICY_VERSION,
+        aggregateLegitimacyPolicyRef: 'aggregate-legitimacy-disabled-v0',
       })
 
       const firstPass = attempt(emptyLedgerOrThrow(), 10)
@@ -237,6 +240,7 @@ describe('B5 — trusted pattern presentation trace', () => {
         orderedCandidates: [{ candidate, revalidatedCandidate: candidate, directEvidenceAssertionInputs: assertionInputs, rankingCacheKey: 'cache-cooldown', revalidationCacheKey: 'cache-cooldown' }],
         ledger: afterFirst, evaluationLsn: 12,
         patternPresentationLedgerPolicyVersion: ATTENTION_PATTERN_PRESENTATION_LEDGER_POLICY_VERSION,
+        aggregateLegitimacyPolicyRef: 'aggregate-legitimacy-disabled-v0',
       })
       expect(pass.presentation).toBeNull()
       expect(pass.ledger.records).toHaveLength(1)
@@ -263,6 +267,7 @@ describe('B5 — trusted pattern presentation trace', () => {
         orderedCandidates: [{ candidate: testCandidate, revalidatedCandidate: testCandidate, directEvidenceAssertionInputs: assertionInputs, rankingCacheKey: 'cache-density', revalidationCacheKey: 'cache-density' }],
         ledger, evaluationLsn: 10,
         patternPresentationLedgerPolicyVersion: ATTENTION_PATTERN_PRESENTATION_LEDGER_POLICY_VERSION,
+        aggregateLegitimacyPolicyRef: 'aggregate-legitimacy-disabled-v0',
       })
       expect(pass.presentation).toBeNull()
       expect(pass.ledger.records).toHaveLength(4)
@@ -287,6 +292,7 @@ describe('B5 — trusted pattern presentation trace', () => {
         orderedCandidates: [{ candidate, revalidatedCandidate: candidate, directEvidenceAssertionInputs: assertionInputs, rankingCacheKey: 'cache-fail-retired', revalidationCacheKey: 'cache-fail-retired' }],
         ledger, evaluationLsn: 20,
         patternPresentationLedgerPolicyVersion: ATTENTION_PATTERN_PRESENTATION_LEDGER_POLICY_VERSION,
+        aggregateLegitimacyPolicyRef: 'aggregate-legitimacy-disabled-v0',
       })
       expect(pass.presentation).toBeNull()
       expect(pass.ledger.records).toHaveLength(2)
@@ -309,6 +315,7 @@ describe('B5 — trusted pattern presentation trace', () => {
         orderedCandidates: [{ candidate, revalidatedCandidate: candidate, directEvidenceAssertionInputs: assertionInputs, rankingCacheKey: 'cache-failure-cooldown', revalidationCacheKey: 'cache-failure-cooldown' }],
         ledger, evaluationLsn: 11,
         patternPresentationLedgerPolicyVersion: ATTENTION_PATTERN_PRESENTATION_LEDGER_POLICY_VERSION,
+        aggregateLegitimacyPolicyRef: 'aggregate-legitimacy-disabled-v0',
       })
       expect(pass.presentation).toBeNull()
       expect(pass.ledger.records).toHaveLength(1)
@@ -363,6 +370,7 @@ describe('B5 — trusted pattern presentation trace', () => {
         ledger,
         evaluationLsn: 10,
         patternPresentationLedgerPolicyVersion: 'attention-pattern-presentation-ledger-policy-v0',
+        aggregateLegitimacyPolicyRef: 'aggregate-legitimacy-disabled-v0',
       })
 
       // Nothing was presented, and the append-only ledger is untouched -- same
@@ -428,6 +436,7 @@ describe('B5 — trusted pattern presentation trace', () => {
         orderedCandidates: [{ candidate, revalidatedCandidate: candidate, directEvidenceAssertionInputs: assertionInputs, rankingCacheKey: 'cache-malformed', revalidationCacheKey: 'cache-malformed' }],
         ledger: malformed, evaluationLsn: 10,
         patternPresentationLedgerPolicyVersion: ATTENTION_PATTERN_PRESENTATION_LEDGER_POLICY_VERSION,
+        aggregateLegitimacyPolicyRef: 'aggregate-legitimacy-disabled-v0',
       })
       expect(pass.presentation).toBeNull()
       expect(pass.ledger).toBe(malformed)

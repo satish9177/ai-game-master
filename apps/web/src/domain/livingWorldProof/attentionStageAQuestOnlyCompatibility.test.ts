@@ -165,6 +165,7 @@ describe(`B1 quest-only compatibility with ${ATTENTION_STAGE_A_QUEST_ONLY_BASELI
       ledger: pass.result.ledger,
       evaluationLsn: 60,
       patternPresentationLedgerPolicyVersion: ATTENTION_PATTERN_PRESENTATION_LEDGER_POLICY_VERSION,
+      aggregateLegitimacyPolicyRef: 'aggregate-legitimacy-disabled-v0',
     })
     expect(pattern.presentation).not.toBeNull()
     expect(canonicalSerialize(pattern.ledger.records.slice(0, 1)))

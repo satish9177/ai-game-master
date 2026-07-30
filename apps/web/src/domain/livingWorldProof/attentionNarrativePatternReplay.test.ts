@@ -34,6 +34,7 @@ function replay() {
     patternPresentationInputs: Object.freeze([{ candidateId: candidate.candidateId, directEvidenceAssertionInputs: instance.directEvidenceAssertionInputs,
       rankingCacheKey: 'cold-pattern-cache', revalidationCacheKey: 'cold-pattern-cache' }]),
     patternPresentationLedgerPolicyVersion: 'attention-pattern-presentation-ledger-policy-v1',
+    aggregateLegitimacyPolicyRef: 'aggregate-legitimacy-disabled-v0',
     authoritativeLogDigestBefore: digestAttentionReplayAuthoritativeLog({ commits: [] }), authoritativeLogDigestAfter: digestAttentionReplayAuthoritativeLog({ commits: [] }),
   })
 }

@@ -113,6 +113,9 @@ import {
   ATTENTION_STAGE_B_RESOURCE_POLICY_VERSION,
   attentionStageBResourcePolicy,
 } from './attentionNarrativePatternResourcePolicy'
+import { ATTENTION_INFERENCE_PROVENANCE_POLICY } from './attentionInferenceProvenancePolicy'
+import { ATTENTION_AGGREGATION_RULE_LIBRARY_VERSION_HASH } from './attentionInferenceRuleLibrary'
+import type { AggregateLegitimacyPolicyRef } from './attentionAggregateLegitimacy'
 
 /**
  * RN019 §9.3's closed derivation dependency bundle: exactly these thirteen
@@ -147,6 +150,9 @@ export interface AttentionCandidateDerivationDependencyBundle {
   readonly patternInstanceIdentitySchemaVersion: string
   readonly patternCandidateIdentitySchemaVersion: string
   readonly resourcePolicyVersion: string
+  readonly inferenceProvenancePolicyVersion: string
+  readonly aggregationRuleLibraryVersionHash: string
+  readonly aggregateLegitimacyPolicyRef: AggregateLegitimacyPolicyRef
 }
 
 /** The thirteen derivation-bundle field names, in RN019 §9.3's declared order. */
@@ -164,6 +170,9 @@ export const ATTENTION_CANDIDATE_DERIVATION_DEPENDENCY_FIELDS: readonly string[]
   'patternInstanceIdentitySchemaVersion',
   'patternCandidateIdentitySchemaVersion',
   'resourcePolicyVersion',
+  'inferenceProvenancePolicyVersion',
+  'aggregationRuleLibraryVersionHash',
+  'aggregateLegitimacyPolicyRef',
 ])
 
 /**
@@ -209,7 +218,8 @@ export interface AttentionCandidateRankingDependencyBundle {
  * at a time.
  */
 export function attentionCandidateDerivationDependencyBundle(
-  input: { readonly snapshotLsn: number } & Partial<AttentionCandidateDerivationDependencyBundle>,
+  input: { readonly snapshotLsn: number; readonly aggregateLegitimacyPolicyRef: AggregateLegitimacyPolicyRef }
+    & Partial<AttentionCandidateDerivationDependencyBundle>,
 ): AttentionCandidateDerivationDependencyBundle {
   return Object.freeze({
     questAccessorContractVersion:
@@ -233,6 +243,11 @@ export function attentionCandidateDerivationDependencyBundle(
     patternCandidateIdentitySchemaVersion:
       input.patternCandidateIdentitySchemaVersion ?? ATTENTION_PATTERN_CANDIDATE_IDENTITY_SCHEMA_VERSION,
     resourcePolicyVersion: input.resourcePolicyVersion ?? ATTENTION_STAGE_B_RESOURCE_POLICY_VERSION,
+    inferenceProvenancePolicyVersion:
+      input.inferenceProvenancePolicyVersion ?? ATTENTION_INFERENCE_PROVENANCE_POLICY.version,
+    aggregationRuleLibraryVersionHash:
+      input.aggregationRuleLibraryVersionHash ?? ATTENTION_AGGREGATION_RULE_LIBRARY_VERSION_HASH,
+    aggregateLegitimacyPolicyRef: input.aggregateLegitimacyPolicyRef,
   })
 }
 
@@ -311,6 +326,10 @@ export type AttentionCandidateCacheKeyRefusal =
   | 'missing-pattern-candidate-identity-schema-version'
   | 'unsupported-pattern-candidate-identity-schema-version'
   | 'missing-resource-policy-version'
+  | 'missing-inference-provenance-policy-version'
+  | 'missing-aggregation-rule-library-version-hash'
+  | 'missing-aggregate-legitimacy-policy-ref'
+  | 'unsupported-aggregate-legitimacy-policy-ref'
   | 'missing-ordering-version'
   | 'unsupported-ordering-version'
   | 'missing-ranking-policy-hash'
@@ -406,6 +425,19 @@ export function deriveAttentionCandidateDerivationCacheKey(
   if (!isPresent(bundle.resourcePolicyVersion)) {
     return { kind: 'refused', reason: 'missing-resource-policy-version' }
   }
+  if (!isPresent(bundle.inferenceProvenancePolicyVersion)) {
+    return { kind: 'refused', reason: 'missing-inference-provenance-policy-version' }
+  }
+  if (!isPresent(bundle.aggregationRuleLibraryVersionHash)) {
+    return { kind: 'refused', reason: 'missing-aggregation-rule-library-version-hash' }
+  }
+  if (!isPresent(bundle.aggregateLegitimacyPolicyRef)) {
+    return { kind: 'refused', reason: 'missing-aggregate-legitimacy-policy-ref' }
+  }
+  if (bundle.aggregateLegitimacyPolicyRef !== 'aggregate-legitimacy-disabled-v0'
+    && bundle.aggregateLegitimacyPolicyRef !== 'aggregate-legitimacy-c1-v1') {
+    return { kind: 'refused', reason: 'unsupported-aggregate-legitimacy-policy-ref' }
+  }
 
   // Rebuilt as a closed record from the bundle's own values, so the literal's
   // property order — and the caller's — cannot reach the bytes.
@@ -422,6 +454,9 @@ export function deriveAttentionCandidateDerivationCacheKey(
     questCandidateIdentitySchemaVersion: bundle.questCandidateIdentitySchemaVersion,
     questOpeningCoordinateContractVersion: bundle.questOpeningCoordinateContractVersion,
     resourcePolicyVersion: bundle.resourcePolicyVersion,
+    inferenceProvenancePolicyVersion: bundle.inferenceProvenancePolicyVersion,
+    aggregationRuleLibraryVersionHash: bundle.aggregationRuleLibraryVersionHash,
+    aggregateLegitimacyPolicyRef: bundle.aggregateLegitimacyPolicyRef,
     snapshotLsn: bundle.snapshotLsn,
   }
 

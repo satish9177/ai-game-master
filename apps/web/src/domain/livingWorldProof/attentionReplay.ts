@@ -128,6 +128,9 @@ import {
   ATTENTION_PATTERN_DIRECT_EVIDENCE_TEMPLATE_VERSION,
   buildAttentionDirectEvidenceAssertions,
 } from './attentionDirectEvidenceAssertion'
+import { evaluateAttentionAggregateLegitimacy } from './attentionAggregateLegitimacy'
+import type { AggregateLegitimacyPolicyRef, AttentionAggregateSource } from './attentionAggregateLegitimacy'
+import { PUBLIC_AID_LINK_EXTENSION_V1 } from './attentionInferenceRuleLibrary'
 import type { NarrativePatternDirectEvidenceAssertionInput } from './attentionNarrativePatternContracts'
 import type { AttentionReadablePatternEvidenceView } from './attentionPatternEvidenceContracts'
 import { reconstructNarrativePatternInstances } from './attentionNarrativePatternMonitor'
@@ -359,6 +362,8 @@ export interface AttentionPatternPresentationPassCandidateInput {
   readonly satisfiedCompletionLsn?: number
   readonly rankingCacheKey: string
   readonly revalidationCacheKey: string
+  /** C1 only: permits the one licensed nested aggregate source pair. */
+  readonly aggregateSources?: readonly AttentionAggregateSource[]
 }
 
 export interface AttentionPatternPresentationPassResult {
@@ -414,6 +419,8 @@ export function attemptAttentionPatternPresentation(input: {
   readonly evaluationLsn: number
   readonly patternPresentationLedgerPolicyVersion: string
   readonly policy: AttentionStageBResourcePolicy
+  /** C1 activation is explicit; callers must choose disabled or the registered C1 policy. */
+  readonly aggregateLegitimacyPolicyRef: AggregateLegitimacyPolicyRef
 }): AttentionPatternPresentationAttemptExecution {
     const entry = input.entry
     const revalidation = revalidateAttentionPatternPresentation({
@@ -463,9 +470,35 @@ export function attemptAttentionPatternPresentation(input: {
       return Object.freeze({ ledger: input.ledger, attempt, decision, presentation: null })
     }
 
+    const legitimacy = evaluateAttentionAggregateLegitimacy({
+      policyRef: input.aggregateLegitimacyPolicyRef,
+      sourceKind: 'narrative_pattern_instance',
+      sources: entry.aggregateSources ?? assertions.assertions,
+      ...(entry.aggregateSources?.some((source) => source.assertionKind === 'aggregate')
+        ? { ruleId: PUBLIC_AID_LINK_EXTENSION_V1.ruleId }
+        : {}),
+    })
+    if (legitimacy.kind === 'refused') {
+      const attempt = Object.freeze({
+        candidateId: entry.candidate.candidateId,
+        outcome: 'assertion-build-refused',
+        revalidationReason: revalidation.reason,
+        assertionIds: Object.freeze(assertions.assertions.map((assertion) => assertion.assertionId)),
+        refusalDetail: legitimacy.reason,
+      } as const)
+      const decision = Object.freeze({
+        candidateId: entry.candidate.candidateId,
+        assertionIds: attempt.assertionIds,
+        ...REVALIDATED_ELIGIBLE_TRACE_OUTCOMES,
+        ledgerAppend: 'not-appended',
+      } as const)
+      return Object.freeze({ ledger: input.ledger, attempt, decision, presentation: null })
+    }
+
     const built = buildAttentionRevealPackage(entry.candidate, {
       templateVersion: ATTENTION_PATTERN_DIRECT_EVIDENCE_TEMPLATE_VERSION,
       directEvidenceAssertions: assertions.assertions,
+      ...(legitimacy.kind === 'ok' ? { aggregateAssertion: legitimacy.aggregate } : {}),
       policy: input.policy,
     })
     if (built.kind !== 'ok') {
@@ -581,6 +614,8 @@ export function runAttentionPatternPresentationPass(input: {
   /** The ledger identity this presentation attempt runs under; passed through unchanged. */
   readonly patternPresentationLedgerPolicyVersion: string
   readonly policy?: AttentionStageBResourcePolicy
+  /** C1 activation is explicit; callers must choose disabled or the registered C1 policy. */
+  readonly aggregateLegitimacyPolicyRef: AggregateLegitimacyPolicyRef
 }): AttentionPatternPresentationPassResult {
   const policy = input.policy ?? attentionStageBResourcePolicy()
   let ledger = input.ledger
@@ -595,6 +630,7 @@ export function runAttentionPatternPresentationPass(input: {
       evaluationLsn: input.evaluationLsn,
       patternPresentationLedgerPolicyVersion: input.patternPresentationLedgerPolicyVersion,
       policy,
+      aggregateLegitimacyPolicyRef: input.aggregateLegitimacyPolicyRef,
     })
     ledger = result.ledger
     attempts.push(result.attempt)
@@ -1125,6 +1161,7 @@ export interface AttentionMixedPatternPresentationInput {
   readonly rankingCacheKey: string
   readonly revalidationCacheKey: string
   readonly satisfiedCompletionLsn?: number
+  readonly aggregateSources?: readonly AttentionAggregateSource[]
 }
 
 export interface AttentionMixedFamilyEvaluationInput {
@@ -1138,6 +1175,8 @@ export interface AttentionMixedFamilyEvaluationInput {
   readonly ledger: AttentionLedger
   readonly patternPresentationInputs: readonly AttentionMixedPatternPresentationInput[]
   readonly patternPresentationLedgerPolicyVersion: string
+  /** C1 activation is explicit; callers must choose disabled or the registered C1 policy. */
+  readonly aggregateLegitimacyPolicyRef: AggregateLegitimacyPolicyRef
   readonly authoritativeLogDigestBefore: string
   readonly authoritativeLogDigestAfter: string
   readonly p3PremiseCheck?: AttentionTraceP3PremiseCheck
@@ -1317,9 +1356,11 @@ export function runAttentionMixedFamilyEvaluation(
       entry: Object.freeze({ candidate, revalidatedCandidate: revalidationPatternById.get(candidate.candidateId),
         directEvidenceAssertionInputs: patternInput.directEvidenceAssertionInputs, rankingCacheKey: patternInput.rankingCacheKey,
         revalidationCacheKey: patternInput.revalidationCacheKey,
+        ...(patternInput.aggregateSources === undefined ? {} : { aggregateSources: patternInput.aggregateSources }),
         ...(patternInput.satisfiedCompletionLsn === undefined ? {} : { satisfiedCompletionLsn: patternInput.satisfiedCompletionLsn }) }),
       ledger, evaluationLsn: input.revalidationSnapshotLsn,
       patternPresentationLedgerPolicyVersion: input.patternPresentationLedgerPolicyVersion, policy,
+      aggregateLegitimacyPolicyRef: input.aggregateLegitimacyPolicyRef,
     })
     ledger = attempt.ledger
     patternDecisions.push(attempt.decision)

@@ -424,6 +424,7 @@ describe('B5 -- presentations per evaluation is exactly 1, exercised through the
       ledger,
       evaluationLsn: 20,
       patternPresentationLedgerPolicyVersion: ATTENTION_PATTERN_PRESENTATION_LEDGER_POLICY_VERSION,
+      aggregateLegitimacyPolicyRef: 'aggregate-legitimacy-disabled-v0',
     })
     expect(result.presentation).toBeNull()
     expect(result.decisions).toEqual([])
@@ -440,6 +441,7 @@ describe('B5 -- presentations per evaluation is exactly 1, exercised through the
       }],
       ledger, evaluationLsn: 20,
       patternPresentationLedgerPolicyVersion: ATTENTION_PATTERN_PRESENTATION_LEDGER_POLICY_VERSION,
+      aggregateLegitimacyPolicyRef: 'aggregate-legitimacy-disabled-v0',
     })
     expect(result.presentation).not.toBeNull()
     expect(result.presentation?.candidateId).toBe('pattern-candidate-1')
@@ -460,6 +462,7 @@ describe('B5 -- presentations per evaluation is exactly 1, exercised through the
       ],
       ledger, evaluationLsn: 20,
       patternPresentationLedgerPolicyVersion: ATTENTION_PATTERN_PRESENTATION_LEDGER_POLICY_VERSION,
+      aggregateLegitimacyPolicyRef: 'aggregate-legitimacy-disabled-v0',
     })
     expect(result.presentation?.candidateId).toBe('pattern-candidate-first')
     expect(result.ledger.records).toHaveLength(1)
@@ -474,6 +477,7 @@ describe('B5 -- presentations per evaluation is exactly 1, exercised through the
       orderedCandidates: [{ candidate: first, revalidatedCandidate: first, directEvidenceAssertionInputs: assertionInputs, rankingCacheKey: 'cache-a', revalidationCacheKey: 'cache-a' }],
       ledger, evaluationLsn: 20,
       patternPresentationLedgerPolicyVersion: ATTENTION_PATTERN_PRESENTATION_LEDGER_POLICY_VERSION,
+      aggregateLegitimacyPolicyRef: 'aggregate-legitimacy-disabled-v0',
     })
     expect(result.presentation?.candidateId).toBe('pattern-candidate-only-legal-first')
   })
@@ -490,6 +494,7 @@ describe('B5 -- presentations per evaluation is exactly 1, exercised through the
       ],
       ledger, evaluationLsn: 20,
       patternPresentationLedgerPolicyVersion: ATTENTION_PATTERN_PRESENTATION_LEDGER_POLICY_VERSION,
+      aggregateLegitimacyPolicyRef: 'aggregate-legitimacy-disabled-v0',
     })
     expect(result.attempts[0]).toMatchObject({ candidateId: 'pattern-candidate-refused-first', outcome: 'revalidation-refused' })
     expect(result.presentation?.candidateId).toBe('pattern-candidate-legal-second')
@@ -509,6 +514,7 @@ describe('B5 -- presentations per evaluation is exactly 1, exercised through the
       ],
       ledger, evaluationLsn: 20,
       patternPresentationLedgerPolicyVersion: ATTENTION_PATTERN_PRESENTATION_LEDGER_POLICY_VERSION,
+      aggregateLegitimacyPolicyRef: 'aggregate-legitimacy-disabled-v0',
     })
     expect(result.attempts[0]).toMatchObject({ outcome: 'revalidation-refused', revalidationReason: 'candidate-disappeared' })
     expect(result.presentation?.candidateId).toBe('pattern-candidate-still-legal')
@@ -523,6 +529,7 @@ describe('B5 -- presentations per evaluation is exactly 1, exercised through the
       ],
       ledger, evaluationLsn: 20,
       patternPresentationLedgerPolicyVersion: ATTENTION_PATTERN_PRESENTATION_LEDGER_POLICY_VERSION,
+      aggregateLegitimacyPolicyRef: 'aggregate-legitimacy-disabled-v0',
     })
     expect(result.presentation).toBeNull()
     expect(result.ledger.records).toHaveLength(0)
@@ -538,6 +545,7 @@ describe('B5 -- presentations per evaluation is exactly 1, exercised through the
       orderedCandidates: [{ candidate: visible, revalidatedCandidate: visible, directEvidenceAssertionInputs: assertionInputs, rankingCacheKey: 'cache-a', revalidationCacheKey: 'cache-a' }],
       ledger, evaluationLsn: 20,
       patternPresentationLedgerPolicyVersion: ATTENTION_PATTERN_PRESENTATION_LEDGER_POLICY_VERSION,
+      aggregateLegitimacyPolicyRef: 'aggregate-legitimacy-disabled-v0',
     })
     expect(result.presentation?.candidateId).toBe('pattern-candidate-visible-only')
     expect(result.decisions).toHaveLength(1)

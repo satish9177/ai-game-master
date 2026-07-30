@@ -65,6 +65,8 @@ import {
   ATTENTION_PATTERN_REVEAL_PACKAGE_SCHEMA_VERSION,
   isValidDirectEvidenceFieldValue,
 } from './attentionDirectEvidenceAssertion'
+import { validateAttentionInferenceProvenance } from './attentionInferenceProvenance'
+import { ATTENTION_INFERENCE_PROVENANCE_POLICY } from './attentionInferenceProvenancePolicy'
 import { ATTENTION_REVEAL_SLOT_ORDER } from './attentionRevealPackage'
 import type {
   AttentionRevealPackage,
@@ -152,19 +154,21 @@ function hasExactKeys(value: object, keys: readonly string[]): boolean {
 
 function assertionLine(assertion: Extract<AttentionRevealPackage, { readonly assertions: readonly unknown[] }>['assertions'][number]):
   string | AttentionTemplateRefusal {
-  if (!isPresent(assertion.assertionId) || !isPresent(assertion.sourceRecordId) || !isPresent(assertion.visibilityProvenanceId)) {
+  if (!isPresent(assertion.assertionId)) {
     return 'malformed-pattern-assertion'
   }
   switch (assertion.assertionKind) {
     case 'public_aid':
       return assertion.token === 'public aid'
         && hasExactKeys(assertion, ['assertionId', 'assertionKind', 'sourceRecordId', 'visibilityProvenanceId', 'token', 'actorId', 'targetId'])
+        && isPresent(assertion.sourceRecordId) && isPresent(assertion.visibilityProvenanceId)
         && isValidRenderedField(assertion.actorId) && isValidRenderedField(assertion.targetId)
         ? `${assertion.token}/${assertion.actorId}/${assertion.targetId}`
         : 'malformed-pattern-assertion'
     case 'public_harm_severity':
       return assertion.token === 'public harm severity'
         && hasExactKeys(assertion, ['assertionId', 'assertionKind', 'sourceRecordId', 'visibilityProvenanceId', 'token', 'actorId', 'targetId', 'publicSeverityBand'])
+        && isPresent(assertion.sourceRecordId) && isPresent(assertion.visibilityProvenanceId)
         && isValidRenderedField(assertion.actorId) && isValidRenderedField(assertion.targetId)
         && ['minor', 'moderate', 'major'].includes(assertion.publicSeverityBand)
         ? `${assertion.token}/${assertion.actorId}/${assertion.targetId}/${assertion.publicSeverityBand}`
@@ -172,6 +176,7 @@ function assertionLine(assertion: Extract<AttentionRevealPackage, { readonly ass
     case 'public_commitment':
       return assertion.token === 'public commitment'
         && hasExactKeys(assertion, ['assertionId', 'assertionKind', 'sourceRecordId', 'visibilityProvenanceId', 'token', 'speakerId', 'recipientId', 'commitmentKey'])
+        && isPresent(assertion.sourceRecordId) && isPresent(assertion.visibilityProvenanceId)
         && isValidRenderedField(assertion.speakerId) && isValidRenderedField(assertion.recipientId)
         && isValidRenderedField(assertion.commitmentKey)
         ? `${assertion.token}/${assertion.speakerId}/${assertion.recipientId}/${assertion.commitmentKey}`
@@ -179,10 +184,36 @@ function assertionLine(assertion: Extract<AttentionRevealPackage, { readonly ass
     case 'public_fulfillment_record':
       return assertion.token === 'public fulfillment record'
         && hasExactKeys(assertion, ['assertionId', 'assertionKind', 'sourceRecordId', 'visibilityProvenanceId', 'token', 'actorId', 'targetId', 'commitmentKey'])
+        && isPresent(assertion.sourceRecordId) && isPresent(assertion.visibilityProvenanceId)
         && isValidRenderedField(assertion.actorId) && isValidRenderedField(assertion.targetId)
         && isValidRenderedField(assertion.commitmentKey)
         ? `${assertion.token}/${assertion.actorId}/${assertion.targetId}/${assertion.commitmentKey}`
         : 'malformed-pattern-assertion'
+    case 'aggregate': {
+      const valid = validateAttentionInferenceProvenance(assertion.provenance, ATTENTION_INFERENCE_PROVENANCE_POLICY)
+      if (
+        !hasExactKeys(assertion, [
+          'assertionId', 'assertionKind', 'participants', 'provenance',
+          'ruleContentHash', 'ruleId', 'ruleSemanticVersion', 'token',
+        ])
+        || valid.kind !== 'ok'
+        || assertion.provenance.assertionId !== assertion.assertionId
+        || assertion.provenance.ruleId !== assertion.ruleId
+        || assertion.provenance.ruleSemanticVersion !== assertion.ruleSemanticVersion
+        || assertion.provenance.ruleContentHash !== assertion.ruleContentHash
+        || assertion.provenance.token !== assertion.token
+        || assertion.participants.length < 2
+        || assertion.participants.some((participant) => !isValidRenderedField(participant))
+        || new Set(assertion.participants).size !== assertion.participants.length
+      ) return 'malformed-pattern-assertion'
+      if (assertion.token === 'public aid was exchanged' && assertion.participants.length === 2) {
+        return `${assertion.token}/${assertion.participants[0]}/${assertion.participants[1]}`
+      }
+      if (assertion.token === 'recorded public aid linked' && assertion.participants.length >= 3) {
+        return `${assertion.token}/${assertion.participants.join(VALUE_SEPARATOR)}`
+      }
+      return 'malformed-pattern-assertion'
+    }
     default:
       return 'malformed-pattern-assertion'
   }
@@ -245,13 +276,24 @@ export function renderAttentionRevealPackage(
     if (revealPackage.assertions.length === 0) return { kind: 'refused', reason: 'missing-pattern-assertion' }
     const assertionIds = new Set<string>()
     const sourceIds = new Set<string>()
+    let aggregateSeen = false
     const lines: string[] = []
     for (const assertion of revealPackage.assertions) {
-      if (assertionIds.has(assertion.assertionId) || sourceIds.has(assertion.sourceRecordId)) {
+      if (assertionIds.has(assertion.assertionId)) {
         return { kind: 'refused', reason: 'duplicate-pattern-assertion' }
       }
       assertionIds.add(assertion.assertionId)
-      sourceIds.add(assertion.sourceRecordId)
+      if (assertion.assertionKind === 'aggregate') {
+        if (aggregateSeen || lines.length !== revealPackage.assertions.length - 1) {
+          return { kind: 'refused', reason: 'malformed-pattern-assertion' }
+        }
+        aggregateSeen = true
+      } else {
+        if (aggregateSeen || sourceIds.has(assertion.sourceRecordId)) {
+          return { kind: 'refused', reason: 'duplicate-pattern-assertion' }
+        }
+        sourceIds.add(assertion.sourceRecordId)
+      }
       const line = assertionLine(assertion)
       if (line === 'malformed-pattern-assertion') return { kind: 'refused', reason: line }
       lines.push(line)

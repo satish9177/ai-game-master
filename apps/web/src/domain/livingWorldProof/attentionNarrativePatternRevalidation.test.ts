@@ -69,14 +69,14 @@ describe('B5 — pattern presentation revalidation', () => {
     // between the two coordinates -- exactly the premise a real revalidation
     // pass would reconstruct and compare.
     const rankingTimeBundle: AttentionCandidateRankingDependencyBundle = {
-      derivation: attentionCandidateDerivationDependencyBundle({ snapshotLsn: 20 }),
+      derivation: attentionCandidateDerivationDependencyBundle({ snapshotLsn: 20, aggregateLegitimacyPolicyRef: 'aggregate-legitimacy-disabled-v0' }),
       orderingVersion: ATTENTION_CANDIDATE_ORDERING_VERSION,
       rankingPolicyHash: 'ranking-policy-hash-v1',
       eligibilityResourceState: attentionCandidateRankingEligibilityResourceState(),
     }
     const revalidationTimeBundle: AttentionCandidateRankingDependencyBundle = {
       ...rankingTimeBundle,
-      derivation: attentionCandidateDerivationDependencyBundle({ snapshotLsn: 24 }),
+      derivation: attentionCandidateDerivationDependencyBundle({ snapshotLsn: 24, aggregateLegitimacyPolicyRef: 'aggregate-legitimacy-disabled-v0' }),
     }
     const rankingTimeKey = deriveAttentionCandidateRankingCacheKey(rankingTimeBundle)
     const revalidationTimeKey = deriveAttentionCandidateRankingCacheKey(revalidationTimeBundle)
@@ -95,7 +95,7 @@ describe('B5 — pattern presentation revalidation', () => {
 
   it('B5 -- an unchanged premise: the identical real cache key at both coordinates permits revalidation to proceed to the policy check', () => {
     const bundle: AttentionCandidateRankingDependencyBundle = {
-      derivation: attentionCandidateDerivationDependencyBundle({ snapshotLsn: 20 }),
+      derivation: attentionCandidateDerivationDependencyBundle({ snapshotLsn: 20, aggregateLegitimacyPolicyRef: 'aggregate-legitimacy-disabled-v0' }),
       orderingVersion: ATTENTION_CANDIDATE_ORDERING_VERSION,
       rankingPolicyHash: 'ranking-policy-hash-v1',
       eligibilityResourceState: attentionCandidateRankingEligibilityResourceState(),

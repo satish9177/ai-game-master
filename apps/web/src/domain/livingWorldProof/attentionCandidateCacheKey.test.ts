@@ -43,6 +43,8 @@ import {
   ATTENTION_STAGE_B_RESOURCE_POLICY_VERSION,
 } from './attentionNarrativePatternResourcePolicy'
 import { computeAttentionCandidateIdentity } from './attentionCandidateIdentity'
+import { ATTENTION_INFERENCE_PROVENANCE_POLICY } from './attentionInferenceProvenancePolicy'
+import { ATTENTION_AGGREGATION_RULE_LIBRARY_VERSION_HASH } from './attentionInferenceRuleLibrary'
 
 /**
  * A3 + B4 — the two separately-keyed cache identities, built from the explicit
@@ -82,7 +84,11 @@ const SNAPSHOT_LSN = 41
 function derivation(
   overrides: Partial<AttentionCandidateDerivationDependencyBundle> = {},
 ): AttentionCandidateDerivationDependencyBundle {
-  return attentionCandidateDerivationDependencyBundle({ snapshotLsn: SNAPSHOT_LSN, ...overrides })
+  return attentionCandidateDerivationDependencyBundle({
+    snapshotLsn: SNAPSHOT_LSN,
+    aggregateLegitimacyPolicyRef: 'aggregate-legitimacy-disabled-v0',
+    ...overrides,
+  })
 }
 
 function ranking(
@@ -162,6 +168,9 @@ const DERIVATION_VARIATIONS: readonly (readonly [
     { patternCandidateIdentitySchemaVersion: 'attention-pattern-candidate-identity-schema-v2' },
   ],
   ['resourcePolicyVersion', { resourcePolicyVersion: 'fixture-resource-policy-v2' }],
+  ['inferenceProvenancePolicyVersion', { inferenceProvenancePolicyVersion: 'fixture-inference-policy-v2' }],
+  ['aggregationRuleLibraryVersionHash', { aggregationRuleLibraryVersionHash: 'fixture-rule-library-hash-v2' }],
+  ['aggregateLegitimacyPolicyRef', { aggregateLegitimacyPolicyRef: 'aggregate-legitimacy-c1-v1' }],
 ]
 
 /**
@@ -194,8 +203,11 @@ describe('B4 / RN019 §9.3 — the derivation bundle is the closed thirteen-fiel
       'patternInstanceIdentitySchemaVersion',
       'patternCandidateIdentitySchemaVersion',
       'resourcePolicyVersion',
+      'inferenceProvenancePolicyVersion',
+      'aggregationRuleLibraryVersionHash',
+      'aggregateLegitimacyPolicyRef',
     ])
-    expect(ATTENTION_CANDIDATE_DERIVATION_DEPENDENCY_FIELDS).toHaveLength(13)
+    expect(ATTENTION_CANDIDATE_DERIVATION_DEPENDENCY_FIELDS).toHaveLength(16)
   })
 
   it('builds a default bundle from the pinned constants, with no field left ambient', () => {
@@ -213,13 +225,16 @@ describe('B4 / RN019 §9.3 — the derivation bundle is the closed thirteen-fiel
       patternInstanceIdentitySchemaVersion: ATTENTION_NARRATIVE_PATTERN_IDENTITY_SCHEMA_VERSION,
       patternCandidateIdentitySchemaVersion: ATTENTION_PATTERN_CANDIDATE_IDENTITY_SCHEMA_VERSION,
       resourcePolicyVersion: ATTENTION_STAGE_B_RESOURCE_POLICY_VERSION,
+      inferenceProvenancePolicyVersion: ATTENTION_INFERENCE_PROVENANCE_POLICY.version,
+      aggregationRuleLibraryVersionHash: ATTENTION_AGGREGATION_RULE_LIBRARY_VERSION_HASH,
+      aggregateLegitimacyPolicyRef: 'aggregate-legitimacy-disabled-v0',
     })
     expect(Object.isFrozen(derivation())).toBe(true)
   })
 
   it('bumps the derivation and ranking key schemas to their explicit versioned strings', () => {
     expect(ATTENTION_CANDIDATE_DERIVATION_CACHE_KEY_SCHEMA_VERSION)
-      .toBe('attention-candidate-derivation-cache-key-v2')
+      .toBe('attention-candidate-derivation-cache-key-v3')
     // B5 adds new ledger/presentation members to the ranking-only eligibility
     // state (never to the derivation bundle), a shape change bumping ranking
     // alone to v3 while derivation stays v2.
@@ -521,8 +536,14 @@ describe('A3 / D15 — the two keys are versioned, distinct, deterministic, and 
       patternInstanceIdentitySchemaVersion: ATTENTION_NARRATIVE_PATTERN_IDENTITY_SCHEMA_VERSION,
       patternCandidateIdentitySchemaVersion: ATTENTION_PATTERN_CANDIDATE_IDENTITY_SCHEMA_VERSION,
       resourcePolicyVersion: ATTENTION_STAGE_B_RESOURCE_POLICY_VERSION,
+      inferenceProvenancePolicyVersion: ATTENTION_INFERENCE_PROVENANCE_POLICY.version,
+      aggregationRuleLibraryVersionHash: ATTENTION_AGGREGATION_RULE_LIBRARY_VERSION_HASH,
+      aggregateLegitimacyPolicyRef: 'aggregate-legitimacy-disabled-v0',
     }
     const reversed: AttentionCandidateDerivationDependencyBundle = {
+      aggregateLegitimacyPolicyRef: 'aggregate-legitimacy-disabled-v0',
+      aggregationRuleLibraryVersionHash: ATTENTION_AGGREGATION_RULE_LIBRARY_VERSION_HASH,
+      inferenceProvenancePolicyVersion: ATTENTION_INFERENCE_PROVENANCE_POLICY.version,
       resourcePolicyVersion: ATTENTION_STAGE_B_RESOURCE_POLICY_VERSION,
       patternCandidateIdentitySchemaVersion: ATTENTION_PATTERN_CANDIDATE_IDENTITY_SCHEMA_VERSION,
       patternInstanceIdentitySchemaVersion: ATTENTION_NARRATIVE_PATTERN_IDENTITY_SCHEMA_VERSION,

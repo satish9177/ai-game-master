@@ -34,6 +34,8 @@ import {
 } from './attentionDirectEvidenceAssertion'
 import { ATTENTION_PATTERN_PRESENTATION_LEDGER_POLICY_VERSION, createAttentionLedger } from './attentionLedger'
 import { runAttentionPatternPresentationPass } from './attentionReplay'
+import { evaluateAttentionAggregateLegitimacy } from './attentionAggregateLegitimacy'
+import { buildC1ReciprocalAidAssertions } from './attentionInferenceScenario'
 
 /**
  * A4 — the Stage A `RevealPackage` subset.
@@ -361,6 +363,24 @@ describe('B4 — the reveal package dispatches the two-family candidate union', 
       .toEqual([...Object.keys(patternPackage.revealPackage)].sort())
   })
 
+  it('C1 -- refuses a forged aggregate before it can enter a reveal package', () => {
+    const assertions = buildAttentionDirectEvidenceAssertions([
+      { assertionKind: 'public_aid', sourceRecordId: 'rec-1', visibilityProvenanceId: 'public-rec-1', actorId: 'ally-a', targetId: 'ally-b' },
+      { assertionKind: 'public_aid', sourceRecordId: 'rec-2', visibilityProvenanceId: 'public-rec-2', actorId: 'ally-b', targetId: 'ally-a' },
+    ])
+    const aggregate = evaluateAttentionAggregateLegitimacy({
+      policyRef: 'aggregate-legitimacy-c1-v1', sourceKind: 'narrative_pattern_instance',
+      sources: buildC1ReciprocalAidAssertions(),
+    })
+    if (assertions.kind !== 'ok' || aggregate.kind !== 'ok') throw new Error('expected C1 fixture evidence')
+    const forged = { ...aggregate.aggregate, sourceRecordId: 'synthetic-aggregate-record' }
+    expect(buildAttentionRevealPackage(PATTERN_CANDIDATE, {
+      templateVersion: ATTENTION_PATTERN_DIRECT_EVIDENCE_TEMPLATE_VERSION,
+      directEvidenceAssertions: assertions.assertions,
+      aggregateAssertion: forged as typeof aggregate.aggregate,
+    })).toEqual({ kind: 'refused', reason: 'invalid-aggregate-assertion' })
+  })
+
   it('B5 -- refuses a quest candidate request carrying pattern-only directEvidenceAssertions', () => {
     const assertions = buildAttentionDirectEvidenceAssertions([
       { assertionKind: 'public_aid', sourceRecordId: 'rec-1', visibilityProvenanceId: 'public-rec-1', actorId: 'a', targetId: 'b' },
@@ -403,6 +423,7 @@ describe('B4 — the reveal package dispatches the two-family candidate union', 
       ledger: created.ledger,
       evaluationLsn: A1_RANKING_SNAPSHOT_LSN,
       patternPresentationLedgerPolicyVersion: ATTENTION_PATTERN_PRESENTATION_LEDGER_POLICY_VERSION,
+      aggregateLegitimacyPolicyRef: 'aggregate-legitimacy-disabled-v0',
     })
 
     expect(pass.presentation).toBeNull()

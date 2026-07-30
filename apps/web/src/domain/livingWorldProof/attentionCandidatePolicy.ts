@@ -126,7 +126,7 @@ export const ATTENTION_CANDIDATE_ORDERING_VERSION = 'attention-candidate-orderin
  * compared equal to one minted under this schema.
  */
 export const ATTENTION_CANDIDATE_DERIVATION_CACHE_KEY_SCHEMA_VERSION =
-  'attention-candidate-derivation-cache-key-v2' as const
+  'attention-candidate-derivation-cache-key-v3' as const
 
 export const ATTENTION_CANDIDATE_RANKING_CACHE_KEY_SCHEMA_VERSION =
   'attention-candidate-ranking-cache-key-v3' as const

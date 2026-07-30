@@ -79,6 +79,11 @@ const STAGE_A_PROOF_MODULES = [
   'attentionReplayResources.ts',
   'attentionReplay.ts',
   'attentionReplayScenario.ts',
+  'attentionInferenceProvenancePolicy.ts',
+  'attentionInferenceRuleLibrary.ts',
+  'attentionInferenceProvenance.ts',
+  'attentionAggregateLegitimacy.ts',
+  'attentionInferenceScenario.ts',
 ] as const
 
 /**
@@ -208,6 +213,9 @@ const ALLOWED_IMPORT_SPECIFIERS: Record<string, readonly string[]> = {
     './attentionNarrativePatternLibrary',
     './attentionNarrativePatternResourcePolicy',
     './attentionDirectEvidenceAssertion',
+    './attentionInferenceProvenancePolicy',
+    './attentionInferenceRuleLibrary',
+    './attentionAggregateLegitimacy',
   ],
   'attentionDirectEvidenceAssertion.ts': [
     './canonicalSerialization',
@@ -219,12 +227,17 @@ const ALLOWED_IMPORT_SPECIFIERS: Record<string, readonly string[]> = {
     './attentionCandidate',
     './attentionDirectEvidenceAssertion',
     './attentionNarrativePatternResourcePolicy',
+    './attentionAggregateLegitimacy',
+    './attentionInferenceProvenance',
+    './attentionInferenceProvenancePolicy',
   ],
   'attentionTemplate.ts': [
     './canonicalSerialization',
     './attentionCandidatePolicy',
     './attentionRevealPackage',
     './attentionDirectEvidenceAssertion',
+    './attentionInferenceProvenance',
+    './attentionInferenceProvenancePolicy',
   ],
   'attentionLedger.ts': [
     './canonicalSerialization',
@@ -259,6 +272,8 @@ const ALLOWED_IMPORT_SPECIFIERS: Record<string, readonly string[]> = {
     './attentionNarrativePatternContracts',
     './attentionPatternEvidenceContracts',
     './attentionNarrativePatternMonitor',
+    './attentionAggregateLegitimacy',
+    './attentionInferenceRuleLibrary',
   ],
   'attentionReplayScenario.ts': [
     './attentionQuestCandidateContracts',
@@ -269,6 +284,21 @@ const ALLOWED_IMPORT_SPECIFIERS: Record<string, readonly string[]> = {
     './attentionReplayResources',
     './attentionQuestCandidateScenario',
   ],
+  'attentionInferenceProvenancePolicy.ts': ['./canonicalSerialization'],
+  'attentionInferenceRuleLibrary.ts': ['./canonicalSerialization'],
+  'attentionInferenceProvenance.ts': [
+    './canonicalSerialization',
+    './attentionInferenceProvenancePolicy',
+    './attentionInferenceRuleLibrary',
+  ],
+  'attentionAggregateLegitimacy.ts': [
+    './canonicalSerialization',
+    './attentionDirectEvidenceAssertion',
+    './attentionInferenceProvenancePolicy',
+    './attentionInferenceRuleLibrary',
+    './attentionInferenceProvenance',
+  ],
+  'attentionInferenceScenario.ts': ['./attentionDirectEvidenceAssertion'],
 }
 
 /**
@@ -970,6 +1000,14 @@ describe('A2 / P1 — Stage A proof modules import a closed Stage A allowlist on
 
   it('every Stage A module has an allowlist entry, so a new module cannot be scanned against nothing', () => {
     expect([...STAGE_A_PROOF_MODULES].sort()).toEqual(Object.keys(ALLOWED_IMPORT_SPECIFIERS).sort())
+  })
+
+  it('covers exactly every attention-prefixed, non-test proof module on disk', () => {
+    const discovered = readdirSync(fileURLToPath(new URL('./', import.meta.url)))
+      .filter((name) => /^attention.*\.tsx?$/.test(name))
+      .filter((name) => !/\.test\.tsx?$/.test(name))
+      .sort()
+    expect(discovered).toEqual([...STAGE_A_PROOF_MODULES].sort())
   })
 })
 
@@ -1720,6 +1758,8 @@ describe('B4 / P1 — the trusted trace and replay path stay singular and patter
             .map((specifier) => `${fileName} -> ${specifier}`)
         ))
         expect(additions.sort()).toEqual([
+          'attentionReplay.ts -> ./attentionAggregateLegitimacy',
+          'attentionReplay.ts -> ./attentionInferenceRuleLibrary',
           'attentionReplay.ts -> ./attentionNarrativePatternMonitor',
           'attentionReplay.ts -> ./attentionPatternEvidenceContracts',
           'attentionReplayScenario.ts -> ./attentionNarrativePatternScenario',

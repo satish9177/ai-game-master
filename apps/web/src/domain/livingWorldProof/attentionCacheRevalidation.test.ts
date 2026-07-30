@@ -60,6 +60,7 @@ const NO_AUTHORITATIVE_LOG_DIGEST = digestAttentionReplayAuthoritativeLog({ comm
  */
 const BASE_DERIVATION_INPUT = attentionCandidateDerivationDependencyBundle({
   snapshotLsn: A1_RANKING_SNAPSHOT_LSN,
+  aggregateLegitimacyPolicyRef: 'aggregate-legitimacy-disabled-v0',
 })
 
 const BASE_RANKING_INPUT: AttentionCandidateRankingDependencyBundle = {
