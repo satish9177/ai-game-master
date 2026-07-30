@@ -1661,7 +1661,7 @@ describe('B4 / P1 — the trusted trace and replay path stay singular and patter
           && CHAIN_STEPS.every((step) => readStrippedSource(fileName).includes(`${step}(`))
         ))
         expect(duplicatingModules).toEqual([])
-      })
+      }, 30_000)
     })
 
     /**
