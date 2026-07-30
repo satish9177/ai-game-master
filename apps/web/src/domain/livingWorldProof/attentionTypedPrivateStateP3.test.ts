@@ -26,7 +26,8 @@ describe('C8 typed private-state P3 families', () => {
   })
 
   it('is rejected at both public attention input types at compile time', () => {
-    if (false) {
+    const typeCheckOnly = (): boolean => false
+    if (typeCheckOnly()) {
       // @ts-expect-error a private belief is not a proof quest snapshot.
       readAttentionReadableQuestCandidateViews(belief, { accessorContractVersion: 'attention-quest-candidate-accessor-v1', rankingSnapshotLsn: 1 })
       // @ts-expect-error a private intention is not an attention-readable quest view.
