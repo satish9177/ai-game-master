@@ -586,7 +586,20 @@ export function attemptAttentionPatternPresentation(input: {
       return Object.freeze({ ledger: input.ledger, attempt, decision, presentation: null })
     }
 
-    let rendered = renderAttentionRevealPackage(built.revealPackage, {
+    // This function is the pattern-only branch. The guard keeps TypeScript and
+    // the runtime aligned with that closed family boundary before C6 consumes
+    // the package's assertion-bearing shape.
+    if (!('assertions' in built.revealPackage)) {
+      const assertionIds = Object.freeze(assertions.assertions.map((assertion) => assertion.assertionId))
+      const attempt = Object.freeze({ candidateId: entry.candidate.candidateId, outcome: 'package-refused',
+        revalidationReason: revalidation.reason, assertionIds, refusalDetail: 'unsupported-source-family' } as const)
+      const decision = Object.freeze({ candidateId: entry.candidate.candidateId, assertionIds,
+        ...REVALIDATED_ELIGIBLE_TRACE_OUTCOMES, ledgerAppend: 'not-appended' } as const)
+      return Object.freeze({ ledger: input.ledger, attempt, decision, presentation: null })
+    }
+    const patternRevealPackage = built.revealPackage
+
+    let rendered = renderAttentionRevealPackage(patternRevealPackage, {
       templateVersion: ATTENTION_PATTERN_DIRECT_EVIDENCE_TEMPLATE_VERSION,
       ...(entry.approvedRevealScope === undefined ? {} : { approvedRevealScope: entry.approvedRevealScope }),
     })
@@ -611,7 +624,7 @@ export function attemptAttentionPatternPresentation(input: {
     let authoritativeResources = entry.diegeticDelivery?.resources
     if (entry.diegeticDelivery !== undefined) {
       const diegeticPackage = buildAttentionDiegeticRevealPackage({
-        revealPackage: built.revealPackage,
+        revealPackage: patternRevealPackage,
         channelId: entry.diegeticDelivery.channelId,
         revealerId: entry.diegeticDelivery.revealerId,
         recipientScope: entry.diegeticDelivery.recipientScope,

@@ -3,6 +3,7 @@ import { createAttentionRevealScope, revalidateAttentionRevealScope } from './at
 import { createAttentionLedger } from './attentionLedger'
 import { ATTENTION_LEDGER_POLICY_VERSION } from './attentionCandidatePolicy'
 import { runAttentionMixedFamilyEvaluation } from './attentionReplay'
+import type { AttentionMixedFamilyEvaluationInput, AttentionMixedPatternC4Eligibility } from './attentionReplay'
 import { buildB6PatternOnlyEvaluationInput } from './attentionReplayScenario'
 import { ATTENTION_COMMUNICATION_AUTHORITY_ACCESSOR_VERSION } from './attentionCommunicationAuthorityContracts'
 import { readAttentionReadableCommunicationAuthorityViews } from './attentionCommunicationAuthorityAccessor'
@@ -74,7 +75,11 @@ describe('C4 reveal scope', () => {
       unavailableRecipientIds: Object.freeze([]),
       assertionIds: Object.freeze([...assertionIds]),
     })
-    const withC4 = (ranking = raw(direct), revalidation = raw(direct), delivery?: object) => ({
+    const withC4 = (
+      ranking = raw(direct),
+      revalidation = raw(direct),
+      delivery?: AttentionMixedPatternC4Eligibility['delivery'],
+    ): AttentionMixedFamilyEvaluationInput => ({
       ...base,
       patternPresentationInputs: Object.freeze(base.patternPresentationInputs.map((entry) => entry.candidateId === candidateId
         ? Object.freeze({ ...entry, c4Eligibility: Object.freeze({ ranking, revalidation, ...(delivery === undefined ? {} : { delivery }) }) })

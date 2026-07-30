@@ -60,35 +60,36 @@ export function buildAttentionAbsenceWitnessProvenance(input: {
 }): AttentionAbsenceWitnessBuildResult {
   if (input.policyRef !== 'absence-witness-c2-v1') return { kind: 'refused', reason: 'absence_completeness_certificate_missing' }
   if (input.certificate === undefined) return { kind: 'refused', reason: 'absence_completeness_certificate_missing' }
-  if (!isStructurallyValidAttentionReadableClosedRelationCertificateView(input.certificate)) {
+  const certificate = input.certificate
+  if (!isStructurallyValidAttentionReadableClosedRelationCertificateView(certificate)) {
     return { kind: 'refused', reason: 'absence_certificate_not_structural' }
   }
-  if (!isAttentionReadableClosedRelationCertificateFromAccessor(input.certificate)) {
+  if (!isAttentionReadableClosedRelationCertificateFromAccessor(certificate)) {
     return { kind: 'refused', reason: 'absence_certificate_not_structural' }
   }
   if (!present(input.entityA) || !present(input.entityB) || input.entityA === input.entityB) {
     return { kind: 'refused', reason: 'absence_certificate_not_structural' }
   }
   const boundEntities = input.entityA < input.entityB ? [input.entityA, input.entityB] as const : [input.entityB, input.entityA] as const
-  if (input.certificate.closedRelationId !== ATTENTION_CLOSED_RELATION_ID
-    || input.certificate.relationSemanticVersion !== ATTENTION_CLOSED_RELATION_SEMANTIC_VERSION) {
+  if (certificate.closedRelationId !== ATTENTION_CLOSED_RELATION_ID
+    || certificate.relationSemanticVersion !== ATTENTION_CLOSED_RELATION_SEMANTIC_VERSION) {
     return { kind: 'refused', reason: 'absence_relation_not_closed' }
   }
-  if (input.certificate.completenessPolicyHash !== ATTENTION_ABSENCE_COMPLETENESS_POLICY_HASH) {
+  if (certificate.completenessPolicyHash !== ATTENTION_ABSENCE_COMPLETENESS_POLICY_HASH) {
     return { kind: 'refused', reason: 'absence_completeness_certificate_missing' }
   }
-  const admitted = readAttentionCertifiedClosedRelationRecords(input.certificate)
+  const admitted = readAttentionCertifiedClosedRelationRecords(certificate)
   if (admitted === undefined) return { kind: 'refused', reason: 'absence_certificate_not_structural' }
   const actualIds = admitted.map((view) => view.recordId).slice().sort()
-  if (canonicalSerialize(actualIds) !== canonicalSerialize(input.certificate.admittedRecordIds)
-    || mintHash(canonicalSerialize(actualIds)) !== input.certificate.admittedRecordDigest) {
+  if (canonicalSerialize(actualIds) !== canonicalSerialize(certificate.admittedRecordIds)
+    || mintHash(canonicalSerialize(actualIds)) !== certificate.admittedRecordDigest) {
     return { kind: 'refused', reason: 'absence_certificate_not_structural' }
   }
   const matching = admitted.some((view) => (
     view.recordKind === 'observable_action'
     && view.actionCode === 'aid'
-    && view.commitLsn >= input.certificate.fromLsn
-    && view.commitLsn <= input.certificate.toLsn
+    && view.commitLsn >= certificate.fromLsn
+    && view.commitLsn <= certificate.toLsn
     && ((view.actorId === boundEntities[0] && view.targetId === boundEntities[1])
       || (view.actorId === boundEntities[1] && view.targetId === boundEntities[0]))
   ))
@@ -97,13 +98,13 @@ export function buildAttentionAbsenceWitnessProvenance(input: {
   const provenance: AttentionAbsenceWitnessProvenance = Object.freeze({
     kind: 'absence_witness', predicateId: NO_RECORDED_PUBLIC_AID_BETWEEN_V1.predicateId,
     predicateSemanticVersion: NO_RECORDED_PUBLIC_AID_BETWEEN_V1.semanticVersion, predicateContentHash,
-    boundEntities, closedRelationId: input.certificate.closedRelationId,
-    relationSemanticVersion: input.certificate.relationSemanticVersion, certificateId: input.certificate.certificateId,
-    admittedRecordDigest: input.certificate.admittedRecordDigest, snapshotLsn: input.certificate.snapshotLsn,
-    fromLsn: input.certificate.fromLsn, toLsn: input.certificate.toLsn,
-    fromWorldTimeTick: input.certificate.fromWorldTimeTick, toWorldTimeTick: input.certificate.toWorldTimeTick,
-    completenessPolicyVersion: input.certificate.completenessPolicyVersion,
-    completenessPolicyHash: input.certificate.completenessPolicyHash, result: 'no-matching-record',
+    boundEntities, closedRelationId: certificate.closedRelationId,
+    relationSemanticVersion: certificate.relationSemanticVersion, certificateId: certificate.certificateId,
+    admittedRecordDigest: certificate.admittedRecordDigest, snapshotLsn: certificate.snapshotLsn,
+    fromLsn: certificate.fromLsn, toLsn: certificate.toLsn,
+    fromWorldTimeTick: certificate.fromWorldTimeTick, toWorldTimeTick: certificate.toWorldTimeTick,
+    completenessPolicyVersion: certificate.completenessPolicyVersion,
+    completenessPolicyHash: certificate.completenessPolicyHash, result: 'no-matching-record',
   })
   return { kind: 'ok', provenance, canonicalBytes: canonicalSerialize(provenance) }
 }

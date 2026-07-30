@@ -4,6 +4,7 @@ import { buildAttentionAbsenceWitnessProvenance } from './attentionAbsenceWitnes
 import { aidRecord, mintPatternEvidenceViews } from './attentionNarrativePatternScenario'
 import { revalidateAttentionAbsenceCertificate } from './attentionReplay'
 import { runAttentionMixedFamilyEvaluation } from './attentionReplay'
+import type { AttentionMixedPatternPresentationInput } from './attentionReplay'
 import { buildB6PatternOnlyEvaluationInput } from './attentionReplayScenario'
 import { createAttentionLedger } from './attentionLedger'
 import { buildAttentionCertifiedAbsenceAssertion } from './attentionDirectEvidenceAssertion'
@@ -46,7 +47,10 @@ describe('C2 absence replay controls', () => {
     const result = runAttentionMixedFamilyEvaluation({
       ...base,
       aggregateLegitimacyPolicyRef: 'aggregate-legitimacy-disabled-v0',
-      patternPresentationInputs: Object.freeze(base.patternPresentationInputs.map((entry) => Object.freeze({ ...entry, absenceAssertions: Object.freeze([absence]) }))),
+      patternPresentationInputs: Object.freeze(base.patternPresentationInputs.map((entry) => Object.freeze({
+        ...entry,
+        absenceAssertions: Object.freeze([absence]),
+      }))) as readonly AttentionMixedPatternPresentationInput[],
     })
     expect(result.kind).toBe('ok')
     if (result.kind !== 'ok') throw new Error('expected absence presentation')

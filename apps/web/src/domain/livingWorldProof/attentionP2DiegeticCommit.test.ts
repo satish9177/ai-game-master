@@ -5,6 +5,7 @@ import {
   createAttentionReplayAuthoritativeResources,
   foldAttentionReplayAuthoritativeLog,
 } from './attentionReplayResources'
+import type { AttentionReplayAuthoritativeResources } from './attentionReplayResources'
 import { COMMUNICATION_VALIDATOR_CONTRACT_VERSION } from './communicationValidatorContracts'
 import { validateAndCommitAuthoritativeCommunication } from './communicationValidator'
 import { deliverAttentionDiegeticReveal } from './attentionDiegeticDelivery'
@@ -72,8 +73,9 @@ describe('C6 P2-B diegetic commit', () => {
     const controlFold = foldAttentionReplayAuthoritativeLog(control.resources.log, ATTENTION_REPLAY_AUTHORITATIVE_LOG_FOLD_V2)
     const onFold = foldAttentionReplayAuthoritativeLog(on.resources.log, ATTENTION_REPLAY_AUTHORITATIVE_LOG_FOLD_V2)
     expect(offFold.kind).toBe('ok'); expect(controlFold.kind).toBe('ok'); expect(onFold.kind).toBe('ok')
-    if (controlFold.kind !== 'ok' || onFold.kind !== 'ok' || offFold.kind !== 'ok') throw new Error('fold failed')
-    const identities = (resources: typeof offV2) => Object.freeze({
+    if (control.result.kind !== 'committed' || on.kind !== 'committed'
+      || controlFold.kind !== 'ok' || onFold.kind !== 'ok' || offFold.kind !== 'ok') throw new Error('fold or delivery failed')
+    const identities = (resources: AttentionReplayAuthoritativeResources) => Object.freeze({
       commitSchemaVersion: resources.log.commitSchemaVersion,
       foldVersion: resources.log.foldVersion,
       validatorPolicyVersion: COMMUNICATION_VALIDATOR_CONTRACT_VERSION,

@@ -474,7 +474,7 @@ export interface AttentionTraceInput {
   readonly authoritativeLogDigestAfter: string
   readonly p3PremiseCheck?: AttentionTraceP3PremiseCheck
   readonly scorePolicyEvidence?: AttentionTraceScorePolicyEvidence
-  readonly absenceWitnessMaterial?: AttentionTraceAbsenceWitnessMaterial
+  readonly absenceWitnessMaterial?: readonly AttentionTraceAbsenceWitnessMaterial[]
   readonly communicationAuthorityMaterial?: readonly AttentionTraceCommunicationAuthorityMaterial[]
   readonly revealScopeMaterial?: readonly AttentionTraceRevealScopeMaterial[]
   /** C7 trusted-only partition evidence; never projected to playerObservable. */

@@ -270,9 +270,10 @@ const ALLOWED_IMPORT_SPECIFIERS: Record<string, readonly string[]> = {
     './attentionDirectEvidenceAssertion',
     './attentionNarrativePatternResourcePolicy',
     './attentionAggregateLegitimacy',
-    './attentionInferenceProvenance',
-    './attentionInferenceProvenancePolicy',
-    './attentionRevealScope',
+     './attentionInferenceProvenance',
+     './attentionInferenceProvenancePolicy',
+     './attentionRecipientScope',
+     './attentionRevealScope',
     './attentionDiegeticRevealProposal',
   ],
   'attentionTemplate.ts': [

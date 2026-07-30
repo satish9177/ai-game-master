@@ -81,6 +81,7 @@ import type { AttentionStageBResourcePolicy } from './attentionNarrativePatternR
 import type { AttentionAggregateAssertion } from './attentionAggregateLegitimacy'
 import { validateAttentionInferenceProvenance } from './attentionInferenceProvenance'
 import { ATTENTION_INFERENCE_PROVENANCE_POLICY } from './attentionInferenceProvenancePolicy'
+import type { RecipientScope } from './attentionRecipientScope'
 import type { AttentionRevealScope } from './attentionRevealScope'
 import { canonicalSerialize } from './canonicalSerialization'
 import {
@@ -247,8 +248,8 @@ export function buildAttentionDiegeticRevealPackage(input: {
   readonly revealPackage: AttentionPatternRevealPackage
   readonly channelId: string
   readonly revealerId: string
-  readonly recipientScope: string
-  readonly revealScope: string
+  readonly recipientScope: RecipientScope
+  readonly revealScope: AttentionRevealScope
   readonly rankingSnapshotLsn: number
   readonly revalidationSnapshotLsn: number
   readonly policyIdentities: readonly string[]
