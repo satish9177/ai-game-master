@@ -85,6 +85,12 @@ import type { AttentionStageBResourcePolicy } from './attentionNarrativePatternR
  */
 export type AttentionLedgerOutcome = AttentionRevealResultTag | 'non-engagement' | 'revalidation-failed'
 
+/** C7's naming-only bridge: the established failed-render outcome is classified
+ * as the existing D11 phrasing_failed code without changing when it fires. */
+export function attentionLedgerOutcomeDiagnostic(outcome: AttentionLedgerOutcome): 'phrasing_failed' | null {
+  return outcome === 'presentation-failed' ? 'phrasing_failed' : null
+}
+
 /** B5's disjoint pattern-presentation record contract; never a quest sentinel. */
 export { ATTENTION_PATTERN_PRESENTATION_LEDGER_POLICY_VERSION } from './attentionCandidatePolicy'
 

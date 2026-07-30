@@ -53,6 +53,7 @@ import { canonicalSerialize, mintHash } from './canonicalSerialization'
 import { ATTENTION_PATTERN_PRESENTATION_LEDGER_POLICY_VERSION } from './attentionCandidatePolicy'
 import type { AttentionRevealResultTag } from './attentionRevealPackage'
 import type { AttentionRevealScope, AttentionRevealScopeRevalidation } from './attentionRevealScope'
+import type { AttentionDiagnosticClassification } from './attentionDiagnosticPartition'
 
 /**
  * **Two schemas, versioned separately (RN019 §9.6).** The trusted/internal trace
@@ -476,6 +477,8 @@ export interface AttentionTraceInput {
   readonly absenceWitnessMaterial?: AttentionTraceAbsenceWitnessMaterial
   readonly communicationAuthorityMaterial?: readonly AttentionTraceCommunicationAuthorityMaterial[]
   readonly revealScopeMaterial?: readonly AttentionTraceRevealScopeMaterial[]
+  /** C7 trusted-only partition evidence; never projected to playerObservable. */
+  readonly diagnostics?: readonly AttentionDiagnosticClassification[]
 }
 
 /**

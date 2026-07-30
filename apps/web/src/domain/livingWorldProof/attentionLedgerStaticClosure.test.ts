@@ -102,6 +102,7 @@ const STAGE_A_PROOF_MODULES = [
   'attentionEligibilityVerdict.ts',
   'attentionDiegeticRevealProposal.ts',
   'attentionDiegeticDelivery.ts',
+  'attentionDiagnosticPartition.ts',
 ] as const
 
 /**
@@ -295,6 +296,7 @@ const ALLOWED_IMPORT_SPECIFIERS: Record<string, readonly string[]> = {
     './attentionCandidatePolicy',
     './attentionRevealPackage',
     './attentionRevealScope',
+    './attentionDiagnosticPartition',
   ],
   'attentionReplayResources.ts': ['./canonicalSerialization'],
   'attentionReplay.ts': [
@@ -383,6 +385,7 @@ const ALLOWED_IMPORT_SPECIFIERS: Record<string, readonly string[]> = {
     './communicationValidatorContracts',
     './attentionDiegeticRevealProposal',
   ],
+  'attentionDiagnosticPartition.ts': [],
 }
 
 /**
