@@ -150,6 +150,14 @@ function digestAttentionReplayReducerCache(cache: AttentionReplayReducerCache): 
  */
 export type AttentionReplayWallClockInput = number
 
+export const ATTENTION_REPLAY_AUTHORITATIVE_COMMIT_SCHEMA_V1 = 'attention-replay-authoritative-commit-schema-v1' as const
+export const ATTENTION_REPLAY_AUTHORITATIVE_COMMIT_SCHEMA_V2 = 'attention-replay-authoritative-commit-schema-v2' as const
+export const ATTENTION_REPLAY_AUTHORITATIVE_LOG_FOLD_V1 = 'attention-replay-authoritative-log-fold-v1' as const
+export const ATTENTION_REPLAY_AUTHORITATIVE_LOG_FOLD_V2 = 'attention-replay-authoritative-log-fold-v2' as const
+export type AttentionReplayAuthoritativeCommitSchemaVersion = typeof ATTENTION_REPLAY_AUTHORITATIVE_COMMIT_SCHEMA_V1 | typeof ATTENTION_REPLAY_AUTHORITATIVE_COMMIT_SCHEMA_V2
+export type AttentionReplayAuthoritativeLogFoldVersion = typeof ATTENTION_REPLAY_AUTHORITATIVE_LOG_FOLD_V1 | typeof ATTENTION_REPLAY_AUTHORITATIVE_LOG_FOLD_V2
+export type AttentionReplayAuthoritativeLogFoldRefusal = 'missing-authoritative-log-fold-version' | 'commit-schema-fold-mismatch' | 'payload-bearing-v1-record' | 'malformed-communication-payload-digest'
+
 // ---------------------------------------------------------------------------
 // A minimal, genuine deterministic authoritative commit/log fold
 // ---------------------------------------------------------------------------
@@ -162,14 +170,17 @@ export interface AttentionReplayAuthoritativeCommit {
   readonly schedulerToken: number
   readonly reducerCacheDigestAtCommit: string
   readonly wallClockInputAtCommit: AttentionReplayWallClockInput
+  readonly communicationPayloadDigest?: string
 }
 
 export interface AttentionReplayAuthoritativeLog {
   readonly commits: readonly AttentionReplayAuthoritativeCommit[]
+  readonly commitSchemaVersion?: AttentionReplayAuthoritativeCommitSchemaVersion
+  readonly foldVersion?: AttentionReplayAuthoritativeLogFoldVersion
 }
 
 export function createAttentionReplayAuthoritativeLog(): AttentionReplayAuthoritativeLog {
-  return Object.freeze({ commits: Object.freeze([]) })
+  return Object.freeze({ commits: Object.freeze([]), commitSchemaVersion: ATTENTION_REPLAY_AUTHORITATIVE_COMMIT_SCHEMA_V1, foldVersion: ATTENTION_REPLAY_AUTHORITATIVE_LOG_FOLD_V1 })
 }
 
 export interface AttentionReplayAuthoritativeResources {
@@ -218,6 +229,7 @@ export function commitAttentionReplayAuthoritativeCommand(
   resources: AttentionReplayAuthoritativeResources,
   commandId: string,
   wallClockInput: AttentionReplayWallClockInput,
+  options: { readonly communicationPayloadDigest?: string } = Object.freeze({}),
 ): AttentionReplayAuthoritativeResources {
   const rngDraw = drawAttentionReplayRngValue(resources.rng)
   const idDraw = allocateAttentionReplayId(resources.idAllocator)
@@ -232,10 +244,19 @@ export function commitAttentionReplayAuthoritativeCommand(
     schedulerToken: schedulerDraw.token,
     reducerCacheDigestAtCommit: digestAttentionReplayReducerCache(resources.cache),
     wallClockInputAtCommit: effectiveWallClockInput,
+    ...(options.communicationPayloadDigest === undefined ? {} : { communicationPayloadDigest: options.communicationPayloadDigest }),
   })
 
   return Object.freeze({
-    log: Object.freeze({ commits: Object.freeze([...resources.log.commits, commit]) }),
+    log: Object.freeze({
+      commits: Object.freeze([...resources.log.commits, commit]),
+      commitSchemaVersion: options.communicationPayloadDigest === undefined
+        ? resources.log.commitSchemaVersion ?? ATTENTION_REPLAY_AUTHORITATIVE_COMMIT_SCHEMA_V1
+        : ATTENTION_REPLAY_AUTHORITATIVE_COMMIT_SCHEMA_V2,
+      foldVersion: options.communicationPayloadDigest === undefined
+        ? resources.log.foldVersion ?? ATTENTION_REPLAY_AUTHORITATIVE_LOG_FOLD_V1
+        : ATTENTION_REPLAY_AUTHORITATIVE_LOG_FOLD_V2,
+    }),
     rng: rngDraw.stream,
     idAllocator: idDraw.allocator,
     scheduler: schedulerDraw.resource,
@@ -247,8 +268,51 @@ export function commitAttentionReplayAuthoritativeCommand(
 }
 
 /** The authoritative log digest — the P2/trace comparison surface. */
+export type AttentionReplayAuthoritativeLogFoldResult =
+  | { readonly kind: 'ok'; readonly digest: string }
+  | { readonly kind: 'refused'; readonly reason: AttentionReplayAuthoritativeLogFoldRefusal }
+
+/** C5's one closed, key-sorted authoritative-log fold route. */
+export function foldAttentionReplayAuthoritativeLog(
+  log: AttentionReplayAuthoritativeLog,
+  foldVersion: AttentionReplayAuthoritativeLogFoldVersion | undefined,
+): AttentionReplayAuthoritativeLogFoldResult {
+  if (foldVersion === undefined) return { kind: 'refused', reason: 'missing-authoritative-log-fold-version' }
+  const schema = log.commitSchemaVersion
+  if (schema === undefined) return { kind: 'refused', reason: 'commit-schema-fold-mismatch' }
+  if (foldVersion === ATTENTION_REPLAY_AUTHORITATIVE_LOG_FOLD_V1) {
+    if (schema !== ATTENTION_REPLAY_AUTHORITATIVE_COMMIT_SCHEMA_V1) return { kind: 'refused', reason: 'commit-schema-fold-mismatch' }
+    if (log.commits.some((commit) => commit.communicationPayloadDigest !== undefined)) return { kind: 'refused', reason: 'payload-bearing-v1-record' }
+    return { kind: 'ok', digest: mintHash(canonicalSerialize({ commits: log.commits })) }
+  }
+  if (foldVersion !== ATTENTION_REPLAY_AUTHORITATIVE_LOG_FOLD_V2 || schema !== ATTENTION_REPLAY_AUTHORITATIVE_COMMIT_SCHEMA_V2) {
+    return { kind: 'refused', reason: 'commit-schema-fold-mismatch' }
+  }
+  const commits: object[] = []
+  for (const commit of log.commits) {
+    const payload = commit.communicationPayloadDigest
+    if (payload !== undefined && !/^[a-z0-9][a-z0-9:-]*$/i.test(payload)) return { kind: 'refused', reason: 'malformed-communication-payload-digest' }
+    commits.push(Object.freeze({
+      commitSeq: commit.commitSeq, commandId: commit.commandId, rngValue: commit.rngValue, allocatedId: commit.allocatedId,
+      schedulerToken: commit.schedulerToken, reducerCacheDigestAtCommit: commit.reducerCacheDigestAtCommit,
+      wallClockInputAtCommit: commit.wallClockInputAtCommit,
+      communicationPayloadPresence: payload === undefined ? 'absent' : 'present',
+      ...(payload === undefined ? {} : { communicationPayloadDigest: payload }),
+    }))
+  }
+  return { kind: 'ok', digest: mintHash(canonicalSerialize({ commits })) }
+}
+
 export function digestAttentionReplayAuthoritativeLog(log: AttentionReplayAuthoritativeLog): string {
-  return mintHash(canonicalSerialize(log))
+  // Historical Stage A–C4 callers construct the pre-C5 `{ commits }` shape
+  // directly. This compatibility wrapper pins that exact shape to v1; every
+  // C5+ evidence call uses `foldAttentionReplayAuthoritativeLog` explicitly.
+  const compatibilityLog = log.commitSchemaVersion === undefined && log.foldVersion === undefined
+    ? Object.freeze({ ...log, commitSchemaVersion: ATTENTION_REPLAY_AUTHORITATIVE_COMMIT_SCHEMA_V1, foldVersion: ATTENTION_REPLAY_AUTHORITATIVE_LOG_FOLD_V1 })
+    : log
+  const folded = foldAttentionReplayAuthoritativeLog(compatibilityLog, compatibilityLog.foldVersion)
+  if (folded.kind === 'refused') throw new Error(`authoritative log fold refused: ${folded.reason}`)
+  return folded.digest
 }
 
 // ---------------------------------------------------------------------------

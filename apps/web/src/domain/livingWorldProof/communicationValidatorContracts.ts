@@ -1,0 +1,35 @@
+import type { AttentionReplayAuthoritativeCommitSchemaVersion, AttentionReplayAuthoritativeLogFoldVersion, AttentionReplayWallClockInput } from './attentionReplayResources'
+
+export const COMMUNICATION_VALIDATOR_CONTRACT_VERSION = 'communication-validator-c5-v1' as const
+
+export interface AuthoritativeCommunicationPayload {
+  readonly communicationKey: string
+  readonly assertionContent: readonly string[]
+  readonly assertionProvenanceDigests: readonly string[]
+  readonly channelId: string
+  readonly revealerId: string
+  readonly recipientScope: string
+  readonly revealScope: string
+  readonly policyIdentities: readonly string[]
+  readonly available: boolean
+}
+
+export interface AuthoritativeCommunicationCommand {
+  readonly contractVersion: typeof COMMUNICATION_VALIDATOR_CONTRACT_VERSION
+  readonly commandId: string
+  readonly communicationKey: string
+  readonly wallClockInput: AttentionReplayWallClockInput
+  readonly commitSchemaVersion: AttentionReplayAuthoritativeCommitSchemaVersion
+  readonly foldVersion: AttentionReplayAuthoritativeLogFoldVersion
+}
+
+export type AuthoritativeCommunicationValidationRefusal =
+  | 'unsupported-validator-contract'
+  | 'unknown-authoritative-communication'
+  | 'communication-unavailable'
+  | 'invalid-communication-command'
+  | 'authoritative-log-version-mismatch'
+
+export type AuthoritativeCommunicationValidationResult =
+  | { readonly kind: 'committed'; readonly communicationPayloadDigest: string }
+  | { readonly kind: 'refused'; readonly reason: AuthoritativeCommunicationValidationRefusal }
