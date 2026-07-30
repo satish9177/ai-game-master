@@ -175,7 +175,7 @@ describe('B5 — direct evidence assertions', () => {
         targetId: 'b',
       })
       const forgedPackage = Object.freeze({
-        packageSchemaVersion: 'attention-pattern-reveal-package-v1' as const,
+        packageSchemaVersion: 'attention-pattern-reveal-package-v2' as const,
         templateVersion: ATTENTION_PATTERN_DIRECT_EVIDENCE_TEMPLATE_VERSION,
         candidateId: 'pattern-candidate-id',
         assertions: Object.freeze([forgedAssertion]),

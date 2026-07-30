@@ -133,6 +133,8 @@ import { evaluateAttentionAggregateLegitimacy } from './attentionAggregateLegiti
 import type { AggregateLegitimacyPolicyRef, AttentionAggregateSource } from './attentionAggregateLegitimacy'
 import { PUBLIC_AID_LINK_EXTENSION_V1 } from './attentionInferenceRuleLibrary'
 import type { AttentionDeclaredScoreFeatures, ScorePolicyRef } from './attentionScorePolicy'
+import { readAttentionReadableClosedRelationCertificate } from './attentionClosedRelationCertificateAccessor'
+import type { AttentionReadableClosedRelationCertificateView } from './attentionClosedRelationCertificateContracts'
 import type { NarrativePatternDirectEvidenceAssertionInput } from './attentionNarrativePatternContracts'
 import type { AttentionReadablePatternEvidenceView } from './attentionPatternEvidenceContracts'
 import { reconstructNarrativePatternInstances } from './attentionNarrativePatternMonitor'
@@ -238,6 +240,24 @@ export function revalidateAttentionPatternPresentation(input: {
     return deny(policy.reason as Exclude<AttentionPatternPresentationPolicyReason, 'eligible'>, policy)
   }
   return Object.freeze({ ok: true as const, reason: 'still-legal' as const, policyDecision: policy })
+}
+
+/** C2's two-clock certificate check reconstructs at the later coordinate; it never reuses ranking material. */
+export function revalidateAttentionAbsenceCertificate(input: {
+  readonly rankingCertificate: AttentionReadableClosedRelationCertificateView
+  readonly revalidationSnapshotLsn: number
+  readonly revalidationPatternEvidenceViews: readonly AttentionReadablePatternEvidenceView[]
+}): 'still-legal' | 'certificate-revalidation-failed' {
+  const rebuilt = readAttentionReadableClosedRelationCertificate({
+    snapshotLsn: input.revalidationSnapshotLsn,
+    fromLsn: input.rankingCertificate.fromLsn,
+    toLsn: input.rankingCertificate.toLsn,
+    patternEvidenceViews: input.revalidationPatternEvidenceViews,
+  })
+  return rebuilt.kind === 'ok'
+    && rebuilt.certificate.certificateId === input.rankingCertificate.certificateId
+    && rebuilt.certificate.admittedRecordDigest === input.rankingCertificate.admittedRecordDigest
+    ? 'still-legal' : 'certificate-revalidation-failed'
 }
 
 /**

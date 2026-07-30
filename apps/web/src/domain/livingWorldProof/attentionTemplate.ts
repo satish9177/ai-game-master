@@ -189,6 +189,13 @@ function assertionLine(assertion: Extract<AttentionRevealPackage, { readonly ass
         && isValidRenderedField(assertion.commitmentKey)
         ? `${assertion.token}/${assertion.actorId}/${assertion.targetId}/${assertion.commitmentKey}`
         : 'malformed-pattern-assertion'
+    case 'certified_absence':
+      return assertion.token === 'nothing in the admitted public record shows aid between'
+        && hasExactKeys(assertion, ['assertionId', 'assertionKind', 'token', 'entityA', 'entityB', 'relationId', 'fromLsn', 'toLsn', 'provenance'])
+        && isValidRenderedField(assertion.entityA) && isValidRenderedField(assertion.entityB)
+        && isValidRenderedField(assertion.relationId) && Number.isSafeInteger(assertion.fromLsn) && Number.isSafeInteger(assertion.toLsn)
+        ? `${assertion.token}/${assertion.entityA}/${assertion.entityB}/${assertion.relationId}/${assertion.fromLsn}/${assertion.toLsn}`
+        : 'malformed-pattern-assertion'
     case 'aggregate': {
       const valid = validateAttentionInferenceProvenance(assertion.provenance, ATTENTION_INFERENCE_PROVENANCE_POLICY)
       if (

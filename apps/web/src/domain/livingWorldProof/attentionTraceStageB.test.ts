@@ -24,7 +24,7 @@ describe('B5 — trusted pattern presentation trace', () => {
     const base = {
       replayCaseId: 'b5-trace', accessorContractVersion: 'accessor-v1', canonicalizationVersion: 'canon-v1', identitySchemaVersion: 'identity-v1',
       orderingVersion: 'order-v2', derivationCacheKeySchemaVersion: 'derive-v2', rankingCacheKeySchemaVersion: 'rank-v2',
-      templateVersion: 'attention-pattern-direct-evidence-template-v1', templateChannelPolicyVersion: 'channel-v1', exposurePolicyVersion: 'exposure-v1', ledgerPolicyVersion: 'ledger-v1',
+      templateVersion: 'attention-pattern-direct-evidence-template-v2', templateChannelPolicyVersion: 'channel-v1', exposurePolicyVersion: 'exposure-v1', ledgerPolicyVersion: 'ledger-v1',
       patternPresentationLedgerPolicyVersion: ATTENTION_PATTERN_PRESENTATION_LEDGER_POLICY_VERSION,
       rankingSnapshotLsn: 10, revalidationSnapshotLsn: 12, admittedQuestCandidateSourceIds: Object.freeze([]),
       orderedAttentionCandidates: Object.freeze([]), orderingTrace: Object.freeze([]), structuralRetention: emptyAttentionTraceStructuralRetention(),
@@ -50,7 +50,7 @@ describe('B5 — trusted pattern presentation trace', () => {
   const base = {
     replayCaseId: 'b5-trace-malformed', accessorContractVersion: 'accessor-v1', canonicalizationVersion: 'canon-v1', identitySchemaVersion: 'identity-v1',
     orderingVersion: 'order-v2', derivationCacheKeySchemaVersion: 'derive-v2', rankingCacheKeySchemaVersion: 'rank-v2',
-    templateVersion: 'attention-pattern-direct-evidence-template-v1', templateChannelPolicyVersion: 'channel-v1', exposurePolicyVersion: 'exposure-v1', ledgerPolicyVersion: 'ledger-v1',
+    templateVersion: 'attention-pattern-direct-evidence-template-v2', templateChannelPolicyVersion: 'channel-v1', exposurePolicyVersion: 'exposure-v1', ledgerPolicyVersion: 'ledger-v1',
     patternPresentationLedgerPolicyVersion: ATTENTION_PATTERN_PRESENTATION_LEDGER_POLICY_VERSION,
     rankingSnapshotLsn: 10, revalidationSnapshotLsn: 12, admittedQuestCandidateSourceIds: Object.freeze([]),
     orderedAttentionCandidates: Object.freeze([]), orderingTrace: Object.freeze([]), structuralRetention: emptyAttentionTraceStructuralRetention(),
@@ -186,7 +186,7 @@ describe('B5 — trusted pattern presentation trace', () => {
         attentionCandidate: candidate,
         exposurePolicyVersion: ATTENTION_EXPOSURE_POLICY_VERSION,
         templateChannelPolicyVersion: ATTENTION_TEMPLATE_CHANNEL_POLICY_VERSION,
-        templateVersion: 'attention-pattern-direct-evidence-template-v1',
+        templateVersion: 'attention-pattern-direct-evidence-template-v2',
         outcome: 'revalidation-failed',
         patternPresentationLedgerPolicyVersion: ATTENTION_PATTERN_PRESENTATION_LEDGER_POLICY_VERSION,
         presentationLsn,

@@ -178,6 +178,7 @@ export const ATTENTION_PATTERN_REVEAL_PACKAGE_KEYS: readonly string[] = Object.f
 export interface AttentionRevealPackageRequest {
   readonly templateVersion: string
   readonly directEvidenceAssertions?: readonly AttentionDirectEvidenceAssertion[]
+  readonly absenceAssertions?: readonly AttentionDirectEvidenceAssertion[]
   /** C1's licensed aggregate root. It is additive only when explicitly supplied. */
   readonly aggregateAssertion?: AttentionAggregateAssertion
   /** B5 — explicit pattern resource policy; defaults to the pinned singleton. */
@@ -274,7 +275,8 @@ export function buildAttentionRevealPackage(
       return { kind: 'refused', reason: 'empty-direct-evidence-assertions' }
     }
     const policy = request.policy ?? attentionStageBResourcePolicy()
-    const assertionCount = request.directEvidenceAssertions.length + (request.aggregateAssertion === undefined ? 0 : 1)
+    const absenceAssertions = request.absenceAssertions ?? []
+    const assertionCount = request.directEvidenceAssertions.length + absenceAssertions.length + (request.aggregateAssertion === undefined ? 0 : 1)
     if (assertionCount > policy.revealPackageAssertions) {
       return { kind: 'refused', reason: 'too-many-direct-evidence-assertions' }
     }
@@ -316,6 +318,11 @@ export function buildAttentionRevealPackage(
     if (givenOrder.some((key, index) => key !== expectedOrder[index])) {
       return { kind: 'refused', reason: 'pattern-assertion-out-of-order' }
     }
+    for (const assertion of absenceAssertions) {
+      if (assertion.assertionKind !== 'certified_absence' || !isPresent(assertion.assertionId) || assertionIds.has(assertion.assertionId)
+        || !hasValidDirectEvidenceAssertionFields(assertion)) return { kind: 'refused', reason: 'invalid-direct-evidence-field-character' }
+      assertionIds.add(assertion.assertionId)
+    }
     if (request.aggregateAssertion !== undefined) {
       const aggregate = request.aggregateAssertion
       if (
@@ -348,6 +355,7 @@ export function buildAttentionRevealPackage(
         candidateId: attentionCandidate.candidateId,
         assertions: Object.freeze([
           ...request.directEvidenceAssertions.map((assertion) => Object.freeze({ ...assertion })),
+          ...absenceAssertions.map((assertion) => Object.freeze({ ...assertion })),
           ...(request.aggregateAssertion === undefined ? [] : [Object.freeze({ ...request.aggregateAssertion })]),
         ]),
         resultTag: 'presentation-ready',
@@ -360,6 +368,7 @@ export function buildAttentionRevealPackage(
   if (request.directEvidenceAssertions !== undefined) {
     return { kind: 'refused', reason: 'unsupported-direct-evidence-assertions-for-quest' }
   }
+  if (request.absenceAssertions !== undefined) return { kind: 'refused', reason: 'unsupported-direct-evidence-assertions-for-quest' }
   if (request.templateVersion !== ATTENTION_TEMPLATE_VERSION) {
     return { kind: 'refused', reason: 'unsupported-template-version' }
   }

@@ -86,6 +86,11 @@ const STAGE_A_PROOF_MODULES = [
   'attentionInferenceScenario.ts',
   'attentionPrivateStateScenario.ts',
   'attentionScorePolicy.ts',
+  'attentionClosedRelationCertificateContracts.ts',
+  'attentionClosedRelationCertificateAccessor.ts',
+  'attentionAbsencePredicateLibrary.ts',
+  'attentionAbsenceWitnessProvenance.ts',
+  'attentionAbsenceScenario.ts',
 ] as const
 
 /**
@@ -140,6 +145,8 @@ const ALLOWED_IMPORT_SPECIFIERS: Record<string, readonly string[]> = {
     './attentionQuestCandidateContracts',
     './attentionPatternEvidenceContracts',
     './attentionPatternEvidenceAccessor',
+    './attentionClosedRelationCertificateContracts',
+    './attentionClosedRelationCertificateAccessor',
   ],
   'attentionNarrativePatternContracts.ts': [
     './attentionCandidatePolicy',
@@ -207,6 +214,8 @@ const ALLOWED_IMPORT_SPECIFIERS: Record<string, readonly string[]> = {
     './canonicalSerialization',
     './attentionCandidate',
     './attentionScorePolicy',
+    './attentionClosedRelationCertificateAccessor',
+    './attentionClosedRelationCertificateContracts',
   ],
   'attentionCandidateCacheKey.ts': [
     './canonicalSerialization',
@@ -220,11 +229,15 @@ const ALLOWED_IMPORT_SPECIFIERS: Record<string, readonly string[]> = {
     './attentionInferenceRuleLibrary',
     './attentionAggregateLegitimacy',
     './attentionScorePolicy',
+    './attentionClosedRelationCertificateContracts',
+    './attentionAbsencePredicateLibrary',
+    './attentionAbsenceWitnessProvenance',
   ],
   'attentionDirectEvidenceAssertion.ts': [
     './canonicalSerialization',
     './attentionCandidatePolicy',
     './attentionNarrativePatternContracts',
+    './attentionAbsenceWitnessProvenance',
   ],
   'attentionRevealPackage.ts': [
     './attentionCandidatePolicy',
@@ -279,6 +292,8 @@ const ALLOWED_IMPORT_SPECIFIERS: Record<string, readonly string[]> = {
     './attentionAggregateLegitimacy',
     './attentionInferenceRuleLibrary',
     './attentionScorePolicy',
+    './attentionClosedRelationCertificateAccessor',
+    './attentionClosedRelationCertificateContracts',
   ],
   'attentionReplayScenario.ts': [
     './attentionQuestCandidateContracts',
@@ -306,6 +321,15 @@ const ALLOWED_IMPORT_SPECIFIERS: Record<string, readonly string[]> = {
   'attentionInferenceScenario.ts': ['./attentionDirectEvidenceAssertion'],
   'attentionPrivateStateScenario.ts': [],
   'attentionScorePolicy.ts': ['./canonicalSerialization'],
+  'attentionClosedRelationCertificateContracts.ts': ['./canonicalSerialization'],
+  'attentionClosedRelationCertificateAccessor.ts': [
+    './canonicalSerialization', './attentionClosedRelationCertificateContracts', './attentionPatternEvidenceContracts', './attentionPatternEvidenceAccessor',
+  ],
+  'attentionAbsencePredicateLibrary.ts': ['./canonicalSerialization', './attentionClosedRelationCertificateContracts'],
+  'attentionAbsenceWitnessProvenance.ts': [
+    './canonicalSerialization', './attentionClosedRelationCertificateContracts', './attentionAbsencePredicateLibrary',
+  ],
+  'attentionAbsenceScenario.ts': ['./attentionClosedRelationCertificateAccessor', './attentionPatternEvidenceContracts'],
 }
 
 /**
@@ -1098,11 +1122,13 @@ describe('A5 / P1 — the reverse scan covers the A5 module names too', () => {
 })
 
 describe('B1 / S2 — the common A-prime constructor names no raw A-domain surface', () => {
-  it('imports only the quest contract, pattern contract, and read-only pattern authority verifier', () => {
+  it('imports only the approved view contracts and read-only origin verifiers', () => {
     const specifiers = proofModuleSpecifiers('attentionReadableBoundary.ts')
 
     expect(specifiers.length).toBeGreaterThan(0)
     expect([...new Set(specifiers)].sort()).toEqual([
+      './attentionClosedRelationCertificateAccessor',
+      './attentionClosedRelationCertificateContracts',
       './attentionPatternEvidenceAccessor',
       './attentionPatternEvidenceContracts',
       './attentionQuestCandidateContracts',
@@ -1117,7 +1143,7 @@ describe('B1 / S2 — the common A-prime constructor names no raw A-domain surfa
     }
   })
 
-  it('exposes exactly one four-parameter constructor: request, quest views, quest opening coordinates, and pattern views', () => {
+  it('exposes exactly one five-parameter constructor: request and the four admitted view collections', () => {
     // B4 adds a parameter and a surface-schema version to the one existing
     // constructor. It does not add a second A-prime boundary: this file's
     // `ALLOWED_IMPORT_SPECIFIERS` admits exactly one boundary module, and the
@@ -1766,6 +1792,8 @@ describe('B4 / P1 — the trusted trace and replay path stay singular and patter
         ))
         expect(additions.sort()).toEqual([
           'attentionReplay.ts -> ./attentionAggregateLegitimacy',
+          'attentionReplay.ts -> ./attentionClosedRelationCertificateAccessor',
+          'attentionReplay.ts -> ./attentionClosedRelationCertificateContracts',
           'attentionReplay.ts -> ./attentionInferenceRuleLibrary',
           'attentionReplay.ts -> ./attentionNarrativePatternMonitor',
           'attentionReplay.ts -> ./attentionPatternEvidenceContracts',

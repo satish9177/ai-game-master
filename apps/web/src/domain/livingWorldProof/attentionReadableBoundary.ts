@@ -79,6 +79,11 @@ import type { AttentionReadablePatternEvidenceView } from './attentionPatternEvi
 import {
   isAttentionReadablePatternEvidenceViewFromAccessor,
 } from './attentionPatternEvidenceAccessor'
+import {
+  isStructurallyValidAttentionReadableClosedRelationCertificateView,
+} from './attentionClosedRelationCertificateContracts'
+import type { AttentionReadableClosedRelationCertificateView } from './attentionClosedRelationCertificateContracts'
+import { isAttentionReadableClosedRelationCertificateFromAccessor } from './attentionClosedRelationCertificateAccessor'
 
 /**
  * The committed B1-B3 common surface schema: exactly `questCandidateViews` and
@@ -100,8 +105,11 @@ export const ATTENTION_READABLE_SURFACE_SCHEMA_V1 =
 export const ATTENTION_READABLE_SURFACE_SCHEMA_V2 =
   'attention-readable-surface-schema-v2' as const
 
+export const ATTENTION_READABLE_SURFACE_SCHEMA_V3 =
+  'attention-readable-surface-schema-v3' as const
+
 /** The schema this build constructs and accepts. */
-export const ATTENTION_READABLE_SURFACE_SCHEMA_VERSION = ATTENTION_READABLE_SURFACE_SCHEMA_V2
+export const ATTENTION_READABLE_SURFACE_SCHEMA_VERSION = ATTENTION_READABLE_SURFACE_SCHEMA_V3
 
 /**
  * Re-exported for the downstream B4 modules that must independently re-check
@@ -132,6 +140,7 @@ export interface AttentionReadableSurface {
   readonly questCandidateViews: readonly AttentionReadableQuestCandidateView[]
   readonly questOpeningCoordinateViews: readonly AttentionReadableQuestOpeningCoordinateView[]
   readonly patternEvidenceViews: readonly AttentionReadablePatternEvidenceView[]
+  readonly closedRelationCertificateViews: readonly AttentionReadableClosedRelationCertificateView[]
 }
 
 export type AttentionReadableSurfaceRefusal =
@@ -145,6 +154,7 @@ export type AttentionReadableSurfaceRefusal =
   | 'quest-view-order-mismatch'
   | 'quest-opening-coordinate-order-mismatch'
   | 'pattern-evidence-order-mismatch'
+  | 'closed-relation-certificate-order-mismatch'
   | 'ambiguous-legal-identity'
 
 export type AttentionReadableSurfaceResult =
@@ -240,6 +250,7 @@ export function constructAttentionReadableSurface(
   questCandidateViews: readonly AttentionReadableQuestCandidateView[],
   questOpeningCoordinateViews: readonly AttentionReadableQuestOpeningCoordinateView[],
   patternEvidenceViews: readonly AttentionReadablePatternEvidenceView[],
+  closedRelationCertificateViews: readonly AttentionReadableClosedRelationCertificateView[] = [],
 ): AttentionReadableSurfaceResult {
   if (request.surfaceSchemaVersion !== ATTENTION_READABLE_SURFACE_SCHEMA_VERSION) {
     return { kind: 'refused', reason: 'surface-schema-version-mismatch' }
@@ -254,6 +265,7 @@ export function constructAttentionReadableSurface(
     !Array.isArray(questCandidateViews)
     || !Array.isArray(questOpeningCoordinateViews)
     || !Array.isArray(patternEvidenceViews)
+    || !Array.isArray(closedRelationCertificateViews)
   ) {
     return { kind: 'refused', reason: 'input-not-attention-readable' }
   }
@@ -342,6 +354,22 @@ export function constructAttentionReadableSurface(
     acceptedPatternViews.push(view)
   }
 
+  const acceptedCertificates: AttentionReadableClosedRelationCertificateView[] = []
+  let previousCertificateId: string | null = null
+  for (const certificate of closedRelationCertificateViews) {
+    if (!isStructurallyValidAttentionReadableClosedRelationCertificateView(certificate)) {
+      return { kind: 'refused', reason: 'input-not-attention-readable' }
+    }
+    if (!isAttentionReadableClosedRelationCertificateFromAccessor(certificate)) {
+      return { kind: 'refused', reason: 'input-not-accessor-minted' }
+    }
+    if (previousCertificateId !== null && previousCertificateId >= certificate.certificateId) {
+      return { kind: 'refused', reason: 'closed-relation-certificate-order-mismatch' }
+    }
+    previousCertificateId = certificate.certificateId
+    acceptedCertificates.push(certificate)
+  }
+
   return {
     kind: 'ok',
     surface: Object.freeze({
@@ -351,6 +379,7 @@ export function constructAttentionReadableSurface(
       questCandidateViews: Object.freeze(acceptedQuestViews),
       questOpeningCoordinateViews: Object.freeze(acceptedOpeningCoordinateViews),
       patternEvidenceViews: Object.freeze(acceptedPatternViews),
+      closedRelationCertificateViews: Object.freeze(acceptedCertificates),
     }),
   }
 }

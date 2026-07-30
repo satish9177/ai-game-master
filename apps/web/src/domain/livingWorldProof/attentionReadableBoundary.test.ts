@@ -277,12 +277,13 @@ describe('A2 / S2 — A-prime is constructed only from A1 legal views', () => {
           openedAtLsn: 37,
         }],
         patternEvidenceViews: [],
+        closedRelationCertificateViews: [],
       },
     })
     expectSourceLifecycleAndBytesUnchanged(sources, before)
   })
 
-  it('records surface schema v2 and never reinterprets a v1 surface as v2', () => {
+  it('records surface schema v3 and never reinterprets an older surface schema as v3', () => {
     const sources = buildA1Sources()
     const result = constructAttentionReadableSurface(
       A1_REQUEST,
@@ -293,8 +294,8 @@ describe('A2 / S2 — A-prime is constructed only from A1 legal views', () => {
 
     expect(ATTENTION_READABLE_SURFACE_SCHEMA_V1).toBe('attention-readable-surface-schema-v1')
     expect(ATTENTION_READABLE_SURFACE_SCHEMA_V2).toBe('attention-readable-surface-schema-v2')
-    expect(ATTENTION_READABLE_SURFACE_SCHEMA_VERSION).toBe(ATTENTION_READABLE_SURFACE_SCHEMA_V2)
-    expect(result.surface.surfaceSchemaVersion).toBe(ATTENTION_READABLE_SURFACE_SCHEMA_V2)
+    expect(ATTENTION_READABLE_SURFACE_SCHEMA_VERSION).toBe('attention-readable-surface-schema-v3')
+    expect(result.surface.surfaceSchemaVersion).toBe('attention-readable-surface-schema-v3')
 
     // A request pinned to v1 refuses rather than being reinterpreted as v2.
     expect(constructAttentionReadableSurface(

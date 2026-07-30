@@ -6,15 +6,18 @@
 import { canonicalSerialize, mintHash } from './canonicalSerialization'
 import { ATTENTION_CANDIDATE_CANONICALIZATION_VERSION } from './attentionCandidatePolicy'
 import type { NarrativePatternDirectEvidenceAssertionInput } from './attentionNarrativePatternContracts'
+import { canonicalSerialize as canonicalAbsenceSerialize } from './canonicalSerialization'
+import { isStructurallyValidAttentionAbsenceWitnessProvenance } from './attentionAbsenceWitnessProvenance'
+import type { AttentionAbsenceWitnessProvenance } from './attentionAbsenceWitnessProvenance'
 
 export const ATTENTION_DIRECT_EVIDENCE_ASSERTION_IDENTITY_VERSION =
-  'attention-direct-evidence-assertion-identity-v1' as const
+  'attention-direct-evidence-assertion-identity-v2' as const
 
 export const ATTENTION_PATTERN_DIRECT_EVIDENCE_TEMPLATE_VERSION =
-  'attention-pattern-direct-evidence-template-v1' as const
+  'attention-pattern-direct-evidence-template-v2' as const
 
 export const ATTENTION_PATTERN_REVEAL_PACKAGE_SCHEMA_VERSION =
-  'attention-pattern-reveal-package-v1' as const
+  'attention-pattern-reveal-package-v2' as const
 
 export type AttentionDirectEvidenceAssertion =
   | {
@@ -45,6 +48,17 @@ export type AttentionDirectEvidenceAssertion =
       readonly speakerId: string
       readonly recipientId: string
       readonly commitmentKey: string
+    }
+  | {
+      readonly assertionId: string
+      readonly assertionKind: 'certified_absence'
+      readonly token: 'nothing in the admitted public record shows aid between'
+      readonly entityA: string
+      readonly entityB: string
+      readonly relationId: string
+      readonly fromLsn: number
+      readonly toLsn: number
+      readonly provenance: AttentionAbsenceWitnessProvenance
     }
   | {
       readonly assertionId: string
@@ -119,11 +133,32 @@ const NON_RENDERED_ASSERTION_FIELDS: ReadonlySet<string> = new Set([
 ])
 
 export function hasValidDirectEvidenceAssertionFields(assertion: AttentionDirectEvidenceAssertion): boolean {
+  if (assertion.assertionKind === 'certified_absence') {
+    return assertion.token === 'nothing in the admitted public record shows aid between'
+      && isStructurallyValidAttentionAbsenceWitnessProvenance(assertion.provenance)
+      && assertion.entityA === assertion.provenance.boundEntities[0]
+      && assertion.entityB === assertion.provenance.boundEntities[1]
+      && assertion.relationId === assertion.provenance.closedRelationId
+      && assertion.fromLsn === assertion.provenance.fromLsn && assertion.toLsn === assertion.provenance.toLsn
+  }
   for (const [key, value] of Object.entries(assertion)) {
     if (NON_RENDERED_ASSERTION_FIELDS.has(key)) continue
     if (typeof value !== 'string' || !isValidDirectEvidenceFieldValue(value)) return false
   }
   return true
+}
+
+export function buildAttentionCertifiedAbsenceAssertion(
+  provenance: AttentionAbsenceWitnessProvenance,
+): AttentionDirectEvidenceAssertion | AttentionDirectEvidenceAssertionRefusal {
+  if (!isStructurallyValidAttentionAbsenceWitnessProvenance(provenance)) return 'unsupported-assertion-input'
+  const assertion = {
+    assertionKind: 'certified_absence' as const,
+    token: 'nothing in the admitted public record shows aid between' as const,
+    entityA: provenance.boundEntities[0], entityB: provenance.boundEntities[1],
+    relationId: provenance.closedRelationId, fromLsn: provenance.fromLsn, toLsn: provenance.toLsn, provenance,
+  }
+  return Object.freeze({ ...assertion, assertionId: ATTENTION_DIRECT_EVIDENCE_ASSERTION_IDENTITY_VERSION + ':' + mintHash(canonicalAbsenceSerialize(assertion)) })
 }
 
 function assertionId(assertion: Omit<AttentionDirectEvidenceAssertion, 'assertionId'>): string {

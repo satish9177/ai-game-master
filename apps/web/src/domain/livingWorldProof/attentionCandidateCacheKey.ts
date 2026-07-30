@@ -117,6 +117,12 @@ import { ATTENTION_INFERENCE_PROVENANCE_POLICY } from './attentionInferenceProve
 import { ATTENTION_AGGREGATION_RULE_LIBRARY_VERSION_HASH } from './attentionInferenceRuleLibrary'
 import type { AggregateLegitimacyPolicyRef } from './attentionAggregateLegitimacy'
 import type { AttentionDeclaredScoreFeatures, ScorePolicyRef } from './attentionScorePolicy'
+import {
+  ATTENTION_ABSENCE_COMPLETENESS_POLICY_VERSION,
+  ATTENTION_CLOSED_RELATION_CERTIFICATE_ACCESSOR_VERSION,
+} from './attentionClosedRelationCertificateContracts'
+import { ATTENTION_ABSENCE_PREDICATE_LIBRARY_HASH } from './attentionAbsencePredicateLibrary'
+import type { AbsenceWitnessPolicyRef } from './attentionAbsenceWitnessProvenance'
 
 /**
  * RN019 §9.3's closed derivation dependency bundle: exactly these thirteen
@@ -154,6 +160,10 @@ export interface AttentionCandidateDerivationDependencyBundle {
   readonly inferenceProvenancePolicyVersion: string
   readonly aggregationRuleLibraryVersionHash: string
   readonly aggregateLegitimacyPolicyRef: AggregateLegitimacyPolicyRef
+  readonly absenceWitnessPolicyRef: AbsenceWitnessPolicyRef
+  readonly absenceCompletenessPolicyVersion: string
+  readonly absencePredicateLibraryVersionHash: string
+  readonly closedRelationCertificateAccessorContractVersion: string
 }
 
 /** The thirteen derivation-bundle field names, in RN019 §9.3's declared order. */
@@ -174,6 +184,10 @@ export const ATTENTION_CANDIDATE_DERIVATION_DEPENDENCY_FIELDS: readonly string[]
   'inferenceProvenancePolicyVersion',
   'aggregationRuleLibraryVersionHash',
   'aggregateLegitimacyPolicyRef',
+  'absenceWitnessPolicyRef',
+  'absenceCompletenessPolicyVersion',
+  'absencePredicateLibraryVersionHash',
+  'closedRelationCertificateAccessorContractVersion',
 ])
 
 /**
@@ -251,6 +265,13 @@ export function attentionCandidateDerivationDependencyBundle(
     aggregationRuleLibraryVersionHash:
       input.aggregationRuleLibraryVersionHash ?? ATTENTION_AGGREGATION_RULE_LIBRARY_VERSION_HASH,
     aggregateLegitimacyPolicyRef: input.aggregateLegitimacyPolicyRef,
+    absenceWitnessPolicyRef: input.absenceWitnessPolicyRef ?? 'absence-witness-disabled-v0',
+    absenceCompletenessPolicyVersion:
+      input.absenceCompletenessPolicyVersion ?? ATTENTION_ABSENCE_COMPLETENESS_POLICY_VERSION,
+    absencePredicateLibraryVersionHash:
+      input.absencePredicateLibraryVersionHash ?? ATTENTION_ABSENCE_PREDICATE_LIBRARY_HASH,
+    closedRelationCertificateAccessorContractVersion:
+      input.closedRelationCertificateAccessorContractVersion ?? ATTENTION_CLOSED_RELATION_CERTIFICATE_ACCESSOR_VERSION,
   })
 }
 
@@ -336,6 +357,11 @@ export type AttentionCandidateCacheKeyRefusal =
   | 'missing-aggregation-rule-library-version-hash'
   | 'missing-aggregate-legitimacy-policy-ref'
   | 'unsupported-aggregate-legitimacy-policy-ref'
+  | 'missing-absence-witness-policy-ref'
+  | 'unsupported-absence-witness-policy-ref'
+  | 'missing-absence-completeness-policy-version'
+  | 'missing-absence-predicate-library-version-hash'
+  | 'missing-closed-relation-certificate-accessor-contract-version'
   | 'missing-ordering-version'
   | 'unsupported-ordering-version'
   | 'missing-ranking-policy-hash'
@@ -444,6 +470,14 @@ export function deriveAttentionCandidateDerivationCacheKey(
     && bundle.aggregateLegitimacyPolicyRef !== 'aggregate-legitimacy-c1-v1') {
     return { kind: 'refused', reason: 'unsupported-aggregate-legitimacy-policy-ref' }
   }
+  if (!isPresent(bundle.absenceWitnessPolicyRef)) return { kind: 'refused', reason: 'missing-absence-witness-policy-ref' }
+  if (bundle.absenceWitnessPolicyRef !== 'absence-witness-disabled-v0' && bundle.absenceWitnessPolicyRef !== 'absence-witness-c2-v1') {
+    return { kind: 'refused', reason: 'unsupported-absence-witness-policy-ref'
+    }
+  }
+  if (!isPresent(bundle.absenceCompletenessPolicyVersion)) return { kind: 'refused', reason: 'missing-absence-completeness-policy-version' }
+  if (!isPresent(bundle.absencePredicateLibraryVersionHash)) return { kind: 'refused', reason: 'missing-absence-predicate-library-version-hash' }
+  if (!isPresent(bundle.closedRelationCertificateAccessorContractVersion)) return { kind: 'refused', reason: 'missing-closed-relation-certificate-accessor-contract-version' }
 
   // Rebuilt as a closed record from the bundle's own values, so the literal's
   // property order — and the caller's — cannot reach the bytes.
@@ -463,6 +497,10 @@ export function deriveAttentionCandidateDerivationCacheKey(
     inferenceProvenancePolicyVersion: bundle.inferenceProvenancePolicyVersion,
     aggregationRuleLibraryVersionHash: bundle.aggregationRuleLibraryVersionHash,
     aggregateLegitimacyPolicyRef: bundle.aggregateLegitimacyPolicyRef,
+    absenceWitnessPolicyRef: bundle.absenceWitnessPolicyRef,
+    absenceCompletenessPolicyVersion: bundle.absenceCompletenessPolicyVersion,
+    absencePredicateLibraryVersionHash: bundle.absencePredicateLibraryVersionHash,
+    closedRelationCertificateAccessorContractVersion: bundle.closedRelationCertificateAccessorContractVersion,
     snapshotLsn: bundle.snapshotLsn,
   }
 

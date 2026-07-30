@@ -383,6 +383,17 @@ export interface AttentionTraceScorePolicyEvidence {
   }[]
 }
 
+/** C2 trusted-only absence evidence; it never enters the observable projection. */
+export interface AttentionTraceAbsenceWitnessMaterial {
+  readonly certificateId: string
+  readonly admittedRecordDigest: string
+  readonly closedRelationId: string
+  readonly fromLsn: number
+  readonly toLsn: number
+  readonly outcome: 'certified' | 'refused'
+  readonly refusalReason?: string
+}
+
 export interface AttentionTraceInput {
   readonly replayCaseId: string
   readonly accessorContractVersion: string
@@ -438,6 +449,7 @@ export interface AttentionTraceInput {
   readonly authoritativeLogDigestAfter: string
   readonly p3PremiseCheck?: AttentionTraceP3PremiseCheck
   readonly scorePolicyEvidence?: AttentionTraceScorePolicyEvidence
+  readonly absenceWitnessMaterial?: AttentionTraceAbsenceWitnessMaterial
 }
 
 /**

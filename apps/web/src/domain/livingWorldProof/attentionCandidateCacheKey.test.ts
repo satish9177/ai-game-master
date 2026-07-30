@@ -46,6 +46,11 @@ import { computeAttentionCandidateIdentity } from './attentionCandidateIdentity'
 import { ATTENTION_INFERENCE_PROVENANCE_POLICY } from './attentionInferenceProvenancePolicy'
 import { ATTENTION_AGGREGATION_RULE_LIBRARY_VERSION_HASH } from './attentionInferenceRuleLibrary'
 import { resolveAttentionScoreComponents } from './attentionScorePolicy'
+import {
+  ATTENTION_ABSENCE_COMPLETENESS_POLICY_VERSION,
+  ATTENTION_CLOSED_RELATION_CERTIFICATE_ACCESSOR_VERSION,
+} from './attentionClosedRelationCertificateContracts'
+import { ATTENTION_ABSENCE_PREDICATE_LIBRARY_HASH } from './attentionAbsencePredicateLibrary'
 
 /**
  * A3 + B4 — the two separately-keyed cache identities, built from the explicit
@@ -171,6 +176,10 @@ const DERIVATION_VARIATIONS: readonly (readonly [
   ['resourcePolicyVersion', { resourcePolicyVersion: 'fixture-resource-policy-v2' }],
   ['inferenceProvenancePolicyVersion', { inferenceProvenancePolicyVersion: 'fixture-inference-policy-v2' }],
   ['aggregationRuleLibraryVersionHash', { aggregationRuleLibraryVersionHash: 'fixture-rule-library-hash-v2' }],
+  ['absenceWitnessPolicyRef', { absenceWitnessPolicyRef: 'absence-witness-c2-v1' }],
+  ['absenceCompletenessPolicyVersion', { absenceCompletenessPolicyVersion: 'fixture-absence-completeness-v2' }],
+  ['absencePredicateLibraryVersionHash', { absencePredicateLibraryVersionHash: 'fixture-absence-library-v2' }],
+  ['closedRelationCertificateAccessorContractVersion', { closedRelationCertificateAccessorContractVersion: 'fixture-certificate-accessor-v2' }],
   ['aggregateLegitimacyPolicyRef', { aggregateLegitimacyPolicyRef: 'aggregate-legitimacy-c1-v1' }],
 ]
 
@@ -207,8 +216,12 @@ describe('B4 / RN019 §9.3 — the derivation bundle is the closed thirteen-fiel
       'inferenceProvenancePolicyVersion',
       'aggregationRuleLibraryVersionHash',
       'aggregateLegitimacyPolicyRef',
+      'absenceWitnessPolicyRef',
+      'absenceCompletenessPolicyVersion',
+      'absencePredicateLibraryVersionHash',
+      'closedRelationCertificateAccessorContractVersion',
     ])
-    expect(ATTENTION_CANDIDATE_DERIVATION_DEPENDENCY_FIELDS).toHaveLength(16)
+    expect(ATTENTION_CANDIDATE_DERIVATION_DEPENDENCY_FIELDS).toHaveLength(20)
   })
 
   it('builds a default bundle from the pinned constants, with no field left ambient', () => {
@@ -229,13 +242,17 @@ describe('B4 / RN019 §9.3 — the derivation bundle is the closed thirteen-fiel
       inferenceProvenancePolicyVersion: ATTENTION_INFERENCE_PROVENANCE_POLICY.version,
       aggregationRuleLibraryVersionHash: ATTENTION_AGGREGATION_RULE_LIBRARY_VERSION_HASH,
       aggregateLegitimacyPolicyRef: 'aggregate-legitimacy-disabled-v0',
+      absenceWitnessPolicyRef: 'absence-witness-disabled-v0',
+      absenceCompletenessPolicyVersion: ATTENTION_ABSENCE_COMPLETENESS_POLICY_VERSION,
+      absencePredicateLibraryVersionHash: ATTENTION_ABSENCE_PREDICATE_LIBRARY_HASH,
+      closedRelationCertificateAccessorContractVersion: ATTENTION_CLOSED_RELATION_CERTIFICATE_ACCESSOR_VERSION,
     })
     expect(Object.isFrozen(derivation())).toBe(true)
   })
 
   it('bumps the derivation and ranking key schemas to their explicit versioned strings', () => {
     expect(ATTENTION_CANDIDATE_DERIVATION_CACHE_KEY_SCHEMA_VERSION)
-      .toBe('attention-candidate-derivation-cache-key-v3')
+      .toBe('attention-candidate-derivation-cache-key-v4')
     // C9 adds only declared ranking features to the ranking-only eligibility
     // state (never to the derivation bundle), so ranking alone transitions v3
     // to v4 while derivation remains v3.
@@ -621,9 +638,17 @@ describe('A3 / D15 — the two keys are versioned, distinct, deterministic, and 
       inferenceProvenancePolicyVersion: ATTENTION_INFERENCE_PROVENANCE_POLICY.version,
       aggregationRuleLibraryVersionHash: ATTENTION_AGGREGATION_RULE_LIBRARY_VERSION_HASH,
       aggregateLegitimacyPolicyRef: 'aggregate-legitimacy-disabled-v0',
+      absenceWitnessPolicyRef: 'absence-witness-disabled-v0',
+      absenceCompletenessPolicyVersion: ATTENTION_ABSENCE_COMPLETENESS_POLICY_VERSION,
+      absencePredicateLibraryVersionHash: ATTENTION_ABSENCE_PREDICATE_LIBRARY_HASH,
+      closedRelationCertificateAccessorContractVersion: ATTENTION_CLOSED_RELATION_CERTIFICATE_ACCESSOR_VERSION,
     }
     const reversed: AttentionCandidateDerivationDependencyBundle = {
       aggregateLegitimacyPolicyRef: 'aggregate-legitimacy-disabled-v0',
+      absenceWitnessPolicyRef: 'absence-witness-disabled-v0',
+      absenceCompletenessPolicyVersion: ATTENTION_ABSENCE_COMPLETENESS_POLICY_VERSION,
+      absencePredicateLibraryVersionHash: ATTENTION_ABSENCE_PREDICATE_LIBRARY_HASH,
+      closedRelationCertificateAccessorContractVersion: ATTENTION_CLOSED_RELATION_CERTIFICATE_ACCESSOR_VERSION,
       aggregationRuleLibraryVersionHash: ATTENTION_AGGREGATION_RULE_LIBRARY_VERSION_HASH,
       inferenceProvenancePolicyVersion: ATTENTION_INFERENCE_PROVENANCE_POLICY.version,
       resourcePolicyVersion: ATTENTION_STAGE_B_RESOURCE_POLICY_VERSION,

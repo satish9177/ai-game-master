@@ -242,9 +242,9 @@ describe(`B1 quest-only compatibility with ${ATTENTION_STAGE_A_QUEST_ONLY_BASELI
     if (first.kind !== 'ok' || second.kind !== 'ok') throw new Error('expected common surfaces')
 
     // Within-schema only: cross-schema v1/v2 whole-surface byte equality is not
-    // claimed, and this surface is explicitly v2.
+    // claimed, and this surface is explicitly v3.
     expect(first.surface.surfaceSchemaVersion).toBe(ATTENTION_READABLE_SURFACE_SCHEMA_VERSION)
-    expect(first.surface.surfaceSchemaVersion).toBe('attention-readable-surface-schema-v2')
+    expect(first.surface.surfaceSchemaVersion).toBe('attention-readable-surface-schema-v3')
     expect(canonicalSerialize(first.surface)).toBe(canonicalSerialize(second.surface))
     expect(first.surface.patternEvidenceViews).toEqual([])
   })
