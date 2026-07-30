@@ -401,5 +401,8 @@ export function renderAttentionDiegeticRevealPackage(
 ): AttentionTemplateResult {
   return renderAttentionRevealPackage(diegeticPackage.package, {
     templateVersion: diegeticPackage.package.templateVersion,
+    ...(diegeticPackage.package.approvedRevealScope === undefined
+      ? {}
+      : { approvedRevealScope: diegeticPackage.package.approvedRevealScope }),
   })
 }

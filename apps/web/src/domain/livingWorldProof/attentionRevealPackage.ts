@@ -257,7 +257,7 @@ export function buildAttentionDiegeticRevealPackage(input: {
     schemaVersion: ATTENTION_DIEGETIC_REVEAL_PROPOSAL_SCHEMA_VERSION,
     candidateId: input.revealPackage.candidateId,
     assertions: input.revealPackage.assertions.map((assertion) => assertion.assertionId),
-    assertionProvenanceDigests: input.revealPackage.assertions.map((assertion) => canonicalSerialize(assertion)),
+    assertionProvenance: input.revealPackage.assertions.map((assertion) => canonicalSerialize(assertion)),
     channelId: input.channelId,
     revealerId: input.revealerId,
     recipientScope: input.recipientScope,

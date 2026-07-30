@@ -32,7 +32,7 @@ export function validateAndCommitAuthoritativeCommunication(input: {
   if (payload === undefined) return { result: { kind: 'refused', reason: 'unknown-authoritative-communication' }, resources: input.resources }
   if (!payload.available) return { result: { kind: 'refused', reason: 'communication-unavailable' }, resources: input.resources }
   const communicationPayloadDigest = mintHash(canonicalSerialize({
-    assertionContent: [...payload.assertionContent], assertionProvenanceDigests: [...payload.assertionProvenanceDigests],
+    assertionContent: [...payload.assertionContent], assertionProvenance: [...payload.assertionProvenance],
     channelId: payload.channelId, revealerId: payload.revealerId, recipientScope: payload.recipientScope,
     revealScope: payload.revealScope, policyIdentities: [...payload.policyIdentities],
     validatorContractVersion: COMMUNICATION_VALIDATOR_CONTRACT_VERSION,
@@ -64,10 +64,10 @@ export function validateAndCommitAttentionDiegeticRevealProposal(input: {
     payload.available
     && payload.channelId === input.proposal.channelId
     && payload.revealerId === input.proposal.revealerId
-    && payload.recipientScope === input.proposal.recipientScope
-    && payload.revealScope === input.proposal.revealScope
+    && canonicalSerialize(payload.recipientScope) === canonicalSerialize(input.proposal.recipientScope)
+    && canonicalSerialize(payload.revealScope) === canonicalSerialize(input.proposal.revealScope)
     && canonicalSerialize(payload.assertionContent) === canonicalSerialize(input.proposal.assertions)
-    && canonicalSerialize(payload.assertionProvenanceDigests) === canonicalSerialize(input.proposal.assertionProvenanceDigests)
+    && canonicalSerialize(payload.assertionProvenance) === canonicalSerialize(input.proposal.assertionProvenance)
     && canonicalSerialize(payload.policyIdentities) === canonicalSerialize(input.proposal.policyIdentities)
   ))
   if (matches.length !== 1) {

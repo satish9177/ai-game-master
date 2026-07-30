@@ -4,15 +4,18 @@ import {
   createAttentionDiegeticRevealProposal,
 } from './attentionDiegeticRevealProposal'
 
+const recipientScope = Object.freeze({ kind: 'direct_recipient' as const, recipientId: 'b' })
+const revealScope = Object.freeze({ approvedAssertionIds: Object.freeze(['aid/a/b']), approvedRecipientScope: recipientScope })
+
 const input = {
   schemaVersion: ATTENTION_DIEGETIC_REVEAL_PROPOSAL_SCHEMA_VERSION,
   candidateId: 'pattern-aid',
   assertions: ['aid/a/b'],
-  assertionProvenanceDigests: ['provenance-aid'],
+  assertionProvenance: ['full-provenance-aid'],
   channelId: 'diegetic-direct-communication-v1',
   revealerId: 'a',
-  recipientScope: 'direct:b',
-  revealScope: 'assertions:aid',
+  recipientScope,
+  revealScope,
   rankingSnapshotLsn: 10,
   revalidationSnapshotLsn: 12,
   policyIdentities: ['channel-c3', 'scope-c4'],
@@ -26,7 +29,7 @@ describe('C6 diegetic reveal proposal', () => {
     expect(Object.isFrozen(result.proposal)).toBe(true)
     expect(Object.isFrozen(result.proposal.assertions)).toBe(true)
     expect(Object.keys(result.proposal).sort()).toEqual([
-      'assertionProvenanceDigests', 'assertions', 'candidateId', 'channelId',
+      'assertionProvenance', 'assertions', 'candidateId', 'channelId',
       'policyIdentities', 'rankingSnapshotLsn', 'recipientScope',
       'revalidationSnapshotLsn', 'revealScope', 'revealerId', 'schemaVersion',
     ])
@@ -36,7 +39,7 @@ describe('C6 diegetic reveal proposal', () => {
     expect(createAttentionDiegeticRevealProposal({ ...input, revalidationSnapshotLsn: 9 })).toEqual({
       kind: 'refused', reason: 'invalid-snapshot-coordinate',
     })
-    expect(createAttentionDiegeticRevealProposal({ ...input, assertionProvenanceDigests: [] })).toEqual({
+    expect(createAttentionDiegeticRevealProposal({ ...input, assertionProvenance: [] })).toEqual({
       kind: 'refused', reason: 'mismatched-assertion-provenance',
     })
   })

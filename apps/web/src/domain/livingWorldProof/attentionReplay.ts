@@ -87,8 +87,8 @@ import {
   ATTENTION_TEMPLATE_CHANNEL_POLICY_VERSION,
   ATTENTION_TEMPLATE_VERSION,
 } from './attentionCandidatePolicy'
-import { buildAttentionRevealPackage } from './attentionRevealPackage'
-import { renderAttentionRevealPackage } from './attentionTemplate'
+import { buildAttentionDiegeticRevealPackage, buildAttentionRevealPackage } from './attentionRevealPackage'
+import { renderAttentionDiegeticRevealPackage, renderAttentionRevealPackage } from './attentionTemplate'
 import {
   appendAttentionLedgerRecord,
   createAttentionLedger,
@@ -109,6 +109,7 @@ import {
 } from './attentionTrace'
 import type {
   AttentionTrace,
+  AttentionTraceAbsenceWitnessMaterial,
   AttentionTraceCandidateEntry,
   AttentionTraceOrderingComparisonEntry,
   AttentionTraceOrderingKeyValue,
@@ -130,12 +131,18 @@ import {
   ATTENTION_PATTERN_DIRECT_EVIDENCE_TEMPLATE_VERSION,
   buildAttentionDirectEvidenceAssertions,
 } from './attentionDirectEvidenceAssertion'
+import type { AttentionDirectEvidenceAssertion } from './attentionDirectEvidenceAssertion'
 import { evaluateAttentionAggregateLegitimacy } from './attentionAggregateLegitimacy'
 import type { AggregateLegitimacyPolicyRef, AttentionAggregateSource } from './attentionAggregateLegitimacy'
+import { evaluateAttentionDiegeticAggregateLegitimacy } from './attentionDiegeticAggregateLegitimacy'
+import { evaluateAttentionRevealerLegality } from './attentionRevealerLegality'
+import type { AttentionRevealerAuthorityRequest, AttentionRevealerAuthorityVerdict } from './attentionRevealerLegality'
+import { evaluateAttentionEligibilityVerdict } from './attentionEligibilityVerdict'
+import type { AttentionEligibilityVerdict } from './attentionEligibilityVerdict'
+import type { RecipientScope } from './attentionRecipientScope'
 import { PUBLIC_AID_LINK_EXTENSION_V1 } from './attentionInferenceRuleLibrary'
 import type { AttentionDeclaredScoreFeatures, ScorePolicyRef } from './attentionScorePolicy'
-import type { AttentionEligibilityVerdict } from './attentionEligibilityVerdict'
-import { revalidateAttentionRevealScope } from './attentionRevealScope'
+import { createAttentionRevealScope, revalidateAttentionRevealScope } from './attentionRevealScope'
 import type { AttentionRevealScope } from './attentionRevealScope'
 import type { AttentionTraceCommunicationAuthorityMaterial } from './attentionTrace'
 import { readAttentionReadableClosedRelationCertificate } from './attentionClosedRelationCertificateAccessor'
@@ -408,6 +415,19 @@ export interface AttentionPatternPresentationPassCandidateInput {
   readonly aggregateSources?: readonly AttentionAggregateSource[]
   /** C4: the immutable approval artifact that the package and renderer must carry unchanged. */
   readonly approvedRevealScope?: AttentionRevealScope
+  /** C2 leaf material is admissible to the package only, never to C1 aggregation. */
+  readonly absenceAssertions?: readonly Extract<AttentionDirectEvidenceAssertion, { readonly assertionKind: 'certified_absence' }>[]
+  /** C6 is opt-in only for the already-legal diegetic pattern branch. */
+  readonly diegeticDelivery?: {
+    readonly channelId: 'diegetic-direct-communication-v1'
+    readonly revealerId: string
+    readonly recipientScope: RecipientScope
+    readonly revealScope: AttentionRevealScope
+    readonly policyIdentities: readonly string[]
+    readonly resources: AttentionReplayAuthoritativeResources
+    readonly authoritativePayloads: readonly AuthoritativeCommunicationPayload[]
+    readonly wallClockInput: AttentionReplayWallClockInput
+  }
 }
 
 export interface AttentionPatternPresentationPassResult {
@@ -454,6 +474,7 @@ export interface AttentionPatternPresentationAttemptExecution {
   readonly attempt: AttentionPatternPresentationAttemptResult
   readonly decision: AttentionTracePatternPresentationDecision
   readonly presentation: AttentionTracePresentationEntry | null
+  readonly authoritativeResources?: AttentionReplayAuthoritativeResources
 }
 
 /** One B5 pattern candidate only; loops, selection slots, traces, and ledger creation remain caller-owned. */
@@ -542,6 +563,7 @@ export function attemptAttentionPatternPresentation(input: {
     const built = buildAttentionRevealPackage(entry.candidate, {
       templateVersion: ATTENTION_PATTERN_DIRECT_EVIDENCE_TEMPLATE_VERSION,
       directEvidenceAssertions: assertions.assertions,
+      ...(entry.absenceAssertions === undefined ? {} : { absenceAssertions: entry.absenceAssertions }),
       ...(legitimacy.kind === 'ok' ? { aggregateAssertion: legitimacy.aggregate } : {}),
       ...(entry.approvedRevealScope === undefined ? {} : { approvedRevealScope: entry.approvedRevealScope }),
       policy: input.policy,
@@ -564,7 +586,7 @@ export function attemptAttentionPatternPresentation(input: {
       return Object.freeze({ ledger: input.ledger, attempt, decision, presentation: null })
     }
 
-    const rendered = renderAttentionRevealPackage(built.revealPackage, {
+    let rendered = renderAttentionRevealPackage(built.revealPackage, {
       templateVersion: ATTENTION_PATTERN_DIRECT_EVIDENCE_TEMPLATE_VERSION,
       ...(entry.approvedRevealScope === undefined ? {} : { approvedRevealScope: entry.approvedRevealScope }),
     })
@@ -584,6 +606,56 @@ export function attemptAttentionPatternPresentation(input: {
         ledgerAppend: 'not-appended',
       } as const)
       return Object.freeze({ ledger: input.ledger, attempt, decision, presentation: null })
+    }
+
+    let authoritativeResources = entry.diegeticDelivery?.resources
+    if (entry.diegeticDelivery !== undefined) {
+      const diegeticPackage = buildAttentionDiegeticRevealPackage({
+        revealPackage: built.revealPackage,
+        channelId: entry.diegeticDelivery.channelId,
+        revealerId: entry.diegeticDelivery.revealerId,
+        recipientScope: entry.diegeticDelivery.recipientScope,
+        revealScope: entry.diegeticDelivery.revealScope,
+        rankingSnapshotLsn: entry.candidate.rankingSnapshotLsn,
+        revalidationSnapshotLsn: input.evaluationLsn,
+        policyIdentities: entry.diegeticDelivery.policyIdentities,
+      })
+      if (diegeticPackage.kind === 'refused') {
+        const assertionIds = Object.freeze(assertions.assertions.map((assertion) => assertion.assertionId))
+        const attempt = Object.freeze({ candidateId: entry.candidate.candidateId, outcome: 'package-refused',
+          revalidationReason: revalidation.reason, assertionIds, refusalDetail: diegeticPackage.reason } as const)
+        const decision = Object.freeze({ candidateId: entry.candidate.candidateId, assertionIds,
+          ...REVALIDATED_ELIGIBLE_TRACE_OUTCOMES, ledgerAppend: 'not-appended' } as const)
+        return Object.freeze({ ledger: input.ledger, attempt, decision, presentation: null, authoritativeResources })
+      }
+      const diegeticRendered = renderAttentionDiegeticRevealPackage(diegeticPackage.diegeticPackage)
+      if (diegeticRendered.kind === 'refused') {
+        const assertionIds = Object.freeze(assertions.assertions.map((assertion) => assertion.assertionId))
+        const attempt = Object.freeze({ candidateId: entry.candidate.candidateId, outcome: 'render-refused',
+          revalidationReason: revalidation.reason, assertionIds, refusalDetail: diegeticRendered.reason } as const)
+        const decision = Object.freeze({ candidateId: entry.candidate.candidateId, assertionIds,
+          ...REVALIDATED_ELIGIBLE_TRACE_OUTCOMES, ledgerAppend: 'not-appended' } as const)
+        return Object.freeze({ ledger: input.ledger, attempt, decision, presentation: null, authoritativeResources })
+      }
+      const delivery = deliverAttentionDiegeticReveal({
+        resources: entry.diegeticDelivery.resources,
+        proposal: diegeticPackage.diegeticPackage.proposal,
+        authoritativePayloads: entry.diegeticDelivery.authoritativePayloads,
+        wallClockInput: entry.diegeticDelivery.wallClockInput,
+      })
+      authoritativeResources = delivery.resources
+      if (delivery.kind === 'refused') {
+        const assertionIds = Object.freeze(assertions.assertions.map((assertion) => assertion.assertionId))
+        const attempt = Object.freeze({ candidateId: entry.candidate.candidateId, outcome: 'ledger-append-refused',
+          revalidationReason: revalidation.reason, assertionIds, refusalDetail: delivery.reason } as const)
+        const decision = Object.freeze({ candidateId: entry.candidate.candidateId, assertionIds,
+          ...REVALIDATED_ELIGIBLE_TRACE_OUTCOMES, ledgerAppend: 'not-appended' } as const)
+        return Object.freeze({ ledger: input.ledger, attempt, decision, presentation: null, authoritativeResources })
+      }
+      // Rendering is deterministic for the package in both channels.  Use the
+      // diegetic rendering result so the observable trace is produced by the
+      // real C6 route, not a hand-built test literal.
+      rendered = diegeticRendered
     }
 
     const appended = appendAttentionLedgerRecord(input.ledger, {
@@ -649,8 +721,14 @@ export function attemptAttentionPatternPresentation(input: {
       outputIdentity: rendered.outputIdentity,
       ledgerOutcome: appended.record.outcome,
       ledgerRecordId: appended.record.recordId,
+      ...(entry.diegeticDelivery === undefined ? {} : {
+        channelId: entry.diegeticDelivery.channelId,
+        revealerId: entry.diegeticDelivery.revealerId,
+        recipientScope: canonicalSerialize(entry.diegeticDelivery.recipientScope),
+      }),
     })
-    return Object.freeze({ ledger: appended.ledger, attempt, decision, presentation })
+    return Object.freeze({ ledger: appended.ledger, attempt, decision, presentation,
+      ...(authoritativeResources === undefined ? {} : { authoritativeResources }) })
 }
 
 export function runAttentionPatternPresentationPass(input: {
@@ -1211,17 +1289,110 @@ export interface AttentionMixedPatternPresentationInput {
   readonly revalidationCacheKey: string
   readonly satisfiedCompletionLsn?: number
   readonly aggregateSources?: readonly AttentionAggregateSource[]
+  readonly absenceAssertions?: readonly Extract<AttentionDirectEvidenceAssertion, { readonly assertionKind: 'certified_absence' }>[]
   /** C4 is opt-in so historical extradiegetic pattern fixtures retain their frozen inputs. */
   readonly c4Eligibility?: AttentionMixedPatternC4Eligibility
 }
 
 /** The C4 half of a diegetic pattern attempt, supplied as one immutable tuple. */
 export interface AttentionMixedPatternC4Eligibility {
-  readonly rankingVerdict: AttentionEligibilityVerdict
-  readonly approvedRevealScope: AttentionRevealScope
-  readonly communicationAuthorityMaterial: AttentionTraceCommunicationAuthorityMaterial
-  readonly revalidationVerdict?: AttentionEligibilityVerdict
-  readonly revalidationRevealScope?: AttentionRevealScope
+  /** Raw current-coordinate C3/C4 inputs.  The evaluator, never fixtures,
+   * computes the authority and eligibility verdict. */
+  readonly ranking: AttentionMixedPatternLegalityInputs
+  /** Raw presentation-coordinate C3/C4 inputs.  It is mandatory so a ranking
+   * verdict can never be reused as revalidation truth. */
+  readonly revalidation: AttentionMixedPatternLegalityInputs
+  /** Raw C5-owned payload/resource inputs for the real C6 hand-off. */
+  readonly delivery?: {
+    readonly resources: AttentionReplayAuthoritativeResources
+    readonly authoritativePayloads: readonly AuthoritativeCommunicationPayload[]
+    readonly wallClockInput: AttentionReplayWallClockInput
+  }
+}
+
+export interface AttentionMixedPatternLegalityInputs {
+  readonly authorityRequest: AttentionRevealerAuthorityRequest
+  readonly recipientScope: RecipientScope
+  readonly authorizedRecipientIds: readonly string[]
+  readonly unavailableRecipientIds: readonly string[]
+  readonly assertionIds: readonly string[]
+}
+
+interface ComputedAttentionMixedPatternLegality {
+  readonly verdict: AttentionEligibilityVerdict
+  readonly revealScope: AttentionRevealScope | null
+  readonly communicationAuthorityMaterial: AttentionTraceCommunicationAuthorityMaterial | null
+}
+
+/**
+ * Compute C3 and C4 from their admitted raw inputs.  A diegetic aggregate
+ * legality result is compared to the direct revealer evaluation so the two
+ * existing policy modules remain one deterministic authority, rather than a
+ * fixture-supplied verdict or a second evaluator.
+ */
+function computeAttentionMixedPatternLegality(
+  candidateId: string,
+  raw: AttentionMixedPatternLegalityInputs,
+): ComputedAttentionMixedPatternLegality {
+  const request: AttentionRevealerAuthorityRequest = Object.freeze({
+    ...raw.authorityRequest,
+    candidateId,
+  })
+  const directAuthority = evaluateAttentionRevealerLegality(request)
+  const aggregateAuthority = evaluateAttentionDiegeticAggregateLegitimacy(request)
+  const authorityVerdict: AttentionRevealerAuthorityVerdict = aggregateAuthority.kind === 'ok'
+    ? aggregateAuthority.verdict
+    : aggregateAuthority.kind === 'bypassed'
+      ? { kind: 'bypassed' }
+      : {
+          kind: 'refused',
+          reason: aggregateAuthority.reason === 'aggregate_assertion_not_legal' ? 'no_legal_revealer' : aggregateAuthority.reason,
+          ...(directAuthority.kind === 'bypassed' ? {} : {
+            policyVersion: directAuthority.policyVersion,
+            policyHash: directAuthority.policyHash,
+            channelPolicyVersion: directAuthority.channelPolicyVersion,
+            channelPolicyHash: directAuthority.channelPolicyHash,
+          }),
+        } as AttentionRevealerAuthorityVerdict
+  if (canonicalSerialize(directAuthority) !== canonicalSerialize(authorityVerdict)) {
+    return {
+      verdict: { kind: 'refused', reason: 'no_legal_revealer' },
+      revealScope: null,
+      communicationAuthorityMaterial: null,
+    }
+  }
+  const verdict = evaluateAttentionEligibilityVerdict({
+    candidateId,
+    authorityVerdict,
+    recipientScope: raw.recipientScope,
+    authorizedRecipientIds: raw.authorizedRecipientIds,
+    unavailableRecipientIds: raw.unavailableRecipientIds,
+  })
+  const revealScope = createAttentionRevealScope(raw.assertionIds, raw.recipientScope)
+  if (verdict.kind === 'refused' || typeof revealScope === 'string') {
+    return {
+      verdict: verdict.kind === 'refused' ? verdict : { kind: 'refused', reason: 'no_legal_channel' },
+      revealScope: null,
+      communicationAuthorityMaterial: null,
+    }
+  }
+  if (authorityVerdict.kind !== 'legal' || authorityVerdict.channelId !== 'diegetic-direct-communication-v1') {
+    return { verdict: { kind: 'refused', reason: 'no_legal_channel' }, revealScope: null, communicationAuthorityMaterial: null }
+  }
+  return {
+    verdict,
+    revealScope,
+    communicationAuthorityMaterial: Object.freeze({
+      candidateId,
+      channelId: authorityVerdict.channelId,
+      revealerId: authorityVerdict.revealerId,
+      route: authorityVerdict.route,
+      communicationLegalityPolicyVersion: authorityVerdict.policyVersion,
+      communicationLegalityPolicyHash: authorityVerdict.policyHash,
+      channelPolicyVersion: authorityVerdict.channelPolicyVersion,
+      channelPolicyHash: authorityVerdict.channelPolicyHash,
+    }),
+  }
 }
 
 export interface AttentionMixedFamilyEvaluationInput {
@@ -1269,6 +1440,7 @@ export interface AttentionMixedFamilyEvaluationResult {
   readonly retainedCandidates: readonly AttentionCandidate[]
   readonly arbitrationAttempts: readonly AttentionMixedFamilyArbitrationAttempt[]
   readonly presentation: AttentionTracePresentationEntry | null
+  readonly authoritativeResources?: AttentionReplayAuthoritativeResources
 }
 
 export type AttentionMixedFamilyEvaluationOutcome =
@@ -1310,12 +1482,17 @@ export function runAttentionMixedFamilyEvaluation(
   if (ordered.kind !== 'ok') return { kind: 'refused', refusal: { stage: 'ordering', reason: ordered.reason } }
   const proofScoreByCandidateId = new Map((ordered.scoreComponents ?? []).map((component) => [component.candidateId, component.proofScore]))
   const presentationInputByCandidateId = new Map(input.patternPresentationInputs.map((entry) => [entry.candidateId, entry] as const))
+  const rankingLegalityByCandidateId = new Map<string, ComputedAttentionMixedPatternLegality>()
   // C4 recipient/audience legality is a ranking-time gate. A refused tuple is
   // removed before the shared candidate cap, so it is never ranked or handed to
   // the RN019 continuation table.
   const eligibleOrderedCandidates = ordered.orderedCandidates.filter((candidate) => {
     if (candidate.sourceKind !== 'narrative_pattern_instance') return true
-    return presentationInputByCandidateId.get(candidate.candidateId)?.c4Eligibility?.rankingVerdict.kind !== 'refused'
+    const raw = presentationInputByCandidateId.get(candidate.candidateId)?.c4Eligibility
+    if (raw === undefined) return true
+    const computed = computeAttentionMixedPatternLegality(candidate.candidateId, raw.ranking)
+    rankingLegalityByCandidateId.set(candidate.candidateId, computed)
+    return computed.verdict.kind !== 'refused'
   })
   const capped = applyMixedFamilyCandidateCap(eligibleOrderedCandidates)
   const retainedCandidates = capped.retainedCandidates
@@ -1374,6 +1551,9 @@ export function runAttentionMixedFamilyEvaluation(
   const patternDecisions: AttentionTracePatternPresentationDecision[] = []
   const communicationAuthorityMaterial: AttentionTraceCommunicationAuthorityMaterial[] = []
   const revealScopeMaterial: AttentionTraceRevealScopeMaterial[] = []
+  const absenceWitnessMaterial: AttentionTraceAbsenceWitnessMaterial[] = []
+  let authoritativeResources: AttentionReplayAuthoritativeResources | undefined
+  let authoritativeLogDigestBefore = input.authoritativeLogDigestBefore
 
   // RN019 §8.2/§8.2.1 B: the shared, family-blind success budget is the
   // versioned policy value, never a literal at this call site. B6 makes the
@@ -1424,15 +1604,26 @@ export function runAttentionMixedFamilyEvaluation(
       return { kind: 'refused', refusal: { stage: 'pattern-input', candidateId: candidate.candidateId, reason: 'missing-pattern-presentation-input' } }
     }
     const c4 = patternInput.c4Eligibility
+    let approvedRevealScope: AttentionRevealScope | undefined
+    let diegeticDelivery: AttentionPatternPresentationPassCandidateInput['diegeticDelivery']
     if (c4 !== undefined) {
-      const revalidationVerdict = c4.revalidationVerdict ?? c4.rankingVerdict
-      if (revalidationVerdict.kind === 'refused') {
+      const rankingLegality = rankingLegalityByCandidateId.get(candidate.candidateId)
+      const revalidationLegality = computeAttentionMixedPatternLegality(candidate.candidateId, c4.revalidation)
+      if (rankingLegality === undefined || rankingLegality.revealScope === null) {
+        return { kind: 'refused', refusal: { stage: 'pattern-input', candidateId: candidate.candidateId, reason: 'missing-pattern-presentation-input' } }
+      }
+      if (revalidationLegality.verdict.kind === 'refused') {
         attempts.push(Object.freeze({ candidateId: candidate.candidateId, sourceKind: candidate.sourceKind, rankPosition,
-          outcome: 'revalidation-refused', refusalReason: revalidationVerdict.reason, continued: true, ledgerAppend: 'not-appended' }))
+          outcome: 'revalidation-refused', refusalReason: revalidationLegality.verdict.reason, continued: true, ledgerAppend: 'not-appended' }))
         continue
       }
-      const scopeOutcome = revalidateAttentionRevealScope(c4.approvedRevealScope, c4.revalidationRevealScope ?? c4.approvedRevealScope)
-      revealScopeMaterial.push(Object.freeze({ candidateId: candidate.candidateId, approvedRevealScope: c4.approvedRevealScope, revalidationOutcome: scopeOutcome }))
+      if (revalidationLegality.revealScope === null) {
+        attempts.push(Object.freeze({ candidateId: candidate.candidateId, sourceKind: candidate.sourceKind, rankPosition,
+          outcome: 'revalidation-refused', refusalReason: 'no_legal_channel', continued: true, ledgerAppend: 'not-appended' }))
+        continue
+      }
+      const scopeOutcome = revalidateAttentionRevealScope(rankingLegality.revealScope, revalidationLegality.revealScope)
+      revealScopeMaterial.push(Object.freeze({ candidateId: candidate.candidateId, approvedRevealScope: rankingLegality.revealScope, revalidationOutcome: scopeOutcome }))
       if (scopeOutcome === 'reveal_scope_expansion_attempt') {
         return { kind: 'refused', refusal: { stage: 'reveal-scope', candidateId: candidate.candidateId, reason: scopeOutcome } }
       }
@@ -1441,7 +1632,29 @@ export function runAttentionMixedFamilyEvaluation(
           outcome: 'revalidation-refused', refusalReason: scopeOutcome, continued: true, ledgerAppend: 'not-appended' }))
         continue
       }
-      communicationAuthorityMaterial.push(c4.communicationAuthorityMaterial)
+      if (rankingLegality.communicationAuthorityMaterial !== null) communicationAuthorityMaterial.push(rankingLegality.communicationAuthorityMaterial)
+      approvedRevealScope = rankingLegality.revealScope
+      if (c4.delivery !== undefined && rankingLegality.verdict.kind === 'legal') {
+        if (authoritativeResources === undefined) {
+          authoritativeResources = c4.delivery.resources
+          authoritativeLogDigestBefore = digestAttentionReplayAuthoritativeLog(c4.delivery.resources.log)
+        }
+        diegeticDelivery = Object.freeze({
+          channelId: 'diegetic-direct-communication-v1',
+          revealerId: rankingLegality.verdict.revealerId,
+          recipientScope: rankingLegality.verdict.recipientScope,
+          revealScope: rankingLegality.revealScope,
+          policyIdentities: Object.freeze([
+            rankingLegality.communicationAuthorityMaterial?.communicationLegalityPolicyVersion ?? '',
+            rankingLegality.communicationAuthorityMaterial?.communicationLegalityPolicyHash ?? '',
+            rankingLegality.communicationAuthorityMaterial?.channelPolicyVersion ?? '',
+            rankingLegality.communicationAuthorityMaterial?.channelPolicyHash ?? '',
+          ]),
+          resources: authoritativeResources,
+          authoritativePayloads: c4.delivery.authoritativePayloads,
+          wallClockInput: c4.delivery.wallClockInput,
+        })
+      }
     }
     const attempt = attemptAttentionPatternPresentation({
       // Exact candidateId lookup, never a sibling. An empty or missing entry is
@@ -1450,13 +1663,24 @@ export function runAttentionMixedFamilyEvaluation(
         directEvidenceAssertionInputs: patternInput.directEvidenceAssertionInputs, rankingCacheKey: patternInput.rankingCacheKey,
         revalidationCacheKey: patternInput.revalidationCacheKey,
         ...(patternInput.aggregateSources === undefined ? {} : { aggregateSources: patternInput.aggregateSources }),
+        ...(patternInput.absenceAssertions === undefined ? {} : { absenceAssertions: patternInput.absenceAssertions }),
         ...(patternInput.satisfiedCompletionLsn === undefined ? {} : { satisfiedCompletionLsn: patternInput.satisfiedCompletionLsn }),
-        ...(c4 === undefined ? {} : { approvedRevealScope: c4.approvedRevealScope }) }),
+        ...(approvedRevealScope === undefined ? {} : { approvedRevealScope }),
+        ...(diegeticDelivery === undefined ? {} : { diegeticDelivery }) }),
       ledger, evaluationLsn: input.revalidationSnapshotLsn,
       patternPresentationLedgerPolicyVersion: input.patternPresentationLedgerPolicyVersion, policy,
       aggregateLegitimacyPolicyRef: input.aggregateLegitimacyPolicyRef,
     })
     ledger = attempt.ledger
+    if (attempt.authoritativeResources !== undefined) authoritativeResources = attempt.authoritativeResources
+    absenceWitnessMaterial.push(...(patternInput.absenceAssertions ?? []).map((absence) => Object.freeze({
+        certificateId: absence.provenance.certificateId,
+        admittedRecordDigest: absence.provenance.admittedRecordDigest,
+        closedRelationId: absence.provenance.closedRelationId,
+        fromLsn: absence.provenance.fromLsn,
+        toLsn: absence.provenance.toLsn,
+        outcome: 'certified',
+      })))
     patternDecisions.push(attempt.decision)
     const outcome = attempt.attempt.outcome
     const arbitrationOutcome = outcome === 'presented' ? 'presented' : outcome
@@ -1497,7 +1721,10 @@ export function runAttentionMixedFamilyEvaluation(
       resourceLimits: Object.freeze(resourceLimits) }),
     presentations: Object.freeze(presentations), revalidations: Object.freeze(revalidations),
     ...(patternDecisions.length === 0 ? {} : { patternPresentationDecisions: Object.freeze(patternDecisions) }),
-    authoritativeLogDigestBefore: input.authoritativeLogDigestBefore, authoritativeLogDigestAfter: input.authoritativeLogDigestAfter,
+    authoritativeLogDigestBefore,
+    authoritativeLogDigestAfter: authoritativeResources === undefined
+      ? input.authoritativeLogDigestAfter
+      : digestAttentionReplayAuthoritativeLog(authoritativeResources.log),
     mixedFamilyArbitration: Object.freeze({ rankedCandidateIds: Object.freeze(retainedCandidates.map((candidate) => candidate.candidateId)),
       attempts: Object.freeze(attempts), winnerCandidateId: presentation?.candidateId ?? null,
       winnerSourceKind: presentation === null ? null : retainedCandidates.find((candidate) => candidate.candidateId === presentation.candidateId)!.sourceKind,
@@ -1516,10 +1743,12 @@ export function runAttentionMixedFamilyEvaluation(
     }) }),
     ...(communicationAuthorityMaterial.length === 0 ? {} : { communicationAuthorityMaterial: Object.freeze(communicationAuthorityMaterial) }),
     ...(revealScopeMaterial.length === 0 ? {} : { revealScopeMaterial: Object.freeze(revealScopeMaterial) }),
+    ...(absenceWitnessMaterial.length === 0 ? {} : { absenceWitnessMaterial: Object.freeze(absenceWitnessMaterial) }),
   })
   if (trace.kind !== 'ok') return { kind: 'refused', refusal: { stage: 'trace', reason: trace.reason } }
   return { kind: 'ok', result: Object.freeze({ trace: trace.trace, ledger, surface: surface.surface,
-    orderedCandidates: eligibleOrderedCandidates, retainedCandidates, arbitrationAttempts: Object.freeze(attempts), presentation }) }
+    orderedCandidates: eligibleOrderedCandidates, retainedCandidates, arbitrationAttempts: Object.freeze(attempts), presentation,
+    ...(authoritativeResources === undefined ? {} : { authoritativeResources }) }) }
 }
 
 // ---------------------------------------------------------------------------

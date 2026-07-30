@@ -3,17 +3,20 @@ import { createAttentionReplayAuthoritativeResources } from './attentionReplayRe
 import { deliverAttentionDiegeticReveal } from './attentionDiegeticDelivery'
 import { ATTENTION_DIEGETIC_REVEAL_PROPOSAL_SCHEMA_VERSION, createAttentionDiegeticRevealProposal } from './attentionDiegeticRevealProposal'
 
+const recipientScope = Object.freeze({ kind: 'direct_recipient' as const, recipientId: 'b' })
+const revealScope = Object.freeze({ approvedAssertionIds: Object.freeze(['aid/a/b']), approvedRecipientScope: recipientScope })
+
 describe('C6 diegetic rejection', () => {
   it('rejects an unavailable independently-owned communication without a commit, identifier, or scheduler change', () => {
     const created = createAttentionDiegeticRevealProposal({
       schemaVersion: ATTENTION_DIEGETIC_REVEAL_PROPOSAL_SCHEMA_VERSION,
       candidateId: 'pattern-aid',
       assertions: ['aid/a/b'],
-      assertionProvenanceDigests: ['provenance-aid'],
+      assertionProvenance: ['full-provenance-aid'],
       channelId: 'diegetic-direct-communication-v1',
       revealerId: 'a',
-      recipientScope: 'direct:b',
-      revealScope: 'assertions:aid',
+      recipientScope,
+      revealScope,
       rankingSnapshotLsn: 10,
       revalidationSnapshotLsn: 12,
       policyIdentities: ['channel-c3', 'scope-c4'],
@@ -26,11 +29,11 @@ describe('C6 diegetic rejection', () => {
       authoritativePayloads: [{
         communicationKey: 'public-aid',
         assertionContent: ['aid/a/b'],
-        assertionProvenanceDigests: ['provenance-aid'],
+        assertionProvenance: ['full-provenance-aid'],
         channelId: 'diegetic-direct-communication-v1',
         revealerId: 'a',
-        recipientScope: 'direct:b',
-        revealScope: 'assertions:aid',
+        recipientScope,
+        revealScope,
         policyIdentities: ['channel-c3', 'scope-c4'],
         available: false,
       }],

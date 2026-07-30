@@ -3,14 +3,17 @@ import { createAttentionReplayAuthoritativeResources } from './attentionReplayRe
 import { runAttentionDiegeticDelivery } from './attentionReplay'
 import { ATTENTION_DIEGETIC_REVEAL_PROPOSAL_SCHEMA_VERSION, createAttentionDiegeticRevealProposal } from './attentionDiegeticRevealProposal'
 
+const recipientScope = Object.freeze({ kind: 'direct_recipient' as const, recipientId: 'b' })
+const revealScope = Object.freeze({ approvedAssertionIds: Object.freeze(['aid/a/b']), approvedRecipientScope: recipientScope })
+
 const payload = Object.freeze({
   communicationKey: 'public-aid',
   assertionContent: Object.freeze(['aid/a/b']),
-  assertionProvenanceDigests: Object.freeze(['provenance-aid']),
+  assertionProvenance: Object.freeze(['full-provenance-aid']),
   channelId: 'diegetic-direct-communication-v1',
   revealerId: 'a',
-  recipientScope: 'direct:b',
-  revealScope: 'assertions:aid',
+  recipientScope,
+  revealScope,
   policyIdentities: Object.freeze(['channel-c3', 'scope-c4']),
   available: true,
 })
@@ -20,7 +23,7 @@ function proposal() {
     schemaVersion: ATTENTION_DIEGETIC_REVEAL_PROPOSAL_SCHEMA_VERSION,
     candidateId: 'pattern-aid',
     assertions: ['aid/a/b'],
-    assertionProvenanceDigests: ['provenance-aid'],
+    assertionProvenance: ['full-provenance-aid'],
     channelId: payload.channelId,
     revealerId: payload.revealerId,
     recipientScope: payload.recipientScope,

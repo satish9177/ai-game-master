@@ -8,11 +8,13 @@ export interface AttentionDiegeticRevealProposal {
   readonly schemaVersion: typeof ATTENTION_DIEGETIC_REVEAL_PROPOSAL_SCHEMA_VERSION
   readonly candidateId: string
   readonly assertions: readonly string[]
-  readonly assertionProvenanceDigests: readonly string[]
+  /** Full canonical per-assertion provenance, retained for authoritative
+   * validation. These are not summary digests. */
+  readonly assertionProvenance: readonly string[]
   readonly channelId: string
   readonly revealerId: string
-  readonly recipientScope: string
-  readonly revealScope: string
+  readonly recipientScope: RecipientScope
+  readonly revealScope: AttentionRevealScope
   readonly rankingSnapshotLsn: number
   readonly revalidationSnapshotLsn: number
   readonly policyIdentities: readonly string[]
@@ -36,6 +38,40 @@ function frozenStrings(values: readonly string[]): readonly string[] {
   return Object.freeze([...values])
 }
 
+function freezeRecipientScope(scope: RecipientScope): RecipientScope {
+  return scope.kind === 'direct_recipient'
+    ? Object.freeze({ kind: scope.kind, recipientId: scope.recipientId })
+    : scope.kind === 'bounded_audience'
+      ? Object.freeze({ kind: scope.kind, recipientIds: frozenStrings(scope.recipientIds) })
+      : Object.freeze({ kind: scope.kind, publicLocusId: scope.publicLocusId })
+}
+
+function freezeRevealScope(scope: AttentionRevealScope): AttentionRevealScope {
+  return Object.freeze({
+    approvedAssertionIds: frozenStrings(scope.approvedAssertionIds),
+    approvedRecipientScope: freezeRecipientScope(scope.approvedRecipientScope),
+  })
+}
+
+function isRecipientScope(scope: RecipientScope): boolean {
+  if (scope.kind === 'direct_recipient') return present(scope.recipientId)
+  if (scope.kind === 'bounded_audience') {
+    return scope.recipientIds.length >= 2
+      && scope.recipientIds.every(present)
+      && new Set(scope.recipientIds).size === scope.recipientIds.length
+      && scope.recipientIds.every((id, index) => index === 0 || scope.recipientIds[index - 1]! < id)
+  }
+  return scope.kind === 'public_audience' && present(scope.publicLocusId)
+}
+
+function isRevealScope(scope: AttentionRevealScope): boolean {
+  return scope.approvedAssertionIds.length > 0
+    && scope.approvedAssertionIds.every(present)
+    && new Set(scope.approvedAssertionIds).size === scope.approvedAssertionIds.length
+    && scope.approvedAssertionIds.every((id, index) => index === 0 || scope.approvedAssertionIds[index - 1]! < id)
+    && isRecipientScope(scope.approvedRecipientScope)
+}
+
 /**
  * Builds an immutable, data-only proposal.  There is deliberately no command,
  * resource, callback, capability, diagnostic, or mutable state member.
@@ -48,12 +84,12 @@ export function createAttentionDiegeticRevealProposal(
   }
   if (
     !present(input.candidateId) || !present(input.channelId) || !present(input.revealerId)
-    || !present(input.recipientScope) || !present(input.revealScope)
+    || !isRecipientScope(input.recipientScope) || !isRevealScope(input.revealScope)
     || input.assertions.length === 0 || input.policyIdentities.length === 0
-    || !input.assertions.every(present) || !input.assertionProvenanceDigests.every(present)
+    || !input.assertions.every(present) || !input.assertionProvenance.every(present)
     || !input.policyIdentities.every(present)
   ) return { kind: 'refused', reason: 'invalid-proposal-member' }
-  if (input.assertions.length !== input.assertionProvenanceDigests.length) {
+  if (input.assertions.length !== input.assertionProvenance.length) {
     return { kind: 'refused', reason: 'mismatched-assertion-provenance' }
   }
   if (!Number.isInteger(input.rankingSnapshotLsn) || !Number.isInteger(input.revalidationSnapshotLsn)
@@ -66,14 +102,16 @@ export function createAttentionDiegeticRevealProposal(
       schemaVersion: ATTENTION_DIEGETIC_REVEAL_PROPOSAL_SCHEMA_VERSION,
       candidateId: input.candidateId,
       assertions: frozenStrings(input.assertions),
-      assertionProvenanceDigests: frozenStrings(input.assertionProvenanceDigests),
+      assertionProvenance: frozenStrings(input.assertionProvenance),
       channelId: input.channelId,
       revealerId: input.revealerId,
-      recipientScope: input.recipientScope,
-      revealScope: input.revealScope,
+      recipientScope: freezeRecipientScope(input.recipientScope),
+      revealScope: freezeRevealScope(input.revealScope),
       rankingSnapshotLsn: input.rankingSnapshotLsn,
       revalidationSnapshotLsn: input.revalidationSnapshotLsn,
       policyIdentities: frozenStrings(input.policyIdentities),
     }),
   }
 }
+import type { RecipientScope } from './attentionRecipientScope'
+import type { AttentionRevealScope } from './attentionRevealScope'

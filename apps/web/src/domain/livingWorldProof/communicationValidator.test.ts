@@ -4,7 +4,9 @@ import { validateAndCommitAuthoritativeCommunication } from './communicationVali
 import { createAttentionReplayAuthoritativeResources } from './attentionReplayResources'
 import { ATTENTION_REPLAY_AUTHORITATIVE_COMMIT_SCHEMA_V2, ATTENTION_REPLAY_AUTHORITATIVE_LOG_FOLD_V2 } from './attentionReplayResources'
 
-const payload = Object.freeze({ communicationKey: 'public-aid', assertionContent: Object.freeze(['aid/a/b']), assertionProvenanceDigests: Object.freeze(['provenance-aid']), channelId: 'diegetic-direct-communication-v1', revealerId: 'a', recipientScope: 'direct:b', revealScope: 'assertions:aid', policyIdentities: Object.freeze(['channel-c3', 'scope-c4']), available: true })
+const recipientScope = Object.freeze({ kind: 'direct_recipient' as const, recipientId: 'b' })
+const revealScope = Object.freeze({ approvedAssertionIds: Object.freeze(['aid/a/b']), approvedRecipientScope: recipientScope })
+const payload = Object.freeze({ communicationKey: 'public-aid', assertionContent: Object.freeze(['aid/a/b']), assertionProvenance: Object.freeze(['full-provenance-aid']), channelId: 'diegetic-direct-communication-v1', revealerId: 'a', recipientScope, revealScope, policyIdentities: Object.freeze(['channel-c3', 'scope-c4']), available: true })
 const command = Object.freeze({ contractVersion: COMMUNICATION_VALIDATOR_CONTRACT_VERSION, commandId: 'ordinary-public-aid', communicationKey: 'public-aid', wallClockInput: 12, commitSchemaVersion: ATTENTION_REPLAY_AUTHORITATIVE_COMMIT_SCHEMA_V2, foldVersion: ATTENTION_REPLAY_AUTHORITATIVE_LOG_FOLD_V2 })
 
 describe('C5 authoritative communication validator', () => {
