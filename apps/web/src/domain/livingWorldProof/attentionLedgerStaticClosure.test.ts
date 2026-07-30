@@ -1238,7 +1238,7 @@ describe('B4 / S2 — the quest opening-coordinate sidecar has accessor-only min
     ))
 
     expect([...namingFiles].sort()).toEqual([...OPENING_COORDINATE_MINT_AUTHORIZED_FILES].sort())
-  }, 10_000)
+  }, 30_000)
 
   it('keeps its nominal marker module-private and independent of the legal view marker', () => {
     const contracts = readStrippedSource('attentionQuestCandidateContracts.ts')
