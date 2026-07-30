@@ -123,6 +123,15 @@ import {
 } from './attentionClosedRelationCertificateContracts'
 import { ATTENTION_ABSENCE_PREDICATE_LIBRARY_HASH } from './attentionAbsencePredicateLibrary'
 import type { AbsenceWitnessPolicyRef } from './attentionAbsenceWitnessProvenance'
+import { ATTENTION_COMMUNICATION_AUTHORITY_ACCESSOR_VERSION } from './attentionCommunicationAuthorityContracts'
+import {
+  ATTENTION_CHANNEL_POLICY_VERSION,
+} from './attentionChannelRegistry'
+import {
+  ATTENTION_COMMUNICATION_LEGALITY_POLICY_HASH,
+  ATTENTION_COMMUNICATION_LEGALITY_POLICY_VERSION,
+} from './attentionRevealerLegality'
+import type { CommunicationLegalityPolicyRef } from './attentionRevealerLegality'
 
 /**
  * RN019 §9.3's closed derivation dependency bundle: exactly these thirteen
@@ -164,6 +173,7 @@ export interface AttentionCandidateDerivationDependencyBundle {
   readonly absenceCompletenessPolicyVersion: string
   readonly absencePredicateLibraryVersionHash: string
   readonly closedRelationCertificateAccessorContractVersion: string
+  readonly communicationAuthorityAccessorContractVersion: string
 }
 
 /** The thirteen derivation-bundle field names, in RN019 §9.3's declared order. */
@@ -188,6 +198,7 @@ export const ATTENTION_CANDIDATE_DERIVATION_DEPENDENCY_FIELDS: readonly string[]
   'absenceCompletenessPolicyVersion',
   'absencePredicateLibraryVersionHash',
   'closedRelationCertificateAccessorContractVersion',
+  'communicationAuthorityAccessorContractVersion',
 ])
 
 /**
@@ -217,6 +228,10 @@ export interface AttentionCandidateRankingEligibilityResourceState {
   readonly patternDirectEvidenceTemplateVersion: string
   readonly scorePolicyRef: ScorePolicyRef
   readonly declaredScoreFeatures: readonly AttentionDeclaredScoreFeatures[]
+  readonly communicationLegalityPolicyRef: CommunicationLegalityPolicyRef
+  readonly communicationLegalityPolicyVersion: string
+  readonly communicationLegalityPolicyHash: string
+  readonly channelPolicyVersion: string
 }
 
 /** RN019 §9.3's ranking dependency bundle: the derivation bundle plus exactly three ranking-only members. */
@@ -272,6 +287,8 @@ export function attentionCandidateDerivationDependencyBundle(
       input.absencePredicateLibraryVersionHash ?? ATTENTION_ABSENCE_PREDICATE_LIBRARY_HASH,
     closedRelationCertificateAccessorContractVersion:
       input.closedRelationCertificateAccessorContractVersion ?? ATTENTION_CLOSED_RELATION_CERTIFICATE_ACCESSOR_VERSION,
+    communicationAuthorityAccessorContractVersion:
+      input.communicationAuthorityAccessorContractVersion ?? ATTENTION_COMMUNICATION_AUTHORITY_ACCESSOR_VERSION,
   })
 }
 
@@ -307,6 +324,10 @@ export function attentionCandidateRankingEligibilityResourceState(
     scorePolicyRef: overrides.scorePolicyRef ?? 'score-constant-zero-v0',
     declaredScoreFeatures: Object.freeze([...(overrides.declaredScoreFeatures ?? [])]
       .sort((left, right) => left.candidateId < right.candidateId ? -1 : left.candidateId > right.candidateId ? 1 : 0)),
+    communicationLegalityPolicyRef: overrides.communicationLegalityPolicyRef ?? 'communication-legality-disabled-v0',
+    communicationLegalityPolicyVersion: overrides.communicationLegalityPolicyVersion ?? 'communication-legality-disabled-v0',
+    communicationLegalityPolicyHash: overrides.communicationLegalityPolicyHash ?? 'communication-legality-disabled-v0',
+    channelPolicyVersion: overrides.channelPolicyVersion ?? ATTENTION_CHANNEL_POLICY_VERSION,
   })
 }
 
@@ -362,6 +383,7 @@ export type AttentionCandidateCacheKeyRefusal =
   | 'missing-absence-completeness-policy-version'
   | 'missing-absence-predicate-library-version-hash'
   | 'missing-closed-relation-certificate-accessor-contract-version'
+  | 'missing-communication-authority-accessor-contract-version'
   | 'missing-ordering-version'
   | 'unsupported-ordering-version'
   | 'missing-ranking-policy-hash'
@@ -478,6 +500,7 @@ export function deriveAttentionCandidateDerivationCacheKey(
   if (!isPresent(bundle.absenceCompletenessPolicyVersion)) return { kind: 'refused', reason: 'missing-absence-completeness-policy-version' }
   if (!isPresent(bundle.absencePredicateLibraryVersionHash)) return { kind: 'refused', reason: 'missing-absence-predicate-library-version-hash' }
   if (!isPresent(bundle.closedRelationCertificateAccessorContractVersion)) return { kind: 'refused', reason: 'missing-closed-relation-certificate-accessor-contract-version' }
+  if (!isPresent(bundle.communicationAuthorityAccessorContractVersion)) return { kind: 'refused', reason: 'missing-communication-authority-accessor-contract-version' }
 
   // Rebuilt as a closed record from the bundle's own values, so the literal's
   // property order — and the caller's — cannot reach the bytes.
@@ -501,6 +524,7 @@ export function deriveAttentionCandidateDerivationCacheKey(
     absenceCompletenessPolicyVersion: bundle.absenceCompletenessPolicyVersion,
     absencePredicateLibraryVersionHash: bundle.absencePredicateLibraryVersionHash,
     closedRelationCertificateAccessorContractVersion: bundle.closedRelationCertificateAccessorContractVersion,
+    communicationAuthorityAccessorContractVersion: bundle.communicationAuthorityAccessorContractVersion,
     snapshotLsn: bundle.snapshotLsn,
   }
 
@@ -549,6 +573,16 @@ function isEligibilityResourceState(
   if (!Array.isArray(value.declaredScoreFeatures)) return false
   if (!value.declaredScoreFeatures.every(isDeclaredScoreFeature)) return false
   if (new Set(value.declaredScoreFeatures.map((feature) => feature.candidateId)).size !== value.declaredScoreFeatures.length) return false
+  if (value.communicationLegalityPolicyRef !== 'communication-legality-disabled-v0' && value.communicationLegalityPolicyRef !== 'communication-legality-c3-v1') return false
+  if (value.communicationLegalityPolicyRef === 'communication-legality-c3-v1' && (
+    value.communicationLegalityPolicyVersion !== ATTENTION_COMMUNICATION_LEGALITY_POLICY_VERSION
+    || value.communicationLegalityPolicyHash !== ATTENTION_COMMUNICATION_LEGALITY_POLICY_HASH
+  )) return false
+  if (value.communicationLegalityPolicyRef === 'communication-legality-disabled-v0' && (
+    value.communicationLegalityPolicyVersion !== 'communication-legality-disabled-v0'
+    || value.communicationLegalityPolicyHash !== 'communication-legality-disabled-v0'
+  )) return false
+  if (value.channelPolicyVersion !== ATTENTION_CHANNEL_POLICY_VERSION) return false
   return true
 }
 
@@ -603,6 +637,10 @@ export function deriveAttentionCandidateRankingCacheKey(
           publicStakesBand: feature.publicStakesBand,
           worldTimeRecencyBand: feature.worldTimeRecencyBand,
         })),
+      communicationLegalityPolicyRef: bundle.eligibilityResourceState.communicationLegalityPolicyRef,
+      communicationLegalityPolicyVersion: bundle.eligibilityResourceState.communicationLegalityPolicyVersion,
+      communicationLegalityPolicyHash: bundle.eligibilityResourceState.communicationLegalityPolicyHash,
+      channelPolicyVersion: bundle.eligibilityResourceState.channelPolicyVersion,
     },
     orderingVersion: bundle.orderingVersion,
     rankingPolicyHash: bundle.rankingPolicyHash,

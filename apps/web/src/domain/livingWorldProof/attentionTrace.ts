@@ -117,6 +117,18 @@ export interface AttentionTraceOrderingKeyValue {
   readonly value: string
 }
 
+/** C3 trusted-only evidence; omitted while communication legality is disabled. */
+export interface AttentionTraceCommunicationAuthorityMaterial {
+  readonly candidateId: string
+  readonly channelId: 'diegetic-direct-communication-v1'
+  readonly revealerId: string
+  readonly route: 'authoritatively-communicated' | 'authoritatively-knows' | 'rule-licensed-combination'
+  readonly communicationLegalityPolicyVersion: string
+  readonly communicationLegalityPolicyHash: string
+  readonly channelPolicyVersion: string
+  readonly channelPolicyHash: string
+}
+
 /** Fields both trusted candidate-entry branches share (RN019 §9.6). */
 export interface AttentionTraceCandidateEntryCommon {
   readonly sourceKind: AttentionTraceSourceKind
@@ -450,6 +462,7 @@ export interface AttentionTraceInput {
   readonly p3PremiseCheck?: AttentionTraceP3PremiseCheck
   readonly scorePolicyEvidence?: AttentionTraceScorePolicyEvidence
   readonly absenceWitnessMaterial?: AttentionTraceAbsenceWitnessMaterial
+  readonly communicationAuthorityMaterial?: readonly AttentionTraceCommunicationAuthorityMaterial[]
 }
 
 /**

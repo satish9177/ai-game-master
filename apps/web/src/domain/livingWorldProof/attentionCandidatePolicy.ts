@@ -126,10 +126,10 @@ export const ATTENTION_CANDIDATE_ORDERING_VERSION = 'attention-candidate-orderin
  * compared equal to one minted under this schema.
  */
 export const ATTENTION_CANDIDATE_DERIVATION_CACHE_KEY_SCHEMA_VERSION =
-  'attention-candidate-derivation-cache-key-v4' as const
+  'attention-candidate-derivation-cache-key-v5' as const
 
 export const ATTENTION_CANDIDATE_RANKING_CACHE_KEY_SCHEMA_VERSION =
-  'attention-candidate-ranking-cache-key-v4' as const
+  'attention-candidate-ranking-cache-key-v5' as const
 
 /**
  * The bounds on the one numeric field Stage A actually owns: the ranking

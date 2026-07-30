@@ -84,6 +84,11 @@ import {
 } from './attentionClosedRelationCertificateContracts'
 import type { AttentionReadableClosedRelationCertificateView } from './attentionClosedRelationCertificateContracts'
 import { isAttentionReadableClosedRelationCertificateFromAccessor } from './attentionClosedRelationCertificateAccessor'
+import {
+  isStructurallyValidAttentionReadableCommunicationAuthorityView,
+} from './attentionCommunicationAuthorityContracts'
+import type { AttentionReadableCommunicationAuthorityView } from './attentionCommunicationAuthorityContracts'
+import { isAttentionReadableCommunicationAuthorityViewFromAccessor } from './attentionCommunicationAuthorityAccessor'
 
 /**
  * The committed B1-B3 common surface schema: exactly `questCandidateViews` and
@@ -108,8 +113,11 @@ export const ATTENTION_READABLE_SURFACE_SCHEMA_V2 =
 export const ATTENTION_READABLE_SURFACE_SCHEMA_V3 =
   'attention-readable-surface-schema-v3' as const
 
+export const ATTENTION_READABLE_SURFACE_SCHEMA_V4 =
+  'attention-readable-surface-schema-v4' as const
+
 /** The schema this build constructs and accepts. */
-export const ATTENTION_READABLE_SURFACE_SCHEMA_VERSION = ATTENTION_READABLE_SURFACE_SCHEMA_V3
+export const ATTENTION_READABLE_SURFACE_SCHEMA_VERSION = ATTENTION_READABLE_SURFACE_SCHEMA_V4
 
 /**
  * Re-exported for the downstream B4 modules that must independently re-check
@@ -141,6 +149,7 @@ export interface AttentionReadableSurface {
   readonly questOpeningCoordinateViews: readonly AttentionReadableQuestOpeningCoordinateView[]
   readonly patternEvidenceViews: readonly AttentionReadablePatternEvidenceView[]
   readonly closedRelationCertificateViews: readonly AttentionReadableClosedRelationCertificateView[]
+  readonly communicationAuthorityViews: readonly AttentionReadableCommunicationAuthorityView[]
 }
 
 export type AttentionReadableSurfaceRefusal =
@@ -155,6 +164,7 @@ export type AttentionReadableSurfaceRefusal =
   | 'quest-opening-coordinate-order-mismatch'
   | 'pattern-evidence-order-mismatch'
   | 'closed-relation-certificate-order-mismatch'
+  | 'communication-authority-order-mismatch'
   | 'ambiguous-legal-identity'
 
 export type AttentionReadableSurfaceResult =
@@ -251,6 +261,7 @@ export function constructAttentionReadableSurface(
   questOpeningCoordinateViews: readonly AttentionReadableQuestOpeningCoordinateView[],
   patternEvidenceViews: readonly AttentionReadablePatternEvidenceView[],
   closedRelationCertificateViews: readonly AttentionReadableClosedRelationCertificateView[] = [],
+  communicationAuthorityViews: readonly AttentionReadableCommunicationAuthorityView[] = [],
 ): AttentionReadableSurfaceResult {
   if (request.surfaceSchemaVersion !== ATTENTION_READABLE_SURFACE_SCHEMA_VERSION) {
     return { kind: 'refused', reason: 'surface-schema-version-mismatch' }
@@ -266,6 +277,7 @@ export function constructAttentionReadableSurface(
     || !Array.isArray(questOpeningCoordinateViews)
     || !Array.isArray(patternEvidenceViews)
     || !Array.isArray(closedRelationCertificateViews)
+    || !Array.isArray(communicationAuthorityViews)
   ) {
     return { kind: 'refused', reason: 'input-not-attention-readable' }
   }
@@ -370,6 +382,26 @@ export function constructAttentionReadableSurface(
     acceptedCertificates.push(certificate)
   }
 
+  const acceptedCommunicationAuthorities: AttentionReadableCommunicationAuthorityView[] = []
+  let previousAuthority: AttentionReadableCommunicationAuthorityView | null = null
+  for (const authority of communicationAuthorityViews) {
+    if (!isStructurallyValidAttentionReadableCommunicationAuthorityView(authority)) {
+      return { kind: 'refused', reason: 'input-not-attention-readable' }
+    }
+    if (!isAttentionReadableCommunicationAuthorityViewFromAccessor(authority)) {
+      return { kind: 'refused', reason: 'input-not-accessor-minted' }
+    }
+    if (previousAuthority !== null) {
+      const kindOrder = { declassified_knowledge: 0, public_knowledge: 1, communication_authority: 2 } as const
+      const comparison = kindOrder[previousAuthority.authorityKind] - kindOrder[authority.authorityKind]
+        || previousAuthority.commitLsn - authority.commitLsn
+        || (previousAuthority.entityId < authority.entityId ? -1 : previousAuthority.entityId > authority.entityId ? 1 : 0)
+      if (comparison >= 0) return { kind: 'refused', reason: 'communication-authority-order-mismatch' }
+    }
+    previousAuthority = authority
+    acceptedCommunicationAuthorities.push(authority)
+  }
+
   return {
     kind: 'ok',
     surface: Object.freeze({
@@ -380,6 +412,7 @@ export function constructAttentionReadableSurface(
       questOpeningCoordinateViews: Object.freeze(acceptedOpeningCoordinateViews),
       patternEvidenceViews: Object.freeze(acceptedPatternViews),
       closedRelationCertificateViews: Object.freeze(acceptedCertificates),
+      communicationAuthorityViews: Object.freeze(acceptedCommunicationAuthorities),
     }),
   }
 }

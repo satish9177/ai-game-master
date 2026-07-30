@@ -91,6 +91,12 @@ const STAGE_A_PROOF_MODULES = [
   'attentionAbsencePredicateLibrary.ts',
   'attentionAbsenceWitnessProvenance.ts',
   'attentionAbsenceScenario.ts',
+  'attentionCommunicationAuthorityContracts.ts',
+  'attentionCommunicationAuthorityAccessor.ts',
+  'attentionChannelRegistry.ts',
+  'attentionRevealerLegality.ts',
+  'attentionDiegeticAggregateLegitimacy.ts',
+  'attentionCommunicationAuthorityScenario.ts',
 ] as const
 
 /**
@@ -147,6 +153,8 @@ const ALLOWED_IMPORT_SPECIFIERS: Record<string, readonly string[]> = {
     './attentionPatternEvidenceAccessor',
     './attentionClosedRelationCertificateContracts',
     './attentionClosedRelationCertificateAccessor',
+    './attentionCommunicationAuthorityContracts',
+    './attentionCommunicationAuthorityAccessor',
   ],
   'attentionNarrativePatternContracts.ts': [
     './attentionCandidatePolicy',
@@ -232,6 +240,9 @@ const ALLOWED_IMPORT_SPECIFIERS: Record<string, readonly string[]> = {
     './attentionClosedRelationCertificateContracts',
     './attentionAbsencePredicateLibrary',
     './attentionAbsenceWitnessProvenance',
+    './attentionCommunicationAuthorityContracts',
+    './attentionChannelRegistry',
+    './attentionRevealerLegality',
   ],
   'attentionDirectEvidenceAssertion.ts': [
     './canonicalSerialization',
@@ -330,6 +341,18 @@ const ALLOWED_IMPORT_SPECIFIERS: Record<string, readonly string[]> = {
     './canonicalSerialization', './attentionClosedRelationCertificateContracts', './attentionAbsencePredicateLibrary',
   ],
   'attentionAbsenceScenario.ts': ['./attentionClosedRelationCertificateAccessor', './attentionPatternEvidenceContracts'],
+  'attentionCommunicationAuthorityContracts.ts': ['./canonicalSerialization'],
+  'attentionCommunicationAuthorityAccessor.ts': ['./attentionCommunicationAuthorityContracts'],
+  'attentionChannelRegistry.ts': ['./canonicalSerialization'],
+  'attentionRevealerLegality.ts': [
+    './attentionChannelRegistry',
+    './attentionCommunicationAuthorityContracts',
+    './attentionCommunicationAuthorityAccessor',
+    './attentionPatternEvidenceContracts',
+    './attentionPatternEvidenceAccessor',
+  ],
+  'attentionDiegeticAggregateLegitimacy.ts': ['./attentionRevealerLegality'],
+  'attentionCommunicationAuthorityScenario.ts': ['./attentionCommunicationAuthorityContracts'],
 }
 
 /**
@@ -1129,6 +1152,8 @@ describe('B1 / S2 — the common A-prime constructor names no raw A-domain surfa
     expect([...new Set(specifiers)].sort()).toEqual([
       './attentionClosedRelationCertificateAccessor',
       './attentionClosedRelationCertificateContracts',
+      './attentionCommunicationAuthorityAccessor',
+      './attentionCommunicationAuthorityContracts',
       './attentionPatternEvidenceAccessor',
       './attentionPatternEvidenceContracts',
       './attentionQuestCandidateContracts',
@@ -1143,7 +1168,7 @@ describe('B1 / S2 — the common A-prime constructor names no raw A-domain surfa
     }
   })
 
-  it('exposes exactly one five-parameter constructor: request and the four admitted view collections', () => {
+  it('exposes exactly one six-parameter constructor: request and the five admitted view collections', () => {
     // B4 adds a parameter and a surface-schema version to the one existing
     // constructor. It does not add a second A-prime boundary: this file's
     // `ALLOWED_IMPORT_SPECIFIERS` admits exactly one boundary module, and the
