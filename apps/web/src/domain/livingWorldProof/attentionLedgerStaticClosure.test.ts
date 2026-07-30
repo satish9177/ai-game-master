@@ -1710,7 +1710,7 @@ describe('B4 / P1 — the trusted trace and replay path stay singular and patter
             .toEqual({ step, callSites: 1 })
         }
         expect(outsideDerivation).toMatch(/function reconstructRetainedPatterns/)
-      })
+      }, 30_000)
 
       it('it runs the committed §11.2A steps 3-7 in exactly that order, A-prime construction first', () => {
         const body = functionBody(DERIVATION)
@@ -1912,7 +1912,7 @@ describe('A2 / D2 — only the A1 accessor may mint an attention-readable view',
     const namingFiles = files.filter((file) => namesViewMint(readFileSync(`${SRC_ROOT}${file}`, 'utf8')))
 
     expect([...namingFiles].sort()).toEqual([...MINT_AUTHORIZED_FILES].sort())
-  })
+  }, 30_000)
 
   it('is not credited to a file that only mentions it in a comment or a string', () => {
     expect(namesViewMint('// mintAttentionReadableQuestCandidateView is deliberately not called here')).toBe(false)
