@@ -73,6 +73,7 @@ import type {
   AttentionRevealResultTag,
   AttentionRevealSlotId,
 } from './attentionRevealPackage'
+import type { AttentionRevealScope } from './attentionRevealScope'
 
 /**
  * The finite template: one fixed label per approved slot, and nothing else. A
@@ -96,6 +97,7 @@ const VALUE_SEPARATOR = '|'
 
 export interface AttentionTemplateRequest {
   readonly templateVersion: string
+  readonly approvedRevealScope?: AttentionRevealScope
 }
 
 /** The closed typed refusal set. Every case refuses; none approximates. */
@@ -277,6 +279,11 @@ export function renderAttentionRevealPackage(
     if (revealPackage.packageSchemaVersion !== ATTENTION_PATTERN_REVEAL_PACKAGE_SCHEMA_VERSION) {
       return { kind: 'refused', reason: 'unsupported-pattern-package-schema' }
     }
+    if (
+      revealPackage.approvedRevealScope !== undefined
+      && (request.approvedRevealScope === undefined
+        || canonicalSerialize(request.approvedRevealScope) !== canonicalSerialize(revealPackage.approvedRevealScope))
+    ) return { kind: 'refused', reason: 'unrenderable-result-tag' }
     if (revealPackage.resultTag !== 'presentation-ready' || !isPresent(revealPackage.candidateId)) {
       return { kind: 'refused', reason: 'unrenderable-result-tag' }
     }

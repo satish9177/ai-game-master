@@ -52,6 +52,7 @@
 import { canonicalSerialize, mintHash } from './canonicalSerialization'
 import { ATTENTION_PATTERN_PRESENTATION_LEDGER_POLICY_VERSION } from './attentionCandidatePolicy'
 import type { AttentionRevealResultTag } from './attentionRevealPackage'
+import type { AttentionRevealScope, AttentionRevealScopeRevalidation } from './attentionRevealScope'
 
 /**
  * **Two schemas, versioned separately (RN019 §9.6).** The trusted/internal trace
@@ -127,6 +128,13 @@ export interface AttentionTraceCommunicationAuthorityMaterial {
   readonly communicationLegalityPolicyHash: string
   readonly channelPolicyVersion: string
   readonly channelPolicyHash: string
+}
+
+/** C4 trusted-only proof that the approved reveal artifact stayed exact across the two clocks. */
+export interface AttentionTraceRevealScopeMaterial {
+  readonly candidateId: string
+  readonly approvedRevealScope: AttentionRevealScope
+  readonly revalidationOutcome: AttentionRevealScopeRevalidation
 }
 
 /** Fields both trusted candidate-entry branches share (RN019 §9.6). */
@@ -463,6 +471,7 @@ export interface AttentionTraceInput {
   readonly scorePolicyEvidence?: AttentionTraceScorePolicyEvidence
   readonly absenceWitnessMaterial?: AttentionTraceAbsenceWitnessMaterial
   readonly communicationAuthorityMaterial?: readonly AttentionTraceCommunicationAuthorityMaterial[]
+  readonly revealScopeMaterial?: readonly AttentionTraceRevealScopeMaterial[]
 }
 
 /**

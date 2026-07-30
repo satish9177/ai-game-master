@@ -97,6 +97,9 @@ const STAGE_A_PROOF_MODULES = [
   'attentionRevealerLegality.ts',
   'attentionDiegeticAggregateLegitimacy.ts',
   'attentionCommunicationAuthorityScenario.ts',
+  'attentionRecipientScope.ts',
+  'attentionRevealScope.ts',
+  'attentionEligibilityVerdict.ts',
 ] as const
 
 /**
@@ -234,6 +237,7 @@ const ALLOWED_IMPORT_SPECIFIERS: Record<string, readonly string[]> = {
     './attentionNarrativePatternResourcePolicy',
     './attentionDirectEvidenceAssertion',
     './attentionInferenceProvenancePolicy',
+    './attentionRevealScope',
     './attentionInferenceRuleLibrary',
     './attentionAggregateLegitimacy',
     './attentionScorePolicy',
@@ -258,6 +262,7 @@ const ALLOWED_IMPORT_SPECIFIERS: Record<string, readonly string[]> = {
     './attentionAggregateLegitimacy',
     './attentionInferenceProvenance',
     './attentionInferenceProvenancePolicy',
+    './attentionRevealScope',
   ],
   'attentionTemplate.ts': [
     './canonicalSerialization',
@@ -266,6 +271,7 @@ const ALLOWED_IMPORT_SPECIFIERS: Record<string, readonly string[]> = {
     './attentionDirectEvidenceAssertion',
     './attentionInferenceProvenance',
     './attentionInferenceProvenancePolicy',
+    './attentionRevealScope',
   ],
   'attentionLedger.ts': [
     './canonicalSerialization',
@@ -280,6 +286,7 @@ const ALLOWED_IMPORT_SPECIFIERS: Record<string, readonly string[]> = {
     './canonicalSerialization',
     './attentionCandidatePolicy',
     './attentionRevealPackage',
+    './attentionRevealScope',
   ],
   'attentionReplayResources.ts': ['./canonicalSerialization'],
   'attentionReplay.ts': [
@@ -305,6 +312,8 @@ const ALLOWED_IMPORT_SPECIFIERS: Record<string, readonly string[]> = {
     './attentionScorePolicy',
     './attentionClosedRelationCertificateAccessor',
     './attentionClosedRelationCertificateContracts',
+    './attentionEligibilityVerdict',
+    './attentionRevealScope',
   ],
   'attentionReplayScenario.ts': [
     './attentionQuestCandidateContracts',
@@ -353,6 +362,9 @@ const ALLOWED_IMPORT_SPECIFIERS: Record<string, readonly string[]> = {
   ],
   'attentionDiegeticAggregateLegitimacy.ts': ['./attentionRevealerLegality'],
   'attentionCommunicationAuthorityScenario.ts': ['./attentionCommunicationAuthorityContracts'],
+  'attentionRecipientScope.ts': ['./attentionChannelRegistry'],
+  'attentionRevealScope.ts': ['./canonicalSerialization', './attentionRecipientScope'],
+  'attentionEligibilityVerdict.ts': ['./attentionRecipientScope', './attentionRevealerLegality'],
 }
 
 /**
@@ -1790,7 +1802,7 @@ describe('B4 / P1 — the trusted trace and replay path stay singular and patter
         expect(body).not.toMatch(/runAttentionQuestCandidateReplayPass\s*\(/)
       })
 
-      it('the closed import allowlist grew by exactly the four authorized B6 additions', () => {
+      it('the closed import allowlist admits only the declared B6 and C4 replay dependencies', () => {
         // The committed 9aa77e8e entries for the three modules B6 touches.
         const COMMITTED_AT_BASELINE: Record<string, readonly string[]> = {
           'attentionReplay.ts': [
@@ -1819,9 +1831,11 @@ describe('B4 / P1 — the trusted trace and replay path stay singular and patter
           'attentionReplay.ts -> ./attentionAggregateLegitimacy',
           'attentionReplay.ts -> ./attentionClosedRelationCertificateAccessor',
           'attentionReplay.ts -> ./attentionClosedRelationCertificateContracts',
+          'attentionReplay.ts -> ./attentionEligibilityVerdict',
           'attentionReplay.ts -> ./attentionInferenceRuleLibrary',
           'attentionReplay.ts -> ./attentionNarrativePatternMonitor',
           'attentionReplay.ts -> ./attentionPatternEvidenceContracts',
+          'attentionReplay.ts -> ./attentionRevealScope',
           'attentionReplay.ts -> ./attentionScorePolicy',
           'attentionReplayScenario.ts -> ./attentionNarrativePatternScenario',
           'attentionReplayScenario.ts -> ./attentionPatternEvidenceContracts',

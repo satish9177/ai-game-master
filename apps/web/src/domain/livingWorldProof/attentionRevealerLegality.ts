@@ -10,8 +10,8 @@ import type { AttentionReadablePatternEvidenceView } from './attentionPatternEvi
 import { isAttentionReadablePatternEvidenceViewFromAccessor } from './attentionPatternEvidenceAccessor'
 
 export type CommunicationLegalityPolicyRef = 'communication-legality-disabled-v0' | 'communication-legality-c3-v1'
-export const ATTENTION_COMMUNICATION_LEGALITY_POLICY_VERSION = 'communication-legality-c3-v1' as const
-export const ATTENTION_COMMUNICATION_LEGALITY_POLICY_HASH = 'communication-legality-c3-v1:declared-individual-speaker-policy' as const
+export const ATTENTION_COMMUNICATION_LEGALITY_POLICY_VERSION = 'communication-legality-c4-v1' as const
+export const ATTENTION_COMMUNICATION_LEGALITY_POLICY_HASH = 'communication-legality-c4-v1:declared-individual-speaker-policy-and-recipient-scope' as const
 export const ATTENTION_REVEALER_ORDER_VERSION = 'attention-revealer-order-c3-v1' as const
 
 export interface AttentionRevealerAuthorityRequest {

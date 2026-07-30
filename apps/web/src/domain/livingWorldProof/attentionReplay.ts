@@ -116,6 +116,7 @@ import type {
   AttentionTracePatternPresentationDecision,
   AttentionTracePatternPresentationOutcome,
   AttentionTracePresentationEntry,
+  AttentionTraceRevealScopeMaterial,
   AttentionTraceResourceLimitEntry,
   AttentionTraceRevalidationEntry,
 } from './attentionTrace'
@@ -133,6 +134,10 @@ import { evaluateAttentionAggregateLegitimacy } from './attentionAggregateLegiti
 import type { AggregateLegitimacyPolicyRef, AttentionAggregateSource } from './attentionAggregateLegitimacy'
 import { PUBLIC_AID_LINK_EXTENSION_V1 } from './attentionInferenceRuleLibrary'
 import type { AttentionDeclaredScoreFeatures, ScorePolicyRef } from './attentionScorePolicy'
+import type { AttentionEligibilityVerdict } from './attentionEligibilityVerdict'
+import { revalidateAttentionRevealScope } from './attentionRevealScope'
+import type { AttentionRevealScope } from './attentionRevealScope'
+import type { AttentionTraceCommunicationAuthorityMaterial } from './attentionTrace'
 import { readAttentionReadableClosedRelationCertificate } from './attentionClosedRelationCertificateAccessor'
 import type { AttentionReadableClosedRelationCertificateView } from './attentionClosedRelationCertificateContracts'
 import type { NarrativePatternDirectEvidenceAssertionInput } from './attentionNarrativePatternContracts'
@@ -386,6 +391,8 @@ export interface AttentionPatternPresentationPassCandidateInput {
   readonly revalidationCacheKey: string
   /** C1 only: permits the one licensed nested aggregate source pair. */
   readonly aggregateSources?: readonly AttentionAggregateSource[]
+  /** C4: the immutable approval artifact that the package and renderer must carry unchanged. */
+  readonly approvedRevealScope?: AttentionRevealScope
 }
 
 export interface AttentionPatternPresentationPassResult {
@@ -521,6 +528,7 @@ export function attemptAttentionPatternPresentation(input: {
       templateVersion: ATTENTION_PATTERN_DIRECT_EVIDENCE_TEMPLATE_VERSION,
       directEvidenceAssertions: assertions.assertions,
       ...(legitimacy.kind === 'ok' ? { aggregateAssertion: legitimacy.aggregate } : {}),
+      ...(entry.approvedRevealScope === undefined ? {} : { approvedRevealScope: entry.approvedRevealScope }),
       policy: input.policy,
     })
     if (built.kind !== 'ok') {
@@ -543,6 +551,7 @@ export function attemptAttentionPatternPresentation(input: {
 
     const rendered = renderAttentionRevealPackage(built.revealPackage, {
       templateVersion: ATTENTION_PATTERN_DIRECT_EVIDENCE_TEMPLATE_VERSION,
+      ...(entry.approvedRevealScope === undefined ? {} : { approvedRevealScope: entry.approvedRevealScope }),
     })
     if (rendered.kind !== 'ok') {
       const assertionIds = Object.freeze(assertions.assertions.map((assertion) => assertion.assertionId))
@@ -1187,6 +1196,17 @@ export interface AttentionMixedPatternPresentationInput {
   readonly revalidationCacheKey: string
   readonly satisfiedCompletionLsn?: number
   readonly aggregateSources?: readonly AttentionAggregateSource[]
+  /** C4 is opt-in so historical extradiegetic pattern fixtures retain their frozen inputs. */
+  readonly c4Eligibility?: AttentionMixedPatternC4Eligibility
+}
+
+/** The C4 half of a diegetic pattern attempt, supplied as one immutable tuple. */
+export interface AttentionMixedPatternC4Eligibility {
+  readonly rankingVerdict: AttentionEligibilityVerdict
+  readonly approvedRevealScope: AttentionRevealScope
+  readonly communicationAuthorityMaterial: AttentionTraceCommunicationAuthorityMaterial
+  readonly revalidationVerdict?: AttentionEligibilityVerdict
+  readonly revalidationRevealScope?: AttentionRevealScope
 }
 
 export interface AttentionMixedFamilyEvaluationInput {
@@ -1214,6 +1234,7 @@ export type AttentionMixedFamilyEvaluationRefusal =
   | { readonly stage: 'accessor' | 'boundary' | 'monitor' | 'normalization' | 'ordering' | 'trace'; readonly reason: string }
   | { readonly stage: 'package' | 'template' | 'ledger'; readonly candidateId: string; readonly reason: string }
   | { readonly stage: 'pattern-input'; readonly candidateId: string; readonly reason: 'missing-pattern-presentation-input' }
+  | { readonly stage: 'reveal-scope'; readonly candidateId: string; readonly reason: 'reveal_scope_expansion_attempt' }
 
 export interface AttentionMixedFamilyArbitrationAttempt {
   readonly candidateId: string
@@ -1273,7 +1294,15 @@ export function runAttentionMixedFamilyEvaluation(
   const ordered = orderAttentionCandidates(normalized.attentionCandidates, input.scorePolicy)
   if (ordered.kind !== 'ok') return { kind: 'refused', refusal: { stage: 'ordering', reason: ordered.reason } }
   const proofScoreByCandidateId = new Map((ordered.scoreComponents ?? []).map((component) => [component.candidateId, component.proofScore]))
-  const capped = applyMixedFamilyCandidateCap(ordered.orderedCandidates)
+  const presentationInputByCandidateId = new Map(input.patternPresentationInputs.map((entry) => [entry.candidateId, entry] as const))
+  // C4 recipient/audience legality is a ranking-time gate. A refused tuple is
+  // removed before the shared candidate cap, so it is never ranked or handed to
+  // the RN019 continuation table.
+  const eligibleOrderedCandidates = ordered.orderedCandidates.filter((candidate) => {
+    if (candidate.sourceKind !== 'narrative_pattern_instance') return true
+    return presentationInputByCandidateId.get(candidate.candidateId)?.c4Eligibility?.rankingVerdict.kind !== 'refused'
+  })
+  const capped = applyMixedFamilyCandidateCap(eligibleOrderedCandidates)
   const retainedCandidates = capped.retainedCandidates
 
   const revalidationAccess = readAttentionReadableQuestCandidateViews(input.revalidationSnapshot, {
@@ -1318,7 +1347,6 @@ export function runAttentionMixedFamilyEvaluation(
       }
     }
   }
-  const presentationInputByCandidateId = new Map(input.patternPresentationInputs.map((entry) => [entry.candidateId, entry] as const))
   const admittedQuestIds = revalidationAccess.kind === 'ok'
     ? new Set(revalidationAccess.views.map((view) => view.candidateId))
     : null
@@ -1329,6 +1357,8 @@ export function runAttentionMixedFamilyEvaluation(
   const revalidations: AttentionTraceRevalidationEntry[] = []
   const attempts: AttentionMixedFamilyArbitrationAttempt[] = []
   const patternDecisions: AttentionTracePatternPresentationDecision[] = []
+  const communicationAuthorityMaterial: AttentionTraceCommunicationAuthorityMaterial[] = []
+  const revealScopeMaterial: AttentionTraceRevealScopeMaterial[] = []
 
   // RN019 §8.2/§8.2.1 B: the shared, family-blind success budget is the
   // versioned policy value, never a literal at this call site. B6 makes the
@@ -1378,6 +1408,26 @@ export function runAttentionMixedFamilyEvaluation(
     if (patternInput === undefined) {
       return { kind: 'refused', refusal: { stage: 'pattern-input', candidateId: candidate.candidateId, reason: 'missing-pattern-presentation-input' } }
     }
+    const c4 = patternInput.c4Eligibility
+    if (c4 !== undefined) {
+      const revalidationVerdict = c4.revalidationVerdict ?? c4.rankingVerdict
+      if (revalidationVerdict.kind === 'refused') {
+        attempts.push(Object.freeze({ candidateId: candidate.candidateId, sourceKind: candidate.sourceKind, rankPosition,
+          outcome: 'revalidation-refused', refusalReason: revalidationVerdict.reason, continued: true, ledgerAppend: 'not-appended' }))
+        continue
+      }
+      const scopeOutcome = revalidateAttentionRevealScope(c4.approvedRevealScope, c4.revalidationRevealScope ?? c4.approvedRevealScope)
+      revealScopeMaterial.push(Object.freeze({ candidateId: candidate.candidateId, approvedRevealScope: c4.approvedRevealScope, revalidationOutcome: scopeOutcome }))
+      if (scopeOutcome === 'reveal_scope_expansion_attempt') {
+        return { kind: 'refused', refusal: { stage: 'reveal-scope', candidateId: candidate.candidateId, reason: scopeOutcome } }
+      }
+      if (scopeOutcome === 'no_legal_channel') {
+        attempts.push(Object.freeze({ candidateId: candidate.candidateId, sourceKind: candidate.sourceKind, rankPosition,
+          outcome: 'revalidation-refused', refusalReason: scopeOutcome, continued: true, ledgerAppend: 'not-appended' }))
+        continue
+      }
+      communicationAuthorityMaterial.push(c4.communicationAuthorityMaterial)
+    }
     const attempt = attemptAttentionPatternPresentation({
       // Exact candidateId lookup, never a sibling. An empty or missing entry is
       // the committed candidate-disappeared path (RN019 section 9.4.1 row 2).
@@ -1385,7 +1435,8 @@ export function runAttentionMixedFamilyEvaluation(
         directEvidenceAssertionInputs: patternInput.directEvidenceAssertionInputs, rankingCacheKey: patternInput.rankingCacheKey,
         revalidationCacheKey: patternInput.revalidationCacheKey,
         ...(patternInput.aggregateSources === undefined ? {} : { aggregateSources: patternInput.aggregateSources }),
-        ...(patternInput.satisfiedCompletionLsn === undefined ? {} : { satisfiedCompletionLsn: patternInput.satisfiedCompletionLsn }) }),
+        ...(patternInput.satisfiedCompletionLsn === undefined ? {} : { satisfiedCompletionLsn: patternInput.satisfiedCompletionLsn }),
+        ...(c4 === undefined ? {} : { approvedRevealScope: c4.approvedRevealScope }) }),
       ledger, evaluationLsn: input.revalidationSnapshotLsn,
       patternPresentationLedgerPolicyVersion: input.patternPresentationLedgerPolicyVersion, policy,
       aggregateLegitimacyPolicyRef: input.aggregateLegitimacyPolicyRef,
@@ -1448,10 +1499,12 @@ export function runAttentionMixedFamilyEvaluation(
           worldTimeRecencyBand: component.worldTimeRecencyBand,
         }))),
     }) }),
+    ...(communicationAuthorityMaterial.length === 0 ? {} : { communicationAuthorityMaterial: Object.freeze(communicationAuthorityMaterial) }),
+    ...(revealScopeMaterial.length === 0 ? {} : { revealScopeMaterial: Object.freeze(revealScopeMaterial) }),
   })
   if (trace.kind !== 'ok') return { kind: 'refused', refusal: { stage: 'trace', reason: trace.reason } }
   return { kind: 'ok', result: Object.freeze({ trace: trace.trace, ledger, surface: surface.surface,
-    orderedCandidates: ordered.orderedCandidates, retainedCandidates, arbitrationAttempts: Object.freeze(attempts), presentation }) }
+    orderedCandidates: eligibleOrderedCandidates, retainedCandidates, arbitrationAttempts: Object.freeze(attempts), presentation }) }
 }
 
 // ---------------------------------------------------------------------------

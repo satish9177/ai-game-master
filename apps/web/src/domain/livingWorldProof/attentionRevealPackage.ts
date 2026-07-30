@@ -81,6 +81,7 @@ import type { AttentionStageBResourcePolicy } from './attentionNarrativePatternR
 import type { AttentionAggregateAssertion } from './attentionAggregateLegitimacy'
 import { validateAttentionInferenceProvenance } from './attentionInferenceProvenance'
 import { ATTENTION_INFERENCE_PROVENANCE_POLICY } from './attentionInferenceProvenancePolicy'
+import type { AttentionRevealScope } from './attentionRevealScope'
 
 /**
  * The approved slots: the closed set of legally readable content fields a Stage A
@@ -157,6 +158,7 @@ export interface AttentionPatternRevealPackage {
   readonly candidateId: string
   readonly assertions: readonly (AttentionDirectEvidenceAssertion | AttentionAggregateAssertion)[]
   readonly resultTag: 'presentation-ready'
+  readonly approvedRevealScope?: AttentionRevealScope
 }
 
 /** One package pipeline, discriminated by its pinned branch template. */
@@ -186,6 +188,7 @@ export interface AttentionRevealPackageRequest {
   readonly aggregateAssertion?: AttentionAggregateAssertion
   /** B5 — explicit pattern resource policy; defaults to the pinned singleton. */
   readonly policy?: AttentionStageBResourcePolicy
+  readonly approvedRevealScope?: AttentionRevealScope
 }
 
 /** The closed typed refusal set. Every case refuses; none approximates. */
@@ -362,6 +365,7 @@ export function buildAttentionRevealPackage(
           ...(request.aggregateAssertion === undefined ? [] : [Object.freeze({ ...request.aggregateAssertion })]),
         ]),
         resultTag: 'presentation-ready',
+        ...(request.approvedRevealScope === undefined ? {} : { approvedRevealScope: request.approvedRevealScope }),
       }),
     }
   }

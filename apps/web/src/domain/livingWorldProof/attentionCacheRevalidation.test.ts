@@ -23,6 +23,10 @@ import { readAttentionReadableQuestCandidateViews } from './attentionQuestCandid
 import { aidRecord, mintPatternEvidenceViews } from './attentionNarrativePatternScenario'
 import { reconstructNarrativePatternInstances } from './attentionNarrativePatternMonitor'
 import { digestAttentionReplayAuthoritativeLog } from './attentionReplayResources'
+import {
+  ATTENTION_COMMUNICATION_LEGALITY_POLICY_HASH,
+  ATTENTION_COMMUNICATION_LEGALITY_POLICY_VERSION,
+} from './attentionRevealerLegality'
 
 /**
  * A5 — cache-key invalidation and two-clock revalidation evidence.
@@ -169,6 +173,27 @@ describe('A5 — the trace cache key folds the ranking key whole plus the two-cl
     expect(rankingBefore.derivationCacheKey).toBe(before.derivationCacheKey)
     expect(rankingAfter.derivationCacheKey).toBe(before.derivationCacheKey)
     expect(rankingBefore.rankingCacheKey).not.toBe(rankingAfter.rankingCacheKey)
+  })
+})
+
+describe('C4 — communication scope policy remains ranking-only cache material', () => {
+  it('moves the ranking key for the C4 legality-policy value while leaving candidate derivation unchanged', () => {
+    const disabled = rankingCacheKeyOrThrow(BASE_RANKING_INPUT)
+    const enabledBundle: AttentionCandidateRankingDependencyBundle = {
+      ...BASE_RANKING_INPUT,
+      eligibilityResourceState: attentionCandidateRankingEligibilityResourceState({
+        communicationLegalityPolicyRef: 'communication-legality-c3-v1',
+        communicationLegalityPolicyVersion: ATTENTION_COMMUNICATION_LEGALITY_POLICY_VERSION,
+        communicationLegalityPolicyHash: ATTENTION_COMMUNICATION_LEGALITY_POLICY_HASH,
+      }),
+    }
+    const enabled = deriveAttentionCandidateRankingCacheKey(enabledBundle)
+    const disabledDerivation = deriveAttentionCandidateDerivationCacheKey(BASE_RANKING_INPUT.derivation)
+    const enabledDerivation = deriveAttentionCandidateDerivationCacheKey(enabledBundle.derivation)
+    expect(enabled.kind).toBe('ok')
+    expect(disabledDerivation).toEqual(enabledDerivation)
+    if (enabled.kind !== 'ok') throw new Error('expected C4 policy resource state to be keyable')
+    expect(enabled.rankingCacheKey).not.toBe(disabled)
   })
 })
 
