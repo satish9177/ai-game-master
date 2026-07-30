@@ -70,7 +70,7 @@ function canonicalDirectOrder(
 ): boolean {
   if (!sources.every((source) => source.kind === 'positive_record')) return false
   const keys = sources.map((source) => `${source.sourceRecordId}\u0000${source.assertionId}`)
-  return keys.every((key, index) => index === 0 || keys[index - 1] <= key)
+  return keys.every((key, index) => index === 0 || keys[index - 1]! <= key)
 }
 
 function hasExactRuleSourceShape(provenance: AttentionInferenceProvenance): boolean {

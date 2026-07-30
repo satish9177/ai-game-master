@@ -94,8 +94,11 @@ function reciprocal(
   sources: readonly AttentionAggregateSource[],
   policy: AttentionInferenceProvenancePolicy,
 ): AttentionAggregateLegitimacyResult {
-  if (sources.length !== 2 || !sources.every(isPublicAid)) return { kind: 'refused', reason: 'aggregate_assertion_not_legal' }
-  const [first, second] = sources
+  const directSources = sources.filter(isPublicAid)
+  if (sources.length !== 2 || directSources.length !== 2) return { kind: 'refused', reason: 'aggregate_assertion_not_legal' }
+  const first = directSources[0]
+  const second = directSources[1]
+  if (first === undefined || second === undefined) return { kind: 'refused', reason: 'aggregate_assertion_not_legal' }
   if (
     first.sourceRecordId === second.sourceRecordId
     || first.assertionId === second.assertionId
@@ -145,13 +148,15 @@ function extension(
   }
   const shared = [direct.actorId, direct.targetId].filter((id) => aggregate.participants.includes(id))
   const newEndpoints = [direct.actorId, direct.targetId].filter((id) => !aggregate.participants.includes(id))
+  const newEndpoint = newEndpoints[0]
   const leaves = allLeafIdentities(aggregate.provenance)
   if (
     shared.length !== 1
     || newEndpoints.length !== 1
+    || newEndpoint === undefined
     || leaves.some((leaf) => leaf.sourceRecordId === direct.sourceRecordId || leaf.assertionId === direct.assertionId)
   ) return { kind: 'refused', reason: 'aggregate_assertion_not_legal' }
-  const participants = Object.freeze([...new Set([...aggregate.participants, newEndpoints[0]])].sort())
+  const participants = Object.freeze([...new Set([...aggregate.participants, newEndpoint])].sort())
   const assertionId = mintAttentionAggregateAssertionId({
     aggregateAssertionId: aggregate.assertionId,
     aggregateProvenance: nested.value.canonicalBytes,

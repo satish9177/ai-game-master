@@ -51,22 +51,22 @@ describe('C1 inference provenance validation', () => {
   })
 
   it('refuses self and multi-node cycles deterministically', () => {
-    const self = { ...extension().provenance } as { assertionId: string; sources: unknown[] }
+    const self = { ...extension().provenance } as unknown as { assertionId: string; sources: unknown[] }
     self.sources = [{ kind: 'aggregate', assertionId: self.assertionId, provenance: self }, {
       kind: 'positive_record', assertionId: 'cycle-direct', sourceRecordId: 'cycle-record',
     }]
-    expect(validateAttentionInferenceProvenance(self as AttentionInferenceProvenance, ATTENTION_INFERENCE_PROVENANCE_POLICY))
+    expect(validateAttentionInferenceProvenance(self as unknown as AttentionInferenceProvenance, ATTENTION_INFERENCE_PROVENANCE_POLICY))
       .toEqual({ kind: 'refused', reason: 'provenance_cycle' })
 
-    const left = { ...extension().provenance } as { assertionId: string; sources: unknown[] }
-    const right = { ...extension().provenance, assertionId: 'other-cycle-root' } as { assertionId: string; sources: unknown[] }
+    const left = { ...extension().provenance } as unknown as { assertionId: string; sources: unknown[] }
+    const right = { ...extension().provenance, assertionId: 'other-cycle-root' } as unknown as { assertionId: string; sources: unknown[] }
     left.sources = [{ kind: 'aggregate', assertionId: right.assertionId, provenance: right }, {
       kind: 'positive_record', assertionId: 'left-direct', sourceRecordId: 'left-record',
     }]
     right.sources = [{ kind: 'aggregate', assertionId: left.assertionId, provenance: left }, {
       kind: 'positive_record', assertionId: 'right-direct', sourceRecordId: 'right-record',
     }]
-    expect(validateAttentionInferenceProvenance(left as AttentionInferenceProvenance, ATTENTION_INFERENCE_PROVENANCE_POLICY))
+    expect(validateAttentionInferenceProvenance(left as unknown as AttentionInferenceProvenance, ATTENTION_INFERENCE_PROVENANCE_POLICY))
       .toEqual({ kind: 'refused', reason: 'provenance_cycle' })
   })
 

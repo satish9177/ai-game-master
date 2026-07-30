@@ -16,7 +16,7 @@ export interface AttentionCommunicationChannel {
 
 export const ATTENTION_CHANNEL_REGISTRY: readonly AttentionCommunicationChannel[] = Object.freeze([
   Object.freeze({ channelId: 'extradiegetic-ui-v1', channelClass: 'extradiegetic', channelSemanticVersion: '1.0.0', permittedRecipientScopeKinds: Object.freeze([]), requiresRevealer: false, requiresValidator: false }),
-  Object.freeze({ channelId: 'diegetic-direct-communication-v1', channelClass: 'diegetic', channelSemanticVersion: '1.0.0', permittedRecipientScopeKinds: Object.freeze(['direct_recipient', 'bounded_audience']), requiresRevealer: true, requiresValidator: true }),
+  Object.freeze({ channelId: 'diegetic-direct-communication-v1', channelClass: 'diegetic', channelSemanticVersion: '1.0.0', permittedRecipientScopeKinds: Object.freeze(['direct_recipient', 'bounded_audience'] as const), requiresRevealer: true, requiresValidator: true }),
 ])
 
 export const ATTENTION_CHANNEL_POLICY_HASH = mintHash(canonicalSerialize({ version: ATTENTION_CHANNEL_POLICY_VERSION, channels: ATTENTION_CHANNEL_REGISTRY }))

@@ -295,7 +295,7 @@ export function renderAttentionRevealPackage(
           return { kind: 'refused', reason: 'malformed-pattern-assertion' }
         }
         aggregateSeen = true
-      } else {
+      } else if (assertion.assertionKind !== 'certified_absence') {
         if (aggregateSeen || sourceIds.has(assertion.sourceRecordId)) {
           return { kind: 'refused', reason: 'duplicate-pattern-assertion' }
         }

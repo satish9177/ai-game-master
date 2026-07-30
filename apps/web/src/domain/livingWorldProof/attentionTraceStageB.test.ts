@@ -339,6 +339,7 @@ describe('B5 — trusted pattern presentation trace', () => {
         }],
         ledger: emptyLedgerOrThrow(), evaluationLsn: 8,
         patternPresentationLedgerPolicyVersion: ATTENTION_PATTERN_PRESENTATION_LEDGER_POLICY_VERSION,
+        aggregateLegitimacyPolicyRef: 'aggregate-legitimacy-disabled-v0',
       })
       expect(pass.presentation).toBeNull()
       expect(pass.ledger.records).toHaveLength(0)

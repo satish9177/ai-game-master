@@ -285,6 +285,7 @@ describe('B6 — mixed candidate replay', () => {
         directEvidenceAssertionInputs: pattern.instance.directEvidenceAssertionInputs,
         rankingCacheKey: 'pattern-cache', revalidationCacheKey: 'pattern-cache' }]),
       patternPresentationLedgerPolicyVersion: 'attention-pattern-presentation-ledger-policy-v1',
+      aggregateLegitimacyPolicyRef: 'aggregate-legitimacy-disabled-v0',
       authoritativeLogDigestBefore: EMPTY_DIGEST, authoritativeLogDigestAfter: EMPTY_DIGEST,
     })
     if (result.kind !== 'ok' || result.result.trace.mixedFamilyArbitration === undefined) throw new Error('expected trace')
@@ -1019,6 +1020,7 @@ describe('B6 — quest construction faults fail the whole evaluation closed', ()
         directEvidenceAssertionInputs: pattern.instance.directEvidenceAssertionInputs,
         rankingCacheKey: 'pattern-cache', revalidationCacheKey: 'pattern-cache' }]),
       patternPresentationLedgerPolicyVersion: ATTENTION_PATTERN_PRESENTATION_LEDGER_POLICY_VERSION,
+      aggregateLegitimacyPolicyRef: 'aggregate-legitimacy-disabled-v0',
       authoritativeLogDigestBefore: EMPTY_DIGEST, authoritativeLogDigestAfter: EMPTY_DIGEST,
     })
 
@@ -1203,6 +1205,7 @@ describe('B6 — pattern-prime derivation and mixed evaluator agree on pattern c
       ledger: emptyLedger(),
       patternPresentationInputs: Object.freeze([]),
       patternPresentationLedgerPolicyVersion: ATTENTION_PATTERN_PRESENTATION_LEDGER_POLICY_VERSION,
+      aggregateLegitimacyPolicyRef: 'aggregate-legitimacy-disabled-v0',
       authoritativeLogDigestBefore: EMPTY_DIGEST,
       authoritativeLogDigestAfter: EMPTY_DIGEST,
     })

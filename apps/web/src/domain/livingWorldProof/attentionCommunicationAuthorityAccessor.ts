@@ -14,10 +14,17 @@ const MARKER: unique symbol = Symbol('attentionCommunicationAuthority.accessorMi
 const MINTED = new WeakSet<object>()
 
 function project(record: ProofCommunicationAuthorityRecord): AttentionReadableCommunicationAuthorityViewFields {
-  const common = { authorityContractVersion: record.authorityContractVersion, authorityKind: record.authorityKind, entityId: record.entityId, commitLsn: record.commitLsn } as const
-  if (record.authorityKind === 'public_knowledge') return { ...common, propositionKey: record.propositionKey, groundingRecordId: record.groundingRecordId, visibilityProvenanceId: record.visibilityProvenanceId }
-  if (record.authorityKind === 'declassified_knowledge') return { ...common, propositionKey: record.propositionKey, declassificationRecordId: record.declassificationRecordId }
-  return { ...common, authorityScopeKey: record.authorityScopeKey, grantingRecordId: record.grantingRecordId }
+  switch (record.authorityKind) {
+    case 'public_knowledge':
+      return { authorityContractVersion: record.authorityContractVersion, authorityKind: 'public_knowledge', entityId: record.entityId, commitLsn: record.commitLsn,
+        propositionKey: record.propositionKey, groundingRecordId: record.groundingRecordId, visibilityProvenanceId: record.visibilityProvenanceId }
+    case 'declassified_knowledge':
+      return { authorityContractVersion: record.authorityContractVersion, authorityKind: 'declassified_knowledge', entityId: record.entityId, commitLsn: record.commitLsn,
+        propositionKey: record.propositionKey, declassificationRecordId: record.declassificationRecordId }
+    case 'communication_authority':
+      return { authorityContractVersion: record.authorityContractVersion, authorityKind: 'communication_authority', entityId: record.entityId, commitLsn: record.commitLsn,
+        authorityScopeKey: record.authorityScopeKey, grantingRecordId: record.grantingRecordId }
+  }
 }
 
 function compare(left: AttentionReadableCommunicationAuthorityView, right: AttentionReadableCommunicationAuthorityView): number {

@@ -29,6 +29,7 @@ export type AttentionDirectEvidenceAssertion =
       readonly actorId: string
       readonly targetId: string
     }
+
   | {
       readonly assertionId: string
       readonly assertionKind: 'public_harm_severity'
@@ -71,6 +72,11 @@ export type AttentionDirectEvidenceAssertion =
       readonly commitmentKey: string
     }
 
+export type AttentionPositiveDirectEvidenceAssertion = Exclude<
+  AttentionDirectEvidenceAssertion,
+  { readonly assertionKind: 'certified_absence' }
+>
+
 export type AttentionDirectEvidenceAssertionRefusal =
   | 'empty-assertion-input'
   | 'unsupported-assertion-input'
@@ -79,7 +85,7 @@ export type AttentionDirectEvidenceAssertionRefusal =
   | 'invalid-direct-evidence-field-character'
 
 export type AttentionDirectEvidenceAssertionResult =
-  | { readonly kind: 'ok'; readonly assertions: readonly AttentionDirectEvidenceAssertion[] }
+  | { readonly kind: 'ok'; readonly assertions: readonly AttentionPositiveDirectEvidenceAssertion[] }
   | { readonly kind: 'refused'; readonly reason: AttentionDirectEvidenceAssertionRefusal }
 
 function isPresent(value: unknown): value is string {
@@ -176,7 +182,7 @@ function fieldRefusal(value: unknown): 'missing-direct-evidence-slot' | 'invalid
 
 function buildOne(
   input: NarrativePatternDirectEvidenceAssertionInput,
-): AttentionDirectEvidenceAssertion | AttentionDirectEvidenceAssertionRefusal {
+): AttentionPositiveDirectEvidenceAssertion | AttentionDirectEvidenceAssertionRefusal {
   if (!isPresent(input.sourceRecordId) || !isPresent(input.visibilityProvenanceId)) {
     return 'missing-direct-evidence-slot'
   }
@@ -254,7 +260,7 @@ export function buildAttentionDirectEvidenceAssertions(
 ): AttentionDirectEvidenceAssertionResult {
   if (inputs.length === 0) return { kind: 'refused', reason: 'empty-assertion-input' }
   const sourceIds = new Set<string>()
-  const assertions: AttentionDirectEvidenceAssertion[] = []
+  const assertions: AttentionPositiveDirectEvidenceAssertion[] = []
   for (const input of inputs) {
     const assertion = buildOne(input)
     if (typeof assertion === 'string') return { kind: 'refused', reason: assertion }

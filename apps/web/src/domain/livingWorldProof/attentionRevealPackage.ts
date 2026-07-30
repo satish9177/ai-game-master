@@ -72,7 +72,10 @@ import {
   ATTENTION_PATTERN_REVEAL_PACKAGE_SCHEMA_VERSION,
   hasValidDirectEvidenceAssertionFields,
 } from './attentionDirectEvidenceAssertion'
-import type { AttentionDirectEvidenceAssertion } from './attentionDirectEvidenceAssertion'
+import type {
+  AttentionDirectEvidenceAssertion,
+  AttentionPositiveDirectEvidenceAssertion,
+} from './attentionDirectEvidenceAssertion'
 import { attentionStageBResourcePolicy } from './attentionNarrativePatternResourcePolicy'
 import type { AttentionStageBResourcePolicy } from './attentionNarrativePatternResourcePolicy'
 import type { AttentionAggregateAssertion } from './attentionAggregateLegitimacy'
@@ -177,8 +180,8 @@ export const ATTENTION_PATTERN_REVEAL_PACKAGE_KEYS: readonly string[] = Object.f
 
 export interface AttentionRevealPackageRequest {
   readonly templateVersion: string
-  readonly directEvidenceAssertions?: readonly AttentionDirectEvidenceAssertion[]
-  readonly absenceAssertions?: readonly AttentionDirectEvidenceAssertion[]
+  readonly directEvidenceAssertions?: readonly AttentionPositiveDirectEvidenceAssertion[]
+  readonly absenceAssertions?: readonly Extract<AttentionDirectEvidenceAssertion, { readonly assertionKind: 'certified_absence' }>[]
   /** C1's licensed aggregate root. It is additive only when explicitly supplied. */
   readonly aggregateAssertion?: AttentionAggregateAssertion
   /** B5 — explicit pattern resource policy; defaults to the pinned singleton. */

@@ -104,6 +104,8 @@ function directSurface(
     questCandidateViews: Object.freeze([...questCandidateViews]),
     questOpeningCoordinateViews: Object.freeze([...questOpeningCoordinateViews]),
     patternEvidenceViews: Object.freeze([]),
+    closedRelationCertificateViews: Object.freeze([]),
+    communicationAuthorityViews: Object.freeze([]),
   })
 }
 

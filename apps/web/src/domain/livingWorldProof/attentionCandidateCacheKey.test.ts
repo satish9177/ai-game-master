@@ -543,7 +543,7 @@ describe('B4 / K2 — every ranking-only dependency moves only the ranking key',
     { scorePolicyRef: 'score-discriminating-c9-v1', declaredScoreFeatures: [{ candidateId: 'x', publicStakesBand: 3, worldTimeRecencyBand: 0 }] },
     { scorePolicyRef: 'score-discriminating-c9-v1', declaredScoreFeatures: [{ candidateId: 'x', publicStakesBand: 0, worldTimeRecencyBand: 1.5 }] },
     { scorePolicyRef: 'score-discriminating-c9-v1', declaredScoreFeatures: [{ candidateId: 'x', publicStakesBand: 0, worldTimeRecencyBand: 0 }, { candidateId: 'x', publicStakesBand: 1, worldTimeRecencyBand: 1 }] },
-  ])('refuses malformed C9 ranking-resource score input rather than keying it', (overrides) => {
+  ] as const)('refuses malformed C9 ranking-resource score input rather than keying it', (overrides) => {
     expect(deriveAttentionCandidateRankingCacheKey(ranking({
       eligibilityResourceState: attentionCandidateRankingEligibilityResourceState(overrides),
     }))).toEqual({ kind: 'refused', reason: 'missing-eligibility-resource-state' })
