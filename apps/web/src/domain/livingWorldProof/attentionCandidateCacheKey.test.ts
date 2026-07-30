@@ -261,7 +261,7 @@ describe('B4 / RN019 §9.3 — the derivation bundle is the closed thirteen-fiel
     // state (never to the derivation bundle), so ranking alone transitions v3
     // to v4 while derivation remains v3.
     expect(ATTENTION_CANDIDATE_RANKING_CACHE_KEY_SCHEMA_VERSION)
-      .toBe('attention-candidate-ranking-cache-key-v5')
+      .toBe('attention-candidate-ranking-cache-key-v6')
   })
 
   it('has a variation case for every declared field, so none is unwitnessed', () => {
@@ -389,6 +389,22 @@ describe('B4 / K2 — every ranking-only dependency moves only the ranking key',
         }),
       },
     ],
+    [
+      'eligibilityResourceState.diegeticProposalSchemaVersion',
+      {
+        eligibilityResourceState: attentionCandidateRankingEligibilityResourceState({
+          diegeticProposalSchemaVersion: 'fixture-diegetic-proposal-schema-v9',
+        }),
+      },
+    ],
+    [
+      'eligibilityResourceState.communicationValidatorContractVersion',
+      {
+        eligibilityResourceState: attentionCandidateRankingEligibilityResourceState({
+          communicationValidatorContractVersion: 'fixture-communication-validator-contract-v9',
+        }),
+      },
+    ],
   ]
 
   it.each(RANKING_ONLY_VARIATIONS)(
@@ -425,7 +441,9 @@ describe('B4 / K2 — every ranking-only dependency moves only the ranking key',
       'communicationLegalityPolicyHash',
       'communicationLegalityPolicyRef',
       'communicationLegalityPolicyVersion',
+      'communicationValidatorContractVersion',
       'declaredScoreFeatures',
+      'diegeticProposalSchemaVersion',
       'directEvidenceAssertionIdentityVersion',
       'exposurePolicyVersion',
       'mixedFamilyCandidateCap',
@@ -461,6 +479,8 @@ describe('B4 / K2 — every ranking-only dependency moves only the ranking key',
     'directEvidenceAssertionIdentityVersion',
     'patternRevealPackageSchemaVersion',
     'patternDirectEvidenceTemplateVersion',
+    'diegeticProposalSchemaVersion',
+    'communicationValidatorContractVersion',
   ] as const)('refuses a missing B5 eligibility-state field %s rather than approximating', (field) => {
     const withMissingField = { ...attentionCandidateRankingEligibilityResourceState() }
     delete (withMissingField as Record<string, unknown>)[field]

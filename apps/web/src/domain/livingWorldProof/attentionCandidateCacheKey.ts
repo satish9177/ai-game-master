@@ -107,6 +107,8 @@ import {
   ATTENTION_PATTERN_DIRECT_EVIDENCE_TEMPLATE_VERSION,
   ATTENTION_PATTERN_REVEAL_PACKAGE_SCHEMA_VERSION,
 } from './attentionDirectEvidenceAssertion'
+import { ATTENTION_DIEGETIC_REVEAL_PROPOSAL_SCHEMA_VERSION } from './attentionDiegeticRevealProposal'
+import { COMMUNICATION_VALIDATOR_CONTRACT_VERSION } from './communicationValidatorContracts'
 import { ATTENTION_NARRATIVE_PATTERN_LIBRARY_HASH } from './attentionNarrativePatternLibrary'
 import {
   ATTENTION_NARRATIVE_PATTERN_POLICY_HASH,
@@ -232,6 +234,10 @@ export interface AttentionCandidateRankingEligibilityResourceState {
   readonly communicationLegalityPolicyVersion: string
   readonly communicationLegalityPolicyHash: string
   readonly channelPolicyVersion: string
+  /** C6's one proposal boundary; ranking-only, never candidate identity. */
+  readonly diegeticProposalSchemaVersion: string
+  /** C6's independent authoritative validator contract; ranking-only. */
+  readonly communicationValidatorContractVersion: string
 }
 
 /** RN019 §9.3's ranking dependency bundle: the derivation bundle plus exactly three ranking-only members. */
@@ -328,6 +334,10 @@ export function attentionCandidateRankingEligibilityResourceState(
     communicationLegalityPolicyVersion: overrides.communicationLegalityPolicyVersion ?? 'communication-legality-disabled-v0',
     communicationLegalityPolicyHash: overrides.communicationLegalityPolicyHash ?? 'communication-legality-disabled-v0',
     channelPolicyVersion: overrides.channelPolicyVersion ?? ATTENTION_CHANNEL_POLICY_VERSION,
+    diegeticProposalSchemaVersion:
+      overrides.diegeticProposalSchemaVersion ?? ATTENTION_DIEGETIC_REVEAL_PROPOSAL_SCHEMA_VERSION,
+    communicationValidatorContractVersion:
+      overrides.communicationValidatorContractVersion ?? COMMUNICATION_VALIDATOR_CONTRACT_VERSION,
   })
 }
 
@@ -583,6 +593,8 @@ function isEligibilityResourceState(
     || value.communicationLegalityPolicyHash !== 'communication-legality-disabled-v0'
   )) return false
   if (value.channelPolicyVersion !== ATTENTION_CHANNEL_POLICY_VERSION) return false
+  if (!isNonEmptyString(value.diegeticProposalSchemaVersion)) return false
+  if (!isNonEmptyString(value.communicationValidatorContractVersion)) return false
   return true
 }
 
@@ -641,6 +653,8 @@ export function deriveAttentionCandidateRankingCacheKey(
       communicationLegalityPolicyVersion: bundle.eligibilityResourceState.communicationLegalityPolicyVersion,
       communicationLegalityPolicyHash: bundle.eligibilityResourceState.communicationLegalityPolicyHash,
       channelPolicyVersion: bundle.eligibilityResourceState.channelPolicyVersion,
+      diegeticProposalSchemaVersion: bundle.eligibilityResourceState.diegeticProposalSchemaVersion,
+      communicationValidatorContractVersion: bundle.eligibilityResourceState.communicationValidatorContractVersion,
     },
     orderingVersion: bundle.orderingVersion,
     rankingPolicyHash: bundle.rankingPolicyHash,

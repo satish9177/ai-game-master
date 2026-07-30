@@ -14,10 +14,10 @@ export const ATTENTION_DIRECT_EVIDENCE_ASSERTION_IDENTITY_VERSION =
   'attention-direct-evidence-assertion-identity-v2' as const
 
 export const ATTENTION_PATTERN_DIRECT_EVIDENCE_TEMPLATE_VERSION =
-  'attention-pattern-direct-evidence-template-v2' as const
+  'attention-pattern-direct-evidence-template-v3' as const
 
 export const ATTENTION_PATTERN_REVEAL_PACKAGE_SCHEMA_VERSION =
-  'attention-pattern-reveal-package-v2' as const
+  'attention-pattern-reveal-package-v3' as const
 
 export type AttentionDirectEvidenceAssertion =
   | {

@@ -71,7 +71,7 @@ import type { AttentionRevealScope, AttentionRevealScopeRevalidation } from './a
 export const ATTENTION_TRACE_SCHEMA_VERSION = 'attention-trace-schema-v2' as const
 
 /** The frozen player-observable projection schema (RN019 §9.6). Its bytes do not move. */
-export const ATTENTION_OBSERVABLE_TRACE_SCHEMA_VERSION = 'attention-observable-trace-schema-v1' as const
+export const ATTENTION_OBSERVABLE_TRACE_SCHEMA_VERSION = 'attention-observable-trace-schema-v2' as const
 
 /** The closed ledger-outcome vocabulary the trace records, restated locally so this module needs no ledger import beyond the type it already re-exports the same values for. */
 export type AttentionTraceLedgerOutcome = AttentionRevealResultTag | 'non-engagement' | 'revalidation-failed'
@@ -284,6 +284,10 @@ export interface AttentionTracePresentationEntry {
   readonly resultTag: AttentionRevealResultTag
   readonly output?: string
   readonly outputIdentity?: string
+  /** C6: present only for a successful diegetic presentation. */
+  readonly channelId?: string
+  readonly revealerId?: string
+  readonly recipientScope?: string
   readonly ledgerOutcome: AttentionTraceLedgerOutcome
   readonly ledgerRecordId: string
 }
@@ -492,6 +496,9 @@ export interface AttentionTracePlayerObservableSubtrace {
     readonly candidateId: string
     readonly resultTag: AttentionRevealResultTag
     readonly output?: string
+    readonly channelId?: string
+    readonly revealerId?: string
+    readonly recipientScope?: string
   }[]
   readonly revalidations: readonly AttentionTraceRevalidationEntry[]
 }
@@ -529,6 +536,7 @@ export type AttentionTraceRefusal =
   | 'missing-revalidation-snapshot-lsn'
   | 'missing-authoritative-log-digest-before'
   | 'missing-authoritative-log-digest-after'
+  | 'invalid-presentation-entry'
   | 'missing-structural-retention'
   | 'mixed-trace-candidate-entry'
   | 'invalid-pattern-presentation-decision'
@@ -613,6 +621,16 @@ function isWellFormedPatternPresentationDecision(
   return true
 }
 
+/** C6's observable diegetic tuple is atomic: it is either wholly omitted or
+ * wholly present on a successful presentation. */
+function isWellFormedPresentationEntry(entry: AttentionTracePresentationEntry): boolean {
+  const members = [entry.channelId, entry.revealerId, entry.recipientScope]
+  const presentCount = members.filter((member) => isPresent(member)).length
+  if (presentCount === 0) return true
+  if (presentCount !== 3) return false
+  return entry.resultTag === 'presentation-ready' || entry.resultTag === 'presentation-fallback'
+}
+
 function isWellFormedMixedFamilyArbitration(
   arbitration: AttentionTraceMixedFamilyArbitration,
   presentations: readonly AttentionTracePresentationEntry[],
@@ -655,6 +673,9 @@ function playerObservableSubtrace(input: AttentionTraceInput): AttentionTracePla
       candidateId: entry.candidateId,
       resultTag: entry.resultTag,
       ...(entry.output === undefined ? {} : { output: entry.output }),
+      ...(entry.channelId === undefined ? {} : { channelId: entry.channelId }),
+      ...(entry.revealerId === undefined ? {} : { revealerId: entry.revealerId }),
+      ...(entry.recipientScope === undefined ? {} : { recipientScope: entry.recipientScope }),
     }))),
     revalidations: Object.freeze([...input.revalidations]),
   })
@@ -708,6 +729,9 @@ export function buildAttentionTrace(input: AttentionTraceInput): AttentionTraceR
   }
   if (!input.orderedAttentionCandidates.every(isWellFormedCandidateEntry)) {
     return { kind: 'refused', reason: 'mixed-trace-candidate-entry' }
+  }
+  if (!input.presentations.every(isWellFormedPresentationEntry)) {
+    return { kind: 'refused', reason: 'invalid-presentation-entry' }
   }
   if (
     input.patternPresentationDecisions !== undefined

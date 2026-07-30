@@ -70,6 +70,7 @@ import { ATTENTION_INFERENCE_PROVENANCE_POLICY } from './attentionInferenceProve
 import { ATTENTION_REVEAL_SLOT_ORDER } from './attentionRevealPackage'
 import type {
   AttentionRevealPackage,
+  AttentionDiegeticRevealPackage,
   AttentionRevealResultTag,
   AttentionRevealSlotId,
 } from './attentionRevealPackage'
@@ -391,4 +392,14 @@ export function renderAttentionRevealPackage(
       frozenLines,
     ),
   }
+}
+
+/** C6's diegetic branch has no free-form phrasing: it delegates all assertion
+ * text to the existing deterministic package renderer. */
+export function renderAttentionDiegeticRevealPackage(
+  diegeticPackage: AttentionDiegeticRevealPackage,
+): AttentionTemplateResult {
+  return renderAttentionRevealPackage(diegeticPackage.package, {
+    templateVersion: diegeticPackage.package.templateVersion,
+  })
 }

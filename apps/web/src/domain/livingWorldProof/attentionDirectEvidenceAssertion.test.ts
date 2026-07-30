@@ -3,6 +3,7 @@ import type { AttentionPatternCandidate } from './attentionCandidate'
 import { ATTENTION_CANDIDATE_CANONICALIZATION_VERSION } from './attentionCandidatePolicy'
 import {
   ATTENTION_PATTERN_DIRECT_EVIDENCE_TEMPLATE_VERSION,
+  ATTENTION_PATTERN_REVEAL_PACKAGE_SCHEMA_VERSION,
   buildAttentionDirectEvidenceAssertions,
 } from './attentionDirectEvidenceAssertion'
 import { buildAttentionRevealPackage } from './attentionRevealPackage'
@@ -175,7 +176,7 @@ describe('B5 — direct evidence assertions', () => {
         targetId: 'b',
       })
       const forgedPackage = Object.freeze({
-        packageSchemaVersion: 'attention-pattern-reveal-package-v2' as const,
+        packageSchemaVersion: ATTENTION_PATTERN_REVEAL_PACKAGE_SCHEMA_VERSION,
         templateVersion: ATTENTION_PATTERN_DIRECT_EVIDENCE_TEMPLATE_VERSION,
         candidateId: 'pattern-candidate-id',
         assertions: Object.freeze([forgedAssertion]),

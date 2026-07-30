@@ -82,6 +82,15 @@ import type { AttentionAggregateAssertion } from './attentionAggregateLegitimacy
 import { validateAttentionInferenceProvenance } from './attentionInferenceProvenance'
 import { ATTENTION_INFERENCE_PROVENANCE_POLICY } from './attentionInferenceProvenancePolicy'
 import type { AttentionRevealScope } from './attentionRevealScope'
+import { canonicalSerialize } from './canonicalSerialization'
+import {
+  ATTENTION_DIEGETIC_REVEAL_PROPOSAL_SCHEMA_VERSION,
+  createAttentionDiegeticRevealProposal,
+} from './attentionDiegeticRevealProposal'
+import type {
+  AttentionDiegeticRevealProposal,
+  AttentionDiegeticRevealProposalRefusal,
+} from './attentionDiegeticRevealProposal'
 
 /**
  * The approved slots: the closed set of legally readable content fields a Stage A
@@ -164,6 +173,12 @@ export interface AttentionPatternRevealPackage {
 /** One package pipeline, discriminated by its pinned branch template. */
 export type AttentionRevealPackage = AttentionQuestRevealPackage | AttentionPatternRevealPackage
 
+/** C6's pattern-only diegetic branch; the enclosed package remains immutable. */
+export interface AttentionDiegeticRevealPackage {
+  readonly package: AttentionPatternRevealPackage
+  readonly proposal: AttentionDiegeticRevealProposal
+}
+
 /** The exact own keys of a built package — exported as closure evidence. */
 export const ATTENTION_REVEAL_PACKAGE_KEYS: readonly string[] = Object.freeze([
   'candidateId',
@@ -221,6 +236,39 @@ export type AttentionRevealPackageRefusal =
 export type AttentionRevealPackageResult =
   | { readonly kind: 'ok'; readonly revealPackage: AttentionRevealPackage }
   | { readonly kind: 'refused'; readonly reason: AttentionRevealPackageRefusal }
+
+export type AttentionDiegeticRevealPackageResult =
+  | { readonly kind: 'ok'; readonly diegeticPackage: AttentionDiegeticRevealPackage }
+  | { readonly kind: 'refused'; readonly reason: AttentionDiegeticRevealProposalRefusal }
+
+/** C6's one-way conversion from an approved package into the frozen B-domain
+ * proposal.  It has no writer, validator, ledger, or authoritative resource. */
+export function buildAttentionDiegeticRevealPackage(input: {
+  readonly revealPackage: AttentionPatternRevealPackage
+  readonly channelId: string
+  readonly revealerId: string
+  readonly recipientScope: string
+  readonly revealScope: string
+  readonly rankingSnapshotLsn: number
+  readonly revalidationSnapshotLsn: number
+  readonly policyIdentities: readonly string[]
+}): AttentionDiegeticRevealPackageResult {
+  const proposal = createAttentionDiegeticRevealProposal({
+    schemaVersion: ATTENTION_DIEGETIC_REVEAL_PROPOSAL_SCHEMA_VERSION,
+    candidateId: input.revealPackage.candidateId,
+    assertions: input.revealPackage.assertions.map((assertion) => assertion.assertionId),
+    assertionProvenanceDigests: input.revealPackage.assertions.map((assertion) => canonicalSerialize(assertion)),
+    channelId: input.channelId,
+    revealerId: input.revealerId,
+    recipientScope: input.recipientScope,
+    revealScope: input.revealScope,
+    rankingSnapshotLsn: input.rankingSnapshotLsn,
+    revalidationSnapshotLsn: input.revalidationSnapshotLsn,
+    policyIdentities: input.policyIdentities,
+  })
+  if (proposal.kind === 'refused') return proposal
+  return { kind: 'ok', diegeticPackage: Object.freeze({ package: input.revealPackage, proposal: proposal.proposal }) }
+}
 
 function isPresent(value: unknown): value is string {
   return typeof value === 'string' && value.trim().length > 0

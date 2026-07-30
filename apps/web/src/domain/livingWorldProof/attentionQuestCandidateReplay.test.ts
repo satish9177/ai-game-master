@@ -122,7 +122,7 @@ describe('A5 — the complete trace is byte-identical across repeated cold runs'
     // The observable projection is versioned independently of the trusted trace
     // and is frozen: a future trusted-shape change bumps only the trusted
     // version, and moving these bytes is a Stage A compatibility break.
-    expect(trace.observableTraceSchemaVersion).toBe('attention-observable-trace-schema-v1')
+    expect(trace.observableTraceSchemaVersion).toBe('attention-observable-trace-schema-v2')
     expect(canonicalAttentionObservableTraceBytes(trace))
       .toBe(ATTENTION_STAGE_A_QUEST_ONLY_GOLDEN.single.playerObservableTraceBytes)
   })

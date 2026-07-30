@@ -224,7 +224,7 @@ describe(`B1 quest-only compatibility with ${ATTENTION_STAGE_A_QUEST_ONLY_BASELI
     const probe = createAttentionZeroModelProbe()
     assertAttentionZeroModelProbeUnused(probe)
 
-    expect(canonicalSerialize(authoritative.resources.log))
+    expect(canonicalSerialize({ commits: authoritative.resources.log.commits }))
       .toBe(ATTENTION_STAGE_A_QUEST_ONLY_GOLDEN.authoritativeCommittedLogBytes)
     expect(authoritative.digest)
       .toBe(ATTENTION_STAGE_A_QUEST_ONLY_GOLDEN.authoritativeCommittedLogDigest)

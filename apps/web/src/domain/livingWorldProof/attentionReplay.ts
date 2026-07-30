@@ -154,6 +154,21 @@ import type {
   AttentionReplayWallClockInput,
 } from './attentionReplayResources'
 import { canonicalSerialize } from './canonicalSerialization'
+import { deliverAttentionDiegeticReveal } from './attentionDiegeticDelivery'
+import type { AttentionDiegeticDeliveryResult } from './attentionDiegeticDelivery'
+import type { AttentionDiegeticRevealProposal } from './attentionDiegeticRevealProposal'
+import type { AuthoritativeCommunicationPayload } from './communicationValidatorContracts'
+
+/** C6's D12 steps 12-14 hand-off. The replay owns no writer; it forwards the
+ * frozen proposal once to the delivery route and receives only its outcome. */
+export function runAttentionDiegeticDelivery(input: {
+  readonly resources: AttentionReplayAuthoritativeResources
+  readonly proposal: AttentionDiegeticRevealProposal
+  readonly authoritativePayloads: readonly AuthoritativeCommunicationPayload[]
+  readonly wallClockInput: AttentionReplayWallClockInput
+}): AttentionDiegeticDeliveryResult {
+  return deliverAttentionDiegeticReveal(input)
+}
 
 export { canonicalAttentionTraceBytes, canonicalAttentionObservableTraceBytes }
 

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { canonicalSerialize } from './canonicalSerialization'
 import type { AttentionPatternCandidate } from './attentionCandidate'
 import { ATTENTION_CANDIDATE_ORDERING_VERSION, ATTENTION_LEDGER_POLICY_VERSION } from './attentionCandidatePolicy'
+import { ATTENTION_PATTERN_DIRECT_EVIDENCE_TEMPLATE_VERSION } from './attentionDirectEvidenceAssertion'
 import {
   appendAttentionLedgerRecord,
   createAttentionLedger,
@@ -149,7 +150,7 @@ describe('B5 — pattern presentation revalidation', () => {
         attentionCandidate: candidate({ rankingSnapshotLsn: lsn }),
         exposurePolicyVersion: 'attention-exposure-policy-v1',
         templateChannelPolicyVersion: 'attention-template-channel-policy-v1',
-        templateVersion: 'attention-pattern-direct-evidence-template-v2',
+        templateVersion: ATTENTION_PATTERN_DIRECT_EVIDENCE_TEMPLATE_VERSION,
         outcome: 'revalidation-failed',
         patternPresentationLedgerPolicyVersion: ATTENTION_PATTERN_PRESENTATION_LEDGER_POLICY_VERSION,
         presentationLsn: lsn,
@@ -366,7 +367,7 @@ function ledgerAppendPresentationReady(ledger: AttentionLedger, lsn: number): At
     },
     exposurePolicyVersion: 'attention-exposure-policy-v1',
     templateChannelPolicyVersion: 'attention-template-channel-policy-v1',
-    templateVersion: 'attention-pattern-direct-evidence-template-v2',
+    templateVersion: ATTENTION_PATTERN_DIRECT_EVIDENCE_TEMPLATE_VERSION,
     outcome: 'presentation-ready',
     renderedOutputIdentity: `output-${lsn}`,
     patternPresentationLedgerPolicyVersion: ATTENTION_PATTERN_PRESENTATION_LEDGER_POLICY_VERSION,

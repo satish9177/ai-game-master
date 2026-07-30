@@ -18,13 +18,14 @@ import { runAttentionPatternPresentationPass } from './attentionReplay'
 import type { AttentionPatternCandidate } from './attentionCandidate'
 import type { NarrativePatternDirectEvidenceAssertionInput } from './attentionNarrativePatternContracts'
 import { ATTENTION_STAGE_B_RESOURCE_POLICY_VERSION } from './attentionNarrativePatternResourcePolicy'
+import { ATTENTION_PATTERN_DIRECT_EVIDENCE_TEMPLATE_VERSION } from './attentionDirectEvidenceAssertion'
 
 describe('B5 — trusted pattern presentation trace', () => {
   it('keeps direct assertion and policy evidence trusted-only', () => {
     const base = {
       replayCaseId: 'b5-trace', accessorContractVersion: 'accessor-v1', canonicalizationVersion: 'canon-v1', identitySchemaVersion: 'identity-v1',
       orderingVersion: 'order-v2', derivationCacheKeySchemaVersion: 'derive-v2', rankingCacheKeySchemaVersion: 'rank-v2',
-      templateVersion: 'attention-pattern-direct-evidence-template-v2', templateChannelPolicyVersion: 'channel-v1', exposurePolicyVersion: 'exposure-v1', ledgerPolicyVersion: 'ledger-v1',
+      templateVersion: ATTENTION_PATTERN_DIRECT_EVIDENCE_TEMPLATE_VERSION, templateChannelPolicyVersion: 'channel-v1', exposurePolicyVersion: 'exposure-v1', ledgerPolicyVersion: 'ledger-v1',
       patternPresentationLedgerPolicyVersion: ATTENTION_PATTERN_PRESENTATION_LEDGER_POLICY_VERSION,
       rankingSnapshotLsn: 10, revalidationSnapshotLsn: 12, admittedQuestCandidateSourceIds: Object.freeze([]),
       orderedAttentionCandidates: Object.freeze([]), orderingTrace: Object.freeze([]), structuralRetention: emptyAttentionTraceStructuralRetention(),
@@ -47,10 +48,39 @@ describe('B5 — trusted pattern presentation trace', () => {
       .toBe(canonicalAttentionObservableTraceBytes(without.trace))
   })
 
+  it('projects the C6 diegetic tuple only when all three public members are present', () => {
+    const input = {
+      replayCaseId: 'c6-diegetic-trace', accessorContractVersion: 'accessor-v1', canonicalizationVersion: 'canon-v1',
+      identitySchemaVersion: 'identity-v1', orderingVersion: 'order-v2', derivationCacheKeySchemaVersion: 'derive-v2',
+      rankingCacheKeySchemaVersion: 'rank-v6', templateVersion: ATTENTION_PATTERN_DIRECT_EVIDENCE_TEMPLATE_VERSION,
+      templateChannelPolicyVersion: 'channel-v1', exposurePolicyVersion: 'exposure-v1', ledgerPolicyVersion: 'ledger-v1',
+      rankingSnapshotLsn: 10, revalidationSnapshotLsn: 12, admittedQuestCandidateSourceIds: Object.freeze([]),
+      orderedAttentionCandidates: Object.freeze([]), orderingTrace: Object.freeze([]),
+      structuralRetention: emptyAttentionTraceStructuralRetention(),
+      revalidations: Object.freeze([]), authoritativeLogDigestBefore: 'before', authoritativeLogDigestAfter: 'after',
+    }
+    const diegetic = buildAttentionTrace({
+      ...input,
+      presentations: [{ candidateId: 'pattern-aid', resultTag: 'presentation-ready', output: 'aid/a/b',
+        channelId: 'diegetic-direct-communication-v1', revealerId: 'a', recipientScope: 'direct:b',
+        ledgerOutcome: 'presentation-ready', ledgerRecordId: 'ledger-1' }],
+    })
+    expect(diegetic.kind).toBe('ok')
+    if (diegetic.kind !== 'ok') throw new Error('expected trace')
+    expect(diegetic.trace.playerObservable.presentations[0]).toMatchObject({
+      channelId: 'diegetic-direct-communication-v1', revealerId: 'a', recipientScope: 'direct:b',
+    })
+    expect(buildAttentionTrace({
+      ...input,
+      presentations: [{ candidateId: 'pattern-aid', resultTag: 'presentation-ready',
+        channelId: 'diegetic-direct-communication-v1', ledgerOutcome: 'presentation-ready', ledgerRecordId: 'ledger-1' }],
+    })).toEqual({ kind: 'refused', reason: 'invalid-presentation-entry' })
+  })
+
   const base = {
     replayCaseId: 'b5-trace-malformed', accessorContractVersion: 'accessor-v1', canonicalizationVersion: 'canon-v1', identitySchemaVersion: 'identity-v1',
     orderingVersion: 'order-v2', derivationCacheKeySchemaVersion: 'derive-v2', rankingCacheKeySchemaVersion: 'rank-v2',
-    templateVersion: 'attention-pattern-direct-evidence-template-v2', templateChannelPolicyVersion: 'channel-v1', exposurePolicyVersion: 'exposure-v1', ledgerPolicyVersion: 'ledger-v1',
+    templateVersion: ATTENTION_PATTERN_DIRECT_EVIDENCE_TEMPLATE_VERSION, templateChannelPolicyVersion: 'channel-v1', exposurePolicyVersion: 'exposure-v1', ledgerPolicyVersion: 'ledger-v1',
     patternPresentationLedgerPolicyVersion: ATTENTION_PATTERN_PRESENTATION_LEDGER_POLICY_VERSION,
     rankingSnapshotLsn: 10, revalidationSnapshotLsn: 12, admittedQuestCandidateSourceIds: Object.freeze([]),
     orderedAttentionCandidates: Object.freeze([]), orderingTrace: Object.freeze([]), structuralRetention: emptyAttentionTraceStructuralRetention(),
@@ -186,7 +216,7 @@ describe('B5 — trusted pattern presentation trace', () => {
         attentionCandidate: candidate,
         exposurePolicyVersion: ATTENTION_EXPOSURE_POLICY_VERSION,
         templateChannelPolicyVersion: ATTENTION_TEMPLATE_CHANNEL_POLICY_VERSION,
-        templateVersion: 'attention-pattern-direct-evidence-template-v2',
+        templateVersion: ATTENTION_PATTERN_DIRECT_EVIDENCE_TEMPLATE_VERSION,
         outcome: 'revalidation-failed',
         patternPresentationLedgerPolicyVersion: ATTENTION_PATTERN_PRESENTATION_LEDGER_POLICY_VERSION,
         presentationLsn,
