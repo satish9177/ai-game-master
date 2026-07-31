@@ -28,14 +28,31 @@ describe('C2 absence provenance', () => {
     })).toEqual({ kind: 'refused', reason: 'absence_match_exists' })
   })
 
-  it('refuses an incomplete lookback, malformed certificate, and text-shaped non-certificate without treating a failed text search as absence', () => {
+  it('R7 refuses a structurally non-closed relation through the certified-absence accessor', () => {
+    const certificate = readAttentionReadableClosedRelationCertificate({
+      snapshotLsn: 10,
+      fromLsn: 1,
+      toLsn: 10,
+      patternEvidenceViews: { relation: 'open-world' } as never,
+    })
+    expect(certificate).toEqual({ kind: 'refused', reason: 'absence_relation_not_closed' })
+  })
+
+  it('R8 refuses an interval that is not fully covered by the accessor horizon', () => {
     const records = mintPatternEvidenceViews(Array.from({ length: 33 }, (_, index) => aidRecord(`aid-${String(index).padStart(2, '0')}`, index + 1, 'x', 'y')))
     expect(readAttentionReadableClosedRelationCertificate({ snapshotLsn: 33, fromLsn: 1, toLsn: 33, patternEvidenceViews: records }))
       .toEqual({ kind: 'refused', reason: 'absence_window_incomplete' })
+  })
+
+  it('R9 refuses a forged or malformed accessor certificate through the absence builder', () => {
+    const records = mintPatternEvidenceViews(Array.from({ length: 33 }, (_, index) => aidRecord(`aid-${String(index).padStart(2, '0')}`, index + 1, 'x', 'y')))
     const certificate = readAttentionReadableClosedRelationCertificate({ snapshotLsn: 33, fromLsn: 2, toLsn: 33, patternEvidenceViews: records })
     if (certificate.kind !== 'ok') throw new Error('expected lookback-contained certificate')
     expect(buildAttentionAbsenceWitnessProvenance({ policyRef: 'absence-witness-c2-v1', certificate: { ...certificate.certificate } as never, entityA: 'a', entityB: 'b' }))
       .toEqual({ kind: 'refused', reason: 'absence_certificate_not_structural' })
+  })
+
+  it('R10 refuses a textual non-certificate without treating a failed text search as absence', () => {
     expect(buildAttentionAbsenceWitnessProvenance({ policyRef: 'absence-witness-c2-v1', certificate: { search: 'no matching text' } as never, entityA: 'a', entityB: 'b' }))
       .toEqual({ kind: 'refused', reason: 'absence_certificate_not_structural' })
   })
