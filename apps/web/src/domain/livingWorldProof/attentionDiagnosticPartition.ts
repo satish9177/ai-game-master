@@ -71,6 +71,7 @@ export type AttentionRuntimeDiagnosticGroup = keyof typeof ATTENTION_RUNTIME_DIA
  */
 export const ATTENTION_RUNTIME_REFUSAL_OWNER = Object.freeze({
   'candidate-disappeared': 'candidate_lifecycle',
+  'missing-retained-pattern-instance': 'candidate_lifecycle',
   'stale-snapshot': 'snapshot_freshness',
   'cache-key-mismatch': 'ranking_integrity',
   'candidate-identity-mismatch': 'ranking_integrity',
@@ -89,6 +90,7 @@ export const ATTENTION_RUNTIME_REFUSAL_OWNER = Object.freeze({
   'missing-ledger-policy-version': 'ranking_integrity',
   'missing-resource-policy-version': 'ranking_integrity',
   'missing-authoritative-log-fold-version': 'ranking_integrity',
+  'missing-pattern-presentation-input': 'ranking_integrity',
   'authoritative-log-version-mismatch': 'authoritative_delivery',
   'invalid-communication-command': 'authoritative_delivery',
   'unknown-authoritative-communication': 'authoritative_delivery',

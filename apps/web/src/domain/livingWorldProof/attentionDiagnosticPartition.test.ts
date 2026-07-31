@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+import * as ts from 'typescript'
 import { describe, expect, it } from 'vitest'
 import {
   ATTENTION_INTERNAL_REFUSAL_LITERALS,
@@ -44,5 +47,68 @@ describe('C7 diagnostic partition', () => {
     }
     expect(Object.keys(ATTENTION_RUNTIME_DIAGNOSTIC_GROUPS).sort())
       .toEqual(Object.keys(ATTENTION_RUNTIME_REFUSALS_BY_GROUP).sort())
+  })
+
+  it('fails when a composed C2-C6 runtime refusal is added without C7 ownership', () => {
+    const sourceFiles = [
+      'attentionAbsenceWitnessProvenance.ts',
+      'attentionClosedRelationCertificateAccessor.ts',
+      'attentionRevealerLegality.ts',
+      'attentionDiegeticAggregateLegitimacy.ts',
+      'attentionEligibilityVerdict.ts',
+      'attentionDiegeticRevealProposal.ts',
+      'communicationValidator.ts',
+      'attentionReplay.ts',
+    ] as const
+    const directory = fileURLToPath(new URL('./', import.meta.url))
+    const runtimeRefusals = new Set<string>()
+    for (const fileName of sourceFiles) {
+      const source = ts.createSourceFile(fileName, readFileSync(`${directory}${fileName}`, 'utf8'), ts.ScriptTarget.Latest, true)
+      const visit = (node: ts.Node): void => {
+        if (ts.isObjectLiteralExpression(node)) {
+          const properties = new Map(node.properties.flatMap((property) => {
+            if (!ts.isPropertyAssignment(property) || !ts.isIdentifier(property.name)) return []
+            return [[property.name.text, property.initializer] as const]
+          }))
+          const kind = properties.get('kind')
+          const reason = properties.get('reason')
+          if (kind !== undefined && ts.isStringLiteral(kind) && kind.text === 'refused'
+            && reason !== undefined && ts.isStringLiteral(reason)) runtimeRefusals.add(reason.text)
+          const refusal = properties.get('refusal')
+          if (kind !== undefined && ts.isStringLiteral(kind) && kind.text === 'refused'
+            && refusal !== undefined && ts.isObjectLiteralExpression(refusal)) {
+            const refusalReason = refusal.properties
+              .filter(ts.isPropertyAssignment)
+              .find((property) => {
+                if (!ts.isIdentifier(property.name)) return false
+                return property.name.text === 'reason'
+              })?.initializer
+            if (refusalReason !== undefined && ts.isStringLiteral(refusalReason)) runtimeRefusals.add(refusalReason.text)
+          }
+        }
+        ts.forEachChild(node, visit)
+      }
+      visit(source)
+    }
+    expect([...runtimeRefusals]).toEqual(expect.arrayContaining([
+      'absence_certificate_not_structural',
+      'absence_completeness_certificate_missing',
+      'absence_match_exists',
+      'absence_relation_not_closed',
+      'absence_window_incomplete',
+      'authoritative-log-version-mismatch',
+      'communication-unavailable',
+      'invalid-communication-command',
+      'invalid-proposal-member',
+      'invalid-snapshot-coordinate',
+      'mismatched-assertion-provenance',
+      'missing-pattern-presentation-input',
+      'missing-retained-pattern-instance',
+      'no_legal_channel',
+      'no_legal_revealer',
+      'unknown-authoritative-communication',
+      'unsupported-proposal-schema',
+    ]))
+    expect([...runtimeRefusals].every((literal) => Object.hasOwn(ATTENTION_RUNTIME_REFUSAL_OWNER, literal))).toBe(true)
   })
 })
