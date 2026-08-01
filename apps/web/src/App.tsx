@@ -148,6 +148,11 @@ import {
   toggleRoomMemoryDebugViewer,
 } from './app/roomMemoryDebugViewer'
 import { themeVocabulary } from './domain/generatedRoomThemeVocabulary'
+import {
+  readBeliefGatedNpcActionEnabled,
+  runBeliefGatedNpcActionReaction,
+} from './app/npcBeliefActionReaction'
+import { coordinateCommittedInteractionFollowups } from './app/committedInteractionCoordinator'
 
 import { NPCDialogueService } from './dialogue/NPCDialogueService'
 import type { NpcDialogueResolvedEvent } from './renderer/RoomViewer'
@@ -160,6 +165,7 @@ const roomMemoryDebugViewerEnabled = debugConfig.roomMemoryDebugViewerEnabled
 // here in the composition layer. When OFF the existing authored/generated
 // journal behavior is byte-identical; the event seam is never invoked.
 const eventConsequenceJournalFromEventsEnabled = readEventConsequenceJournalEnabled()
+const beliefGatedNpcActionEnabled = readBeliefGatedNpcActionEnabled()
 // Hostile NPC chase demo opt-in (ADR-0086): default-off, closed-allowlist,
 // id-only visibility path onto the existing, unchanged
 // `SetRoomOptions.chaseOptInNpcIds` seam. Off by default; no behavior change
@@ -824,7 +830,9 @@ function App() {
   // it hands back only the committed events plus the raw name hints it already
   // has on hand; this composition root builds the DisplayNameResolver (only when
   // BOTH a room name and an item name are known) and owns RoomMemoryService.
-  const handleCommittedInteractionEvents = useCallback((input: CommittedInteractionEvents) => {
+  const handleCommittedInteractionEvents = useCallback(async (
+    input: CommittedInteractionEvents,
+  ): Promise<void> => {
     applyMeaningfulJournalFromSession(input.state.sessionId)
     const displayNames =
       input.roomName !== undefined && input.item !== undefined
@@ -842,23 +850,37 @@ function App() {
     // wholesale rejection of the promotion promise itself (not a per-event
     // `remember` failure, which `promoteInteractionMemories` already catches)
     // falls back to `EMPTY_PROMOTION_SUMMARY` so creation feedback never throws.
-    void promoteInteractionMemories(
-      input.events,
-      input.state.worldId,
-      roomMemoryRuntimeRef.current.service,
-      logger,
-      displayNames,
-    )
-      .catch(() => EMPTY_PROMOTION_SUMMARY)
-      .then((promotionSummary) => {
-        setMemoryFeedbackState((current) =>
-          memoryFeedbackAfterPromotion(current, { promotionSummary, roomEntrySeq }),
-        )
-      })
-      .finally(() => {
-        refreshRoomMemoryContext(input.state)
-      })
-  }, [applyMeaningfulJournalFromSession, refreshRoomMemoryContext])
+    await coordinateCommittedInteractionFollowups({
+      promoteInteractionMemories: () => promoteInteractionMemories(
+        input.events,
+        input.state.worldId,
+        roomMemoryRuntimeRef.current.service,
+        logger,
+        displayNames,
+      )
+        .catch(() => EMPTY_PROMOTION_SUMMARY)
+        .then((promotionSummary) => {
+          setMemoryFeedbackState((current) =>
+            memoryFeedbackAfterPromotion(current, { promotionSummary, roomEntrySeq }),
+          )
+        })
+        .finally(() => {
+          refreshRoomMemoryContext(input.state)
+        }),
+      runBeliefGatedNpcActionReaction: () =>
+        beliefGatedNpcActionEnabled && input.room !== undefined
+          ? runBeliefGatedNpcActionReaction({
+              enabled: true,
+              sessionId: input.state.sessionId,
+              room: input.room,
+              state: input.state,
+              session: worldSession,
+              logger,
+            })
+          : Promise.resolve(null),
+      refreshDerivedViews,
+    })
+  }, [applyMeaningfulJournalFromSession, refreshDerivedViews, refreshRoomMemoryContext])
 
   // Auto-dismiss the visible memory feedback line after a fixed delay (same
   // effect-cleanup idiom as `QuestTracker`'s recently-completed timer): the
@@ -1388,6 +1410,8 @@ function App() {
       fromRoomId: activePlay.room.id,
       toRoomId,
       demoQuestEnabled: activePlay.questSpec != null,
+      npcActionEnabled: beliefGatedNpcActionEnabled,
+      npcActionRoom: activePlay.room,
       getWorldState: (sessionId) => worldSession.getWorldState(sessionId),
       navigate: () => navigation.navigate({
         sessionId: activePlay.sessionId,

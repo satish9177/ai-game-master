@@ -47,6 +47,10 @@ import { buildExitLookup, navigationResultMessage } from '../app/exits'
 import type { ExitLookup } from '../app/exits'
 import { buildDialogueLookup, dialogueResultMessage, DIALOGUE_AT_CAP_MESSAGE } from '../app/dialogue'
 import type { NPCDialogueLookup, NPCDialogueTarget } from '../app/dialogue'
+import {
+  awaitCommittedInteractionCallback,
+  evaluateCommittedInteractionExitGuard,
+} from './committedInteractionPending'
 
 const ROOM_UNAVAILABLE = 'This room could not be loaded.'
 const visualPackLogger = createConsoleLogger()
@@ -87,6 +91,7 @@ function describeError(err: unknown): string {
 export type CommittedInteractionEvents = {
   events: WorldEvent[]
   state: WorldState
+  room?: LoadedRoom
   roomName?: string
   item?: { itemId: string; name: string }
 }
@@ -107,7 +112,7 @@ type RoomViewerProps = {
   requestDialogueAttempt?: () => boolean
   onNavigate: (toRoomId: string) => Promise<NavigationResult>
   onWorldStateChange?: (state: WorldState) => void
-  onCommittedInteractionEvents?: (input: CommittedInteractionEvents) => void
+  onCommittedInteractionEvents?: (input: CommittedInteractionEvents) => void | Promise<void>
   onNpcDialogueResolved?: (event: NpcDialogueResolvedEvent) => void
   questStage?: QuestDialogueContext
   getRoomMemoryContextForNpc?: (npcId: string) => RoomMemoryDialogueContext | undefined
@@ -212,6 +217,7 @@ export function RoomViewer({
   const activeNPCDialogueRef = useRef<NPCDialogueTarget | null>(null)
   const npcDialogueRequestRef = useRef(0)
   const npcDialoguePendingRef = useRef(false)
+  const committedInteractionInFlightRef = useRef(0)
   // The loaded room's display name only, kept for the onCommittedInteractionEvents
   // display-name hint (memory-event-promotion-v0 wiring slice). Never anything
   // beyond a plain name string; RoomViewer has no memory-layer import.
@@ -287,6 +293,13 @@ export function RoomViewer({
       // Composition precedence: exit, then encounter, dialogue, then effect.
       const exitTarget = target.id ? exitLookupRef.current.get(target.id) : undefined
       if (exitTarget) {
+        const exitGuard = evaluateCommittedInteractionExitGuard(
+          committedInteractionInFlightRef.current,
+        )
+        if (exitGuard.blocked) {
+          setNavigationMessage(exitGuard.message)
+          return
+        }
         engine.setInteractionLock(true)
         activeEncounterRef.current = null
         setDialogue(null)
@@ -354,21 +367,29 @@ export function RoomViewer({
           sessionId,
           effect: effectTarget?.effect,
           ref: effectTarget?.ref ?? target.id,
-        }).then((result) => {
+        }).then(async (result) => {
           if (cancelled) return
           if (result.status === 'applied' || result.status === 'already-resolved') {
             updateVisualStateFromWorldState(result.state)
             onWorldStateChange?.(result.state)
           }
           if (result.status === 'applied' && result.events.length > 0) {
-            onCommittedInteractionEvents?.({
-              events: result.events,
-              state: result.state,
-              roomName: currentRoomNameRef.current,
-              ...(result.outcome.kind === 'item-taken'
-                ? { item: { itemId: result.outcome.item.itemId, name: result.outcome.item.name } }
-                : {}),
-            })
+            const committedRoom = loadedRoomRef.current
+            if (onCommittedInteractionEvents !== undefined) {
+              await awaitCommittedInteractionCallback(
+                committedInteractionInFlightRef,
+                () => onCommittedInteractionEvents({
+                  events: result.events,
+                  state: result.state,
+                  ...(committedRoom !== null ? { room: committedRoom } : {}),
+                  roomName: currentRoomNameRef.current,
+                  ...(result.outcome.kind === 'item-taken'
+                    ? { item: { itemId: result.outcome.item.itemId, name: result.outcome.item.name } }
+                    : {}),
+                }),
+              )
+              if (cancelled) return
+            }
           }
           if (result.status === 'already-resolved') {
             const body = authoredPostUseInteractionBody({ objectId: target.id, state: result.state })
@@ -609,11 +630,7 @@ export function RoomViewer({
           action: choiceId,
         }).then(async (result) => {
           if (activeMeaningfulObjectRef.current !== meaningful) return
-          if (result.status === 'observed') setResultMessage('You inspect it.')
-          else if (result.status === 'already-resolved') {
-            setResultMessage(result.action === 'read' ? 'Already read.' : 'Already searched.')
-          } else if (result.status === 'applied') {
-            setResultMessage(result.message)
+          if (result.status === 'applied') {
             engineRef.current?.updateObjectPresentationStates(projectRoomObjectPresentationStates({
               room,
               generatedPlay,
@@ -621,11 +638,22 @@ export function RoomViewer({
               exitGateResults: exitGateResultsRef.current,
             }))
             onWorldStateChange?.(result.state)
-            onCommittedInteractionEvents?.({
-              events: [result.event],
-              state: result.state,
-              roomName: currentRoomNameRef.current,
-            })
+            if (onCommittedInteractionEvents !== undefined) {
+              await awaitCommittedInteractionCallback(
+                committedInteractionInFlightRef,
+                () => onCommittedInteractionEvents({
+                  events: [result.event],
+                  state: result.state,
+                  room,
+                  roomName: currentRoomNameRef.current,
+                }),
+              )
+              if (activeMeaningfulObjectRef.current !== meaningful) return
+            }
+            setResultMessage(result.message)
+          } else if (result.status === 'observed') setResultMessage('You inspect it.')
+          else if (result.status === 'already-resolved') {
+            setResultMessage(result.action === 'read' ? 'Already read.' : 'Already searched.')
           } else if (result.status === 'failed') {
             setResultMessage(result.reason === 'conflict' ? 'The world changed. Try again.' : 'This interaction is unavailable.')
           } else setResultMessage('This interaction is unavailable.')

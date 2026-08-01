@@ -24,6 +24,13 @@ export function navigationResultMessage(result: NavigationResult): string | unde
   if (result.status === 'rejected' && result.reason === 'gate-locked') {
     return 'This way remains sealed.'
   }
+  if (result.status === 'rejected' && result.reason === 'npc-barred') {
+    // This fixed message is valid only while v0 has exactly one closed authored binding.
+    return 'Asha has barred the north arch. She saw you take the coin.'
+  }
+  if (result.status === 'rejected' && result.reason === 'gate-state-unavailable') {
+    return 'The way cannot be checked right now. Try again.'
+  }
   if (result.status === 'rejected' && result.reason === 'already-here') {
     return 'You are already here.'
   }

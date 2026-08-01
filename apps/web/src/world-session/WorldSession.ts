@@ -26,6 +26,8 @@ import { CanonSeedSchema } from '../domain/world/worldState'
 import type { InventoryItem, WorldState } from '../domain/world/worldState'
 import { evaluateCondition } from '../domain/quests/evaluateQuest'
 import type { QuestSpec } from '../domain/quests/questSpec'
+import { planBeliefGatedNpcAction } from '../domain/npcBelief/planNpcAction'
+import type { NpcBelief } from '../domain/npcBelief/contracts'
 import type { Logger } from '../platform/logger/Logger'
 
 export type WorldSessionErrorCode =
@@ -59,9 +61,17 @@ export type MeaningfulObjectContext = Readonly<{
   questSpec?: QuestSpec
 }>
 
+export type NpcActionContext = Readonly<{ room: LoadedRoom }>
+
 type AppliedMeaningfulConsequences = Readonly<{
   clueId?: string
   objective?: Readonly<{ questId: string; objectiveId: string; toStage: 1 }>
+}>
+
+type AppliedNpcActionProvenance = Readonly<{
+  ruleId: string
+  belief: NpcBelief
+  supportingEventIds: readonly string[]
 }>
 
 export class WorldSession {
@@ -209,6 +219,68 @@ export class WorldSession {
     return { ok: true, state: next, event }
   }
 
+  async commitNpcAction(
+    sessionId: string,
+    command: unknown,
+    expectedRevision: number,
+    context: NpcActionContext,
+  ): Promise<AppendEventResult> {
+    // Snapshot and log are separate reads; store.commit's compare-and-set remains
+    // the safety boundary. Under a concurrent append, re-planning may return
+    // invalid-command before the eventual compare-and-set conflict. That limits
+    // the diagnostic code only and does not create an authority or safety hole.
+    const snapshot = await this.store.getSnapshot(sessionId)
+    if (!snapshot) return fail('not-found')
+    if (snapshot.revision !== expectedRevision) return fail('conflict')
+
+    const parsed = WorldCommandSchema.safeParse(command)
+    if (!parsed.success || parsed.data.type !== 'npc-action-committed') {
+      return fail('invalid-command')
+    }
+    if (parsed.data.roomId !== snapshot.currentRoomId) return fail('invalid-command')
+    if (context.room.id !== parsed.data.roomId) return fail('invalid-command')
+
+    const log = await this.store.listEvents(sessionId)
+    const plan = planBeliefGatedNpcAction({ room: context.room, state: snapshot, log })
+    if (plan.status !== 'commit') return fail('invalid-command')
+    if (
+      plan.command.type !== 'npc-action-committed'
+      || plan.command.npcId !== parsed.data.npcId
+      || plan.command.action !== parsed.data.action
+      || plan.command.targetObjectId !== parsed.data.targetObjectId
+    ) return fail('invalid-command')
+
+    const event = buildEvent(
+      sessionId,
+      expectedRevision + 1,
+      this.idGenerator.newId(),
+      this.clock.now(),
+      parsed.data,
+      {},
+      {
+        ruleId: plan.ruleId,
+        belief: plan.belief,
+        supportingEventIds: plan.belief.supportingEventIds,
+      },
+    )
+    const next = applyEvent(snapshot, event)
+    const committed = await this.store.commit({
+      sessionId,
+      expectedRevision,
+      event,
+      snapshot: next,
+    })
+    if (!committed.ok) return fail(committed.error.code)
+    this.log.info('world event appended', {
+      sessionId,
+      eventId: event.eventId,
+      eventType: event.type,
+      seq: event.seq,
+      revision: next.revision,
+    })
+    return { ok: true, state: next, event }
+  }
+
   move(
     sessionId: string,
     toRoomId: string,
@@ -319,6 +391,7 @@ export class WorldSession {
 
 function isValidForState(state: WorldState, command: WorldCommand): boolean {
   if (command.type === 'meaningful-object-applied') return false
+  if (command.type === 'npc-action-committed') return false
   if (command.type === 'item-removed') {
     const held = state.inventory.find((item) => item.itemId === command.itemId)?.quantity ?? 0
     return command.quantity <= held
@@ -416,6 +489,7 @@ function buildEvent(
   occurredAt: string,
   command: WorldCommand,
   meaningfulConsequences: AppliedMeaningfulConsequences = {},
+  npcActionProvenance?: AppliedNpcActionProvenance,
 ): WorldEvent {
   const envelope = { schemaVersion: 1 as const, eventId, sessionId, seq, occurredAt }
   let raw: unknown
@@ -494,6 +568,30 @@ function buildEvent(
           ...(meaningfulConsequences.objective !== undefined
             ? { objective: meaningfulConsequences.objective }
             : {}),
+        },
+      }
+      break
+    }
+    case 'npc-action-committed': {
+      if (npcActionProvenance === undefined) {
+        throw new Error('missing NPC action provenance')
+      }
+      raw = {
+        ...envelope,
+        type: command.type,
+        payload: {
+          npcId: command.npcId,
+          roomId: command.roomId,
+          action: command.action,
+          targetObjectId: command.targetObjectId,
+          ruleId: npcActionProvenance.ruleId,
+          belief: {
+            predicate: npcActionProvenance.belief.predicate,
+            itemId: npcActionProvenance.belief.itemId,
+            roomId: npcActionProvenance.belief.roomId,
+            confidence: npcActionProvenance.belief.confidence,
+          },
+          supportingEventIds: [...npcActionProvenance.supportingEventIds],
         },
       }
       break

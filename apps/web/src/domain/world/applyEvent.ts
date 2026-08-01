@@ -5,6 +5,7 @@ import {
   meaningfulClueFlagKey,
   meaningfulObjectiveFlagKey,
 } from '../objectPurpose/meaningfulObjectConsequences'
+import { npcActionFlagKey } from '../npcBelief/contracts'
 
 export function applyEvent(state: WorldState | null, event: WorldEvent): WorldState {
   if (event.type === 'session-started') {
@@ -143,6 +144,25 @@ export function applyEvent(state: WorldState | null, event: WorldEvent): WorldSt
       next = {
         ...state,
         inventory,
+        roomStates: {
+          ...state.roomStates,
+          [event.payload.roomId]: { visited: existing.visited, flags },
+        },
+      }
+      break
+    }
+    case 'npc-action-committed': {
+      const existing = state.roomStates[event.payload.roomId] ?? { visited: false }
+      const flags = {
+        ...(existing.flags ?? {}),
+        [npcActionFlagKey(
+          event.payload.npcId,
+          event.payload.action,
+          event.payload.targetObjectId,
+        )]: true,
+      }
+      next = {
+        ...state,
         roomStates: {
           ...state.roomStates,
           [event.payload.roomId]: { visited: existing.visited, flags },

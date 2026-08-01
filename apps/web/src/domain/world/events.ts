@@ -101,6 +101,25 @@ const MeaningfulObjectAppliedEventSchema = z.object({
   }).strict(),
 }).strict()
 
+const NpcActionCommittedEventSchema = z.object({
+  ...eventEnvelope,
+  type: z.literal('npc-action-committed'),
+  payload: z.object({
+    npcId: z.string().min(1),
+    roomId: z.string().min(1),
+    action: z.literal('bar-exit'),
+    targetObjectId: z.string().min(1),
+    ruleId: z.string().min(1),
+    belief: z.object({
+      predicate: z.literal('player-took-item'),
+      itemId: z.string().min(1),
+      roomId: z.string().min(1),
+      confidence: z.literal('high'),
+    }).strict(),
+    supportingEventIds: z.array(UuidSchema).min(1),
+  }).strict(),
+}).strict()
+
 export const WorldEventSchema = z.discriminatedUnion('type', [
   SessionStartedEventSchema,
   MovedToRoomEventSchema,
@@ -111,6 +130,7 @@ export const WorldEventSchema = z.discriminatedUnion('type', [
   StatusChangedEventSchema,
   RoomStateChangedEventSchema,
   MeaningfulObjectAppliedEventSchema,
+  NpcActionCommittedEventSchema,
 ])
 
 const commandEnvelope = { schemaVersion: z.literal(WORLD_SCHEMA_VERSION) }
@@ -171,6 +191,14 @@ export const WorldCommandSchema = z.discriminatedUnion('type', [
       objectiveId: z.string().min(1),
       toStage: z.literal(1),
     }).strict().optional(),
+  }).strict(),
+  z.object({
+    ...commandEnvelope,
+    type: z.literal('npc-action-committed'),
+    npcId: z.string().min(1),
+    roomId: z.string().min(1),
+    action: z.literal('bar-exit'),
+    targetObjectId: z.string().min(1),
   }).strict(),
 ])
 

@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
+import { throneRoom } from '../domain/examples/throneRoom'
 import { validateGeneratedMechanicalGate, type GeneratedMechanicalGate } from '../domain/generatedMechanicalGate'
 import { loadRoomSpec, type LoadedRoom } from '../domain/loadRoomSpec'
 import type { RoomSpec } from '../domain/roomSpec'
@@ -91,6 +92,7 @@ function providerGate(overrides: Partial<GeneratedMechanicalGate> = {}): Generat
 }
 
 const delegatedResult: NavigationResult = { status: 'rejected', reason: 'unknown-room' }
+const authoredRoom = loadRoomSpec(throneRoom)
 
 type RunOverrides = Partial<{
   sessionId: string
@@ -291,5 +293,156 @@ describe('navigateWithExitGate', () => {
 
     await expect(result).resolves.toEqual({ status: 'rejected', reason: 'gate-locked' })
     expect(navigate).not.toHaveBeenCalled()
+  })
+
+  it('T46 runs the NPC gate third, after the demo gate', async () => {
+    const navigate = vi.fn<() => Promise<NavigationResult>>().mockResolvedValue(delegatedResult)
+    const result = navigateWithExitGate({
+      sessionId: makeState().sessionId,
+      fromRoomId: 'throne-room',
+      toRoomId: 'ruined-safehouse',
+      demoQuestEnabled: true,
+      npcActionEnabled: true,
+      npcActionRoom: authoredRoom,
+      getWorldState: async () => stateResult(makeState({
+        roomStates: {
+          'throne-room': {
+            visited: true,
+            flags: { 'npc-action:herald-asha:bar-exit:north-door': true },
+          },
+        },
+      })),
+      navigate,
+    })
+    await expect(result).resolves.toEqual({ status: 'rejected', reason: 'blocked' })
+    expect(navigate).not.toHaveBeenCalled()
+  })
+
+  it('T47 rejects as npc-barred after earlier gates open and never navigates', async () => {
+    const navigate = vi.fn<() => Promise<NavigationResult>>().mockResolvedValue(delegatedResult)
+    const result = navigateWithExitGate({
+      sessionId: makeState().sessionId,
+      fromRoomId: 'throne-room',
+      toRoomId: 'ruined-safehouse',
+      demoQuestEnabled: true,
+      npcActionEnabled: true,
+      npcActionRoom: authoredRoom,
+      getWorldState: async () => stateResult(makeState({
+        roomStates: {
+          'throne-room': {
+            visited: true,
+            flags: {
+              'encounter:malik-encounter': true,
+              'npc-action:herald-asha:bar-exit:north-door': true,
+            },
+          },
+        },
+      })),
+      navigate,
+    })
+    await expect(result).resolves.toEqual({ status: 'rejected', reason: 'npc-barred' })
+    expect(navigate).not.toHaveBeenCalled()
+  })
+
+  it('T47a fails closed without claiming an NPC action when state returns non-ok', async () => {
+    const navigate = vi.fn<() => Promise<NavigationResult>>().mockResolvedValue(delegatedResult)
+    const result = navigateWithExitGate({
+      sessionId: makeState().sessionId,
+      fromRoomId: 'throne-room',
+      toRoomId: 'ruined-safehouse',
+      demoQuestEnabled: false,
+      npcActionEnabled: true,
+      npcActionRoom: authoredRoom,
+      getWorldState: async () => notFoundResult(),
+      navigate,
+    })
+    await expect(result).resolves.toEqual({
+      status: 'rejected', reason: 'gate-state-unavailable',
+    })
+    expect(navigate).not.toHaveBeenCalled()
+  })
+
+  it('fails closed when the enabled NPC gate room is unavailable', async () => {
+    const navigate = vi.fn<() => Promise<NavigationResult>>().mockResolvedValue(delegatedResult)
+    const result = navigateWithExitGate({
+      sessionId: makeState().sessionId,
+      fromRoomId: 'throne-room',
+      toRoomId: 'ruined-safehouse',
+      demoQuestEnabled: false,
+      npcActionEnabled: true,
+      getWorldState: async () => stateResult(makeState()),
+      navigate,
+    })
+    await expect(result).resolves.toEqual({
+      status: 'rejected', reason: 'gate-state-unavailable',
+    })
+    expect(navigate).not.toHaveBeenCalled()
+  })
+
+  it('T47b fails closed when the enabled NPC gate state lookup throws', async () => {
+    const navigate = vi.fn<() => Promise<NavigationResult>>().mockResolvedValue(delegatedResult)
+    const result = navigateWithExitGate({
+      sessionId: makeState().sessionId,
+      fromRoomId: 'throne-room',
+      toRoomId: 'ruined-safehouse',
+      demoQuestEnabled: false,
+      npcActionEnabled: true,
+      npcActionRoom: authoredRoom,
+      getWorldState: async () => { throw new Error('state read failed') },
+      navigate,
+    })
+    await expect(result).resolves.toEqual({
+      status: 'rejected', reason: 'gate-state-unavailable',
+    })
+    expect(navigate).not.toHaveBeenCalled()
+  })
+
+  it('T47c preserves flag-off non-ok fail-open and thrown lookup propagation', async () => {
+    const navigate = vi.fn<() => Promise<NavigationResult>>().mockResolvedValue(delegatedResult)
+    const nonOk = navigateWithExitGate({
+      sessionId: makeState().sessionId,
+      fromRoomId: 'throne-room',
+      toRoomId: 'ruined-safehouse',
+      demoQuestEnabled: true,
+      npcActionEnabled: false,
+      getWorldState: async () => notFoundResult(),
+      navigate,
+    })
+    await expect(nonOk).resolves.toBe(delegatedResult)
+    expect(navigate).toHaveBeenCalledTimes(1)
+
+    const marker = new Error('existing throw behavior')
+    await expect(navigateWithExitGate({
+      sessionId: makeState().sessionId,
+      fromRoomId: 'throne-room',
+      toRoomId: 'ruined-safehouse',
+      demoQuestEnabled: true,
+      npcActionEnabled: false,
+      getWorldState: async () => { throw marker },
+      navigate,
+    })).rejects.toBe(marker)
+  })
+
+  it('T48 delegates exactly once when every enabled gate is open', async () => {
+    const navigate = vi.fn<() => Promise<NavigationResult>>().mockResolvedValue(delegatedResult)
+    const result = navigateWithExitGate({
+      sessionId: makeState().sessionId,
+      fromRoomId: 'throne-room',
+      toRoomId: 'ruined-safehouse',
+      demoQuestEnabled: true,
+      npcActionEnabled: true,
+      npcActionRoom: authoredRoom,
+      getWorldState: async () => stateResult(makeState({
+        roomStates: {
+          'throne-room': {
+            visited: true,
+            flags: { 'encounter:malik-encounter': true },
+          },
+        },
+      })),
+      navigate,
+    })
+    await expect(result).resolves.toBe(delegatedResult)
+    expect(navigate).toHaveBeenCalledTimes(1)
   })
 })

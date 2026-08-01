@@ -15,7 +15,14 @@ export type NavigationResult =
     }
   | {
       status: 'rejected'
-      reason: 'missing-exit' | 'unknown-room' | 'already-here' | 'blocked' | 'gate-locked'
+      reason:
+        | 'missing-exit'
+        | 'unknown-room'
+        | 'already-here'
+        | 'blocked'
+        | 'gate-locked'
+        | 'npc-barred'
+        | 'gate-state-unavailable'
     }
   | {
       status: 'failed'

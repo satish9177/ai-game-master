@@ -33,6 +33,21 @@ const start = event(1, 'session-started', {
   },
 })
 
+const npcAction = (seq: number, roomId = 'throne-room') => event(seq, 'npc-action-committed', {
+  npcId: 'herald-asha',
+  roomId,
+  action: 'bar-exit',
+  targetObjectId: 'north-door',
+  ruleId: 'belief-gated-npc-action/bar-exit-on-witnessed-take@1',
+  belief: {
+    predicate: 'player-took-item',
+    itemId: 'gold-coin',
+    roomId,
+    confidence: 'high',
+  },
+  supportingEventIds: ['00000000-0000-4000-8000-000000000001'],
+})
+
 describe('world projection', () => {
   it('applies every event type with the v0 transition semantics', () => {
     const log = [
@@ -105,6 +120,44 @@ describe('world projection', () => {
       .toThrow()
     expect(() => applyEvent(applyEvent(null, start), start)).toThrow()
     expect(() => projectWorldState([])).toThrow()
+  })
+
+  it('T18 sets the NPC action flag on the named room', () => {
+    const state = projectWorldState([start, npcAction(2)])
+    expect(state.roomStates['throne-room']?.flags).toEqual({
+      'npc-action:herald-asha:bar-exit:north-door': true,
+    })
+  })
+
+  it('T19 preserves the exact top-level WorldState key set', () => {
+    const before = projectWorldState([start])
+    const after = applyEvent(before, npcAction(2))
+    expect(Object.keys(after).sort()).toEqual(Object.keys(before).sort())
+  })
+
+  it('T20 preserves visited and pre-existing flags in the room', () => {
+    const before = projectWorldState([
+      start,
+      event(2, 'room-state-changed', {
+        roomId: 'throne-room',
+        visited: true,
+        flags: { 'interaction:offering-coffer': true },
+      }),
+    ])
+    const after = applyEvent(before, npcAction(3))
+    expect(after.roomStates['throne-room']).toEqual({
+      visited: true,
+      flags: {
+        'interaction:offering-coffer': true,
+        'npc-action:herald-asha:bar-exit:north-door': true,
+      },
+    })
+  })
+
+  it('T21 stamps revision and updatedAt from the action event', () => {
+    const after = projectWorldState([start, npcAction(2)])
+    expect(after.revision).toBe(2)
+    expect(after.updatedAt).toBe('2026-06-22T10:00:02.000Z')
   })
 })
 
