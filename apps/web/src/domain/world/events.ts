@@ -101,6 +101,100 @@ const MeaningfulObjectAppliedEventSchema = z.object({
   }).strict(),
 }).strict()
 
+const WarrantRuleIdSchema = z.enum([
+  'sole-copresent-candidate@1',
+  'direct-witness@1',
+])
+
+const WarrantPremiseIdSchema = z.enum([
+  'p1-before',
+  'p2-after',
+  'p3-sole-candidate',
+  'p4-no-alternate-access',
+  'p1-witnessed-take',
+])
+
+const SerializedWarrantPremiseSchema = z.object({
+  id: WarrantPremiseIdSchema,
+  kind: z.enum(['observed', 'default']),
+  observationEventIds: z.array(UuidSchema),
+  defeasible: z.boolean(),
+}).strict()
+
+export const SerializedWarrantSchema = z.object({
+  ruleId: WarrantRuleIdSchema,
+  premises: z.array(SerializedWarrantPremiseSchema).min(1),
+  defeasiblePremiseIds: z.array(WarrantPremiseIdSchema),
+}).strict().superRefine((warrant, context) => {
+  const premiseIds = warrant.premises.map((premise) => premise.id)
+  if (new Set(premiseIds).size !== premiseIds.length) {
+    context.addIssue({
+      code: 'custom',
+      path: ['premises'],
+      message: 'premise ids must be unique',
+    })
+  }
+
+  warrant.premises.forEach((premise, index) => {
+    const provenanceCount = premise.observationEventIds.length
+    if (premise.kind === 'default' && provenanceCount !== 0) {
+      context.addIssue({
+        code: 'custom',
+        path: ['premises', index, 'observationEventIds'],
+        message: 'default premises must not carry observation provenance',
+      })
+    }
+    if (premise.kind === 'observed' && provenanceCount === 0) {
+      context.addIssue({
+        code: 'custom',
+        path: ['premises', index, 'observationEventIds'],
+        message: 'observed premises require observation provenance',
+      })
+    }
+  })
+
+  const expectedDefeasibleIds = warrant.premises
+    .filter((premise) => premise.defeasible)
+    .map((premise) => premise.id)
+  const actualDefeasibleIds = warrant.defeasiblePremiseIds
+  const expectedSet = new Set(expectedDefeasibleIds)
+  const actualSet = new Set(actualDefeasibleIds)
+  if (
+    actualSet.size !== actualDefeasibleIds.length
+    || actualSet.size !== expectedSet.size
+    || [...expectedSet].some((id) => !actualSet.has(id))
+  ) {
+    context.addIssue({
+      code: 'custom',
+      path: ['defeasiblePremiseIds'],
+      message: 'defeasible premise ids must exactly match defeasible premises',
+    })
+  }
+})
+
+export const SerializedBeliefV1Schema = z.object({
+  predicate: z.literal('player-took-item'),
+  itemId: z.string().min(1),
+  roomId: z.string().min(1),
+  confidence: z.literal('high'),
+}).strict()
+
+export const SerializedBeliefV2Schema = z.object({
+  beliefSchemaVersion: z.literal(2),
+  predicate: z.literal('player-took-item'),
+  itemId: z.string().min(1),
+  roomId: z.string().min(1),
+  confidence: z.enum(['low', 'high']),
+  warrant: SerializedWarrantSchema,
+}).strict()
+
+export const SerializedBeliefSchema = z.union([
+  SerializedBeliefV1Schema,
+  SerializedBeliefV2Schema,
+])
+
+export type SerializedBelief = z.infer<typeof SerializedBeliefSchema>
+
 const NpcActionCommittedEventSchema = z.object({
   ...eventEnvelope,
   type: z.literal('npc-action-committed'),
@@ -110,12 +204,7 @@ const NpcActionCommittedEventSchema = z.object({
     action: z.literal('bar-exit'),
     targetObjectId: z.string().min(1),
     ruleId: z.string().min(1),
-    belief: z.object({
-      predicate: z.literal('player-took-item'),
-      itemId: z.string().min(1),
-      roomId: z.string().min(1),
-      confidence: z.literal('high'),
-    }).strict(),
+    belief: SerializedBeliefSchema,
     supportingEventIds: z.array(UuidSchema).min(1),
   }).strict(),
 }).strict()

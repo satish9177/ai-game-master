@@ -18,6 +18,18 @@
  * must land together.
  */
 
+import type { NpcBeliefV1 } from './beliefVersions'
+
+export type {
+  NpcBeliefRecord,
+  NpcBeliefV1,
+  NpcBeliefV2,
+  NpcBeliefWarrant,
+  WarrantPremise,
+  WarrantPremiseId,
+  WarrantRuleId,
+} from './beliefVersions'
+
 export const NPC_BELIEF_SCHEMA_VERSION = 1 as const
 export const NPC_ACTION_FLAG_PREFIX = 'npc-action' as const
 
@@ -33,16 +45,7 @@ export type NpcObservation = Readonly<{
   occurredAt: string
 }>
 
-export type NpcBelief = Readonly<{
-  schemaVersion: 1
-  holderNpcId: string
-  predicate: 'player-took-item'
-  itemId: string
-  roomId: string
-  confidence: 'high'
-  supportingEventIds: readonly string[]
-  lastUpdatedSeq: number
-}>
+export type NpcBelief = NpcBeliefV1
 
 export function npcActionFlagKey(
   npcId: string,
