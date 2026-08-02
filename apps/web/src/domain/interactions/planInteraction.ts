@@ -2,6 +2,9 @@ import { WorldCommandSchema } from '../world/events'
 import type { WorldCommand } from '../world/events'
 import type { InventoryItem, WorldState } from '../world/worldState'
 import type { InteractionEffect } from './effects'
+import { interactionFlagKey } from './interactionFlags'
+
+export { interactionFlagKey } from './interactionFlags'
 
 export type InteractionOutcome =
   | { kind: 'inspected' }
@@ -121,13 +124,6 @@ function planUseItem(
       ...(effect.health ? { healthDelta: effect.health.delta } : {}),
     },
   }
-}
-
-export function interactionFlagKey(
-  explicitFlag: string | undefined,
-  ref: string | undefined,
-): string | undefined {
-  return explicitFlag ?? (ref ? `interaction:${ref}` : undefined)
 }
 
 function isFlagSet(state: WorldState, flagKey: string): boolean {

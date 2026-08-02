@@ -45,6 +45,19 @@ const ItemDiscoveredEventSchema = z.object({
   }).strict(),
 }).strict()
 
+const OffstageItemTakenEventSchema = z.object({
+  ...eventEnvelope,
+  type: z.literal('offstage-item-taken'),
+  payload: z.object({
+    roomId: z.string().min(1),
+    containerId: z.string().min(1),
+    itemId: z.string().min(1),
+    actorId: z.string().min(1),
+    ruleId: z.string().min(1),
+    concealed: z.literal(true),
+  }).strict(),
+}).strict()
+
 const ItemRemovedEventSchema = z.object({
   ...eventEnvelope,
   type: z.literal('item-removed'),
@@ -214,6 +227,7 @@ export const WorldEventSchema = z.discriminatedUnion('type', [
   MovedToRoomEventSchema,
   ItemAddedEventSchema,
   ItemDiscoveredEventSchema,
+  OffstageItemTakenEventSchema,
   ItemRemovedEventSchema,
   HealthChangedEventSchema,
   StatusChangedEventSchema,

@@ -1,5 +1,6 @@
 import type { WorldEvent } from './events'
 import type { RoomState, WorldState } from './worldState'
+import { interactionFlagKey } from '../interactions/interactionFlags'
 import { meaningfulObjectStateFlagKey } from '../objectPurpose/meaningfulObjectRuntime'
 import {
   meaningfulClueFlagKey,
@@ -69,6 +70,22 @@ export function applyEvent(state: WorldState | null, event: WorldEvent): WorldSt
     }
     case 'item-discovered': {
       next = { ...state }
+      break
+    }
+    case 'offstage-item-taken': {
+      const existing = state.roomStates[event.payload.roomId] ?? { visited: false }
+      const flagKey = interactionFlagKey(undefined, event.payload.containerId)
+      if (flagKey === undefined) throw new Error('offstage item container id must be non-empty')
+      next = {
+        ...state,
+        roomStates: {
+          ...state.roomStates,
+          [event.payload.roomId]: {
+            visited: existing.visited,
+            flags: { ...(existing.flags ?? {}), [flagKey]: true },
+          },
+        },
+      }
       break
     }
     case 'item-removed': {

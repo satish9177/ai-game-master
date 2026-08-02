@@ -117,6 +117,8 @@ export function importanceFor(event: WorldEvent): number {
     case 'meaningful-object-applied':
     case 'npc-action-committed':
       return 1
+    case 'offstage-item-taken':
+      return 0
     case 'session-started':
       return 0
     default: {
