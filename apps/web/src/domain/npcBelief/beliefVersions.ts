@@ -52,7 +52,7 @@ export function normalizeCommittedBeliefWarrant(input: {
   supportingEventIds: readonly string[]
 }): NpcBeliefWarrant {
   // Input must come from a WorldEventSchema-validated npc-action-committed payload.
-  if (!('beliefSchemaVersion' in input.belief)) {
+  if (!('warrant' in input.belief)) {
     return {
       ruleId: 'direct-witness@1',
       premises: [{

@@ -12,6 +12,7 @@ const binding: DefeasibleNpcActionBinding = {
   targetObjectId: 'gated-exit',
   triggerItemId: 'fixture-item',
   containerId: 'fixture-container',
+  initialContainerContents: 'present',
   attentionObjectIds: ['fixture-container'],
   minConfidence: 'low',
   evidenceArtifacts: [{
@@ -30,6 +31,12 @@ const binding: DefeasibleNpcActionBinding = {
       presentation: { objectId: 'presentation-object', toNpcId: 'fixture-npc' },
     },
   }],
+  offstageTruth: {
+    triggerObjectId: 'fixture-trigger',
+    actorId: 'concealed-actor',
+    itemId: 'fixture-item',
+    ruleId: 'fixture-offstage-rule',
+  },
 }
 
 describe('defeasible binding catalog', () => {

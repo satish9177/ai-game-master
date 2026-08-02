@@ -39,9 +39,14 @@ const binding: DefeasibleNpcActionBinding = {
   targetObjectId: 'gated-exit',
   triggerItemId: ITEM_ID,
   containerId: 'fixture-container',
+  initialContainerContents: 'present',
   attentionObjectIds: ['fixture-container'],
   minConfidence: 'low',
   evidenceArtifacts: [],
+  offstageTruth: {
+    triggerObjectId: 'fixture-trigger', actorId: 'concealed-actor',
+    itemId: ITEM_ID, ruleId: 'fixture-offstage-rule',
+  },
 }
 
 const direct: DefeasibleNpcObservation = {
@@ -165,5 +170,35 @@ describe('planDefeasibleNpcAction', () => {
     expect(result.belief.schemaVersion).toBe(1)
     expect(result.warrant.ruleId).toBe('direct-witness@1')
     expect(result.warrant.defeasiblePremiseIds).toEqual([])
+  })
+
+  it('refuses an inferred warrant already defeated by a holder-scoped p4 undercutter', () => {
+    const undercutter = {
+      evidenceId: 'p4', roomId: ROOM_ID, sourceObjectId: 'source', strength: 'hard' as const,
+      exposes: ['alternate-access'], class: 'undercutting' as const,
+      defeats: {
+        ruleId: 'sole-copresent-candidate@1' as const,
+        premiseId: 'p4-no-alternate-access' as const,
+      },
+      reachability: { prerequisiteObjectIds: [], presentation: {
+        objectId: 'presentation', toNpcId: NPC_ID,
+      } },
+    }
+    expect(plan({ observations: inferred, presentedArtifacts: [undercutter] })).toEqual({
+      status: 'refused', reason: 'warrant-defeated',
+    })
+    expect(plan({ observations: [direct], presentedArtifacts: [undercutter] }).status)
+      .toBe('commit')
+  })
+
+  it('allows inert presented evidence to leave commitment unchanged', () => {
+    expect(plan({
+      observations: inferred,
+      presentedArtifacts: [{
+        evidenceId: 'inert', roomId: ROOM_ID, sourceObjectId: 'source',
+        strength: 'soft', exposes: [], class: 'inert', defeats: null,
+        presentation: { objectId: 'presentation', toNpcId: NPC_ID },
+      }],
+    }).status).toBe('commit')
   })
 })

@@ -7,6 +7,8 @@ import {
 import { deriveWarrant, type WarrantAbstentionReason } from './deriveWarrant'
 import type { NpcBeliefV1, NpcBeliefV2, NpcBeliefWarrant } from './beliefVersions'
 import type { DefeasibleNpcObservation } from './observationScopeV2'
+import { evaluateDefeat } from './defeatReasoning'
+import type { EvidenceArtifact } from './defeasibleBindings'
 
 export const DEFEASIBLE_NPC_ACTION_RULE_ID =
   'defeasible-npc-action/bar-exit-on-warranted-take@1' as const
@@ -21,6 +23,7 @@ export type DefeasibleNpcActionRefusalReason =
   | 'no-qualifying-observation'
   | 'below-confidence-threshold'
   | 'already-retracted'
+  | 'warrant-defeated'
 
 export type DefeasibleNpcActionPlan =
   | Readonly<{
@@ -54,6 +57,7 @@ type PlannerInput = Readonly<{
   observations: readonly DefeasibleNpcObservation[]
   consequenceStatus: NpcActionConsequenceStatus
   binding?: DefeasibleNpcActionBinding
+  presentedArtifacts?: readonly EvidenceArtifact[]
 }>
 
 function meetsConfidenceThreshold(
@@ -103,6 +107,15 @@ export function planDefeasibleNpcAction(input: PlannerInput): DefeasibleNpcActio
   }
   if (!meetsConfidenceThreshold(warrantResult.derived.confidence, binding.minConfidence)) {
     return { status: 'refused', reason: 'below-confidence-threshold' }
+  }
+  for (const artifact of input.presentedArtifacts ?? []) {
+    const revision = evaluateDefeat({
+      warrant: warrantResult.derived.warrant,
+      artifact,
+    })
+    if (revision.status === 'retracted' || revision.status === 'replaced') {
+      return { status: 'refused', reason: 'warrant-defeated' }
+    }
   }
 
   const command = WorldCommandSchema.parse({

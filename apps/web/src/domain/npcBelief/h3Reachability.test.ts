@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import { loadRoomSpec, type LoadedRoom } from '../loadRoomSpec'
-import type { DefeasibleNpcActionBinding } from './defeasibleBindings'
-import { checkH3Reachability } from './h3Reachability'
+import {
+  DEFEASIBLE_NPC_ACTION_BINDINGS,
+  type DefeasibleNpcActionBinding,
+} from './defeasibleBindings'
+import { checkH3NonVacuity, checkH3Reachability } from './h3Reachability'
 
 function room(id: string, objects: unknown[]): LoadedRoom {
   return loadRoomSpec({
@@ -45,6 +48,7 @@ function binding(
     targetObjectId: 'gated-exit',
     triggerItemId: 'fixture-item',
     containerId: 'fixture-container',
+    initialContainerContents: 'present',
     attentionObjectIds: ['fixture-container'],
     minConfidence: 'low',
     evidenceArtifacts: [{
@@ -63,6 +67,10 @@ function binding(
         presentation: { objectId: presentationObjectId, toNpcId: 'recipient' },
       },
     }],
+    offstageTruth: {
+      triggerObjectId: 'fixture-trigger', actorId: 'concealed-actor',
+      itemId: 'fixture-item', ruleId: 'fixture-offstage-rule',
+    },
   }
 }
 
@@ -146,5 +154,91 @@ describe('checkH3Reachability', () => {
 
     expect(result.valid).toBe(false)
     expect(result.issues.map((issue) => issue.code)).toContain('evidence-source-unreachable')
+  })
+
+  it('reports missing binding rooms and production non-vacuity without importing a room registry', () => {
+    const missing = { ...binding(), roomId: 'missing-room' }
+    expect(checkH3Reachability({ rooms: [], bindings: [missing] }).issues[0]?.code)
+      .toBe('binding-room-missing')
+    expect(checkH3NonVacuity({ rooms: [], bindings: DEFEASIBLE_NPC_ACTION_BINDINGS }))
+      .toEqual({ valid: false, issues: [{ code: 'no-authored-bindings' }] })
+    expect(checkH3NonVacuity({ rooms: [], bindings: [binding()] }).issues)
+      .toContainEqual({ code: 'binding-room-not-registered', bindingRoomId: 'start-room' })
+  })
+
+  it.each([
+    ['missing', []],
+    ['duplicated in the presentation room', [npc('recipient'), npc('recipient')]],
+  ])('rejects a recipient that is %s', (_name, recipients) => {
+    const start = room('start-room', [
+      exit('gated-exit', 'gated-room'), inspectable('altar', 'evidence-source'),
+      inspectable('table', 'presentation'), ...recipients,
+    ])
+    expect(checkH3Reachability({ rooms: [start], bindings: [binding()] }).issues
+      .map((issue) => issue.code)).toContain('invalid-presentation-recipient')
+  })
+
+  it('scopes recipient uniqueness to the presentation room', () => {
+    const start = room('start-room', [
+      exit('gated-exit', 'gated-room'), inspectable('altar', 'evidence-source'),
+      inspectable('table', 'presentation'), npc('recipient'),
+    ])
+    expect(checkH3Reachability({
+      rooms: [start, room('unrelated', [npc('recipient')])], bindings: [binding()],
+    })).toEqual({ valid: true, issues: [] })
+
+    const withoutLocal = room('start-room', [
+      exit('gated-exit', 'gated-room'), inspectable('altar', 'evidence-source'),
+      inspectable('table', 'presentation'),
+    ])
+    expect(checkH3Reachability({
+      rooms: [withoutLocal, room('unrelated', [npc('recipient')])], bindings: [binding()],
+    }).issues.map((issue) => issue.code)).toContain('invalid-presentation-recipient')
+  })
+
+  it.each([
+    ['dialogue-only', {
+      type: 'npc', id: 'presentation', name: 'Presenter', position: [0, 0, 0],
+      interaction: { key: 'F', prompt: 'Talk', dialogue: { greeting: 'Hello.' } },
+    }],
+    ['exit', exit('presentation', 'other')],
+    ['no-effect', {
+      type: 'table', id: 'presentation', position: [0, 0, 0],
+      interaction: { key: 'E', prompt: 'Use' },
+    }],
+  ])('rejects a %s presentation affordance', (_name, presentation) => {
+    const start = room('start-room', [
+      exit('gated-exit', 'gated-room'), inspectable('altar', 'evidence-source'),
+      presentation, npc('recipient'),
+    ])
+    expect(checkH3Reachability({ rooms: [start], bindings: [binding()] }).issues
+      .map((issue) => issue.code)).toContain('invalid-presentation-affordance')
+  })
+
+  it('removes only the binding-room edge when target object ids are shared', () => {
+    const start = room('start-room', [
+      exit('gated-exit', 'blocked'), exit('path', 'side'),
+    ])
+    const side = room('side', [exit('gated-exit', 'evidence-room')])
+    const evidenceRoom = room('evidence-room', [
+      inspectable('altar', 'evidence-source'), inspectable('table', 'presentation'),
+      npc('recipient'),
+    ])
+    expect(checkH3Reachability({ rooms: [start, side, evidenceRoom], bindings: [binding()] }))
+      .toEqual({ valid: true, issues: [] })
+  })
+
+  it('ignores duplicate object ids in unreachable rooms but rejects reachable duplicates', () => {
+    const start = room('start-room', [
+      exit('gated-exit', 'blocked'), exit('path', 'side'), inspectable('altar', 'evidence-source'),
+      inspectable('table', 'presentation'), npc('recipient'),
+    ])
+    const unreachable = room('blocked', [inspectable('altar', 'evidence-source')])
+    expect(checkH3Reachability({ rooms: [start, unreachable], bindings: [binding()] }))
+      .toEqual({ valid: true, issues: [] })
+
+    const reachable = room('side', [inspectable('altar', 'evidence-source')])
+    expect(checkH3Reachability({ rooms: [start, reachable], bindings: [binding()] }).issues
+      .map((issue) => issue.code)).toContain('evidence-source-unreachable')
   })
 })

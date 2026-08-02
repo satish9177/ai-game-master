@@ -14,6 +14,7 @@ const scope: DefeasibleObservationScope = {
   itemId: 'fixture-item',
   containerId: 'fixture-container',
   attentionObjectIds: ['fixture-container', 'attention-object'],
+  initialContents: 'present',
 }
 
 function event(seq: number, type: WorldEvent['type'], payload: unknown): WorldEvent {

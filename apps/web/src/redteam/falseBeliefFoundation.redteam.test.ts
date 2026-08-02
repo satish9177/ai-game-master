@@ -29,15 +29,26 @@ function productionSourceFiles(
 
 function trackedProductionPaths(): Set<string> {
   const repositoryRoot = fileURLToPath(new URL('../../../../', import.meta.url))
-  const output = execFileSync(
+  const tracked = execFileSync('git', ['ls-files', '--', 'apps/web/src'], {
+    cwd: repositoryRoot, encoding: 'utf8',
+  })
+  const untracked = execFileSync(
     'git',
-    ['ls-files', '--', 'apps/web/src'],
+    ['ls-files', '--others', '--exclude-standard', '--', 'apps/web/src'],
     { cwd: repositoryRoot, encoding: 'utf8' },
   )
-  return new Set(output
+  const protectedPaths = new Set([
+    'domain/quests/generatedObjectiveExitBinding.ts',
+    'domain/quests/generatedObjectiveExitBinding.test.ts',
+    'spike-claim-mapper/lexicon.ts',
+    'spike-claim-mapper/strength.ts',
+    'spike-claim-mapper/vocabulary.ts',
+  ])
+  return new Set(`${tracked}\n${untracked}`
     .split(/\r?\n/)
     .filter((path) => path.length > 0)
-    .map((path) => path.replace(/^apps\/web\/src\//, '')))
+    .map((path) => path.replace(/^apps\/web\/src\//, ''))
+    .filter((path) => !protectedPaths.has(path)))
 }
 
 function stripComments(source: string): string {
@@ -47,25 +58,46 @@ function stripComments(source: string): string {
 }
 
 describe('falseBeliefFoundation production emission guard', () => {
-  // Temporary: S4 must replace this broad ban with an exact authorized-emitter allowlist.
-  it('permits in-memory NpcBeliefV2 construction but forbids production stamping of serialized beliefSchemaVersion: 2 payloads', () => {
+  it('allows the serialized V2 schema only at its definition and authorized serializer import', () => {
     const files = productionSourceFiles(
       new URL('../', import.meta.url),
       trackedProductionPaths(),
     )
-    const eventsSource = files.find((file) => file.relativePath === 'domain/world/events.ts')?.source
-    const versionsSource = files.find(
-      (file) => file.relativePath === 'domain/npcBelief/beliefVersions.ts',
-    )?.source
-    expect(eventsSource).toMatch(/export const SerializedBeliefV2Schema/)
-    expect(eventsSource).toMatch(/beliefSchemaVersion\s*:\s*z\.literal\(2\)/)
-    expect(versionsSource).toMatch(/export type NpcBeliefV2/)
+    const importers = files.filter((file) => {
+      const imports = stripComments(file.source)
+        .match(/import[\s\S]*?from\s+['"][^'"]+['"]/g) ?? []
+      return imports.some((statement) => statement.includes('SerializedBeliefV2Schema'))
+    }).map((file) => file.relativePath)
+    expect(importers).toEqual(['world-session/serializeCommittedBelief.ts'])
 
-    for (const file of files) {
-      const withoutDefinition = stripComments(file.source)
-        .replace(/\bbeliefSchemaVersion\s*:\s*z\.literal\(\s*2\s*\)/g, '')
-      expect(withoutDefinition, file.relativePath)
-        .not.toMatch(/\bbeliefSchemaVersion\s*:\s*2\b/)
-    }
+    const discriminatorFiles = files.filter((file) =>
+      /\bbeliefSchemaVersion\b/.test(stripComments(file.source)))
+      .map((file) => file.relativePath)
+    expect(discriminatorFiles).toEqual([
+      'domain/world/events.ts',
+      'world-session/serializeCommittedBelief.ts',
+    ])
+  }, 30_000)
+
+  it('gives the serializer exactly one production importer and one V2-capable authority route', () => {
+    const files = productionSourceFiles(new URL('../', import.meta.url), trackedProductionPaths())
+    const importers = files.filter((file) =>
+      /from\s+['"][^'"]*serializeCommittedBelief['"]/.test(stripComments(file.source)))
+      .map((file) => file.relativePath)
+    expect(importers).toEqual(['world-session/WorldSession.ts'])
+
+    const worldSession = files.find(
+      (file) => file.relativePath === 'world-session/WorldSession.ts',
+    )?.source ?? ''
+    const baseline = worldSession.slice(
+      worldSession.indexOf('async commitNpcAction('),
+      worldSession.indexOf('async commitOffstageTruth('),
+    )
+    const defeasible = worldSession.slice(
+      worldSession.indexOf('async commitDefeasibleNpcAction('),
+      worldSession.indexOf('async commitNpcActionRetraction('),
+    )
+    expect(baseline).not.toContain('serializeCommittedBelief(')
+    expect(defeasible.match(/serializeCommittedBelief\(/g)).toHaveLength(1)
   }, 30_000)
 })

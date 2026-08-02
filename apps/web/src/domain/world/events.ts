@@ -119,7 +119,7 @@ const WarrantRuleIdSchema = z.enum([
   'direct-witness@1',
 ])
 
-const WarrantPremiseIdSchema = z.enum([
+export const WarrantPremiseIdSchema = z.enum([
   'p1-before',
   'p2-after',
   'p3-sole-candidate',
@@ -222,6 +222,44 @@ const NpcActionCommittedEventSchema = z.object({
   }).strict(),
 }).strict()
 
+const EvidenceDiscoveredEventSchema = z.object({
+  ...eventEnvelope,
+  type: z.literal('evidence-discovered'),
+  payload: z.object({
+    roomId: z.string().min(1),
+    evidenceId: z.string().min(1),
+    sourceObjectId: z.string().min(1),
+  }).strict(),
+}).strict()
+
+const EvidencePresentedEventSchema = z.object({
+  ...eventEnvelope,
+  type: z.literal('evidence-presented'),
+  payload: z.object({
+    roomId: z.string().min(1),
+    evidenceId: z.string().min(1),
+    toNpcId: z.string().min(1),
+    presentationObjectId: z.string().min(1),
+    discoveryEventId: UuidSchema,
+  }).strict(),
+}).strict()
+
+const NpcActionRetractedEventSchema = z.object({
+  ...eventEnvelope,
+  type: z.literal('npc-action-retracted'),
+  payload: z.object({
+    npcId: z.string().min(1),
+    roomId: z.string().min(1),
+    action: z.literal('bar-exit'),
+    targetObjectId: z.string().min(1),
+    ruleId: z.string().min(1),
+    defeatedPremiseId: WarrantPremiseIdSchema,
+    evidenceId: z.string().min(1),
+    supersedesEventId: UuidSchema,
+    supportingEventIds: z.array(UuidSchema).min(1),
+  }).strict(),
+}).strict()
+
 export const WorldEventSchema = z.discriminatedUnion('type', [
   SessionStartedEventSchema,
   MovedToRoomEventSchema,
@@ -234,6 +272,9 @@ export const WorldEventSchema = z.discriminatedUnion('type', [
   RoomStateChangedEventSchema,
   MeaningfulObjectAppliedEventSchema,
   NpcActionCommittedEventSchema,
+  EvidenceDiscoveredEventSchema,
+  EvidencePresentedEventSchema,
+  NpcActionRetractedEventSchema,
 ])
 
 const commandEnvelope = { schemaVersion: z.literal(WORLD_SCHEMA_VERSION) }
@@ -298,6 +339,14 @@ export const WorldCommandSchema = z.discriminatedUnion('type', [
   z.object({
     ...commandEnvelope,
     type: z.literal('npc-action-committed'),
+    npcId: z.string().min(1),
+    roomId: z.string().min(1),
+    action: z.literal('bar-exit'),
+    targetObjectId: z.string().min(1),
+  }).strict(),
+  z.object({
+    ...commandEnvelope,
+    type: z.literal('npc-action-retracted'),
     npcId: z.string().min(1),
     roomId: z.string().min(1),
     action: z.literal('bar-exit'),

@@ -72,6 +72,11 @@ export function applyEvent(state: WorldState | null, event: WorldEvent): WorldSt
       next = { ...state }
       break
     }
+    case 'evidence-discovered':
+    case 'evidence-presented': {
+      next = { ...state }
+      break
+    }
     case 'offstage-item-taken': {
       const existing = state.roomStates[event.payload.roomId] ?? { visited: false }
       const flagKey = interactionFlagKey(undefined, event.payload.containerId)
@@ -177,6 +182,25 @@ export function applyEvent(state: WorldState | null, event: WorldEvent): WorldSt
           event.payload.action,
           event.payload.targetObjectId,
         )]: true,
+      }
+      next = {
+        ...state,
+        roomStates: {
+          ...state.roomStates,
+          [event.payload.roomId]: { visited: existing.visited, flags },
+        },
+      }
+      break
+    }
+    case 'npc-action-retracted': {
+      const existing = state.roomStates[event.payload.roomId] ?? { visited: false }
+      const flags = {
+        ...(existing.flags ?? {}),
+        [npcActionFlagKey(
+          event.payload.npcId,
+          event.payload.action,
+          event.payload.targetObjectId,
+        )]: false,
       }
       next = {
         ...state,

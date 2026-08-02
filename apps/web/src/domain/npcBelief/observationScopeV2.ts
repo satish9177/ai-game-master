@@ -40,6 +40,7 @@ export type DefeasibleObservationScope = Readonly<{
   itemId: string
   containerId: string
   attentionObjectIds: readonly string[]
+  initialContents: 'present' | 'absent'
 }>
 
 export function deriveDefeasibleObservations(
@@ -47,7 +48,7 @@ export function deriveDefeasibleObservations(
   scope: DefeasibleObservationScope,
 ): DefeasibleNpcObservation[] {
   let playerRoomId: string | undefined
-  let containerContents: 'present' | 'absent' = 'present'
+  let containerContents: 'present' | 'absent' = scope.initialContents
   let activePlayerSpanIndex: number | undefined
   const observations: DefeasibleNpcObservation[] = []
   const attentionKeys = new Set(

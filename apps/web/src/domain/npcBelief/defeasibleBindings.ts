@@ -21,6 +21,7 @@ type EvidenceArtifactBase = Readonly<{
   sourceObjectId: string
   strength: 'hard' | 'soft'
   exposes: readonly string[]
+  presentation?: EvidencePresentationDescriptor
 }>
 
 export type UndercuttingEvidenceArtifact = EvidenceArtifactBase & Readonly<{
@@ -50,9 +51,16 @@ export type DefeasibleNpcActionBinding = Readonly<{
   targetObjectId: string
   triggerItemId: string
   containerId: string
+  initialContainerContents: 'present' | 'absent'
   attentionObjectIds: readonly string[]
   minConfidence: 'low' | 'high'
   evidenceArtifacts: readonly EvidenceArtifact[]
+  offstageTruth: Readonly<{
+    triggerObjectId: string
+    actorId: string
+    itemId: string
+    ruleId: string
+  }>
 }>
 
 export const DEFEASIBLE_NPC_ACTION_BINDINGS = [] as const satisfies
@@ -70,4 +78,12 @@ export function evidenceArtifactFor(
   evidenceId: string,
 ): EvidenceArtifact | undefined {
   return binding.evidenceArtifacts.find((artifact) => artifact.evidenceId === evidenceId)
+}
+
+export function evidencePresentationFor(
+  artifact: EvidenceArtifact,
+): EvidencePresentationDescriptor | undefined {
+  return artifact.class === 'undercutting'
+    ? artifact.reachability.presentation
+    : artifact.presentation
 }

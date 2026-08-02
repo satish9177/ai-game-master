@@ -1,4 +1,5 @@
 import type { Clock } from '../domain/ports/Clock'
+import { z } from 'zod'
 import type { IdGenerator } from '../domain/ports/IdGenerator'
 import type { WorldStore } from '../domain/ports/WorldStore'
 import type { LoadedRoom } from '../domain/loadRoomSpec'
@@ -21,14 +22,24 @@ import {
 } from '../domain/objectPurpose/meaningfulObjectRuntime'
 import { applyEvent } from '../domain/world/applyEvent'
 import { WorldCommandSchema, WorldEventSchema } from '../domain/world/events'
-import type { WorldCommand, WorldEvent } from '../domain/world/events'
+import type { SerializedBelief, WorldCommand, WorldEvent } from '../domain/world/events'
 import { CanonSeedSchema } from '../domain/world/worldState'
 import type { InventoryItem, WorldState } from '../domain/world/worldState'
 import { evaluateCondition } from '../domain/quests/evaluateQuest'
 import type { QuestSpec } from '../domain/quests/questSpec'
 import { planBeliefGatedNpcAction } from '../domain/npcBelief/planNpcAction'
-import type { NpcBelief } from '../domain/npcBelief/contracts'
+import type { DefeasibleNpcActionBinding } from '../domain/npcBelief/defeasibleBindings'
+import { evidencePresentationFor } from '../domain/npcBelief/defeasibleBindings'
+import { deriveDefeasibleObservations } from '../domain/npcBelief/observationScopeV2'
+import {
+  classifyEvidencePresentations,
+  evidenceHolderScopeFor,
+} from '../domain/npcBelief/evidenceObservation'
+import { foldConsequenceStatus } from '../domain/npcBelief/foldConsequenceStatus'
+import { planDefeasibleNpcAction } from '../domain/npcBelief/planDefeasibleNpcAction'
+import { planNpcActionRetraction } from '../domain/npcBelief/planNpcActionRetraction'
 import type { Logger } from '../platform/logger/Logger'
+import { serializeCommittedBelief } from './serializeCommittedBelief'
 
 export type WorldSessionErrorCode =
   | 'not-found'
@@ -62,6 +73,10 @@ export type MeaningfulObjectContext = Readonly<{
 }>
 
 export type NpcActionContext = Readonly<{ room: LoadedRoom }>
+export type DefeasibleNpcActionContext = Readonly<{
+  room: LoadedRoom
+  binding: DefeasibleNpcActionBinding
+}>
 
 type AppliedMeaningfulConsequences = Readonly<{
   clueId?: string
@@ -70,7 +85,15 @@ type AppliedMeaningfulConsequences = Readonly<{
 
 type AppliedNpcActionProvenance = Readonly<{
   ruleId: string
-  belief: NpcBelief
+  belief: SerializedBelief
+  supportingEventIds: readonly string[]
+}>
+
+type AppliedNpcActionRetractionProvenance = Readonly<{
+  ruleId: string
+  defeatedPremiseId: Extract<WorldEvent, { type: 'npc-action-retracted' }>['payload']['defeatedPremiseId']
+  evidenceId: string
+  supersedesEventId: string
   supportingEventIds: readonly string[]
 }>
 
@@ -259,10 +282,317 @@ export class WorldSession {
       {},
       {
         ruleId: plan.ruleId,
-        belief: plan.belief,
+        belief: {
+          predicate: plan.belief.predicate,
+          itemId: plan.belief.itemId,
+          roomId: plan.belief.roomId,
+          confidence: plan.belief.confidence,
+        },
         supportingEventIds: plan.belief.supportingEventIds,
       },
     )
+    const next = applyEvent(snapshot, event)
+    const committed = await this.store.commit({
+      sessionId,
+      expectedRevision,
+      event,
+      snapshot: next,
+    })
+    if (!committed.ok) return fail(committed.error.code)
+    this.log.info('world event appended', {
+      sessionId,
+      eventId: event.eventId,
+      eventType: event.type,
+      seq: event.seq,
+      revision: next.revision,
+    })
+    return { ok: true, state: next, event }
+  }
+
+  async commitOffstageTruth(
+    sessionId: string,
+    input: unknown,
+    expectedRevision: number,
+    context: DefeasibleNpcActionContext,
+  ): Promise<AppendEventResult> {
+    const snapshot = await this.store.getSnapshot(sessionId)
+    if (!snapshot) return fail('not-found')
+    if (snapshot.revision !== expectedRevision) return fail('conflict')
+
+    const parsed = OffstageTruthInputSchema.safeParse(input)
+    if (!parsed.success) return fail('invalid-command')
+    const { binding } = context
+    if (
+      parsed.data.roomId !== snapshot.currentRoomId
+      || context.room.id !== parsed.data.roomId
+      || binding.roomId !== parsed.data.roomId
+      || binding.offstageTruth.triggerObjectId !== parsed.data.triggerObjectId
+    ) return fail('invalid-command')
+
+    const log = await this.store.listEvents(sessionId)
+    if (log.some((event) => event.type === 'offstage-item-taken'
+      && event.payload.roomId === binding.roomId
+      && event.payload.containerId === binding.containerId
+      && event.payload.itemId === binding.offstageTruth.itemId
+      && event.payload.actorId === binding.offstageTruth.actorId
+      && event.payload.ruleId === binding.offstageTruth.ruleId)) {
+      return fail('invalid-command')
+    }
+
+    const event = buildAuthorityEvent(
+      sessionId,
+      expectedRevision + 1,
+      this.idGenerator.newId(),
+      this.clock.now(),
+      'offstage-item-taken',
+      {
+        roomId: binding.roomId,
+        containerId: binding.containerId,
+        itemId: binding.offstageTruth.itemId,
+        actorId: binding.offstageTruth.actorId,
+        ruleId: binding.offstageTruth.ruleId,
+        concealed: true,
+      },
+    )
+    return this.commitAuthorityEvent(sessionId, expectedRevision, snapshot, event)
+  }
+
+  async commitEvidenceDiscovered(
+    sessionId: string,
+    input: unknown,
+    expectedRevision: number,
+    context: DefeasibleNpcActionContext,
+  ): Promise<AppendEventResult> {
+    const snapshot = await this.store.getSnapshot(sessionId)
+    if (!snapshot) return fail('not-found')
+    if (snapshot.revision !== expectedRevision) return fail('conflict')
+
+    const parsed = EvidenceDiscoveredInputSchema.safeParse(input)
+    if (!parsed.success) return fail('invalid-command')
+    const { binding } = context
+    if (
+      parsed.data.roomId !== snapshot.currentRoomId
+      || context.room.id !== parsed.data.roomId
+      || binding.roomId !== parsed.data.roomId
+    ) return fail('invalid-command')
+    const artifacts = binding.evidenceArtifacts.filter(
+      (artifact) => artifact.sourceObjectId === parsed.data.sourceObjectId,
+    )
+    if (artifacts.length !== 1) return fail('invalid-command')
+    const artifact = artifacts[0]!
+
+    const log = await this.store.listEvents(sessionId)
+    if (log.some((event) => event.type === 'evidence-discovered'
+      && event.payload.evidenceId === artifact.evidenceId)) {
+      return fail('invalid-command')
+    }
+    const event = buildAuthorityEvent(
+      sessionId,
+      expectedRevision + 1,
+      this.idGenerator.newId(),
+      this.clock.now(),
+      'evidence-discovered',
+      {
+        roomId: binding.roomId,
+        evidenceId: artifact.evidenceId,
+        sourceObjectId: artifact.sourceObjectId,
+      },
+    )
+    return this.commitAuthorityEvent(sessionId, expectedRevision, snapshot, event)
+  }
+
+  async commitEvidencePresented(
+    sessionId: string,
+    input: unknown,
+    expectedRevision: number,
+    context: DefeasibleNpcActionContext,
+  ): Promise<AppendEventResult> {
+    const snapshot = await this.store.getSnapshot(sessionId)
+    if (!snapshot) return fail('not-found')
+    if (snapshot.revision !== expectedRevision) return fail('conflict')
+
+    const parsed = EvidencePresentedInputSchema.safeParse(input)
+    if (!parsed.success) return fail('invalid-command')
+    const { binding } = context
+    if (
+      parsed.data.roomId !== snapshot.currentRoomId
+      || context.room.id !== parsed.data.roomId
+      || binding.roomId !== parsed.data.roomId
+    ) return fail('invalid-command')
+    const artifacts = binding.evidenceArtifacts.filter(
+      (artifact) => evidencePresentationFor(artifact)?.objectId
+        === parsed.data.presentationObjectId,
+    )
+    if (artifacts.length !== 1) return fail('invalid-command')
+    const artifact = artifacts[0]!
+    const presentation = evidencePresentationFor(artifact)
+    if (presentation === undefined) return fail('invalid-command')
+    const recipients = context.room.objects.filter(
+      (object) => object.id === presentation.toNpcId && object.type === 'npc',
+    )
+    if (recipients.length !== 1 || presentation.toNpcId !== binding.npcId) {
+      return fail('invalid-command')
+    }
+
+    const log = await this.store.listEvents(sessionId)
+    const discoveries = log.filter(
+      (event): event is Extract<WorldEvent, { type: 'evidence-discovered' }> =>
+        event.type === 'evidence-discovered'
+        && event.payload.roomId === binding.roomId
+        && event.payload.evidenceId === artifact.evidenceId
+        && event.payload.sourceObjectId === artifact.sourceObjectId,
+    )
+    if (discoveries.length !== 1) return fail('invalid-command')
+    const discovery = discoveries[0]!
+    const event = buildAuthorityEvent(
+      sessionId,
+      expectedRevision + 1,
+      this.idGenerator.newId(),
+      this.clock.now(),
+      'evidence-presented',
+      {
+        roomId: binding.roomId,
+        evidenceId: artifact.evidenceId,
+        toNpcId: presentation.toNpcId,
+        presentationObjectId: parsed.data.presentationObjectId,
+        discoveryEventId: discovery.eventId,
+      },
+    )
+    return this.commitAuthorityEvent(sessionId, expectedRevision, snapshot, event)
+  }
+
+  async commitDefeasibleNpcAction(
+    sessionId: string,
+    command: unknown,
+    expectedRevision: number,
+    context: DefeasibleNpcActionContext,
+  ): Promise<AppendEventResult> {
+    const snapshot = await this.store.getSnapshot(sessionId)
+    if (!snapshot) return fail('not-found')
+    if (snapshot.revision !== expectedRevision) return fail('conflict')
+
+    const parsed = WorldCommandSchema.safeParse(command)
+    if (!parsed.success || parsed.data.type !== 'npc-action-committed') {
+      return fail('invalid-command')
+    }
+    if (
+      parsed.data.roomId !== snapshot.currentRoomId
+      || context.room.id !== parsed.data.roomId
+      || context.binding.roomId !== parsed.data.roomId
+    ) return fail('invalid-command')
+
+    const log = await this.store.listEvents(sessionId)
+    const observations = deriveDefeasibleObservations(log, {
+      npcId: context.binding.npcId,
+      npcRoomId: context.binding.roomId,
+      itemId: context.binding.triggerItemId,
+      containerId: context.binding.containerId,
+      attentionObjectIds: context.binding.attentionObjectIds,
+      initialContents: context.binding.initialContainerContents,
+    })
+    const presentedArtifacts = classifyEvidencePresentations(
+      log,
+      evidenceHolderScopeFor(context.binding),
+    ).flatMap((classification) => classification.status === 'received'
+      ? [classification.artifact]
+      : [])
+    const consequenceStatus = foldConsequenceStatus(log, context.binding)
+    const plan = planDefeasibleNpcAction({
+      room: context.room,
+      observations,
+      consequenceStatus,
+      binding: context.binding,
+      presentedArtifacts,
+    })
+    if (plan.status !== 'commit' || !sameNpcActionCommand(plan.command, parsed.data)) {
+      return fail('invalid-command')
+    }
+
+    const event = buildEvent(
+      sessionId,
+      expectedRevision + 1,
+      this.idGenerator.newId(),
+      this.clock.now(),
+      parsed.data,
+      {},
+      {
+        ruleId: plan.ruleId,
+        belief: serializeCommittedBelief(plan.belief),
+        supportingEventIds: plan.belief.supportingEventIds,
+      },
+    )
+    return this.commitAuthorityEvent(sessionId, expectedRevision, snapshot, event)
+  }
+
+  async commitNpcActionRetraction(
+    sessionId: string,
+    command: unknown,
+    expectedRevision: number,
+    context: DefeasibleNpcActionContext,
+  ): Promise<AppendEventResult> {
+    const snapshot = await this.store.getSnapshot(sessionId)
+    if (!snapshot) return fail('not-found')
+    if (snapshot.revision !== expectedRevision) return fail('conflict')
+
+    const parsed = WorldCommandSchema.safeParse(command)
+    if (!parsed.success || parsed.data.type !== 'npc-action-retracted') {
+      return fail('invalid-command')
+    }
+    if (
+      parsed.data.roomId !== snapshot.currentRoomId
+      || context.room.id !== parsed.data.roomId
+      || context.binding.roomId !== parsed.data.roomId
+    ) return fail('invalid-command')
+
+    const log = await this.store.listEvents(sessionId)
+    const plan = planNpcActionRetraction({
+      room: context.room,
+      log,
+      binding: context.binding,
+    })
+    if (plan.status !== 'retract' || !sameNpcActionCommand(plan.command, parsed.data)) {
+      return fail('invalid-command')
+    }
+    const supporting = plan.supportingEventIds.map(
+      (eventId) => log.find((event) => event.eventId === eventId),
+    )
+    const presented = supporting[0]
+    const discovered = supporting[1]
+    if (
+      supporting.some((event) => event === undefined)
+      || presented?.type !== 'evidence-presented'
+      || discovered?.type !== 'evidence-discovered'
+      || presented.eventId !== plan.presentationEvent.eventId
+      || discovered.eventId !== plan.discoveryEvent.eventId
+      || presented.payload.discoveryEventId !== discovered.eventId
+      || presented.payload.evidenceId !== discovered.payload.evidenceId
+    ) return fail('invalid-command')
+
+    const event = buildEvent(
+      sessionId,
+      expectedRevision + 1,
+      this.idGenerator.newId(),
+      this.clock.now(),
+      parsed.data,
+      {},
+      undefined,
+      {
+        ruleId: plan.ruleId,
+        defeatedPremiseId: plan.defeatedPremiseId,
+        evidenceId: plan.evidenceId,
+        supersedesEventId: plan.supersedesEventId,
+        supportingEventIds: plan.supportingEventIds,
+      },
+    )
+    return this.commitAuthorityEvent(sessionId, expectedRevision, snapshot, event)
+  }
+
+  private async commitAuthorityEvent(
+    sessionId: string,
+    expectedRevision: number,
+    snapshot: WorldState,
+    event: WorldEvent,
+  ): Promise<AppendEventResult> {
     const next = applyEvent(snapshot, event)
     const committed = await this.store.commit({
       sessionId,
@@ -392,6 +722,7 @@ export class WorldSession {
 function isValidForState(state: WorldState, command: WorldCommand): boolean {
   if (command.type === 'meaningful-object-applied') return false
   if (command.type === 'npc-action-committed') return false
+  if (command.type === 'npc-action-retracted') return false
   if (command.type === 'item-removed') {
     const held = state.inventory.find((item) => item.itemId === command.itemId)?.quantity ?? 0
     return command.quantity <= held
@@ -490,6 +821,7 @@ function buildEvent(
   command: WorldCommand,
   meaningfulConsequences: AppliedMeaningfulConsequences = {},
   npcActionProvenance?: AppliedNpcActionProvenance,
+  npcActionRetractionProvenance?: AppliedNpcActionRetractionProvenance,
 ): WorldEvent {
   const envelope = { schemaVersion: 1 as const, eventId, sessionId, seq, occurredAt }
   let raw: unknown
@@ -585,13 +917,29 @@ function buildEvent(
           action: command.action,
           targetObjectId: command.targetObjectId,
           ruleId: npcActionProvenance.ruleId,
-          belief: {
-            predicate: npcActionProvenance.belief.predicate,
-            itemId: npcActionProvenance.belief.itemId,
-            roomId: npcActionProvenance.belief.roomId,
-            confidence: npcActionProvenance.belief.confidence,
-          },
+          belief: npcActionProvenance.belief,
           supportingEventIds: [...npcActionProvenance.supportingEventIds],
+        },
+      }
+      break
+    }
+    case 'npc-action-retracted': {
+      if (npcActionRetractionProvenance === undefined) {
+        throw new Error('missing NPC action retraction provenance')
+      }
+      raw = {
+        ...envelope,
+        type: command.type,
+        payload: {
+          npcId: command.npcId,
+          roomId: command.roomId,
+          action: command.action,
+          targetObjectId: command.targetObjectId,
+          ruleId: npcActionRetractionProvenance.ruleId,
+          defeatedPremiseId: npcActionRetractionProvenance.defeatedPremiseId,
+          evidenceId: npcActionRetractionProvenance.evidenceId,
+          supersedesEventId: npcActionRetractionProvenance.supersedesEventId,
+          supportingEventIds: [...npcActionRetractionProvenance.supportingEventIds],
         },
       }
       break
@@ -600,6 +948,54 @@ function buildEvent(
       return assertNever(command)
   }
   return WorldEventSchema.parse(raw)
+}
+
+const OffstageTruthInputSchema = z.object({
+  roomId: z.string().min(1),
+  triggerObjectId: z.string().min(1),
+}).strict()
+
+const EvidenceDiscoveredInputSchema = z.object({
+  roomId: z.string().min(1),
+  sourceObjectId: z.string().min(1),
+}).strict()
+
+const EvidencePresentedInputSchema = z.object({
+  roomId: z.string().min(1),
+  presentationObjectId: z.string().min(1),
+}).strict()
+
+function sameNpcActionCommand(
+  planned: WorldCommand,
+  submitted: WorldCommand,
+): boolean {
+  return planned.type === submitted.type
+    && (planned.type === 'npc-action-committed' || planned.type === 'npc-action-retracted')
+    && (submitted.type === 'npc-action-committed' || submitted.type === 'npc-action-retracted')
+    && planned.schemaVersion === submitted.schemaVersion
+    && planned.npcId === submitted.npcId
+    && planned.roomId === submitted.roomId
+    && planned.action === submitted.action
+    && planned.targetObjectId === submitted.targetObjectId
+}
+
+function buildAuthorityEvent(
+  sessionId: string,
+  seq: number,
+  eventId: string,
+  occurredAt: string,
+  type: 'offstage-item-taken' | 'evidence-discovered' | 'evidence-presented',
+  payload: unknown,
+): WorldEvent {
+  return WorldEventSchema.parse({
+    schemaVersion: 1,
+    eventId,
+    sessionId,
+    seq,
+    occurredAt,
+    type,
+    payload,
+  })
 }
 
 function fail(code: WorldSessionErrorCode): { ok: false; error: WorldSessionError } {

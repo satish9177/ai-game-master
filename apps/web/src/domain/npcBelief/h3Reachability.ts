@@ -61,8 +61,10 @@ function uniqueReachableObject(
   reachable: ReadonlySet<string>,
   objectId: string,
 ): ObjectLocation | undefined {
-  const matches = locations.filter((entry) => entry.object.id === objectId)
-  if (matches.length !== 1 || !reachable.has(matches[0]!.roomId)) return undefined
+  const matches = locations.filter(
+    (entry) => reachable.has(entry.roomId) && entry.object.id === objectId,
+  )
+  if (matches.length !== 1) return undefined
   return matches[0]
 }
 
@@ -108,7 +110,9 @@ export function checkH3Reachability(input: {
       continue
     }
 
-    const reducedEdges = exitEdges.filter((edge) => edge.objectId !== binding.targetObjectId)
+    const reducedEdges = exitEdges.filter(
+      (edge) => !(edge.fromRoomId === binding.roomId && edge.objectId === binding.targetObjectId),
+    )
     const reachable = reachableRooms(binding.roomId, roomIds, reducedEdges)
     for (const artifact of artifacts) {
       if (
@@ -139,14 +143,53 @@ export function checkH3Reachability(input: {
       }
 
       const recipientId = artifact.reachability.presentation.toNpcId
-      const recipients = locations.filter(
-        (entry) => entry.object.id === recipientId && entry.object.type === 'npc',
+      const recipients = presentation.object.id === undefined
+        ? []
+        : locations.filter(
+          (entry) => entry.roomId === presentation.roomId
+            && entry.object.id === recipientId
+            && entry.object.type === 'npc',
       )
-      if (recipients.length !== 1 || recipients[0]!.roomId !== presentation.roomId) {
+      if (recipients.length !== 1) {
         addIssue(binding, artifact, 'invalid-presentation-recipient', recipientId)
       }
     }
   }
 
+  return issues.length === 0 ? { valid: true, issues: [] } : { valid: false, issues }
+}
+
+export type H3NonVacuityIssueCode =
+  | 'no-authored-bindings'
+  | 'binding-without-undercutter'
+  | 'binding-room-not-registered'
+
+export type H3NonVacuityResult =
+  | Readonly<{ valid: true; issues: readonly [] }>
+  | Readonly<{
+      valid: false
+      issues: readonly Readonly<{
+        code: H3NonVacuityIssueCode
+        bindingRoomId?: string
+      }>[]
+    }>
+
+export function checkH3NonVacuity(input: {
+  rooms: readonly LoadedRoom[]
+  bindings: readonly DefeasibleNpcActionBinding[]
+}): H3NonVacuityResult {
+  if (input.bindings.length === 0) {
+    return { valid: false, issues: [{ code: 'no-authored-bindings' }] }
+  }
+  const roomIds = new Set(input.rooms.map((room) => room.id))
+  const issues: Array<{ code: H3NonVacuityIssueCode; bindingRoomId?: string }> = []
+  for (const binding of input.bindings) {
+    if (undercutters(binding).length === 0) {
+      issues.push({ code: 'binding-without-undercutter', bindingRoomId: binding.roomId })
+    }
+    if (!roomIds.has(binding.roomId)) {
+      issues.push({ code: 'binding-room-not-registered', bindingRoomId: binding.roomId })
+    }
+  }
   return issues.length === 0 ? { valid: true, issues: [] } : { valid: false, issues }
 }

@@ -167,6 +167,7 @@ describe('deriveWarrant', () => {
       itemId: ITEM_ID,
       containerId: 'fixture-container',
       attentionObjectIds: ['fixture-container'],
+      initialContents: 'present',
     })
     const result = derive(observations)
 

@@ -1,10 +1,10 @@
 import type { EvidenceArtifact } from './defeasibleBindings'
-import type { NpcBeliefWarrant } from './beliefVersions'
+import type { NpcBeliefWarrant, WarrantPremiseId } from './beliefVersions'
 
 export type BeliefRevision =
   | Readonly<{
       status: 'retracted'
-      defeatedPremiseId: string
+      defeatedPremiseId: WarrantPremiseId
       evidenceId: string
       ruleId: string
     }>
