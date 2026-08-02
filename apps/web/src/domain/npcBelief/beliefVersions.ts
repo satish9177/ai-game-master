@@ -1,7 +1,4 @@
-import {
-  SerializedWarrantSchema,
-  type SerializedBelief,
-} from '../world/events'
+import type { SerializedBelief } from '../world/events'
 
 export type WarrantRuleId = 'sole-copresent-candidate@1' | 'direct-witness@1'
 
@@ -54,6 +51,7 @@ export function normalizeCommittedBeliefWarrant(input: {
   belief: SerializedBelief
   supportingEventIds: readonly string[]
 }): NpcBeliefWarrant {
+  // Input must come from a WorldEventSchema-validated npc-action-committed payload.
   if (!('beliefSchemaVersion' in input.belief)) {
     return {
       ruleId: 'direct-witness@1',
@@ -67,6 +65,5 @@ export function normalizeCommittedBeliefWarrant(input: {
     }
   }
 
-  const validated = SerializedWarrantSchema.safeParse(input.belief.warrant)
-  return validated.success ? validated.data : input.belief.warrant
+  return input.belief.warrant
 }
