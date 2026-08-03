@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, expectTypeOf, it } from 'vitest'
 import { evaluateNpcActionExitGate } from '../app/npcActionExitGate'
 import { loadRoomSpec } from '../domain/loadRoomSpec'
 import type { DefeasibleNpcActionBinding } from '../domain/npcBelief/defeasibleBindings'
@@ -7,7 +7,11 @@ import type { IdGenerator } from '../domain/ports/IdGenerator'
 import { projectWorldState } from '../domain/world/applyEvent'
 import type { Logger } from '../platform/logger/Logger'
 import { InMemoryWorldStore } from './InMemoryWorldStore'
-import { WorldSession } from './WorldSession'
+import {
+  WorldSession,
+  type DefeasibleNpcActionContext,
+  type WorldSessionOptions,
+} from './WorldSession'
 
 const logger: Logger = {
   debug: () => undefined, info: () => undefined, warn: () => undefined,
@@ -58,7 +62,9 @@ const actionCommand = {
 }
 const retractionCommand = { ...actionCommand, type: 'npc-action-retracted' as const }
 
-function harness() {
+const fixtureResolver = (roomId: string) => roomId === binding.roomId ? binding : undefined
+
+function harness(options: WorldSessionOptions = { resolveDefeasibleBinding: fixtureResolver }) {
   const store = new InMemoryWorldStore()
   let id = 1
   const ids: IdGenerator = {
@@ -68,7 +74,12 @@ function harness() {
   const clock: Clock = {
     now: () => `2026-01-01T00:00:${String(tick++).padStart(2, '0')}.000Z`,
   }
-  return { store, session: new WorldSession(store, clock, ids, logger) }
+  return {
+    store,
+    session: options.resolveDefeasibleBinding === undefined
+      ? new WorldSession(store, clock, ids, logger)
+      : new WorldSession(store, clock, ids, logger, options),
+  }
 }
 
 async function start(value: ReturnType<typeof harness>) {
@@ -87,7 +98,7 @@ async function inferredReady(value: ReturnType<typeof harness>) {
     started.sessionId,
     { roomId: 'room', triggerObjectId: 'truth-trigger' },
     started.revision,
-    { room, binding },
+    { room },
   )
   if (!truth.ok) throw new Error(truth.error.code)
   const attention = await value.session.setRoomState(
@@ -107,14 +118,14 @@ async function discoverAndPresent(value: ReturnType<typeof harness>, revision: n
     state.sessionId,
     { roomId: 'room', sourceObjectId: 'source' },
     revision,
-    { room, binding },
+    { room },
   )
   if (!discovered.ok) throw new Error(discovered.error.code)
   const presented = await value.session.commitEvidencePresented(
     state.sessionId,
     { roomId: 'room', presentationObjectId: 'presentation' },
     discovered.state.revision,
-    { room, binding },
+    { room },
   )
   if (!presented.ok) throw new Error(presented.error.code)
   return { discovered, presented }
@@ -128,7 +139,7 @@ describe('WorldSession defeasible authority', () => {
       state.sessionId,
       { roomId: 'room', triggerObjectId: 'truth-trigger', actorId: 'caller' },
       state.revision,
-      { room, binding },
+      { room },
     )
     expect(injected.ok).toBe(false)
 
@@ -136,7 +147,7 @@ describe('WorldSession defeasible authority', () => {
       state.sessionId,
       { roomId: 'room', triggerObjectId: 'truth-trigger' },
       state.revision,
-      { room, binding },
+      { room },
     )
     expect(committed.ok).toBe(true)
     if (!committed.ok) return
@@ -148,7 +159,7 @@ describe('WorldSession defeasible authority', () => {
       state.sessionId,
       { roomId: 'room', triggerObjectId: 'truth-trigger' },
       committed.state.revision,
-      { room, binding },
+      { room },
     )
     expect(duplicate.ok).toBe(false)
   })
@@ -160,21 +171,21 @@ describe('WorldSession defeasible authority', () => {
       state.sessionId,
       { roomId: 'room', presentationObjectId: 'presentation' },
       state.revision,
-      { room, binding },
+      { room },
     )
     expect(premature.ok).toBe(false)
     const injected = await value.session.commitEvidenceDiscovered(
       state.sessionId,
       { roomId: 'room', sourceObjectId: 'source', evidenceId: 'caller' },
       state.revision,
-      { room, binding },
+      { room },
     )
     expect(injected.ok).toBe(false)
     const discovered = await value.session.commitEvidenceDiscovered(
       state.sessionId,
       { roomId: 'room', sourceObjectId: 'source' },
       state.revision,
-      { room, binding },
+      { room },
     )
     if (!discovered.ok) throw new Error(discovered.error.code)
     const injectedPresentation = await value.session.commitEvidencePresented(
@@ -184,14 +195,14 @@ describe('WorldSession defeasible authority', () => {
         evidenceId: 'caller', toNpcId: 'caller',
       },
       discovered.state.revision,
-      { room, binding },
+      { room },
     )
     expect(injectedPresentation.ok).toBe(false)
     const presented = await value.session.commitEvidencePresented(
       state.sessionId,
       { roomId: 'room', presentationObjectId: 'presentation' },
       discovered.state.revision,
-      { room, binding },
+      { room },
     )
     if (!presented.ok) throw new Error(presented.error.code)
     expect(discovered.event).toMatchObject({ type: 'evidence-discovered', payload: {
@@ -206,7 +217,7 @@ describe('WorldSession defeasible authority', () => {
       state.sessionId,
       { roomId: 'room', sourceObjectId: 'source' },
       presented.state.revision,
-      { room, binding },
+      { room },
     )
     expect(duplicate.ok).toBe(false)
   })
@@ -215,7 +226,7 @@ describe('WorldSession defeasible authority', () => {
     const value = harness()
     const state = await inferredReady(value)
     const result = await value.session.commitDefeasibleNpcAction(
-      state.sessionId, actionCommand, state.revision, { room, binding },
+      state.sessionId, actionCommand, state.revision, { room },
     )
     expect(result.ok).toBe(true)
     if (!result.ok || result.event.type !== 'npc-action-committed') return
@@ -230,7 +241,7 @@ describe('WorldSession defeasible authority', () => {
     const state = await inferredReady(value)
     const evidence = await discoverAndPresent(value, state.revision)
     const result = await value.session.commitDefeasibleNpcAction(
-      state.sessionId, actionCommand, evidence.presented.state.revision, { room, binding },
+      state.sessionId, actionCommand, evidence.presented.state.revision, { room },
     )
     expect(result.ok).toBe(false)
   })
@@ -250,7 +261,7 @@ describe('WorldSession defeasible authority', () => {
     if (!witnessed.ok) throw new Error(witnessed.error.code)
     const evidence = await discoverAndPresent(value, witnessed.state.revision)
     const result = await value.session.commitDefeasibleNpcAction(
-      started.sessionId, actionCommand, evidence.presented.state.revision, { room, binding },
+      started.sessionId, actionCommand, evidence.presented.state.revision, { room },
     )
     expect(result.ok).toBe(true)
     if (!result.ok || result.event.type !== 'npc-action-committed') return
@@ -263,7 +274,7 @@ describe('WorldSession defeasible authority', () => {
     const value = harness()
     const ready = await inferredReady(value)
     const committed = await value.session.commitDefeasibleNpcAction(
-      ready.sessionId, actionCommand, ready.revision, { room, binding },
+      ready.sessionId, actionCommand, ready.revision, { room },
     )
     if (!committed.ok) throw new Error(committed.error.code)
     const original = JSON.stringify(committed.event)
@@ -274,7 +285,7 @@ describe('WorldSession defeasible authority', () => {
     )
     expect(generic.ok).toBe(false)
     const retracted = await value.session.commitNpcActionRetraction(
-      ready.sessionId, retractionCommand, evidence.presented.state.revision, { room, binding },
+      ready.sessionId, retractionCommand, evidence.presented.state.revision, { room },
     )
     expect(retracted.ok).toBe(true)
     if (!retracted.ok || retracted.event.type !== 'npc-action-retracted') return
@@ -294,8 +305,102 @@ describe('WorldSession defeasible authority', () => {
     expect(projectWorldState(log)).toEqual(retracted.state)
 
     const duplicate = await value.session.commitNpcActionRetraction(
-      ready.sessionId, retractionCommand, retracted.state.revision, { room, binding },
+      ready.sessionId, retractionCommand, retracted.state.revision, { room },
     )
     expect(duplicate.ok).toBe(false)
+  })
+
+  it('exposes room-only authority contexts', () => {
+    expectTypeOf<keyof DefeasibleNpcActionContext>().toEqualTypeOf<'room'>()
+    expectTypeOf<Parameters<WorldSession['commitOffstageTruth']>[3]>()
+      .toEqualTypeOf<DefeasibleNpcActionContext>()
+    expectTypeOf<Parameters<WorldSession['commitEvidenceDiscovered']>[3]>()
+      .toEqualTypeOf<DefeasibleNpcActionContext>()
+    expectTypeOf<Parameters<WorldSession['commitEvidencePresented']>[3]>()
+      .toEqualTypeOf<DefeasibleNpcActionContext>()
+    expectTypeOf<Parameters<WorldSession['commitDefeasibleNpcAction']>[3]>()
+      .toEqualTypeOf<DefeasibleNpcActionContext>()
+    expectTypeOf<Parameters<WorldSession['commitNpcActionRetraction']>[3]>()
+      .toEqualTypeOf<DefeasibleNpcActionContext>()
+  })
+
+  it('uses the empty production registry by default for all five authority methods', async () => {
+    const value = harness({})
+    const state = await start(value)
+    const context = { room }
+    const results = await Promise.all([
+      value.session.commitOffstageTruth(
+        state.sessionId,
+        { roomId: 'room', triggerObjectId: 'truth-trigger' },
+        state.revision,
+        context,
+      ),
+      value.session.commitEvidenceDiscovered(
+        state.sessionId,
+        { roomId: 'room', sourceObjectId: 'source' },
+        state.revision,
+        context,
+      ),
+      value.session.commitEvidencePresented(
+        state.sessionId,
+        { roomId: 'room', presentationObjectId: 'presentation' },
+        state.revision,
+        context,
+      ),
+      value.session.commitDefeasibleNpcAction(
+        state.sessionId,
+        actionCommand,
+        state.revision,
+        context,
+      ),
+      value.session.commitNpcActionRetraction(
+        state.sessionId,
+        retractionCommand,
+        state.revision,
+        context,
+      ),
+    ])
+    expect(results).toEqual(Array.from({ length: 5 }, () => ({
+      ok: false,
+      error: {
+        code: 'invalid-command',
+        message: 'World command is invalid for the current state.',
+      },
+    })))
+  })
+
+  it('ignores a caller-shaped structural binding on the room context', async () => {
+    const value = harness({})
+    const state = await start(value)
+    const callerShapedContext = { room, binding }
+    const result = await value.session.commitOffstageTruth(
+      state.sessionId,
+      { roomId: 'room', triggerObjectId: 'truth-trigger' },
+      state.revision,
+      callerShapedContext,
+    )
+    expect(result.ok).toBe(false)
+  })
+
+  it('rejects authority data added to NPC action commands', async () => {
+    const authorityFields = {
+      binding,
+      offstageTruth: binding.offstageTruth,
+      initialContainerContents: binding.initialContainerContents,
+      evidenceArtifacts: binding.evidenceArtifacts,
+      presentationRecipientNpcId: binding.npcId,
+      concealedActorId: binding.offstageTruth.actorId,
+    }
+    for (const [field, value] of Object.entries(authorityFields)) {
+      const session = harness()
+      const state = await inferredReady(session)
+      const result = await session.session.commitDefeasibleNpcAction(
+        state.sessionId,
+        { ...actionCommand, [field]: value },
+        state.revision,
+        { room },
+      )
+      expect(result.ok, field).toBe(false)
+    }
   })
 })

@@ -5,6 +5,8 @@ import {
   type EvidenceArtifact,
   type UndercuttingEvidenceArtifact,
 } from './defeasibleBindings'
+import { evaluateDefeat, type BeliefRevision } from './defeatReasoning'
+import type { NpcBeliefWarrant } from './beliefVersions'
 
 type EvidencePresentedEvent = Extract<WorldEvent, { type: 'evidence-presented' }>
 type EvidenceDiscoveredEvent = Extract<WorldEvent, { type: 'evidence-discovered' }>
@@ -42,6 +44,30 @@ export type EvidenceHolderScope = Readonly<{
   npcRoomId: string
   evidenceArtifacts: readonly EvidenceArtifact[]
 }>
+
+export type RetractionEvidenceRefusalReason =
+  | 'no-evidence'
+  | 'evidence-out-of-scope'
+  | 'unknown-evidence-target'
+  | 'evidence-provenance-invalid'
+  | 'no-defeater'
+  | 'defeater-targets-unknown-premise'
+  | 'defeater-targets-indefeasible-premise'
+  | 'replacement-not-reachable'
+
+export type RetractionEvidenceSelection =
+  | Readonly<{
+      status: 'selected'
+      presentationEvent: EvidencePresentedEvent
+      discoveryEvent: EvidenceDiscoveredEvent
+      artifact: EvidenceArtifact
+      observation: DefeaterReceivedObservation
+      revision: Extract<BeliefRevision, { status: 'retracted' }>
+    }>
+  | Readonly<{
+      status: 'refused'
+      reason: RetractionEvidenceRefusalReason
+    }>
 
 export function evidenceHolderScopeFor(
   binding: DefeasibleNpcActionBinding,
@@ -141,4 +167,91 @@ export function deriveDefeaterObservations(
       occurredAt: presentationEvent.occurredAt,
     }]
   })
+}
+
+export function selectRetractionEvidence(input: Readonly<{
+  log: readonly WorldEvent[]
+  scope: EvidenceHolderScope
+  warrant: NpcBeliefWarrant
+}>): RetractionEvidenceSelection {
+  const orderedLog = [...input.log].sort(compareEvents)
+  const classifications = classifyEvidencePresentations(orderedLog, input.scope)
+    .sort(compareClassifications)
+  const observations = deriveDefeaterObservations(orderedLog, input.scope)
+    .sort(compareDefeaterObservations)
+
+  for (const observation of observations) {
+    const received = classifications.find((classification) =>
+      classification.status === 'received'
+      && classification.presentationEvent.eventId === observation.presentedEventId
+      && classification.discoveryEvent.eventId === observation.discoveredEventId
+      && classification.artifact.evidenceId === observation.evidenceId
+      && classification.artifact.class === 'undercutting'
+      && classification.artifact.defeats.ruleId === observation.defeatsRuleId
+      && classification.artifact.defeats.premiseId === observation.defeatsPremiseId)
+    if (received === undefined || received.status !== 'received') continue
+
+    const revision = evaluateDefeat({ warrant: input.warrant, artifact: received.artifact })
+    if (revision.status === 'retracted') {
+      return {
+        status: 'selected',
+        presentationEvent: received.presentationEvent,
+        discoveryEvent: received.discoveryEvent,
+        artifact: received.artifact,
+        observation,
+        revision,
+      }
+    }
+  }
+
+  const received = classifications.filter(
+    (classification): classification is Extract<
+      EvidencePresentationClassification,
+      { status: 'received' }
+    > => classification.status === 'received',
+  )
+  for (const classification of received) {
+    const revision = evaluateDefeat({ warrant: input.warrant, artifact: classification.artifact })
+    if (revision.status === 'replaced') {
+      return { status: 'refused', reason: 'replacement-not-reachable' }
+    }
+    if (revision.status === 'unchanged'
+      && revision.reason === 'defeater-targets-unknown-premise') {
+      return { status: 'refused', reason: 'defeater-targets-unknown-premise' }
+    }
+    if (revision.status === 'unchanged'
+      && revision.reason === 'defeater-targets-indefeasible-premise') {
+      return { status: 'refused', reason: 'defeater-targets-indefeasible-premise' }
+    }
+  }
+  if (received.length > 0) return { status: 'refused', reason: 'no-defeater' }
+
+  const diagnostic = classifications[0]
+  if (diagnostic === undefined) return { status: 'refused', reason: 'no-evidence' }
+  if (diagnostic.status === 'out-of-scope') {
+    return { status: 'refused', reason: 'evidence-out-of-scope' }
+  }
+  if (diagnostic.status === 'invalid-discovery-provenance') {
+    return { status: 'refused', reason: 'evidence-provenance-invalid' }
+  }
+  return { status: 'refused', reason: 'unknown-evidence-target' }
+}
+
+function compareEvents(left: WorldEvent, right: WorldEvent): number {
+  return left.seq - right.seq || left.eventId.localeCompare(right.eventId)
+}
+
+function compareClassifications(
+  left: EvidencePresentationClassification,
+  right: EvidencePresentationClassification,
+): number {
+  return compareEvents(left.presentationEvent, right.presentationEvent)
+}
+
+function compareDefeaterObservations(
+  left: DefeaterReceivedObservation,
+  right: DefeaterReceivedObservation,
+): number {
+  return left.sourceSeq - right.sourceSeq
+    || left.sourceEventId.localeCompare(right.sourceEventId)
 }

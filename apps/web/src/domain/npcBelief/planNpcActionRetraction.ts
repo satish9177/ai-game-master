@@ -4,10 +4,9 @@ import {
   defeasibleNpcActionBindingFor,
   type DefeasibleNpcActionBinding,
 } from './defeasibleBindings'
-import { evaluateDefeat } from './defeatReasoning'
 import {
-  classifyEvidencePresentations,
   evidenceHolderScopeFor,
+  selectRetractionEvidence,
 } from './evidenceObservation'
 import { activeCommittedNpcAction, foldConsequenceStatus } from './foldConsequenceStatus'
 import { normalizeCommittedBeliefWarrant, type WarrantPremiseId } from './beliefVersions'
@@ -24,6 +23,7 @@ export type NpcActionRetractionRefusalReason =
   | 'no-evidence'
   | 'evidence-out-of-scope'
   | 'unknown-evidence-target'
+  | 'evidence-provenance-invalid'
   | 'no-defeater'
   | 'defeater-targets-unknown-premise'
   | 'defeater-targets-indefeasible-premise'
@@ -80,42 +80,17 @@ export function planNpcActionRetraction(input: Readonly<{
   const committed = activeCommittedNpcAction(input.log, binding)
   if (committed === undefined) return { status: 'refused', reason: 'nothing-to-retract' }
 
-  const classifications = classifyEvidencePresentations(
-    input.log,
-    evidenceHolderScopeFor(binding),
-  )
-  if (classifications.length === 0) return { status: 'refused', reason: 'no-evidence' }
-  const received = classifications.filter(
-    (classification) => classification.status === 'received',
-  )
-  const selected = received[received.length - 1]
-  if (selected === undefined || selected.status !== 'received') {
-    const latest = classifications[classifications.length - 1]!
-    return {
-      status: 'refused',
-      reason: latest.status === 'out-of-scope'
-        ? 'evidence-out-of-scope'
-        : 'unknown-evidence-target',
-    }
-  }
-
   const warrant = normalizeCommittedBeliefWarrant({
     belief: committed.payload.belief,
     supportingEventIds: committed.payload.supportingEventIds,
   })
-  const revision = evaluateDefeat({ warrant, artifact: selected.artifact })
-  if (revision.status === 'replaced') {
-    return { status: 'refused', reason: 'replacement-not-reachable' }
-  }
-  if (revision.status === 'unchanged') {
-    if (revision.reason === 'defeater-targets-unknown-premise') {
-      return { status: 'refused', reason: 'defeater-targets-unknown-premise' }
-    }
-    if (revision.reason === 'defeater-targets-indefeasible-premise') {
-      return { status: 'refused', reason: 'defeater-targets-indefeasible-premise' }
-    }
-    return { status: 'refused', reason: 'no-defeater' }
-  }
+  const selected = selectRetractionEvidence({
+    log: input.log,
+    scope: evidenceHolderScopeFor(binding),
+    warrant,
+  })
+  if (selected.status === 'refused') return selected
+  const { revision } = selected
 
   const command = WorldCommandSchema.parse({
     schemaVersion: 1,

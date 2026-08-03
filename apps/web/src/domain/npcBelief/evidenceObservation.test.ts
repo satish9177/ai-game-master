@@ -4,6 +4,7 @@ import type { EvidenceHolderScope } from './evidenceObservation'
 import {
   classifyEvidencePresentations,
   deriveDefeaterObservations,
+  selectRetractionEvidence,
 } from './evidenceObservation'
 
 const SESSION_ID = '10000000-0000-4000-8000-000000000000'
@@ -107,5 +108,45 @@ describe('holder-scoped evidence observation', () => {
     expect(classifyEvidencePresentations([discovery, presentation], inertScope)[0]?.status)
       .toBe('received')
     expect(deriveDefeaterObservations([discovery, presentation], inertScope)).toEqual([])
+  })
+
+  it('selects through derived defeater observations without mutating unordered inputs', () => {
+    const laterPresentation = event(
+      4,
+      '20000000-0000-4000-8000-000000000004',
+      'evidence-presented',
+      { ...presentation.payload },
+    )
+    const log = [laterPresentation, presentation, discovery]
+    const beforeLog = JSON.stringify(log)
+    const beforeArtifacts = JSON.stringify(scope.evidenceArtifacts)
+
+    const selected = selectRetractionEvidence({
+      log,
+      scope,
+      warrant: {
+        ruleId: 'sole-copresent-candidate@1',
+        premises: [{
+          id: 'p4-no-alternate-access', kind: 'default', observationEventIds: [],
+          defeasible: true,
+        }],
+        defeasiblePremiseIds: ['p4-no-alternate-access'],
+      },
+    })
+
+    expect(selected.status).toBe('selected')
+    if (selected.status !== 'selected') return
+    expect(selected.presentationEvent).toBe(presentation)
+    expect(selected.discoveryEvent).toBe(discovery)
+    expect(selected.artifact).toBe(scope.evidenceArtifacts[0])
+    expect(selected.observation.sourceEventId).toBe(PRESENTATION_ID)
+    expect(selected.revision).toEqual({
+      status: 'retracted',
+      defeatedPremiseId: 'p4-no-alternate-access',
+      evidenceId: 'p4-evidence',
+      ruleId: 'sole-copresent-candidate@1',
+    })
+    expect(JSON.stringify(log)).toBe(beforeLog)
+    expect(JSON.stringify(scope.evidenceArtifacts)).toBe(beforeArtifacts)
   })
 })

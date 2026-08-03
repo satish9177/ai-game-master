@@ -28,8 +28,11 @@ import type { InventoryItem, WorldState } from '../domain/world/worldState'
 import { evaluateCondition } from '../domain/quests/evaluateQuest'
 import type { QuestSpec } from '../domain/quests/questSpec'
 import { planBeliefGatedNpcAction } from '../domain/npcBelief/planNpcAction'
-import type { DefeasibleNpcActionBinding } from '../domain/npcBelief/defeasibleBindings'
-import { evidencePresentationFor } from '../domain/npcBelief/defeasibleBindings'
+import {
+  defeasibleNpcActionBindingFor,
+  evidencePresentationFor,
+  type DefeasibleNpcActionBinding,
+} from '../domain/npcBelief/defeasibleBindings'
 import { deriveDefeasibleObservations } from '../domain/npcBelief/observationScopeV2'
 import {
   classifyEvidencePresentations,
@@ -73,9 +76,11 @@ export type MeaningfulObjectContext = Readonly<{
 }>
 
 export type NpcActionContext = Readonly<{ room: LoadedRoom }>
-export type DefeasibleNpcActionContext = Readonly<{
-  room: LoadedRoom
-  binding: DefeasibleNpcActionBinding
+export type DefeasibleNpcActionContext = Readonly<{ room: LoadedRoom }>
+export type DefeasibleBindingResolver =
+  (roomId: string) => DefeasibleNpcActionBinding | undefined
+export type WorldSessionOptions = Readonly<{
+  resolveDefeasibleBinding?: DefeasibleBindingResolver
 }>
 
 type AppliedMeaningfulConsequences = Readonly<{
@@ -102,12 +107,21 @@ export class WorldSession {
   private readonly clock: Clock
   private readonly idGenerator: IdGenerator
   private readonly log: Logger
+  private readonly resolveDefeasibleBinding: DefeasibleBindingResolver
 
-  constructor(store: WorldStore, clock: Clock, idGenerator: IdGenerator, logger: Logger) {
+  constructor(
+    store: WorldStore,
+    clock: Clock,
+    idGenerator: IdGenerator,
+    logger: Logger,
+    options: WorldSessionOptions = {},
+  ) {
     this.store = store
     this.clock = clock
     this.idGenerator = idGenerator
     this.log = logger
+    this.resolveDefeasibleBinding = options.resolveDefeasibleBinding
+      ?? defeasibleNpcActionBindingFor
   }
 
   async startSession(canon: unknown): Promise<WorldStateResult> {
@@ -321,13 +335,11 @@ export class WorldSession {
 
     const parsed = OffstageTruthInputSchema.safeParse(input)
     if (!parsed.success) return fail('invalid-command')
-    const { binding } = context
-    if (
-      parsed.data.roomId !== snapshot.currentRoomId
-      || context.room.id !== parsed.data.roomId
-      || binding.roomId !== parsed.data.roomId
-      || binding.offstageTruth.triggerObjectId !== parsed.data.triggerObjectId
-    ) return fail('invalid-command')
+    const binding = this.defeasibleBindingFor(parsed.data.roomId, snapshot, context)
+    if (binding === undefined
+      || binding.offstageTruth.triggerObjectId !== parsed.data.triggerObjectId) {
+      return fail('invalid-command')
+    }
 
     const log = await this.store.listEvents(sessionId)
     if (log.some((event) => event.type === 'offstage-item-taken'
@@ -369,12 +381,8 @@ export class WorldSession {
 
     const parsed = EvidenceDiscoveredInputSchema.safeParse(input)
     if (!parsed.success) return fail('invalid-command')
-    const { binding } = context
-    if (
-      parsed.data.roomId !== snapshot.currentRoomId
-      || context.room.id !== parsed.data.roomId
-      || binding.roomId !== parsed.data.roomId
-    ) return fail('invalid-command')
+    const binding = this.defeasibleBindingFor(parsed.data.roomId, snapshot, context)
+    if (binding === undefined) return fail('invalid-command')
     const artifacts = binding.evidenceArtifacts.filter(
       (artifact) => artifact.sourceObjectId === parsed.data.sourceObjectId,
     )
@@ -413,12 +421,8 @@ export class WorldSession {
 
     const parsed = EvidencePresentedInputSchema.safeParse(input)
     if (!parsed.success) return fail('invalid-command')
-    const { binding } = context
-    if (
-      parsed.data.roomId !== snapshot.currentRoomId
-      || context.room.id !== parsed.data.roomId
-      || binding.roomId !== parsed.data.roomId
-    ) return fail('invalid-command')
+    const binding = this.defeasibleBindingFor(parsed.data.roomId, snapshot, context)
+    if (binding === undefined) return fail('invalid-command')
     const artifacts = binding.evidenceArtifacts.filter(
       (artifact) => evidencePresentationFor(artifact)?.objectId
         === parsed.data.presentationObjectId,
@@ -475,33 +479,30 @@ export class WorldSession {
     if (!parsed.success || parsed.data.type !== 'npc-action-committed') {
       return fail('invalid-command')
     }
-    if (
-      parsed.data.roomId !== snapshot.currentRoomId
-      || context.room.id !== parsed.data.roomId
-      || context.binding.roomId !== parsed.data.roomId
-    ) return fail('invalid-command')
+    const binding = this.defeasibleBindingFor(parsed.data.roomId, snapshot, context)
+    if (binding === undefined) return fail('invalid-command')
 
     const log = await this.store.listEvents(sessionId)
     const observations = deriveDefeasibleObservations(log, {
-      npcId: context.binding.npcId,
-      npcRoomId: context.binding.roomId,
-      itemId: context.binding.triggerItemId,
-      containerId: context.binding.containerId,
-      attentionObjectIds: context.binding.attentionObjectIds,
-      initialContents: context.binding.initialContainerContents,
+      npcId: binding.npcId,
+      npcRoomId: binding.roomId,
+      itemId: binding.triggerItemId,
+      containerId: binding.containerId,
+      attentionObjectIds: binding.attentionObjectIds,
+      initialContents: binding.initialContainerContents,
     })
     const presentedArtifacts = classifyEvidencePresentations(
       log,
-      evidenceHolderScopeFor(context.binding),
+      evidenceHolderScopeFor(binding),
     ).flatMap((classification) => classification.status === 'received'
       ? [classification.artifact]
       : [])
-    const consequenceStatus = foldConsequenceStatus(log, context.binding)
+    const consequenceStatus = foldConsequenceStatus(log, binding)
     const plan = planDefeasibleNpcAction({
       room: context.room,
       observations,
       consequenceStatus,
-      binding: context.binding,
+      binding,
       presentedArtifacts,
     })
     if (plan.status !== 'commit' || !sameNpcActionCommand(plan.command, parsed.data)) {
@@ -538,17 +539,14 @@ export class WorldSession {
     if (!parsed.success || parsed.data.type !== 'npc-action-retracted') {
       return fail('invalid-command')
     }
-    if (
-      parsed.data.roomId !== snapshot.currentRoomId
-      || context.room.id !== parsed.data.roomId
-      || context.binding.roomId !== parsed.data.roomId
-    ) return fail('invalid-command')
+    const binding = this.defeasibleBindingFor(parsed.data.roomId, snapshot, context)
+    if (binding === undefined) return fail('invalid-command')
 
     const log = await this.store.listEvents(sessionId)
     const plan = planNpcActionRetraction({
       room: context.room,
       log,
-      binding: context.binding,
+      binding,
     })
     if (plan.status !== 'retract' || !sameNpcActionCommand(plan.command, parsed.data)) {
       return fail('invalid-command')
@@ -585,6 +583,21 @@ export class WorldSession {
       },
     )
     return this.commitAuthorityEvent(sessionId, expectedRevision, snapshot, event)
+  }
+
+  private defeasibleBindingFor(
+    roomId: string,
+    snapshot: WorldState,
+    context: DefeasibleNpcActionContext,
+  ): DefeasibleNpcActionBinding | undefined {
+    const binding = this.resolveDefeasibleBinding(roomId)
+    if (
+      binding === undefined
+      || binding.roomId !== roomId
+      || context.room.id !== roomId
+      || snapshot.currentRoomId !== roomId
+    ) return undefined
+    return binding
   }
 
   private async commitAuthorityEvent(
