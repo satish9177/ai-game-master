@@ -60,6 +60,39 @@ export type RoomMemoryDialogueContext = {
   entries: RoomMemoryContextEntry[]
 }
 
+export type BeliefConfidenceBucket = 'low' | 'medium' | 'high'
+
+export type BeliefSourceTrustBucket = 'unknown' | 'low' | 'medium' | 'high'
+
+export type BeliefDialogueContextEntry = {
+  /**
+   * The holder's belief proposition text, verbatim from the projection.
+   * Hedging happens at render time (`buildBeliefSection`), keyed by
+   * `confidenceBucket` — never by rewriting this string in place.
+   */
+  text: string
+  confidenceBucket: BeliefConfidenceBucket
+  sourceTrustBucket: BeliefSourceTrustBucket
+}
+
+/**
+ * Bounded, holder-scoped belief projection (belief-driven-npc-dialogue-slice-v0,
+ * S2). Dialogue-local by design: `domain/dialogue` must not import any
+ * cognition module (`domain/livingWorldProof`, `domain/npcBelief`), so this is a
+ * plain shape rather than a re-export of spine `Belief` records. The app-layer
+ * orchestrator (`app/projectBeliefDialogueContext.ts`) maps the holder's current
+ * spine projection into it. It carries only what the speaker is entitled to
+ * know: hedged proposition text plus confidence and source-trust buckets. No
+ * record ids, no evidence ids, no `sourceRef`, no holder ids other than the
+ * speaker's own context placement, no raw scores, and no attributed-belief
+ * marker (depth-1 attribution is a different experiment). Like room memory it
+ * is recall/context only — never gameplay truth, never a source of state
+ * mutation — and what a character believes may be false.
+ */
+export type BeliefDialogueContext = {
+  entries: BeliefDialogueContextEntry[]
+}
+
 /**
  * Closed activity label, one per {@link NpcRoutineMode} value (fixed 1:1 mapping,
  * npc-routine-dialogue-context-v0 / ADR-0089).
@@ -108,6 +141,12 @@ export type NPCDialogueContext = {
    * Bounded, read-only, advisory current-activity hint. See `RoutineDialogueContext`.
    */
   routine?: RoutineDialogueContext
+  /**
+   * Bounded, holder-scoped, read-only belief projection (belief-driven-npc-dialogue-slice-v0,
+   * S2). What this character believes — possibly false, second-hand, or
+   * unjustified. Never authoritative; see `BeliefDialogueContext`.
+   */
+  belief?: BeliefDialogueContext
 }
 
 export type NPCDialogueRequest = {

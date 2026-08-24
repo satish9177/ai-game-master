@@ -1,5 +1,6 @@
 import type { WorldState } from '../world/worldState'
 import type {
+  BeliefDialogueContext,
   NPCDialogueContext,
   NPCDialogueTurn,
   QuestDialogueContext,
@@ -28,6 +29,7 @@ export function buildDialogueContext(
   relationshipState?: NpcRelationshipState,
   timeContext?: PromptTimeContext,
   routineContext?: RoutineDialogueContext,
+  beliefContext?: BeliefDialogueContext,
 ): NPCDialogueContext {
   return {
     roomId: state.currentRoomId,
@@ -49,6 +51,7 @@ export function buildDialogueContext(
     relationship: projectRelationshipDialogueContext(relationshipState),
     ...(timeContext !== undefined ? { time: { ...timeContext } } : {}),
     ...(routineContext != null ? { routine: { ...routineContext } } : {}),
+    ...(beliefContext !== undefined ? { belief: copyBeliefDialogueContext(beliefContext) } : {}),
   }
 }
 
@@ -64,5 +67,11 @@ function copyRoomDialogueContext(room: RoomDialogueContext): RoomDialogueContext
 function copyRoomMemoryDialogueContext(memory: RoomMemoryDialogueContext): RoomMemoryDialogueContext {
   return {
     entries: memory.entries.map((entry) => ({ ...entry })),
+  }
+}
+
+function copyBeliefDialogueContext(belief: BeliefDialogueContext): BeliefDialogueContext {
+  return {
+    entries: belief.entries.map((entry) => ({ ...entry })),
   }
 }

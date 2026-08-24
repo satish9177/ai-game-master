@@ -222,6 +222,21 @@ function splitSentences(transcript: string): readonly string[] {
 }
 
 /**
+ * Shared with sibling instruments (answeredCount) so both counters cut and
+ * match transcripts identically: whole-word, case-insensitive mention test
+ * including digit-suffix lemma aliases.
+ */
+export function splitTranscriptSentences(transcript: string): readonly string[] {
+  return splitSentences(transcript)
+}
+
+/** Shared matcher machinery for sibling instruments; see {@link splitTranscriptSentences}. */
+export function mentionsAnyName(sentence: string, names: readonly string[]): boolean {
+  if (names.length === 0) return false
+  return names.some((name) => compileMatchers(name).some((matcher) => matcher.test(sentence)))
+}
+
+/**
  * Full findings list for one holder over one transcript. Deterministic and
  * side-effect free; inputs are never mutated.
  */

@@ -1,6 +1,7 @@
 import type { NPCDialogueTarget } from './dialogue'
 import type { NPCDialogueInput } from '../dialogue/NPCDialogueService'
 import type {
+  BeliefDialogueContext,
   NPCDialogueTurn,
   QuestDialogueContext,
   RoomDialogueContext,
@@ -19,6 +20,7 @@ export function buildNPCDialogueReplyInput({
   roomContext,
   questStage,
   memoryContext,
+  beliefContext,
   relationshipState,
   timeContext,
   routineContext,
@@ -31,6 +33,7 @@ export function buildNPCDialogueReplyInput({
   roomContext?: RoomDialogueContext
   questStage?: QuestDialogueContext
   memoryContext?: RoomMemoryDialogueContext
+  beliefContext?: BeliefDialogueContext
   relationshipState?: NpcRelationshipState
   timeContext?: PromptTimeContext
   routineContext?: RoutineDialogueContext
@@ -47,6 +50,7 @@ export function buildNPCDialogueReplyInput({
     ...(roomContext !== undefined ? { roomContext } : {}),
     ...(questStage !== undefined ? { quest: questStage } : {}),
     ...(memoryContext !== undefined ? { memoryContext } : {}),
+    ...(beliefContext !== undefined ? { beliefContext } : {}),
     ...(relationshipState !== undefined ? { relationshipState } : {}),
     ...(timeContext !== undefined ? { timeContext } : {}),
     ...(routineContext !== undefined ? { routineContext } : {}),
