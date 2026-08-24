@@ -10,6 +10,8 @@
  * is counted against the ADR-0030 session-cap accounting.
  */
 
+/* eslint-disable no-console -- a research harness reports to stdout by design */
+
 import { readFileSync, writeFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -214,7 +216,7 @@ async function main(): Promise<void> {
   for (const entry of plan) {
     const memoryService = freshMemoryService()
     await seedMemories(memoryService, entry.seeding.texts)
-    const { worldSession, sessionId } = await startWorldSession()
+    const { worldSession } = await startWorldSession()
     void worldSession
 
     for (const [stepIndex, step] of THREE_NPC_PLAYER_SCRIPT.entries()) {

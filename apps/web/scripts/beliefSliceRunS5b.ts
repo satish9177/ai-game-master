@@ -19,6 +19,8 @@
  * the section. Production defaults and visibility.ts are untouched.
  */
 
+/* eslint-disable no-console -- a research harness reports to stdout by design */
+
 import { readFileSync, writeFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -267,7 +269,7 @@ async function main(): Promise<void> {
   for (const entry of plan) {
     const memoryService = freshMemoryService()
     await seedMemories(memoryService, SEEDINGS[entry.seedingKey]!)
-    const { sessionId } = await startWorldSession()
+    await startWorldSession()
     const steps = SCRIPTS[entry.scriptKey]!
 
     for (const [stepIndex, step] of steps.entries()) {
