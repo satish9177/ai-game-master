@@ -9,6 +9,7 @@ import { NPCDialogueService } from '../dialogue/NPCDialogueService'
 import { FakeNPCDialogueProvider } from '../dialogue/FakeNPCDialogueProvider'
 import { buildNPCDialogueReplyInput } from './npcDialogueReplyInput'
 import type { NPCDialogueTarget } from './dialogue'
+import type { BeliefDialogueContext } from '../domain/dialogue/contracts'
 
 const noopLogger: Logger = {
   debug() {},
@@ -154,6 +155,29 @@ describe('buildNPCDialogueReplyInput', () => {
     })
     expect(input.memoryContext).toBeUndefined()
     expect(input).not.toHaveProperty('memoryContext')
+  })
+
+  it('includes the belief context when provided', () => {
+    const beliefContext: BeliefDialogueContext = {
+      entries: [{ text: 'the player attacked guard_malik', confidenceBucket: 'low', sourceTrustBucket: 'unknown' }],
+    }
+    const input = buildNPCDialogueReplyInput({
+      sessionId: 's',
+      target: ashaTarget,
+      history: [],
+      beliefContext,
+    })
+    expect(input.beliefContext).toEqual(beliefContext)
+  })
+
+  it('omits the belief context when not provided', () => {
+    const input = buildNPCDialogueReplyInput({
+      sessionId: 's',
+      target: ashaTarget,
+      history: [],
+    })
+    expect(input.beliefContext).toBeUndefined()
+    expect(input).not.toHaveProperty('beliefContext')
   })
 
   it('includes prompt time context only when provided', () => {

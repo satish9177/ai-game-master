@@ -60,6 +60,50 @@ export type RoomMemoryDialogueContext = {
   entries: RoomMemoryContextEntry[]
 }
 
+export type BeliefConfidenceBucket = 'low' | 'medium' | 'high'
+
+export type BeliefSourceTrustBucket = 'unknown' | 'low' | 'medium' | 'high'
+
+export type BeliefDialogueContextEntry = {
+  /**
+   * The holder's belief proposition text, verbatim from the projection.
+   * Hedging happens at render time (`buildBeliefSection`), keyed by
+   * `confidenceBucket` — never by rewriting this string in place.
+   */
+  text: string
+  confidenceBucket: BeliefConfidenceBucket
+  sourceTrustBucket: BeliefSourceTrustBucket
+  /**
+   * Present only when the belief is a received rumor (`sourceType: 'rumor'`
+   * in the spine): the immediate teller the transmission came from, restored
+   * in S4.5 item 3 so a holder can say what it was told and by whom. This is
+   * the ONE other-holder name a context may carry, and only where a real
+   * RumorTransmission to the speaker exists -- exactly the case the leakage
+   * instrument already entitles via its direct-transmission rule.
+   */
+  attributedFrom?: string
+}
+
+/**
+ * Bounded, holder-scoped belief projection (belief-driven-npc-dialogue-slice-v0,
+ * S2). Dialogue-local by design: `domain/dialogue` must not import any
+ * cognition module (`domain/livingWorldProof`, `domain/npcBelief`), so this is a
+ * plain shape rather than a re-export of spine `Belief` records. The app-layer
+ * orchestrator (`app/projectBeliefDialogueContext.ts`) maps the holder's current
+ * spine projection into it. It carries only what the speaker is entitled to
+ * know: hedged proposition text plus confidence and source-trust buckets, and
+ * — where a real transmission to the speaker exists — the immediate teller
+ * (`attributedFrom`). No record ids, no evidence ids, no `sourceRef`, no raw
+ * scores, and no attributed belief *content* about other minds (depth-1
+ * attribution of what another holder currently believes is a different
+ * experiment). Like room memory it
+ * is recall/context only — never gameplay truth, never a source of state
+ * mutation — and what a character believes may be false.
+ */
+export type BeliefDialogueContext = {
+  entries: BeliefDialogueContextEntry[]
+}
+
 /**
  * Closed activity label, one per {@link NpcRoutineMode} value (fixed 1:1 mapping,
  * npc-routine-dialogue-context-v0 / ADR-0089).
@@ -108,6 +152,12 @@ export type NPCDialogueContext = {
    * Bounded, read-only, advisory current-activity hint. See `RoutineDialogueContext`.
    */
   routine?: RoutineDialogueContext
+  /**
+   * Bounded, holder-scoped, read-only belief projection (belief-driven-npc-dialogue-slice-v0,
+   * S2). What this character believes — possibly false, second-hand, or
+   * unjustified. Never authoritative; see `BeliefDialogueContext`.
+   */
+  belief?: BeliefDialogueContext
 }
 
 export type NPCDialogueRequest = {

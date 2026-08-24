@@ -3,6 +3,7 @@ import type { Clock } from '../domain/ports/Clock'
 import type { IdGenerator } from '../domain/ports/IdGenerator'
 import type { NPCDialogueProvider } from '../domain/ports/NPCDialogueProvider'
 import type {
+  BeliefDialogueContext,
   NPCDialogueRequest,
   RoomDialogueContext,
   RoomMemoryDialogueContext,
@@ -206,6 +207,62 @@ describe('NPCDialogueService', () => {
 
     expect(requests[0]?.context.memory).toBeUndefined()
     expect(requests[0]?.context).not.toHaveProperty('memory')
+  })
+
+  it('passes optional beliefContext through to provider context, deep-copied and never mutated', async () => {
+    const requests: NPCDialogueRequest[] = []
+    const harness = createHarness({
+      reply: async (request) => {
+        requests.push(request)
+        return { text: 'A belief-aware answer.' }
+      },
+    })
+    const state = await start(harness)
+    const beliefContext: BeliefDialogueContext = {
+      entries: [{ text: 'the player attacked guard_malik', confidenceBucket: 'low', sourceTrustBucket: 'unknown' }],
+    }
+    const beliefContextBefore = structuredClone(beliefContext)
+
+    const result = await harness.service.reply({
+      sessionId: state.sessionId,
+      npcId: 'friendly-aide',
+      npcName: 'Asha',
+      dialogue: { persona: 'friendly-aide' },
+      history: [],
+      beliefContext,
+    })
+
+    expect(result).toEqual({
+      status: 'replied',
+      turn: { speaker: 'npc', text: 'A belief-aware answer.' },
+    })
+    expect(requests).toHaveLength(1)
+    expect(requests[0]?.context.belief).toEqual(beliefContext)
+    expect(requests[0]?.context.belief).not.toBe(beliefContext)
+    expect(requests[0]?.context.belief?.entries[0]).not.toBe(beliefContext.entries[0])
+    expect(beliefContext).toEqual(beliefContextBefore)
+  })
+
+  it('omits beliefContext from provider context when absent', async () => {
+    const requests: NPCDialogueRequest[] = []
+    const harness = createHarness({
+      reply: async (request) => {
+        requests.push(request)
+        return { text: 'A plain answer.' }
+      },
+    })
+    const state = await start(harness)
+
+    await harness.service.reply({
+      sessionId: state.sessionId,
+      npcId: 'friendly-aide',
+      npcName: 'Asha',
+      dialogue: { persona: 'friendly-aide' },
+      history: [],
+    })
+
+    expect(requests[0]?.context.belief).toBeUndefined()
+    expect(requests[0]?.context).not.toHaveProperty('belief')
   })
 
   it('projects a bucketed relationship hint from the provided relationshipState', async () => {

@@ -1,5 +1,6 @@
 import { buildDialogueContext } from '../domain/dialogue/buildDialogueContext'
 import type {
+  BeliefDialogueContext,
   NPCDialogueSpec,
   NPCDialogueTurn,
   QuestDialogueContext,
@@ -32,6 +33,7 @@ export type NPCDialogueInput = {
   roomContext?: RoomDialogueContext
   quest?: QuestDialogueContext
   memoryContext?: RoomMemoryDialogueContext
+  beliefContext?: BeliefDialogueContext
   relationshipState?: NpcRelationshipState
   timeContext?: PromptTimeContext
   routineContext?: RoutineDialogueContext
@@ -74,6 +76,7 @@ export class NPCDialogueService {
       input.relationshipState,
       input.timeContext,
       input.routineContext,
+      input.beliefContext,
     )
 
     try {
