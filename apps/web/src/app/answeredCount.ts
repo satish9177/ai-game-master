@@ -1,5 +1,5 @@
 import type { ReadableRecord } from '../domain/livingWorldProof/evidenceRecords'
-import { deriveEntitlement, mentionsAnyName, splitTranscriptSentences } from './leakageCount'
+import { deriveEntitlement, splitTranscriptSentences } from './leakageCount'
 
 /**
  * The second deterministic counter for the Belief-Driven NPC Dialogue Slice
@@ -37,8 +37,45 @@ export function assertsEntitledContent(
   const entitledNames = [...entitlement.allowedEntities]
   const heardSounds = [...entitlement.heardSounds]
   return splitTranscriptSentences(text).some(
-    (sentence) => mentionsAnyName(sentence, entitledNames) || mentionsAnyName(sentence, heardSounds),
+    (sentence) => mentionsEntitled(sentence, entitledNames) || mentionsEntitled(sentence, heardSounds),
   )
+}
+
+/**
+ * S5b item 2 -- the utility counter's own matcher: morphological and
+ * surname/short-form tolerant, so natural paraphrase stops under-reporting
+ * ("I heard screams" matches `scream`; "knocked Malik" matches
+ * `guard_malik`). Deliberately LOCAL to this instrument: the leakage counter
+ * stays strict exact-id (plus its digit-suffix lemma) because a leak counter
+ * should never gain matches. Variants per name: the full id, its digit-suffix
+ * lemma (`zombie_17` -> `zombie`), and — for multi-part snake ids only — the
+ * final segment as short form (`guard_malik` -> `malik`); each optionally
+ * suffixed with a closed set of noun inflections (`s`, `es`, `'s`).
+ */
+function mentionsEntitled(sentence: string, names: readonly string[]): boolean {
+  for (const name of names) {
+    for (const variant of nameVariants(name)) {
+      if (new RegExp(`\\b${escapeRegExp(variant)}(?:s|es|'s)?\\b`, 'i').test(sentence)) return true
+    }
+  }
+  return false
+}
+
+function nameVariants(name: string): readonly string[] {
+  const variants = new Set<string>()
+  const add = (value: string | undefined): void => {
+    if (value !== undefined && value.length >= 3) variants.add(value.toLowerCase())
+  }
+  add(name)
+  const lemma = /^([a-z]+)[_-]\d+$/i.exec(name)
+  if (lemma !== null && lemma[1] !== undefined) add(lemma[1])
+  const parts = name.split('_')
+  if (parts.length > 1) add(parts[parts.length - 1])
+  return [...variants]
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
 export interface AnsweredStep {

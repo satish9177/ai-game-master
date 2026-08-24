@@ -36,6 +36,24 @@ describe('assertsEntitledContent', () => {
     }
   })
 
+  it('S5b item 2: matches morphological variants of entitled names (utility counter, not the leak counter)', () => {
+    // Plural of a heard sound.
+    expect(assertsEntitledContent('I heard screams, but I did not see a thing.', 'NPC_A', universe)).toBe(true)
+    // Short form (final snake segment) of an entitled full id.
+    expect(assertsEntitledContent('You knocked Malik clean off his post.', 'NPC_C', universe)).toBe(true)
+    // Possessive inflection.
+    expect(assertsEntitledContent("That was guard_malik's post, and the player took it.", 'NPC_B', universe)).toBe(true)
+  })
+
+  it('S5b item 2: stays strict about UNentitled names even under morphology', () => {
+    // B never learned where any of it happened; plural/possessive does not entitle.
+    expect(assertsEntitledContent('It happened in the cellars.', 'NPC_B', universe)).toBe(false)
+    expect(assertsEntitledContent("The cellar's door was shut.", 'NPC_B', universe)).toBe(false)
+    // Bare first segment of a multi-part id is NOT a variant ('guard' alone
+    // is generic; only the surname segment counts).
+    expect(assertsEntitledContent("The guard's been asking questions.", 'NPC_C', universe)).toBe(false)
+  })
+
   it('is deterministic: same inputs, same answer', () => {
     const text = 'The player was involved in what happened to guard_malik.'
     expect(assertsEntitledContent(text, 'NPC_B', universe)).toBe(assertsEntitledContent(text, 'NPC_B', universe))
