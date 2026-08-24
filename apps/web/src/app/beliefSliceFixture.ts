@@ -1,4 +1,4 @@
-import { beliefFromObservation, beliefFromRumor } from '../domain/livingWorldProof/beliefUpdate'
+import { applyEvidenceCorrection, beliefFromObservation, beliefFromRumor } from '../domain/livingWorldProof/beliefUpdate'
 import {
   BeliefSchema,
   EvidenceSchema,
@@ -100,6 +100,69 @@ export interface ThreeNpcRumorDriftFixture {
   store: ConflictStore
   bounds: QueryBounds
   beliefsByHolder: Readonly<Record<SliceHolder, Belief>>
+}
+
+/** The corrected belief the spine's own evidence-correction path mints for C. */
+export const correctedBeliefC: Belief = BeliefSchema.parse(
+  (() => {
+    const outcome = applyEvidenceCorrection(beliefC1, clawMarkEvidence, 'Bel_C1_post')
+    if (outcome.status !== 'corrected') {
+      throw new Error('beliefSliceFixture: E_claw must correct Bel_C1 -- fixture invariant broken')
+    }
+    return outcome.corrected
+  })(),
+)
+
+export interface ThreeNpcPostCorrectionFixture extends ThreeNpcRumorDriftFixture {
+  /** The claw mark, presented to C. */
+  evidence: Evidence
+  /** C's post-correction belief (zombie_17 attacked guard_malik, hard evidence, high). */
+  correctedBelief: Belief
+}
+
+/**
+ * The fixture advanced past the claw-mark presentation (S4.5 item 2): the
+ * evidence is in C's granted set and C's correction -- minted by the spine's
+ * own `applyEvidenceCorrection`, never hand-authored -- is committed at
+ * night_4/tick_1. A and B hold nothing new: only C's projection changes.
+ * The pre-correction accusation stays committed and therefore co-rendered
+ * with its correction (D8 never-silently-inconsistent): this slice commits
+ * no BeliefTransition, so no supersession hides the old line.
+ */
+export function buildThreeNpcPostCorrectionFixture(): ThreeNpcPostCorrectionFixture {
+  const universe: ReadableRecord[] = [
+    ...buildPreEvidenceUniverse(),
+    { kind: 'evidence', record: clawMarkEvidence },
+    { kind: 'belief', record: correctedBeliefC },
+  ]
+
+  let store = initConflictStore(new Map())
+  for (const entry of universe) {
+    if (entry.kind !== 'belief') continue
+    const validFrom = entry.record.id === 'Bel_C1_post' ? { night: 4, tick: 1 } : BELIEF_VALID_FROM[entry.record.id]
+    if (validFrom === undefined) {
+      throw new Error(`beliefSliceFixture: missing validFrom for ${entry.record.id} -- fixture invariant broken`)
+    }
+    const committed = commitBelief(store, universe, entry.record.id, validFrom)
+    if (committed.outcome.verdict !== 'committed') {
+      throw new Error(`beliefSliceFixture: expected ${entry.record.id} to commit -- fixture invariant broken`)
+    }
+    store = committed.store
+  }
+
+  // Projection point: after the correction exists (night_4 tick 1). At these
+  // bounds C projects both her accusation (open-ended) and its correction;
+  // A and B project exactly what they projected before.
+  const bounds: QueryBounds = { validT: { night: 4, tick: 1 }, txBound: store.nextSeq }
+
+  return {
+    universe,
+    store,
+    bounds,
+    beliefsByHolder: { NPC_A: beliefA1, NPC_B: beliefB1, NPC_C: beliefC1 },
+    evidence: clawMarkEvidence,
+    correctedBelief: correctedBeliefC,
+  }
 }
 
 /**

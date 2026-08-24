@@ -24,11 +24,11 @@ import type { Logger } from '../platform/logger/Logger'
  *
  * The returned shape is dialogue-local (`BeliefDialogueContext`), not the
  * spine's `Belief`: per entry it carries the proposition text verbatim plus
- * bucketed confidence and source trust. It never carries record ids,
- * evidence ids, `sourceRef`, timestamps, supporting/contraditing refs, or any
- * holder id other than the speaker's own (the caller decides whose context
- * this is), and it never carries raw scores. Hedging of the proposition text
- * happens at render time in the prompt builder, keyed by the confidence
+ * bucketed confidence and source trust, and -- where a real RumorTransmission
+ * to the speaker exists -- `attributedFrom`, the immediate teller. It never
+ * carries record ids, evidence ids, `sourceRef`, timestamps,
+ * supporting/contradicting refs, or raw scores. Hedging of the proposition
+ * text happens at render time in the prompt builder, keyed by the confidence
  * bucket, so this mapping stays lossless about what was projected while
  * remaining silent about anything the holder is not entitled to know.
  */
@@ -70,13 +70,21 @@ function trustBucketFor(holder: string, belief: Belief, store: ConflictStore, tr
   return lookup.tier === 'resolved' ? combineTrustBucket(lookup.competence, lookup.certainty) : 'unknown'
 }
 
-function toEntry(holder: string, belief: Belief, store: ConflictStore, trustStore: ReportResolutionStore | undefined): BeliefDialogueContext['entries'][number] {
+function attributedFromFor(belief: Belief, universe: readonly ReadableRecord[]): string | undefined {
+  if (belief.sourceType !== 'rumor') return undefined
+  const transmission = universe.find((entry) => entry.kind === 'rumor' && entry.record.id === belief.sourceRef)
+  return transmission === undefined ? undefined : (transmission.record as { from: string }).from
+}
+
+function toEntry(holder: string, belief: Belief, store: ConflictStore, universe: readonly ReadableRecord[], trustStore: ReportResolutionStore | undefined): BeliefDialogueContext['entries'][number] {
+  const attributedFrom = attributedFromFor(belief, universe)
   return {
     text: belief.proposition,
     confidenceBucket: belief.confidence,
     ...(trustStore !== undefined
       ? { sourceTrustBucket: trustBucketFor(holder, belief, store, trustStore) }
       : { sourceTrustBucket: 'unknown' }),
+    ...(attributedFrom !== undefined ? { attributedFrom } : {}),
   }
 }
 
@@ -93,7 +101,7 @@ export function projectBeliefDialogueContext(
 ): BeliefDialogueContext {
   try {
     const projection = currentBeliefs(holder, spine.universe, spine.store, spine.bounds)
-    const entries = projection.beliefs.map((belief) => toEntry(holder, belief, spine.store, options?.trustStore))
+    const entries = projection.beliefs.map((belief) => toEntry(holder, belief, spine.store, spine.universe, options?.trustStore))
     logger.info('belief dialogue context projected', { holder, count: entries.length })
     return { entries }
   } catch {

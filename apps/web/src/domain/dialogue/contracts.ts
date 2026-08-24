@@ -73,6 +73,15 @@ export type BeliefDialogueContextEntry = {
   text: string
   confidenceBucket: BeliefConfidenceBucket
   sourceTrustBucket: BeliefSourceTrustBucket
+  /**
+   * Present only when the belief is a received rumor (`sourceType: 'rumor'`
+   * in the spine): the immediate teller the transmission came from, restored
+   * in S4.5 item 3 so a holder can say what it was told and by whom. This is
+   * the ONE other-holder name a context may carry, and only where a real
+   * RumorTransmission to the speaker exists -- exactly the case the leakage
+   * instrument already entitles via its direct-transmission rule.
+   */
+  attributedFrom?: string
 }
 
 /**
@@ -82,10 +91,12 @@ export type BeliefDialogueContextEntry = {
  * plain shape rather than a re-export of spine `Belief` records. The app-layer
  * orchestrator (`app/projectBeliefDialogueContext.ts`) maps the holder's current
  * spine projection into it. It carries only what the speaker is entitled to
- * know: hedged proposition text plus confidence and source-trust buckets. No
- * record ids, no evidence ids, no `sourceRef`, no holder ids other than the
- * speaker's own context placement, no raw scores, and no attributed-belief
- * marker (depth-1 attribution is a different experiment). Like room memory it
+ * know: hedged proposition text plus confidence and source-trust buckets, and
+ * — where a real transmission to the speaker exists — the immediate teller
+ * (`attributedFrom`). No record ids, no evidence ids, no `sourceRef`, no raw
+ * scores, and no attributed belief *content* about other minds (depth-1
+ * attribution of what another holder currently believes is a different
+ * experiment). Like room memory it
  * is recall/context only — never gameplay truth, never a source of state
  * mutation — and what a character believes may be false.
  */

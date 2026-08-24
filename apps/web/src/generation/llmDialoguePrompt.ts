@@ -177,7 +177,8 @@ function buildBeliefSection(belief: BeliefDialogueContext | undefined): string |
 
   const lines = belief.entries.slice(0, MAX_BELIEF_ENTRIES).map((entry) => {
     const hedge = CONFIDENCE_HEDGE[entry.confidenceBucket]
-    return `- ${hedge}: ${clampText(toSingleLine(entry.text), MAX_BELIEF_LINE_CHARS)} (grounding trust: ${entry.sourceTrustBucket})`
+    const attribution = entry.attributedFrom !== undefined ? `; heard from ${entry.attributedFrom}` : ''
+    return `- ${hedge}: ${clampText(toSingleLine(entry.text), MAX_BELIEF_LINE_CHARS)} (grounding trust: ${entry.sourceTrustBucket}${attribution})`
   })
 
   return [BELIEF_SECTION_HEADER, ...lines].join('\n')

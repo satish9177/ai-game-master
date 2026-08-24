@@ -3,6 +3,7 @@ import { buildVisibleRoomMemoryContext } from '../app/buildVisibleRoomMemoryCont
 import {
   buildPostEvidenceUniverse,
   buildPreEvidenceUniverse,
+  buildThreeNpcPostCorrectionFixture,
   buildThreeNpcRumorDriftFixture,
 } from '../app/beliefSliceFixture'
 import { THREE_NPC_PLAYER_SCRIPT } from '../app/beliefSlicePlayerScript'
@@ -41,12 +42,24 @@ const ROOM_ID = 'cellar'
 
 const SCOPE = { worldId: WORLD_ID, sessionId: SESSION_ID, roomId: ROOM_ID }
 
-/** Verbatim rendered belief entries, asserted literally so the arm's entire background is auditable. */
+/** Verbatim rendered belief entries, asserted literally so the arm's entire background is auditable.
+ * S4.5 item 3: rumor beliefs carry their attributed teller. */
 const VERBATIM_BELIEF_LINE: Readonly<Record<string, string>> = {
   NPC_A: '- is not sure but suspects: something happened involving a scream near cellar (grounding trust: unknown)',
-  NPC_B: '- is not sure but suspects: the player was involved in what happened to guard_malik (grounding trust: unknown)',
-  NPC_C: '- is not sure but suspects: the player attacked guard_malik (grounding trust: unknown)',
+  NPC_B: '- is not sure but suspects: the player was involved in what happened to guard_malik (grounding trust: unknown; heard from NPC_A)',
+  NPC_C: '- is not sure but suspects: the player attacked guard_malik (grounding trust: unknown; heard from NPC_B)',
 }
+
+/**
+ * S4.5 item 2: after the claw mark is presented, C's projection carries the
+ * co-rendered accusation AND its evidence correction (spine's own
+ * applyEvidenceCorrection; no BeliefTransition hides the old line). A and B
+ * are unchanged.
+ */
+const VERBATIM_C_POST_CORRECTION_LINES = [
+  VERBATIM_BELIEF_LINE.NPC_C,
+  '- is convinced: zombie_17 attacked guard_malik (grounding trust: unknown)',
+]
 
 async function seededHarness(texts: readonly string[]) {
   const harness = createRoomMemoryHarness('belief-slice-mem')
@@ -83,13 +96,16 @@ interface StepMeasurement {
  */
 async function measureArm3(memoryTexts: readonly string[]): Promise<StepMeasurement[]> {
   const harness = await seededHarness(memoryTexts)
-  const fixture = buildThreeNpcRumorDriftFixture()
+  const preFixture = buildThreeNpcRumorDriftFixture()
+  // S4.5 item 2: the claw-mark step projects C's post-correction state.
+  const postFixture = buildThreeNpcPostCorrectionFixture()
   const measurements: StepMeasurement[] = []
 
   for (const [stepIndex, step] of THREE_NPC_PLAYER_SCRIPT.entries()) {
     // Recall still runs: suppression happens at composition, not upstream.
     const recalled = await recallRoomMemoryContext(SCOPE, harness.service, createSpyLogger([]))
     buildVisibleRoomMemoryContext(recalled, step.npcId)
+    const fixture = step.kind === 'showEvidence' ? postFixture : preFixture
     const beliefContext = projectBeliefDialogueContext(step.npcId, fixture, createSpyLogger([]))
 
     const request = evalDialogueRequest({
@@ -133,20 +149,30 @@ describe('Arm 3 (belief only, treatment) over the fixed player script', () => {
       expect(measurement.promptText, `${measurement.npcId}#${measurement.stepIndex}`).not.toContain(MEMORY_SECTION_HEADER)
       // ...and the belief section is present in its place.
       expect(measurement.promptText, `${measurement.npcId}#${measurement.stepIndex}`).toContain(BELIEF_SECTION_HEADER)
-      expect(measurement.promptText.toLowerCase(), `${measurement.npcId}#${measurement.stepIndex}`).not.toContain('zombie')
+      if (measurement.stepIndex < 3) {
+        // Pre-evidence steps: the attacker's name never reaches any prompt.
+        expect(measurement.promptText.toLowerCase(), `${measurement.npcId}#${measurement.stepIndex}`).not.toContain('zombie')
+      } else {
+        // Step 3 (C, post-claw-mark): zombie_17 renders ONLY inside C's
+        // entitled evidence correction -- and only after the evidence exists.
+        expect(measurement.promptText).toContain('- is convinced: zombie_17 attacked guard_malik')
+      }
     }
 
     expect(measurements.map((measurement) => measurement.answered)).toEqual([true, true, true, true])
   })
 
-  it('REALISTIC seeding: the entire background is the verbatim single-entry belief section, auditable per holder', async () => {
+  it('REALISTIC seeding: the entire background is the verbatim belief section, auditable per holder', async () => {
     const measurements = await measureArm3(['The player entered the cellar.', 'A scream rang out from the cellar.'])
 
     for (const measurement of measurements) {
-      const expectedBackground = `${BELIEF_SECTION_HEADER}\n${VERBATIM_BELIEF_LINE[measurement.npcId]!}`
+      const expectedLines = measurement.stepIndex === 3
+        ? VERBATIM_C_POST_CORRECTION_LINES
+        : [VERBATIM_BELIEF_LINE[measurement.npcId]!]
+      const expectedBackground = `${BELIEF_SECTION_HEADER}\n${expectedLines.join('\n')}`
       expect(measurement.promptText).toContain(expectedBackground)
-      // Nothing else is background: extracting that header yields exactly the one line.
-      expect(extractSectionBodies(measurement.promptText, [BELIEF_SECTION_HEADER])).toBe(VERBATIM_BELIEF_LINE[measurement.npcId]!)
+      // Nothing else is background: extracting that header yields exactly those lines.
+      expect(extractSectionBodies(measurement.promptText, [BELIEF_SECTION_HEADER])).toBe(expectedLines.join('\n'))
     }
   })
 
@@ -164,7 +190,6 @@ describe('Arm 3 (belief only, treatment) over the fixed player script', () => {
     expect(sensitivity.map((m) => m.findings)).toEqual([[], [], [], []])
     expect(sensitivity.map((m) => m.answered)).toEqual([true, true, true, true])
     for (const measurement of sensitivity) {
-      expect(measurement.promptText.toLowerCase()).not.toContain('zombie')
       expect(measurement.promptText).not.toContain(MEMORY_SECTION_HEADER)
     }
   })

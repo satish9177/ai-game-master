@@ -38,28 +38,41 @@ describe('per-holder projection through the real spine', () => {
     })
   })
 
-  it('projects B as specific-but-unconfident second-hand rumor', () => {
+  it('projects B as specific-but-unconfident second-hand rumor, attributed to its teller', () => {
     const { logger } = capturingLogger()
     const context = projectBeliefDialogueContext('NPC_B', fixture, logger)
     expect(context.entries).toEqual([
-      { text: B_SPECIFIC_PROPOSITION, confidenceBucket: 'low', sourceTrustBucket: 'unknown' },
+      {
+        text: B_SPECIFIC_PROPOSITION,
+        confidenceBucket: 'low',
+        sourceTrustBucket: 'unknown',
+        attributedFrom: 'NPC_A',
+      },
     ])
   })
 
-  it('projects C as the low-confidence accusation', () => {
+  it('projects C as the low-confidence accusation, attributed to its teller', () => {
     const { logger } = capturingLogger()
     const context = projectBeliefDialogueContext('NPC_C', fixture, logger)
     expect(context.entries).toEqual([
-      { text: C_ACCUSATION_PROPOSITION, confidenceBucket: 'low', sourceTrustBucket: 'unknown' },
+      {
+        text: C_ACCUSATION_PROPOSITION,
+        confidenceBucket: 'low',
+        sourceTrustBucket: 'unknown',
+        attributedFrom: 'NPC_B',
+      },
     ])
   })
 
-  it('carries only the three plain fields per entry -- no ids, no sourceRef, no other holders', () => {
+  it('carries only the plain fields per entry -- no ids, no sourceRef, no other records', () => {
     const { logger } = capturingLogger()
     for (const holder of ['NPC_A', 'NPC_B', 'NPC_C'] as const) {
       const context = projectBeliefDialogueContext(holder, fixture, logger)
       for (const entry of context.entries) {
-        expect(Object.keys(entry).sort()).toEqual(['confidenceBucket', 'sourceTrustBucket', 'text'])
+        const allowedKeys = entry.attributedFrom !== undefined
+          ? ['attributedFrom', 'confidenceBucket', 'sourceTrustBucket', 'text']
+          : ['confidenceBucket', 'sourceTrustBucket', 'text']
+        expect(Object.keys(entry).sort()).toEqual(allowedKeys)
       }
     }
   })
@@ -87,15 +100,26 @@ describe('S2 gate: zombie_17 negative control', () => {
     }
   })
 
-  it('no projection names any other holder', () => {
+  it('names another holder ONLY as the attributed teller of a real received transmission', () => {
     const { logger } = capturingLogger()
     for (const holder of ['NPC_A', 'NPC_B', 'NPC_C'] as const) {
-      for (const other of ['NPC_A', 'NPC_B', 'NPC_C']) {
-        if (other === holder) continue
-        const serialized = JSON.stringify(projectBeliefDialogueContext(holder, fixture, logger))
-        expect(serialized, `${holder} must not name ${other}`).not.toContain(other)
+      const context = projectBeliefDialogueContext(holder, fixture, logger)
+      for (const entry of context.entries) {
+        for (const other of ['NPC_A', 'NPC_B', 'NPC_C']) {
+          if (other === holder) continue
+          const appears = JSON.stringify(entry).includes(other)
+          if (appears) {
+            // The only sanctioned appearance: attributedFrom on a rumor belief,
+            // backed by a real RumorTransmission to this holder.
+            expect(entry.attributedFrom, `${holder} may only attribute to its own transmission source`).toBe(other)
+            expect(entry.text === C_ACCUSATION_PROPOSITION || entry.text === B_SPECIFIC_PROPOSITION).toBe(true)
+          }
+        }
       }
     }
+    // A's inference is not a rumor: it carries no attribution at all.
+    const a = projectBeliefDialogueContext('NPC_A', fixture, logger)
+    expect(a.entries[0]).not.toHaveProperty('attributedFrom')
   })
 })
 

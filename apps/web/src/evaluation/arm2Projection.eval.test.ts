@@ -3,6 +3,7 @@ import { buildVisibleRoomMemoryContext } from '../app/buildVisibleRoomMemoryCont
 import {
   buildPostEvidenceUniverse,
   buildPreEvidenceUniverse,
+  buildThreeNpcPostCorrectionFixture,
   buildThreeNpcRumorDriftFixture,
 } from '../app/beliefSliceFixture'
 import { THREE_NPC_PLAYER_SCRIPT } from '../app/beliefSlicePlayerScript'
@@ -82,12 +83,17 @@ interface StepMeasurement {
  */
 async function measureArm2(memoryTexts: readonly string[]): Promise<StepMeasurement[]> {
   const harness = await seededHarness(memoryTexts)
-  const fixture = buildThreeNpcRumorDriftFixture()
+  const preFixture = buildThreeNpcRumorDriftFixture()
+  // S4.5 item 2: after the claw mark is presented, C's context projects her
+  // corrected belief (spine's own applyEvidenceCorrection); A and B are
+  // untouched. Counting universes and entitlements are unchanged.
+  const postFixture = buildThreeNpcPostCorrectionFixture()
   const measurements: StepMeasurement[] = []
 
   for (const [stepIndex, step] of THREE_NPC_PLAYER_SCRIPT.entries()) {
     const recalled = await recallRoomMemoryContext(SCOPE, harness.service, createSpyLogger([]))
     const memoryContext = buildVisibleRoomMemoryContext(recalled, step.npcId)
+    const fixture = step.kind === 'showEvidence' ? postFixture : preFixture
     const beliefContext = projectBeliefDialogueContext(step.npcId, fixture, createSpyLogger([]))
 
     const request = evalDialogueRequest({
@@ -165,9 +171,12 @@ describe('Arm 2 (belief context present) over the fixed player script', () => {
     expect(measurements).toHaveLength(4)
 
     // Positive bound: the memory and belief contexts were actually present.
+    // Step 3 (C, post-claw-mark) projects two entries since S4.5 item 2: the
+    // co-rendered accusation and its evidence correction.
     for (const measurement of measurements) {
       expect(measurement.contextEntries, `step ${measurement.stepIndex}`).toBe(2)
-      expect(measurement.beliefEntries, `step ${measurement.stepIndex}`).toBe(1)
+      const expectedBeliefEntries = measurement.stepIndex === 3 ? 2 : 1
+      expect(measurement.beliefEntries, `step ${measurement.stepIndex}`).toBe(expectedBeliefEntries)
     }
 
     // Anti-leakage result: the composed Arm 2 surface leaks exactly what
@@ -186,9 +195,15 @@ describe('Arm 2 (belief context present) over the fixed player script', () => {
       }
     }
 
-    // Stronger rendering-level gate: the string never reaches the model at all.
+    // Stronger rendering-level gate: on pre-evidence steps the attacker's
+    // name never reaches any prompt; step 3 renders it only inside C's
+    // entitled evidence correction (S4.5 item 2).
     for (const measurement of measurements) {
-      expect(measurement.promptText.toLowerCase(), `${measurement.npcId}#${measurement.stepIndex}`).not.toContain('zombie')
+      if (measurement.stepIndex < 3) {
+        expect(measurement.promptText.toLowerCase(), `${measurement.npcId}#${measurement.stepIndex}`).not.toContain('zombie')
+      } else {
+        expect(measurement.promptText, `${measurement.npcId}#${measurement.stepIndex}`).toContain('- is convinced: zombie_17 attacked guard_malik')
+      }
       expect(measurement.promptText, `${measurement.npcId}#${measurement.stepIndex}`).toContain(BELIEF_SECTION_HEADER)
     }
 
